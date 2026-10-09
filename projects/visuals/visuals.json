@@ -1,0 +1,29 @@
+{
+    "project": "World Most Popular Documentary Filming",
+    "status": "READY",
+    "visual_style": "Cinematic Documentary",
+    "aspect_ratio": "16:9",
+    "resolution": "4K",
+    "camera_style": [
+        "Wide establishing shots",
+        "Medium cinematic shots",
+        "Close-up emotional shots",
+        "Drone aerial shots",
+        "Slow cinematic camera movement"
+    ],
+    "lighting": [
+        "Natural documentary lighting",
+        "Golden hour",
+        "Low-key dramatic lighting",
+        "Soft cinematic highlights"
+    ],
+    "visual_elements": [
+        "Real locations",
+        "Documentary subjects",
+        "Film crew",
+        "Professional cinema cameras",
+        "Natural environments",
+        "Behind-the-scenes production"
+    ],
+    "created_at": "2026-10-06T18:06:42.209457"
+}

@@ -1,0 +1,139 @@
+{
+  "store": "AI_CREATOR_AGENT_PROVIDER_STORE",
+  "version": "2.0",
+  "status": "READY",
+  "subscription_policy": "USER_CONTROLLED",
+  "providers": [
+    {
+      "id": "huggingface",
+      "name": "Hugging Face",
+      "category": "image",
+      "status": "CONNECTED",
+      "capabilities": [
+        "text_to_image",
+        "image_to_image",
+        "upscaling"
+      ],
+      "auth_type": "API_TOKEN",
+      "connection_type": "API",
+      "subscription_required": false,
+      "subscription_url": "https://huggingface.co/",
+      "official_api_url": "https://huggingface.co/docs/api-inference/",
+      "module": "projects/generation/providers/huggingface_provider.py",
+      "enabled": true,
+      "credits_status": "AVAILABLE"
+    },
+    {
+      "id": "pollinations",
+      "name": "Pollinations",
+      "category": "image",
+      "status": "READY",
+      "capabilities": [
+        "text_to_image"
+      ],
+      "auth_type": "NONE",
+      "connection_type": "API",
+      "subscription_required": false,
+      "subscription_url": "https://pollinations.ai/",
+      "official_api_url": "https://pollinations.ai/",
+      "module": "projects/generation/providers/pollinations_provider.py",
+      "enabled": true,
+      "credits_status": "AVAILABLE"
+    },
+    {
+      "id": "elevenlabs",
+      "name": "ElevenLabs",
+      "category": "voice",
+      "status": "LOCKED",
+      "capabilities": [
+        "text_to_speech",
+        "voice_cloning",
+        "multilingual_voice"
+      ],
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "subscription_url": "https://elevenlabs.io/",
+      "official_api_url": "https://elevenlabs.io/docs/api-reference",
+      "module": null,
+      "enabled": false,
+      "credits_status": "UNKNOWN"
+    },
+    {
+      "id": "suno",
+      "name": "Suno",
+      "category": "music",
+      "status": "LOCKED",
+      "capabilities": [
+        "music_generation",
+        "song_generation",
+        "lyrics_to_music"
+      ],
+      "auth_type": "ACCOUNT",
+      "connection_type": "MANUAL_CONNECT",
+      "subscription_required": true,
+      "subscription_url": "https://suno.com/",
+      "official_api_url": "",
+      "module": null,
+      "enabled": false,
+      "credits_status": "UNKNOWN"
+    },
+    {
+      "id": "runway",
+      "name": "Runway",
+      "category": "video",
+      "status": "LOCKED",
+      "capabilities": [
+        "text_to_video",
+        "image_to_video",
+        "video_generation"
+      ],
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "subscription_url": "https://runwayml.com/",
+      "official_api_url": "https://docs.dev.runwayml.com/",
+      "module": null,
+      "enabled": false,
+      "credits_status": "UNKNOWN"
+    },
+    {
+      "id": "kling",
+      "name": "Kling AI",
+      "category": "video",
+      "status": "LOCKED",
+      "capabilities": [
+        "text_to_video",
+        "image_to_video",
+        "video_generation"
+      ],
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "subscription_url": "https://klingai.com/",
+      "official_api_url": "",
+      "module": null,
+      "enabled": false,
+      "credits_status": "UNKNOWN"
+    },
+    {
+      "id": "heygen",
+      "name": "HeyGen",
+      "category": "lipsync",
+      "status": "LOCKED",
+      "capabilities": [
+        "avatar_video",
+        "lip_sync",
+        "voice_video"
+      ],
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "subscription_url": "https://www.heygen.com/",
+      "official_api_url": "https://docs.heygen.com/",
+      "module": null,
+      "enabled": false,
+      "credits_status": "UNKNOWN"
+    }
+  ]
+}

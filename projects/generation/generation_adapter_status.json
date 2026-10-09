@@ -1,0 +1,17 @@
+{
+    "project": "World Most Popular Documentary Filming",
+    "engine": "AI Generation Adapter",
+    "version": "1.0",
+    "status": "READY",
+    "providers": {
+        "image": "NOT_CONNECTED",
+        "video": "NOT_CONNECTED",
+        "voice": "NOT_CONNECTED"
+    },
+    "generation_modes": [
+        "IMAGE",
+        "VIDEO",
+        "VOICE"
+    ],
+    "created_at": "2026-10-06T20:44:24.535589"
+}

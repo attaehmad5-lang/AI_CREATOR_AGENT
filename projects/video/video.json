@@ -1,0 +1,28 @@
+{
+    "project": "World Most Popular Documentary Filming",
+    "status": "READY",
+    "video_style": "Cinematic Documentary",
+    "aspect_ratio": "16:9",
+    "resolution": "4K",
+    "frame_rate": "24fps",
+    "camera_movement": [
+        "Slow cinematic movement",
+        "Handheld documentary shots",
+        "Smooth tracking shots",
+        "Drone aerial movement",
+        "Static interview shots"
+    ],
+    "transitions": [
+        "Clean cuts",
+        "Cinematic fades",
+        "Slow dissolves",
+        "Match cuts"
+    ],
+    "audio": [
+        "Narration",
+        "Ambient sound",
+        "Cinematic music",
+        "Natural location sound"
+    ],
+    "created_at": "2026-10-06T18:13:17.727363"
+}

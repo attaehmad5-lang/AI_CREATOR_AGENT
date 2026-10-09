@@ -1,0 +1,52 @@
+{
+    "project": "World Most Popular Documentary Filming",
+    "engine": "Advanced Provider Registry",
+    "version": "1.0",
+    "status": "READY",
+    "routing": {
+        "strategy": "PRIMARY_THEN_FALLBACK",
+        "max_retries_per_provider": 3,
+        "automatic_fallback": true,
+        "health_check_before_generation": true
+    },
+    "image": {
+        "primary": "Hugging Face",
+        "fallbacks": [],
+        "capabilities": [
+            "text_to_image",
+            "image_to_image",
+            "upscaling"
+        ],
+        "model": "stabilityai/stable-diffusion-xl-base-1.0",
+        "status": "CONNECTED"
+    },
+    "video": {
+        "primary": null,
+        "fallbacks": [],
+        "capabilities": [
+            "text_to_video",
+            "image_to_video",
+            "video_generation"
+        ]
+    },
+    "voice": {
+        "primary": null,
+        "fallbacks": [],
+        "capabilities": [
+            "text_to_speech",
+            "multilingual_voice",
+            "voice_generation"
+        ]
+    },
+    "security": {
+        "api_keys_in_source_code": false,
+        "environment_variables": true,
+        "key_logging": false
+    },
+    "future_providers": {
+        "image": [],
+        "video": [],
+        "voice": []
+    },
+    "created_at": "2026-10-06T20:42:40.399503"
+}

@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "policy": "USER_CONTROLLED",
+  "security": {
+    "store_secrets_in_source": false,
+    "log_api_keys": false,
+    "auto_purchase": false,
+    "subscription_bypass": false
+  },
+  "providers": {
+    "huggingface": {
+      "status": "CONNECTED"
+    },
+    "pollinations": {
+      "status": "READY"
+    }
+  }
+}

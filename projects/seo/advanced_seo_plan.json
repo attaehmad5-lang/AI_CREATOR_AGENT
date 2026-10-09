@@ -1,0 +1,71 @@
+{
+    "project": "World Most Popular Documentary Filming",
+    "status": "READY",
+    "engine": "Advanced SEO & Publishing Engine",
+    "youtube": {
+        "title": "World Most Popular Documentary Filming | Behind The Scenes of Cinematic Filmmaking",
+        "description": "Discover the world behind professional documentary filmmaking. Explore how powerful real-world stories are planned, filmed, recorded, and transformed into cinematic documentaries through cameras, sound, lighting, production teams, challenging locations and careful editing.",
+        "keywords": [
+            "documentary filming",
+            "documentary filmmaking",
+            "documentary production",
+            "behind the scenes",
+            "cinematic documentary",
+            "filmmaking",
+            "cinematic filming",
+            "documentary camera",
+            "film production",
+            "documentary production process"
+        ],
+        "tags": [
+            "documentary",
+            "documentary filming",
+            "documentary filmmaking",
+            "filmmaking",
+            "cinematic documentary",
+            "behind the scenes",
+            "film production",
+            "documentary production",
+            "cinematic filming",
+            "documentary camera"
+        ],
+        "hashtags": [
+            "#Documentary",
+            "#Filmmaking",
+            "#Cinematic",
+            "#BehindTheScenes",
+            "#DocumentaryFilming"
+        ],
+        "category": "Film & Animation",
+        "format": "Long Form",
+        "aspect_ratio": "16:9",
+        "resolution": "4K"
+    },
+    "thumbnail": {
+        "style": "Premium cinematic documentary",
+        "aspect_ratio": "16:9",
+        "resolution": "4K",
+        "direction": "Professional cinematic documentary thumbnail showing a powerful real-world filming environment, professional cinema camera, documentary crew, dramatic natural lighting, realistic subjects, premium film-industry composition, strong depth, high visual contrast, cinematic atmosphere, no watermark."
+    },
+    "publishing": {
+        "platform": "YouTube",
+        "content_type": "Long Form Documentary",
+        "recommended_format": "4K 24fps",
+        "language": "English",
+        "content_style": "Cinematic Documentary",
+        "metadata_status": "READY"
+    },
+    "optimization": {
+        "search_intent": "Documentary filmmaking and behind-the-scenes production",
+        "audience": [
+            "Documentary viewers",
+            "Filmmaking enthusiasts",
+            "Cinema fans",
+            "Cinematic content viewers"
+        ],
+        "discovery_strategy": "Use strong documentary keywords in title, description and tags while maintaining natural language.",
+        "click_strategy": "Use a cinematic thumbnail with a clear production story and strong visual subject.",
+        "retention_strategy": "Open with a strong visual hook, build curiosity, reveal production challenges and finish with an emotional cinematic conclusion."
+    },
+    "created_at": "2026-10-06T19:41:53.565880"
+}

@@ -1,0 +1,27 @@
+{
+    "project": "World Most Popular Documentary Filming",
+    "status": "READY",
+    "voice_style": "Cinematic Documentary Narration",
+    "language": "English",
+    "tone": [
+        "Deep",
+        "Professional",
+        "Emotional",
+        "Suspenseful",
+        "Natural"
+    ],
+    "delivery": [
+        "Clear narration",
+        "Controlled pacing",
+        "Emotional emphasis",
+        "Dramatic pauses",
+        "Strong storytelling"
+    ],
+    "music_direction": [
+        "Cinematic ambient music",
+        "Soft piano",
+        "Deep strings",
+        "Atmospheric pads"
+    ],
+    "created_at": "2026-10-06T18:10:10.669802"
+}

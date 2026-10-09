@@ -1,0 +1,54 @@
+{
+  "system": "AI_CREATOR_AGENT",
+  "component": "MASTER_SYSTEM_HEALTH",
+  "health": "DEGRADED",
+  "pipeline_integrity": true,
+  "providers_connected": 0,
+  "capabilities_ready": false,
+  "total_jobs": 30,
+  "waiting_for_provider": 10,
+  "waiting_for_dependency": 10,
+  "assets_total": 30,
+  "real_generation_started": false,
+  "safe_mode": true,
+  "real_provider_call": false,
+  "file_checks": [
+    {
+      "component": "pipeline",
+      "exists": true,
+      "valid": true
+    },
+    {
+      "component": "controller",
+      "exists": true,
+      "valid": true
+    },
+    {
+      "component": "connection",
+      "exists": true,
+      "valid": true
+    },
+    {
+      "component": "capability_gate",
+      "exists": false,
+      "valid": false
+    },
+    {
+      "component": "orchestration",
+      "exists": true,
+      "valid": true
+    },
+    {
+      "component": "state",
+      "exists": true,
+      "valid": true
+    },
+    {
+      "component": "assets",
+      "exists": true,
+      "valid": true
+    }
+  ],
+  "status": "READY",
+  "created_at": "2026-10-08T16:52:51.807322"
+}

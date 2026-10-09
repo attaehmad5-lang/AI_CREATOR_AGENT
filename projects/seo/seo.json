@@ -1,0 +1,38 @@
+{
+    "project": "World Most Popular Documentary Filming",
+    "status": "READY",
+    "title": "World Most Popular Documentary Filming",
+    "description_style": "Cinematic Documentary",
+    "keywords": [
+        "documentary filming",
+        "documentary production",
+        "behind the scenes",
+        "cinematic documentary",
+        "filmmaking",
+        "documentary filmmaking",
+        "cinematic filming"
+    ],
+    "tags": [
+        "documentary",
+        "documentary filming",
+        "filmmaking",
+        "behind the scenes",
+        "cinematic documentary",
+        "documentary production"
+    ],
+    "hashtags": [
+        "#Documentary",
+        "#Filmmaking",
+        "#Cinematic",
+        "#BehindTheScenes",
+        "#DocumentaryFilming"
+    ],
+    "publishing": {
+        "platform": "YouTube",
+        "format": "Long Form Video",
+        "aspect_ratio": "16:9",
+        "thumbnail": "Cinematic 4K",
+        "category": "Documentary"
+    },
+    "created_at": "2026-10-06T18:14:06.904232"
+}

@@ -1,0 +1,20 @@
+hf_token.txt
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.git/
+output/
+
+# Sensitive setup scripts
+hf_token_setup.py
+# Generated media and archives
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.mp4
+*.mp3
+*.wav
+*.zip

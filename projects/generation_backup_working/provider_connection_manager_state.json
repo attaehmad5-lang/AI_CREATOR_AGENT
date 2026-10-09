@@ -1,0 +1,38 @@
+{
+  "manager": "PROVIDER_CONNECTION_MANAGER",
+  "strategy": "ENVIRONMENT_VARIABLE_PROVIDER_CONNECTION",
+  "providers_total": 3,
+  "api_keys_detected": 1,
+  "providers_connected": 1,
+  "api_keys_in_source_code": false,
+  "connections": [
+    {
+      "media_type": "IMAGE",
+      "provider": "OpenAI",
+      "environment_variable": "AI_IMAGE_API_KEY",
+      "api_key_present": true,
+      "connected": true,
+      "connection_state": "CONNECTED"
+    },
+    {
+      "media_type": "VIDEO",
+      "provider": "VIDEO_PROVIDER",
+      "environment_variable": "AI_VIDEO_API_KEY",
+      "api_key_present": false,
+      "connected": false,
+      "connection_state": "WAITING_FOR_API_KEY"
+    },
+    {
+      "media_type": "VOICE",
+      "provider": "VOICE_PROVIDER",
+      "environment_variable": "AI_VOICE_API_KEY",
+      "api_key_present": false,
+      "connected": false,
+      "connection_state": "WAITING_FOR_API_KEY"
+    }
+  ],
+  "safe_mode": true,
+  "real_provider_call": false,
+  "status": "READY",
+  "created_at": "2026-10-06T21:42:48.779099"
+}

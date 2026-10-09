@@ -1,0 +1,313 @@
+{
+  "version": "1.0",
+  "status": "READY",
+  "policy": {
+    "user_controlled_subscriptions": true,
+    "auto_purchase": false,
+    "subscription_bypass": false,
+    "api_key_logging": false
+  },
+  "providers": [
+    {
+      "id": "openai_script",
+      "name": "OpenAI",
+      "category": "script_story",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "story_generation",
+        "screenplay",
+        "scene_breakdown",
+        "character_development",
+        "dialogue_writing"
+      ]
+    },
+    {
+      "id": "google_gemini_script",
+      "name": "Google Gemini",
+      "category": "script_story",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "story_generation",
+        "screenplay",
+        "character_development",
+        "dialogue_writing",
+        "storyboard_planning"
+      ]
+    },
+    {
+      "id": "anthropic_claude_script",
+      "name": "Anthropic Claude",
+      "category": "script_story",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "story_generation",
+        "screenplay",
+        "scene_breakdown",
+        "character_development",
+        "dialogue_writing"
+      ]
+    },
+    {
+      "id": "adobe_firefly_advanced",
+      "name": "Adobe Firefly",
+      "category": "advanced_image_editing",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "inpainting",
+        "outpainting",
+        "object_removal",
+        "background_removal",
+        "background_replacement",
+        "relighting",
+        "image_restoration"
+      ]
+    },
+    {
+      "id": "replicate_image_editing",
+      "name": "Replicate",
+      "category": "advanced_image_editing",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "inpainting",
+        "outpainting",
+        "object_removal",
+        "background_removal",
+        "image_restoration"
+      ]
+    },
+    {
+      "id": "runway_image_editing",
+      "name": "Runway",
+      "category": "advanced_image_editing",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "object_removal",
+        "background_replacement",
+        "image_editing",
+        "image_restoration"
+      ]
+    },
+    {
+      "id": "topaz_advanced",
+      "name": "Topaz Labs",
+      "category": "advanced_upscaling",
+      "status": "LOCKED",
+      "auth_type": "API_KEY_OR_ACCOUNT",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "image_upscaling",
+        "face_restoration",
+        "detail_enhancement",
+        "denoise",
+        "old_photo_restoration",
+        "video_upscaling"
+      ]
+    },
+    {
+      "id": "magnific_advanced",
+      "name": "Magnific AI",
+      "category": "advanced_upscaling",
+      "status": "LOCKED",
+      "auth_type": "API_KEY_OR_ACCOUNT",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "image_upscaling",
+        "face_restoration",
+        "detail_enhancement",
+        "old_photo_restoration"
+      ]
+    },
+    {
+      "id": "krea_upscaling",
+      "name": "Krea AI",
+      "category": "advanced_upscaling",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT_OR_API",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "image_upscaling",
+        "detail_enhancement",
+        "image_restoration"
+      ]
+    },
+    {
+      "id": "assemblyai_advanced",
+      "name": "AssemblyAI",
+      "category": "advanced_transcription",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "speech_to_text",
+        "speaker_detection",
+        "subtitle_generation",
+        "caption_timing",
+        "transcript_cleanup"
+      ]
+    },
+    {
+      "id": "deepgram_transcription",
+      "name": "Deepgram",
+      "category": "advanced_transcription",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "speech_to_text",
+        "speaker_detection",
+        "transcript_cleanup",
+        "caption_timing"
+      ]
+    },
+    {
+      "id": "google_cloud_speech",
+      "name": "Google Cloud Speech-to-Text",
+      "category": "advanced_transcription",
+      "status": "LOCKED",
+      "auth_type": "API_KEY_OR_SERVICE_ACCOUNT",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "speech_to_text",
+        "speaker_detection",
+        "subtitle_generation",
+        "caption_timing",
+        "transcript_cleanup"
+      ]
+    },
+    {
+      "id": "elevenlabs_advanced_audio",
+      "name": "ElevenLabs",
+      "category": "advanced_audio",
+      "status": "LOCKED",
+      "auth_type": "API_KEY_OR_ACCOUNT",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "voice_generation",
+        "voice_cloning",
+        "voice_dubbing",
+        "audio_enhancement",
+        "noise_removal"
+      ]
+    },
+    {
+      "id": "playht_advanced_audio",
+      "name": "PlayHT",
+      "category": "advanced_audio",
+      "status": "LOCKED",
+      "auth_type": "API_KEY_OR_ACCOUNT",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "voice_generation",
+        "voice_cloning",
+        "voice_dubbing",
+        "audio_enhancement"
+      ]
+    },
+    {
+      "id": "suno_advanced_audio",
+      "name": "Suno",
+      "category": "advanced_audio",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT_OR_API",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "music_generation",
+        "sound_effect_generation",
+        "audio_generation"
+      ]
+    },
+    {
+      "id": "runway_advanced_video",
+      "name": "Runway",
+      "category": "advanced_video_editing",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT_OR_API",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "video_editing",
+        "scene_detection",
+        "object_removal",
+        "background_replacement",
+        "color_grading",
+        "video_restoration"
+      ]
+    },
+    {
+      "id": "adobe_premiere_advanced",
+      "name": "Adobe Premiere Pro",
+      "category": "advanced_video_editing",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT",
+      "connection_type": "ACCOUNT_OR_API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "video_editing",
+        "scene_detection",
+        "color_grading",
+        "video_restoration"
+      ]
+    },
+    {
+      "id": "davinci_resolve_advanced",
+      "name": "DaVinci Resolve",
+      "category": "advanced_video_editing",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT_OR_LOCAL",
+      "connection_type": "LOCAL_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "video_editing",
+        "scene_detection",
+        "color_grading",
+        "video_restoration",
+        "audio_editing"
+      ]
+    }
+  ]
+}

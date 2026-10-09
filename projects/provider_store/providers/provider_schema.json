@@ -1,0 +1,15 @@
+{
+  "provider_id": "",
+  "name": "",
+  "category": "",
+  "status": "LOCKED",
+  "capabilities": [],
+  "auth_type": "API_KEY",
+  "connection_type": "API",
+  "subscription_required": true,
+  "subscription_url": "",
+  "official_api_url": "",
+  "module": null,
+  "enabled": false,
+  "credits_status": "UNKNOWN"
+}

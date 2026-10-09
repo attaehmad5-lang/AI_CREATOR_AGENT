@@ -1,0 +1,128 @@
+{
+    "project": "World Most Popular Documentary Filming",
+    "status": "READY",
+    "scene_count": 10,
+    "created_at": "2026-10-06T19:11:33.145457",
+    "scenes": [
+        {
+            "scene": 1,
+            "title": "Opening Hook",
+            "narration": "What does it really take to create a documentary that captures the attention of millions?",
+            "visual_direction": "Cinematic aerial establishing shots of a vast real-world location, introducing the scale and mystery of the documentary.",
+            "camera": "24mm wide lens, slow aerial drone movement, gentle push-in",
+            "location": "Real-world exterior location",
+            "lighting": "Natural dawn light with soft atmospheric haze",
+            "sound": "Wind, distant environmental ambience, subtle cinematic drone",
+            "duration": "02:00",
+            "status": "READY"
+        },
+        {
+            "scene": 2,
+            "title": "Introduction",
+            "narration": "The journey begins long before the cameras start rolling. Every location, subject, camera angle, and sound must be planned.",
+            "visual_direction": "Professional documentary crew preparing cameras, microphones and equipment before filming begins.",
+            "camera": "35mm lens, slow tracking shots, detailed close-ups",
+            "location": "Documentary production location",
+            "lighting": "Soft natural morning light with practical fill",
+            "sound": "Equipment handling, footsteps, quiet crew communication",
+            "duration": "02:00",
+            "status": "READY"
+        },
+        {
+            "scene": 3,
+            "title": "The Main Story",
+            "narration": "At the heart of every powerful documentary is a real story. The filmmakers must discover it, understand it, and bring it to the audience.",
+            "visual_direction": "The main documentary subject moving naturally through an authentic environment while the camera observes without disturbing the moment.",
+            "camera": "50mm lens, handheld documentary movement, intimate close-ups",
+            "location": "Authentic real-world environment",
+            "lighting": "Natural daylight with realistic contrast",
+            "sound": "Natural location sound, footsteps, environmental ambience",
+            "duration": "02:00",
+            "status": "READY"
+        },
+        {
+            "scene": 4,
+            "title": "Behind The Scenes",
+            "narration": "Behind the camera, an entire production team works together. Every important moment can change the direction of the story.",
+            "visual_direction": "Behind-the-scenes view of the film crew working together while cameras capture important moments.",
+            "camera": "35mm lens, shoulder-mounted camera, observational framing",
+            "location": "Active filming location",
+            "lighting": "Mixed natural and practical production lighting",
+            "sound": "Crew communication, camera operation, ambient location sound",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 5,
+            "title": "Production Challenges",
+            "narration": "Real locations create real problems. Weather, distance, lighting, sound, equipment, and unexpected events can test the entire production.",
+            "visual_direction": "The production team facing difficult weather, terrain and logistical conditions while continuing to film.",
+            "camera": "24mm and 50mm lenses, handheld movement, occasional static frames",
+            "location": "Remote or challenging location",
+            "lighting": "Overcast natural light with dramatic atmospheric conditions",
+            "sound": "Wind, rain or environmental sounds, equipment movement",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 6,
+            "title": "Cinematic Filming",
+            "narration": "Modern documentary filmmaking combines reality with cinematic visual language. Wide landscapes, intimate close-ups, controlled camera movement, and natural light can transform a real moment.",
+            "visual_direction": "Highly cinematic documentary imagery showing landscapes, details and human moments with controlled visual composition.",
+            "camera": "24mm wide shots, 85mm close-ups, slow dolly and tracking movement",
+            "location": "Cinematic real-world location",
+            "lighting": "Golden-hour sunlight and soft cinematic highlights",
+            "sound": "Atmospheric music, natural ambience, subtle sound design",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 7,
+            "title": "Human Story",
+            "narration": "Technology may capture the image, but people create the emotion. The strongest documentaries allow viewers to connect with real human experiences.",
+            "visual_direction": "An intimate human moment revealing emotion, personality and the real story behind the documentary subject.",
+            "camera": "85mm portrait lens, shallow depth of field, slow controlled push-in",
+            "location": "Quiet authentic environment",
+            "lighting": "Soft diffused natural light",
+            "sound": "Breathing, subtle environmental ambience, restrained music",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 8,
+            "title": "The Final Moment",
+            "narration": "After weeks or months of filming, hundreds of hours of material can be reduced to a carefully crafted story.",
+            "visual_direction": "Final major filming moment as the crew captures a powerful image that completes the central story.",
+            "camera": "35mm cinematic lens, slow crane or dolly movement",
+            "location": "Key documentary location",
+            "lighting": "Late-afternoon dramatic natural light",
+            "sound": "Rising cinematic score, natural environmental sound",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 9,
+            "title": "Conclusion",
+            "narration": "A great documentary is more than a collection of images. It is a journey built from reality, patience, creativity, and the search for a story worth remembering.",
+            "visual_direction": "A wide reflective view summarizing the journey, returning to the environment where the story began.",
+            "camera": "24mm wide lens, slow pull-back, stable composition",
+            "location": "Original documentary environment",
+            "lighting": "Warm sunset light with long shadows",
+            "sound": "Soft piano, ambient atmosphere, gentle wind",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 10,
+            "title": "End Credits",
+            "narration": "This is the world behind documentary filmmaking.",
+            "visual_direction": "Elegant closing images of the location and production team, creating a professional documentary ending.",
+            "camera": "35mm lens, slow cinematic fade-out movement",
+            "location": "Documentary location",
+            "lighting": "Soft twilight light",
+            "sound": "Final musical resolve, natural ambience, clean ending",
+            "duration": "03:00",
+            "status": "READY"
+        }
+    ]
+}

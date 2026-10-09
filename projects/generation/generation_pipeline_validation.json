@@ -1,0 +1,107 @@
+{
+  "validator": "GENERATION_PIPELINE_VALIDATOR",
+  "total_checks": 19,
+  "passed": 19,
+  "failed": 0,
+  "pipeline_integrity": true,
+  "real_generation_started": false,
+  "status": "PASSED",
+  "checks": [
+    {
+      "check": "adapter_status",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "jobs",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "queue",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "provider_config",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "provider_health",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "provider_registry",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "routing",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "capability_queue",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "execution_report",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "asset_manifest",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "dry_run",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "generation_state",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "retry_state",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "provider_connection",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "provider_capability_router",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "scheduled_queue",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "dependencies",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "dependency_plan",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    },
+    {
+      "check": "orchestration",
+      "status": "PASSED",
+      "reason": "VALID_JSON"
+    }
+  ],
+  "created_at": "2026-10-06T20:35:56.593160"
+}

@@ -1,0 +1,31 @@
+{
+  "project": "World Most Popular Documentary Filming",
+  "status": "READY",
+  "engine": "AI Provider Manager",
+  "providers": {
+    "image": {
+      "status": "CONFIGURED",
+      "provider": "OpenAI",
+      "model": "gpt-image-2",
+      "api_key_configured": false
+    },
+    "video": {
+      "status": "NOT_CONNECTED",
+      "provider": null,
+      "model": null,
+      "api_key_configured": false
+    },
+    "voice": {
+      "status": "NOT_CONNECTED",
+      "provider": null,
+      "model": null,
+      "api_key_configured": false
+    }
+  },
+  "security": {
+    "api_keys_in_source_code": false,
+    "configuration_method": "Environment variables or secure configuration",
+    "key_logging": false
+  },
+  "created_at": "2026-10-06T20:55:33.310322"
+}

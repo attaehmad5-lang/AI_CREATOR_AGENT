@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "states": [
+    "QUEUED",
+    "PROCESSING",
+    "COMPLETED",
+    "FAILED",
+    "RETRYING"
+  ],
+  "transitions": {
+    "QUEUED": [
+      "PROCESSING"
+    ],
+    "PROCESSING": [
+      "COMPLETED",
+      "FAILED",
+      "RETRYING"
+    ],
+    "RETRYING": [
+      "QUEUED",
+      "PROCESSING"
+    ],
+    "FAILED": [
+      "RETRYING"
+    ],
+    "COMPLETED": []
+  },
+  "terminal_states": [
+    "COMPLETED"
+  ],
+  "retry_states": [
+    "RETRYING"
+  ],
+  "success_states": [
+    "COMPLETED"
+  ]
+}

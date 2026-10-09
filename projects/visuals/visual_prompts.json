@@ -1,0 +1,131 @@
+{
+    "project": "World Most Popular Documentary Filming",
+    "status": "READY",
+    "engine": "Advanced Visual Prompt Engine",
+    "aspect_ratio": "16:9",
+    "resolution": "4K",
+    "scene_count": 10,
+    "visuals": [
+        {
+            "scene": 1,
+            "title": "Opening Hook",
+            "image_prompt": "Cinematic documentary frame, Cinematic aerial establishing shots of a vast real-world location, introducing the scale and mystery of the documentary., location: Real-world exterior location, lighting: Natural dawn light with soft atmospheric haze, 24mm wide lens, slow aerial drone movement, gentle push-in, realistic human subjects, authentic environment, natural textures, physically accurate lighting, cinematic depth of field, professional documentary cinematography, subtle film grain, high dynamic range, realistic color science, 16:9 composition, 4K detail, no text, no watermark.",
+            "video_prompt": "Realistic cinematic documentary shot. Cinematic aerial establishing shots of a vast real-world location, introducing the scale and mystery of the documentary. Camera: 24mm wide lens, slow aerial drone movement, gentle push-in. Location: Real-world exterior location. Lighting: Natural dawn light with soft atmospheric haze. Natural subject movement, realistic environmental motion, physically accurate camera movement, authentic documentary behavior, smooth cinematic pacing.",
+            "camera": "24mm wide lens, slow aerial drone movement, gentle push-in",
+            "lighting": "Natural dawn light with soft atmospheric haze",
+            "location": "Real-world exterior location",
+            "sound_direction": "Wind, distant environmental ambience, subtle cinematic drone",
+            "duration": "02:00",
+            "status": "READY"
+        },
+        {
+            "scene": 2,
+            "title": "Introduction",
+            "image_prompt": "Cinematic documentary frame, Professional documentary crew preparing cameras, microphones and equipment before filming begins., location: Documentary production location, lighting: Soft natural morning light with practical fill, 35mm lens, slow tracking shots, detailed close-ups, realistic human subjects, authentic environment, natural textures, physically accurate lighting, cinematic depth of field, professional documentary cinematography, subtle film grain, high dynamic range, realistic color science, 16:9 composition, 4K detail, no text, no watermark.",
+            "video_prompt": "Realistic cinematic documentary shot. Professional documentary crew preparing cameras, microphones and equipment before filming begins. Camera: 35mm lens, slow tracking shots, detailed close-ups. Location: Documentary production location. Lighting: Soft natural morning light with practical fill. Natural subject movement, realistic environmental motion, physically accurate camera movement, authentic documentary behavior, smooth cinematic pacing.",
+            "camera": "35mm lens, slow tracking shots, detailed close-ups",
+            "lighting": "Soft natural morning light with practical fill",
+            "location": "Documentary production location",
+            "sound_direction": "Equipment handling, footsteps, quiet crew communication",
+            "duration": "02:00",
+            "status": "READY"
+        },
+        {
+            "scene": 3,
+            "title": "The Main Story",
+            "image_prompt": "Cinematic documentary frame, The main documentary subject moving naturally through an authentic environment while the camera observes without disturbing the moment., location: Authentic real-world environment, lighting: Natural daylight with realistic contrast, 50mm lens, handheld documentary movement, intimate close-ups, realistic human subjects, authentic environment, natural textures, physically accurate lighting, cinematic depth of field, professional documentary cinematography, subtle film grain, high dynamic range, realistic color science, 16:9 composition, 4K detail, no text, no watermark.",
+            "video_prompt": "Realistic cinematic documentary shot. The main documentary subject moving naturally through an authentic environment while the camera observes without disturbing the moment. Camera: 50mm lens, handheld documentary movement, intimate close-ups. Location: Authentic real-world environment. Lighting: Natural daylight with realistic contrast. Natural subject movement, realistic environmental motion, physically accurate camera movement, authentic documentary behavior, smooth cinematic pacing.",
+            "camera": "50mm lens, handheld documentary movement, intimate close-ups",
+            "lighting": "Natural daylight with realistic contrast",
+            "location": "Authentic real-world environment",
+            "sound_direction": "Natural location sound, footsteps, environmental ambience",
+            "duration": "02:00",
+            "status": "READY"
+        },
+        {
+            "scene": 4,
+            "title": "Behind The Scenes",
+            "image_prompt": "Cinematic documentary frame, Behind-the-scenes view of the film crew working together while cameras capture important moments., location: Active filming location, lighting: Mixed natural and practical production lighting, 35mm lens, shoulder-mounted camera, observational framing, realistic human subjects, authentic environment, natural textures, physically accurate lighting, cinematic depth of field, professional documentary cinematography, subtle film grain, high dynamic range, realistic color science, 16:9 composition, 4K detail, no text, no watermark.",
+            "video_prompt": "Realistic cinematic documentary shot. Behind-the-scenes view of the film crew working together while cameras capture important moments. Camera: 35mm lens, shoulder-mounted camera, observational framing. Location: Active filming location. Lighting: Mixed natural and practical production lighting. Natural subject movement, realistic environmental motion, physically accurate camera movement, authentic documentary behavior, smooth cinematic pacing.",
+            "camera": "35mm lens, shoulder-mounted camera, observational framing",
+            "lighting": "Mixed natural and practical production lighting",
+            "location": "Active filming location",
+            "sound_direction": "Crew communication, camera operation, ambient location sound",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 5,
+            "title": "Production Challenges",
+            "image_prompt": "Cinematic documentary frame, The production team facing difficult weather, terrain and logistical conditions while continuing to film., location: Remote or challenging location, lighting: Overcast natural light with dramatic atmospheric conditions, 24mm and 50mm lenses, handheld movement, occasional static frames, realistic human subjects, authentic environment, natural textures, physically accurate lighting, cinematic depth of field, professional documentary cinematography, subtle film grain, high dynamic range, realistic color science, 16:9 composition, 4K detail, no text, no watermark.",
+            "video_prompt": "Realistic cinematic documentary shot. The production team facing difficult weather, terrain and logistical conditions while continuing to film. Camera: 24mm and 50mm lenses, handheld movement, occasional static frames. Location: Remote or challenging location. Lighting: Overcast natural light with dramatic atmospheric conditions. Natural subject movement, realistic environmental motion, physically accurate camera movement, authentic documentary behavior, smooth cinematic pacing.",
+            "camera": "24mm and 50mm lenses, handheld movement, occasional static frames",
+            "lighting": "Overcast natural light with dramatic atmospheric conditions",
+            "location": "Remote or challenging location",
+            "sound_direction": "Wind, rain or environmental sounds, equipment movement",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 6,
+            "title": "Cinematic Filming",
+            "image_prompt": "Cinematic documentary frame, Highly cinematic documentary imagery showing landscapes, details and human moments with controlled visual composition., location: Cinematic real-world location, lighting: Golden-hour sunlight and soft cinematic highlights, 24mm wide shots, 85mm close-ups, slow dolly and tracking movement, realistic human subjects, authentic environment, natural textures, physically accurate lighting, cinematic depth of field, professional documentary cinematography, subtle film grain, high dynamic range, realistic color science, 16:9 composition, 4K detail, no text, no watermark.",
+            "video_prompt": "Realistic cinematic documentary shot. Highly cinematic documentary imagery showing landscapes, details and human moments with controlled visual composition. Camera: 24mm wide shots, 85mm close-ups, slow dolly and tracking movement. Location: Cinematic real-world location. Lighting: Golden-hour sunlight and soft cinematic highlights. Natural subject movement, realistic environmental motion, physically accurate camera movement, authentic documentary behavior, smooth cinematic pacing.",
+            "camera": "24mm wide shots, 85mm close-ups, slow dolly and tracking movement",
+            "lighting": "Golden-hour sunlight and soft cinematic highlights",
+            "location": "Cinematic real-world location",
+            "sound_direction": "Atmospheric music, natural ambience, subtle sound design",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 7,
+            "title": "Human Story",
+            "image_prompt": "Cinematic documentary frame, An intimate human moment revealing emotion, personality and the real story behind the documentary subject., location: Quiet authentic environment, lighting: Soft diffused natural light, 85mm portrait lens, shallow depth of field, slow controlled push-in, realistic human subjects, authentic environment, natural textures, physically accurate lighting, cinematic depth of field, professional documentary cinematography, subtle film grain, high dynamic range, realistic color science, 16:9 composition, 4K detail, no text, no watermark.",
+            "video_prompt": "Realistic cinematic documentary shot. An intimate human moment revealing emotion, personality and the real story behind the documentary subject. Camera: 85mm portrait lens, shallow depth of field, slow controlled push-in. Location: Quiet authentic environment. Lighting: Soft diffused natural light. Natural subject movement, realistic environmental motion, physically accurate camera movement, authentic documentary behavior, smooth cinematic pacing.",
+            "camera": "85mm portrait lens, shallow depth of field, slow controlled push-in",
+            "lighting": "Soft diffused natural light",
+            "location": "Quiet authentic environment",
+            "sound_direction": "Breathing, subtle environmental ambience, restrained music",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 8,
+            "title": "The Final Moment",
+            "image_prompt": "Cinematic documentary frame, Final major filming moment as the crew captures a powerful image that completes the central story., location: Key documentary location, lighting: Late-afternoon dramatic natural light, 35mm cinematic lens, slow crane or dolly movement, realistic human subjects, authentic environment, natural textures, physically accurate lighting, cinematic depth of field, professional documentary cinematography, subtle film grain, high dynamic range, realistic color science, 16:9 composition, 4K detail, no text, no watermark.",
+            "video_prompt": "Realistic cinematic documentary shot. Final major filming moment as the crew captures a powerful image that completes the central story. Camera: 35mm cinematic lens, slow crane or dolly movement. Location: Key documentary location. Lighting: Late-afternoon dramatic natural light. Natural subject movement, realistic environmental motion, physically accurate camera movement, authentic documentary behavior, smooth cinematic pacing.",
+            "camera": "35mm cinematic lens, slow crane or dolly movement",
+            "lighting": "Late-afternoon dramatic natural light",
+            "location": "Key documentary location",
+            "sound_direction": "Rising cinematic score, natural environmental sound",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 9,
+            "title": "Conclusion",
+            "image_prompt": "Cinematic documentary frame, A wide reflective view summarizing the journey, returning to the environment where the story began., location: Original documentary environment, lighting: Warm sunset light with long shadows, 24mm wide lens, slow pull-back, stable composition, realistic human subjects, authentic environment, natural textures, physically accurate lighting, cinematic depth of field, professional documentary cinematography, subtle film grain, high dynamic range, realistic color science, 16:9 composition, 4K detail, no text, no watermark.",
+            "video_prompt": "Realistic cinematic documentary shot. A wide reflective view summarizing the journey, returning to the environment where the story began. Camera: 24mm wide lens, slow pull-back, stable composition. Location: Original documentary environment. Lighting: Warm sunset light with long shadows. Natural subject movement, realistic environmental motion, physically accurate camera movement, authentic documentary behavior, smooth cinematic pacing.",
+            "camera": "24mm wide lens, slow pull-back, stable composition",
+            "lighting": "Warm sunset light with long shadows",
+            "location": "Original documentary environment",
+            "sound_direction": "Soft piano, ambient atmosphere, gentle wind",
+            "duration": "03:00",
+            "status": "READY"
+        },
+        {
+            "scene": 10,
+            "title": "End Credits",
+            "image_prompt": "Cinematic documentary frame, Elegant closing images of the location and production team, creating a professional documentary ending., location: Documentary location, lighting: Soft twilight light, 35mm lens, slow cinematic fade-out movement, realistic human subjects, authentic environment, natural textures, physically accurate lighting, cinematic depth of field, professional documentary cinematography, subtle film grain, high dynamic range, realistic color science, 16:9 composition, 4K detail, no text, no watermark.",
+            "video_prompt": "Realistic cinematic documentary shot. Elegant closing images of the location and production team, creating a professional documentary ending. Camera: 35mm lens, slow cinematic fade-out movement. Location: Documentary location. Lighting: Soft twilight light. Natural subject movement, realistic environmental motion, physically accurate camera movement, authentic documentary behavior, smooth cinematic pacing.",
+            "camera": "35mm lens, slow cinematic fade-out movement",
+            "lighting": "Soft twilight light",
+            "location": "Documentary location",
+            "sound_direction": "Final musical resolve, natural ambience, clean ending",
+            "duration": "03:00",
+            "status": "READY"
+        }
+    ],
+    "created_at": "2026-10-06T19:41:53.044241"
+}

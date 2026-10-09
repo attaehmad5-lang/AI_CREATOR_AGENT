@@ -1,0 +1,4317 @@
+[
+  {
+    "job_id": "5d121779-e288-4650-8e28-ae08954d16cb",
+    "status": "PLANNING",
+    "created_at": "2026-10-07T12:12:22.691977",
+    "request": {
+      "type": "cinematic_video",
+      "topic": "persistence test"
+    },
+    "stages": [],
+    "current_stage": "PLANNING"
+  },
+  {
+    "job_id": "e82c3528-e43e-41c9-b57d-f0ca58157cbd",
+    "status": "SCRIPT",
+    "created_at": "2026-10-07T12:16:07.580524",
+    "request": {
+      "type": "cinematic_video",
+      "topic": "stage test"
+    },
+    "stages": [],
+    "current_stage": "SCRIPT"
+  },
+  {
+    "job_id": "08c1a0dd-a76b-46ca-9e95-711d6fac0231",
+    "status": "COMPLETED",
+    "created_at": "2026-10-07T12:17:47.212463",
+    "request": {
+      "type": "cinematic_video",
+      "topic": "runner test"
+    },
+    "stages": [],
+    "current_stage": "COMPLETED"
+  },
+  {
+    "job_id": "0affcc4a-72b5-4ad1-8304-baaf871079a2",
+    "status": "COMPLETED",
+    "created_at": "2026-10-07T13:23:09.236625",
+    "request": {
+      "type": "cinematic_video",
+      "topic": "full handler test"
+    },
+    "stages": [],
+    "current_stage": "COMPLETED",
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY"
+    }
+  },
+  {
+    "job_id": "0e130dc0-9072-427c-b453-1ddf6806a9da",
+    "status": "COMPLETED",
+    "created_at": "2026-10-07T13:26:06.552571",
+    "request": {
+      "type": "cinematic_video",
+      "topic": "handler implementation test",
+      "language": "ur"
+    },
+    "stages": [],
+    "current_stage": "COMPLETED",
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": null
+    }
+  },
+  {
+    "job_id": "b345e320-d6e7-4d81-8523-c20619ca703d",
+    "status": "COMPLETED",
+    "created_at": "2026-10-07T13:50:07.761990",
+    "request": {
+      "type": "documentary",
+      "topic": "TEST_TOPIC",
+      "language": "ur",
+      "duration": "5 minutes"
+    },
+    "stages": [],
+    "current_stage": "COMPLETED",
+    "production_plan": {
+      "topic": "TEST_TOPIC",
+      "language": "ur",
+      "duration": "5 minutes",
+      "content_type": "documentary",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": null
+    },
+    "script_plan": {
+      "topic": "TEST_TOPIC",
+      "language": "ur",
+      "duration": "5 minutes",
+      "content_type": "documentary",
+      "script_status": "PENDING_AI_WRITER"
+    },
+    "scene_plan": {
+      "topic": "TEST_TOPIC",
+      "content_type": "documentary",
+      "language": "ur",
+      "duration": "5 minutes",
+      "storyboard_status": "PENDING_SCENE_ENGINE"
+    },
+    "generation_plan": {
+      "topic": "TEST_TOPIC",
+      "content_type": "documentary",
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "PENDING_GENERATION_GATEWAY"
+    },
+    "audio_plan": {
+      "topic": "TEST_TOPIC",
+      "content_type": "documentary",
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "PENDING_AUDIO_ENGINE"
+    },
+    "subtitle_plan": {
+      "topic": "TEST_TOPIC",
+      "content_type": "documentary",
+      "language": "ur",
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "PENDING_SUBTITLE_ENGINE"
+    },
+    "editing_plan": {
+      "topic": "TEST_TOPIC",
+      "content_type": "documentary",
+      "visuals_input": true,
+      "audio_input": true,
+      "subtitles_input": true,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "PENDING_VIDEO_EDITOR"
+    },
+    "quality_plan": {
+      "topic": "TEST_TOPIC",
+      "content_type": "documentary",
+      "visual_quality_check": true,
+      "audio_quality_check": true,
+      "subtitle_quality_check": true,
+      "sync_check": true,
+      "render_check": true,
+      "final_quality_status": "PENDING_QC_ENGINE"
+    }
+  },
+  {
+    "request": {
+      "prompt": "Create a documentary about space science",
+      "topic": "Space Science",
+      "language": "ur"
+    },
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "Space Science",
+      "language": "ur",
+      "content_type": "documentary",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "DOCUMENTARY_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "status": "CREATED"
+  },
+  {
+    "job_id": "511f4841-da15-48e1-bd78-8c870535fa6e",
+    "status": "CREATED",
+    "created_at": "2026-10-07T14:02:36.909551",
+    "request": {
+      "prompt": "Create a science documentary",
+      "topic": "Space Science",
+      "language": "ur"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "Space Science",
+      "language": "ur",
+      "content_type": "documentary",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "DOCUMENTARY_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    }
+  },
+  {
+    "job_id": "6f5aa073-3354-44a0-b2dd-ee4eebc0f72a",
+    "status": "COMPLETED",
+    "created_at": "2026-10-07T14:03:56.778549",
+    "request": {
+      "prompt": "Create a documentary about space science",
+      "topic": "Space Science",
+      "language": "ur"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "Space Science",
+      "language": "ur",
+      "content_type": "documentary",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "DOCUMENTARY_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "current_stage": "COMPLETED",
+    "production_plan": {
+      "topic": "Space Science",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "cinematic_video",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": null
+    },
+    "script_plan": {
+      "topic": "Space Science",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "cinematic_video",
+      "script_status": "PENDING_AI_WRITER"
+    },
+    "scene_plan": {
+      "topic": "Space Science",
+      "content_type": "cinematic_video",
+      "language": "ur",
+      "duration": "auto",
+      "storyboard_status": "PENDING_SCENE_ENGINE"
+    },
+    "generation_plan": {
+      "topic": "Space Science",
+      "content_type": "cinematic_video",
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "PENDING_GENERATION_GATEWAY"
+    },
+    "audio_plan": {
+      "topic": "Space Science",
+      "content_type": "cinematic_video",
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "PENDING_AUDIO_ENGINE"
+    },
+    "subtitle_plan": {
+      "topic": "Space Science",
+      "content_type": "cinematic_video",
+      "language": "ur",
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "PENDING_SUBTITLE_ENGINE"
+    },
+    "editing_plan": {
+      "topic": "Space Science",
+      "content_type": "cinematic_video",
+      "visuals_input": true,
+      "audio_input": true,
+      "subtitles_input": true,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "PENDING_VIDEO_EDITOR"
+    },
+    "quality_plan": {
+      "topic": "Space Science",
+      "content_type": "cinematic_video",
+      "visual_quality_check": true,
+      "audio_quality_check": true,
+      "subtitle_quality_check": true,
+      "sync_check": true,
+      "render_check": true,
+      "final_quality_status": "PENDING_QC_ENGINE"
+    }
+  },
+  {
+    "job_id": "ad139415-029b-4149-a10d-b77eb712353b",
+    "status": "CREATED",
+    "created_at": "2026-10-07T14:23:46.586068",
+    "request": {
+      "prompt": "Create a research report about artificial intelligence",
+      "topic": "artificial intelligence"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "language": "auto",
+      "content_type": "research",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "RESEARCH_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "research_result": {
+      "status": "READY",
+      "mode": "research",
+      "topic": "artificial intelligence",
+      "source_collection": true,
+      "fact_checking": false,
+      "reference_validation": true,
+      "research_status": "READY"
+    }
+  },
+  {
+    "job_id": "85138596-b0c9-45a2-9d87-0470a76ed06e",
+    "status": "CREATED",
+    "created_at": "2026-10-07T14:24:12.730619",
+    "request": {
+      "prompt": "Fact check this information about artificial intelligence",
+      "topic": "artificial intelligence"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "language": "auto",
+      "content_type": "fact_checking",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "FACT_CHECKING_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "research_result": {
+      "status": "READY",
+      "mode": "fact_checking",
+      "topic": "artificial intelligence",
+      "source_collection": true,
+      "fact_checking": true,
+      "reference_validation": true,
+      "research_status": "READY"
+    }
+  },
+  {
+    "job_id": "af7191a3-5562-4694-9450-0445e2545a7f",
+    "status": "CREATED",
+    "created_at": "2026-10-07T14:32:44.242451",
+    "request": {
+      "prompt": "Create a research report about artificial intelligence",
+      "topic": "artificial intelligence",
+      "references": [
+        "Reference A",
+        "Reference B"
+      ]
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "language": "auto",
+      "content_type": "research",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "RESEARCH_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "research_result": {
+      "status": "READY",
+      "mode": "research",
+      "topic": "artificial intelligence",
+      "source_collection": true,
+      "fact_checking": false,
+      "reference_validation": true,
+      "sources": [],
+      "references": [],
+      "research_status": "READY"
+    },
+    "source_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "sources": [],
+      "source_collection_status": "READY"
+    },
+    "reference_result": {
+      "status": "READY",
+      "references": [
+        "Reference A",
+        "Reference B"
+      ],
+      "validated": true,
+      "reference_validation_status": "READY"
+    }
+  },
+  {
+    "job_id": "c3e79ada-0d41-487e-9641-d2d15d8e2353",
+    "status": "CREATED",
+    "created_at": "2026-10-07T14:38:11.568113",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "research"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "language": "auto",
+      "content_type": "research",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "RESEARCH_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "idea_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "content_type": "research",
+      "ideas": [],
+      "concepts": [],
+      "hooks": [],
+      "creative_direction": "READY",
+      "idea_status": "READY"
+    },
+    "research_result": {
+      "status": "READY",
+      "mode": "research",
+      "topic": "artificial intelligence",
+      "source_collection": true,
+      "fact_checking": false,
+      "reference_validation": true,
+      "sources": [],
+      "references": [],
+      "research_status": "READY"
+    },
+    "source_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "sources": [],
+      "source_collection_status": "READY"
+    },
+    "reference_result": {
+      "status": "READY",
+      "references": [],
+      "validated": true,
+      "reference_validation_status": "READY"
+    }
+  },
+  {
+    "job_id": "43a21be3-c948-46a4-b1e9-4a922aa6845f",
+    "status": "CREATED",
+    "created_at": "2026-10-07T14:40:42.101155",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "research"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "language": "auto",
+      "content_type": "research",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "RESEARCH_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "idea_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "content_type": "research",
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط research تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "creative_direction": "READY",
+      "idea_status": "READY"
+    },
+    "research_result": {
+      "status": "READY",
+      "mode": "research",
+      "topic": "artificial intelligence",
+      "source_collection": true,
+      "fact_checking": false,
+      "reference_validation": true,
+      "sources": [],
+      "references": [],
+      "research_status": "READY"
+    },
+    "source_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "sources": [],
+      "source_collection_status": "READY"
+    },
+    "reference_result": {
+      "status": "READY",
+      "references": [],
+      "validated": true,
+      "reference_validation_status": "READY"
+    }
+  },
+  {
+    "job_id": "094afc60-ce8e-4f0d-8b74-2e93f2a745f3",
+    "status": "CREATED",
+    "created_at": "2026-10-07T15:02:06.888355",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "research"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "language": "auto",
+      "content_type": "research",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "RESEARCH_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "idea_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "content_type": "research",
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط research تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "creative_direction": "READY",
+      "idea_status": "READY"
+    },
+    "research_result": {
+      "status": "READY",
+      "mode": "research",
+      "topic": "artificial intelligence",
+      "source_collection": true,
+      "fact_checking": false,
+      "reference_validation": true,
+      "sources": [],
+      "references": [],
+      "research_status": "READY"
+    },
+    "source_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "sources": [],
+      "source_collection_status": "READY"
+    },
+    "reference_result": {
+      "status": "READY",
+      "references": [],
+      "validated": true,
+      "reference_validation_status": "READY"
+    }
+  },
+  {
+    "job_id": "658cf1af-b220-4562-88d3-6700a6d7f965",
+    "status": "COMPLETED",
+    "created_at": "2026-10-07T15:03:25.994593",
+    "request": {
+      "topic": "cinematic story about artificial intelligence",
+      "type": "film"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "cinematic story about artificial intelligence",
+      "language": "auto",
+      "content_type": "film",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "FILM_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "idea_result": {
+      "status": "READY",
+      "topic": "cinematic story about artificial intelligence",
+      "content_type": "film",
+      "ideas": [
+        "cinematic story about artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "cinematic story about artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "cinematic story about artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "creative_direction": "READY",
+      "idea_status": "READY"
+    },
+    "current_stage": "COMPLETED",
+    "production_plan": {
+      "topic": "cinematic story about artificial intelligence",
+      "language": "auto",
+      "duration": "auto",
+      "content_type": "film",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true,
+      "ideas": [
+        "cinematic story about artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "cinematic story about artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "cinematic story about artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ]
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": null
+    },
+    "script_plan": {
+      "topic": "cinematic story about artificial intelligence",
+      "language": "auto",
+      "duration": "auto",
+      "content_type": "film",
+      "script_status": "PENDING_AI_WRITER"
+    },
+    "scene_plan": {
+      "topic": "cinematic story about artificial intelligence",
+      "content_type": "film",
+      "language": "auto",
+      "duration": "auto",
+      "storyboard_status": "PENDING_SCENE_ENGINE"
+    },
+    "generation_plan": {
+      "topic": "cinematic story about artificial intelligence",
+      "content_type": "film",
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "PENDING_GENERATION_GATEWAY"
+    },
+    "audio_plan": {
+      "topic": "cinematic story about artificial intelligence",
+      "content_type": "film",
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "PENDING_AUDIO_ENGINE"
+    },
+    "subtitle_plan": {
+      "topic": "cinematic story about artificial intelligence",
+      "content_type": "film",
+      "language": "auto",
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "PENDING_SUBTITLE_ENGINE"
+    },
+    "editing_plan": {
+      "topic": "cinematic story about artificial intelligence",
+      "content_type": "film",
+      "visuals_input": true,
+      "audio_input": true,
+      "subtitles_input": true,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "PENDING_VIDEO_EDITOR"
+    },
+    "quality_plan": {
+      "topic": "cinematic story about artificial intelligence",
+      "content_type": "film",
+      "visual_quality_check": true,
+      "audio_quality_check": true,
+      "subtitle_quality_check": true,
+      "sync_check": true,
+      "render_check": true,
+      "final_quality_status": "PENDING_QC_ENGINE"
+    }
+  },
+  {
+    "job_id": "dd26cfdf-5172-45ff-a3df-248ec2bd8f72",
+    "status": "COMPLETED",
+    "created_at": "2026-10-07T15:42:45.676520",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "film"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "language": "auto",
+      "content_type": "film",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "FILM_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "idea_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "creative_direction": "READY",
+      "idea_status": "READY"
+    },
+    "script_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "script_status": "READY"
+    },
+    "current_stage": "COMPLETED",
+    "production_plan": {
+      "topic": "artificial intelligence",
+      "language": "auto",
+      "duration": "auto",
+      "content_type": "film",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true,
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ]
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": null
+    },
+    "script_plan": {
+      "topic": "artificial intelligence",
+      "language": "auto",
+      "duration": "auto",
+      "content_type": "film",
+      "script_status": "PENDING_AI_WRITER"
+    },
+    "scene_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "auto",
+      "duration": "auto",
+      "storyboard_status": "PENDING_SCENE_ENGINE"
+    },
+    "generation_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "PENDING_GENERATION_GATEWAY"
+    },
+    "audio_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "PENDING_AUDIO_ENGINE"
+    },
+    "subtitle_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "auto",
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "PENDING_SUBTITLE_ENGINE"
+    },
+    "editing_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "visuals_input": true,
+      "audio_input": true,
+      "subtitles_input": true,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "PENDING_VIDEO_EDITOR"
+    },
+    "quality_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "visual_quality_check": true,
+      "audio_quality_check": true,
+      "subtitle_quality_check": true,
+      "sync_check": true,
+      "render_check": true,
+      "final_quality_status": "PENDING_QC_ENGINE"
+    }
+  },
+  {
+    "job_id": "6e40176f-1e58-4e4b-8f98-489bacfecc27",
+    "status": "COMPLETED",
+    "created_at": "2026-10-07T16:08:00.542872",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "film",
+      "language": "ur"
+    },
+    "stages": [],
+    "current_stage": "COMPLETED",
+    "production_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true,
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": {
+        "topic": "artificial intelligence",
+        "content_type": "film",
+        "visuals": [],
+        "scenes": [],
+        "dialogue": [],
+        "subtitles": [],
+        "quality_status": "PENDING_QC_ENGINE",
+        "status": "READY"
+      }
+    },
+    "script_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "ideas": [],
+      "concepts": [],
+      "hooks": [],
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "script_status": "PENDING_AI_WRITER"
+    },
+    "scene_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "storyboard_status": "PENDING_SCENE_ENGINE"
+    },
+    "generation_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "PENDING_GENERATION_GATEWAY",
+      "generated_outputs": []
+    },
+    "audio_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "generated_outputs": [],
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "PENDING_AUDIO_ENGINE"
+    },
+    "subtitle_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "PENDING_SUBTITLE_ENGINE"
+    },
+    "editing_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "generated_outputs": [],
+      "dialogue": [],
+      "visuals_input": false,
+      "audio_input": false,
+      "subtitles_input": false,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "PENDING_VIDEO_EDITOR"
+    },
+    "quality_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "visual_quality_check": false,
+      "audio_quality_check": false,
+      "subtitle_quality_check": false,
+      "sync_check": false,
+      "render_check": true,
+      "final_quality_status": "PENDING_QC_ENGINE"
+    },
+    "final_output": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "visuals": [],
+      "scenes": [],
+      "dialogue": [],
+      "subtitles": [],
+      "quality_status": "PENDING_QC_ENGINE",
+      "status": "READY"
+    }
+  },
+  {
+    "job_id": "fc2f75c0-9c66-4dfd-856b-fc394e6a60e4",
+    "status": "COMPLETED",
+    "created_at": "2026-10-07T16:10:10.419031",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "film",
+      "language": "ur"
+    },
+    "stages": [],
+    "current_stage": "COMPLETED",
+    "production_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true,
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": {
+        "topic": "artificial intelligence",
+        "content_type": "film",
+        "visuals": [],
+        "scenes": [],
+        "dialogue": [],
+        "subtitles": [],
+        "quality_status": "PENDING_QC_ENGINE",
+        "status": "READY"
+      }
+    },
+    "script_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "ideas": [],
+      "concepts": [],
+      "hooks": [],
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "script_status": "PENDING_AI_WRITER"
+    },
+    "scene_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "storyboard_status": "PENDING_SCENE_ENGINE"
+    },
+    "generation_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "PENDING_GENERATION_GATEWAY",
+      "generated_outputs": []
+    },
+    "audio_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "generated_outputs": [],
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "PENDING_AUDIO_ENGINE"
+    },
+    "subtitle_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "PENDING_SUBTITLE_ENGINE"
+    },
+    "editing_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "generated_outputs": [],
+      "dialogue": [],
+      "visuals_input": false,
+      "audio_input": false,
+      "subtitles_input": false,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "PENDING_VIDEO_EDITOR"
+    },
+    "quality_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "visual_quality_check": false,
+      "audio_quality_check": false,
+      "subtitle_quality_check": false,
+      "sync_check": false,
+      "render_check": true,
+      "final_quality_status": "PENDING_QC_ENGINE"
+    },
+    "final_output": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "visuals": [],
+      "scenes": [],
+      "dialogue": [],
+      "subtitles": [],
+      "quality_status": "PENDING_QC_ENGINE",
+      "status": "READY"
+    }
+  },
+  {
+    "job_id": "e57fb97f-e722-433e-8c34-a00b9b17c75c",
+    "status": "COMPLETED",
+    "created_at": "2026-10-07T16:14:13.217049",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "film",
+      "language": "ur",
+      "duration": "auto"
+    },
+    "stages": [],
+    "stage_result": {
+      "stage": "QUALITY_CONTROL",
+      "status": "READY",
+      "quality_passed": false,
+      "quality_plan": {
+        "topic": "artificial intelligence",
+        "content_type": "film",
+        "language": "ur",
+        "visual_quality_check": false,
+        "audio_quality_check": false,
+        "subtitle_quality_check": false,
+        "sync_check": false,
+        "render_check": true,
+        "final_quality_status": "PENDING_QC_ENGINE"
+      },
+      "next": "QC_ENGINE"
+    },
+    "current_stage": "COMPLETED",
+    "production_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true,
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "script_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "ideas": [],
+      "concepts": [],
+      "hooks": [],
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "script_status": "PENDING_AI_WRITER"
+    },
+    "scene_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "storyboard_status": "PENDING_SCENE_ENGINE"
+    },
+    "generation_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "PENDING_GENERATION_GATEWAY",
+      "generated_outputs": []
+    },
+    "audio_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "generated_outputs": [],
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "PENDING_AUDIO_ENGINE"
+    },
+    "subtitle_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "PENDING_SUBTITLE_ENGINE"
+    },
+    "editing_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "generated_outputs": [],
+      "dialogue": [],
+      "visuals_input": false,
+      "audio_input": false,
+      "subtitles_input": false,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "PENDING_VIDEO_EDITOR"
+    },
+    "quality_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "visual_quality_check": false,
+      "audio_quality_check": false,
+      "subtitle_quality_check": false,
+      "sync_check": false,
+      "render_check": true,
+      "final_quality_status": "PENDING_QC_ENGINE"
+    }
+  },
+  {
+    "job_id": "afec66b3-1362-4ecb-a3e2-c12ffcc15105",
+    "status": "COMPLETED",
+    "current_stage": "COMPLETED",
+    "created_at": "2026-10-07T16:19:11.947986",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "film",
+      "language": "ur",
+      "duration": "auto"
+    },
+    "stages": [],
+    "stage_result": {
+      "stage": "QUALITY_CONTROL",
+      "status": "READY",
+      "quality_passed": false,
+      "quality_plan": {
+        "topic": "artificial intelligence",
+        "content_type": "film",
+        "language": "ur",
+        "visual_quality_check": false,
+        "audio_quality_check": false,
+        "subtitle_quality_check": false,
+        "sync_check": false,
+        "render_check": true,
+        "final_quality_status": "PENDING_QC_ENGINE"
+      },
+      "next": "QC_ENGINE"
+    },
+    "production_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true,
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "script_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "ideas": [],
+      "concepts": [],
+      "hooks": [],
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "script_status": "PENDING_AI_WRITER"
+    },
+    "scene_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "storyboard_status": "PENDING_SCENE_ENGINE"
+    },
+    "generation_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "PENDING_GENERATION_GATEWAY",
+      "generated_outputs": []
+    },
+    "audio_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "generated_outputs": [],
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "PENDING_AUDIO_ENGINE"
+    },
+    "subtitle_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "PENDING_SUBTITLE_ENGINE"
+    },
+    "editing_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "generated_outputs": [],
+      "dialogue": [],
+      "visuals_input": false,
+      "audio_input": false,
+      "subtitles_input": false,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "PENDING_VIDEO_EDITOR"
+    },
+    "quality_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "visual_quality_check": false,
+      "audio_quality_check": false,
+      "subtitle_quality_check": false,
+      "sync_check": false,
+      "render_check": true,
+      "final_quality_status": "PENDING_QC_ENGINE"
+    }
+  },
+  {
+    "job_id": "efe95672-d368-4c54-8e51-e41066b60d62",
+    "status": "COMPLETED",
+    "current_stage": "COMPLETED",
+    "created_at": "2026-10-07T16:21:04.367334",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "film",
+      "language": "ur",
+      "duration": "auto"
+    },
+    "stages": [],
+    "stage_result": {
+      "stage": "QUALITY_CONTROL",
+      "status": "READY",
+      "quality_passed": false,
+      "quality_plan": {
+        "topic": "artificial intelligence",
+        "content_type": "film",
+        "language": "ur",
+        "visual_quality_check": false,
+        "audio_quality_check": false,
+        "subtitle_quality_check": false,
+        "sync_check": false,
+        "render_check": true,
+        "final_quality_status": "PENDING_QC_ENGINE"
+      },
+      "next": "QC_ENGINE"
+    },
+    "production_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true,
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "script_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "ideas": [],
+      "concepts": [],
+      "hooks": [],
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "script_status": "PENDING_AI_WRITER"
+    },
+    "scene_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "storyboard_status": "PENDING_SCENE_ENGINE"
+    },
+    "generation_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "PENDING_GENERATION_GATEWAY",
+      "generated_outputs": []
+    },
+    "audio_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "generated_outputs": [],
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "PENDING_AUDIO_ENGINE"
+    },
+    "subtitle_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "PENDING_SUBTITLE_ENGINE"
+    },
+    "editing_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "generated_outputs": [],
+      "dialogue": [],
+      "visuals_input": false,
+      "audio_input": false,
+      "subtitles_input": false,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "PENDING_VIDEO_EDITOR"
+    },
+    "quality_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "visual_quality_check": false,
+      "audio_quality_check": false,
+      "subtitle_quality_check": false,
+      "sync_check": false,
+      "render_check": true,
+      "final_quality_status": "PENDING_QC_ENGINE"
+    }
+  },
+  {
+    "job_id": "d504b355-cc20-40a6-a964-c6014dfbeb0f",
+    "status": "COMPLETED",
+    "current_stage": "COMPLETED",
+    "created_at": "2026-10-07T16:23:30.038142",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "film",
+      "language": "ur",
+      "duration": "auto"
+    },
+    "stages": [],
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": {
+        "topic": "artificial intelligence",
+        "content_type": "film",
+        "visuals": [],
+        "scenes": [],
+        "dialogue": [],
+        "subtitles": [],
+        "quality_status": "PENDING_QC_ENGINE",
+        "status": "READY"
+      }
+    },
+    "production_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true,
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "script_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "ideas": [],
+      "concepts": [],
+      "hooks": [],
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "script_status": "PENDING_AI_WRITER"
+    },
+    "scene_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "storyboard_status": "PENDING_SCENE_ENGINE"
+    },
+    "generation_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "PENDING_GENERATION_GATEWAY",
+      "generated_outputs": []
+    },
+    "audio_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "generated_outputs": [],
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "PENDING_AUDIO_ENGINE"
+    },
+    "subtitle_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "dialogue": [],
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "PENDING_SUBTITLE_ENGINE"
+    },
+    "editing_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [],
+      "scenes": [],
+      "generated_outputs": [],
+      "dialogue": [],
+      "visuals_input": false,
+      "audio_input": false,
+      "subtitles_input": false,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "PENDING_VIDEO_EDITOR"
+    },
+    "quality_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "visual_quality_check": false,
+      "audio_quality_check": false,
+      "subtitle_quality_check": false,
+      "sync_check": false,
+      "render_check": true,
+      "final_quality_status": "PENDING_QC_ENGINE"
+    },
+    "final_output": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "visuals": [],
+      "scenes": [],
+      "dialogue": [],
+      "subtitles": [],
+      "quality_status": "PENDING_QC_ENGINE",
+      "status": "READY"
+    }
+  },
+  {
+    "job_id": "8dd9cdb5-4fc6-4a22-b422-e1abed442f11",
+    "status": "COMPLETED",
+    "current_stage": "COMPLETED",
+    "created_at": "2026-10-07T16:24:33.225096",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "film",
+      "language": "ur",
+      "duration": "auto"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "content_type": "film",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "FILM_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "idea_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "creative_direction": "READY",
+      "idea_status": "READY"
+    },
+    "script_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "script_status": "READY"
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": {
+        "topic": "artificial intelligence",
+        "content_type": "film",
+        "visuals": [
+          {
+            "scene": 1,
+            "result": {
+              "status": "COMPLETED",
+              "provider": "Pollinations",
+              "output": "output/job_unknown_scene_1.png",
+              "attempted_providers": [
+                {
+                  "provider": "Hugging Face",
+                  "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67244-2f0c03134248291c601b966c;70ca0561-5588-42e7-9bb0-7ed9a6928ee1)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+                },
+                {
+                  "provider": "Pollinations",
+                  "status": "COMPLETED"
+                }
+              ]
+            }
+          },
+          {
+            "scene": 2,
+            "result": {
+              "status": "FAILED",
+              "provider": null,
+              "errors": [
+                {
+                  "provider": "Hugging Face",
+                  "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67248-762fbecd765e0a823c880b65;106a2b40-939c-49fa-b080-1caa9d835c1c)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+                },
+                {
+                  "provider": "Pollinations",
+                  "error": "Pollinations HTTP 402: {}"
+                }
+              ]
+            }
+          },
+          {
+            "scene": 3,
+            "result": {
+              "status": "FAILED",
+              "provider": null,
+              "errors": [
+                {
+                  "provider": "Hugging Face",
+                  "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67249-2bb7d96b4b57dc925f70a272;ecb9d64c-ce7c-4131-90d1-3ee94df0d83f)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+                },
+                {
+                  "provider": "Pollinations",
+                  "error": "Pollinations HTTP 402: {}"
+                }
+              ]
+            }
+          }
+        ],
+        "scenes": [
+          {
+            "scene": 1,
+            "title": "Opening",
+            "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+          },
+          {
+            "scene": 2,
+            "title": "Development",
+            "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+          },
+          {
+            "scene": 3,
+            "title": "Ending",
+            "description": "[ENDING] نتیجہ اور اختتامی اثر"
+          }
+        ],
+        "dialogue": [
+          {
+            "scene": 1,
+            "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+          }
+        ],
+        "subtitles": [
+          "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+          "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+          "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+          "[ENDING] نتیجہ اور اختتامی اثر"
+        ],
+        "quality_status": "READY",
+        "status": "READY"
+      }
+    },
+    "production_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true,
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ]
+    },
+    "script_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "script_status": "READY"
+    },
+    "scene_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "storyboard_status": "READY"
+    },
+    "generation_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "READY",
+      "generated_outputs": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67244-2f0c03134248291c601b966c;70ca0561-5588-42e7-9bb0-7ed9a6928ee1)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67248-762fbecd765e0a823c880b65;106a2b40-939c-49fa-b080-1caa9d835c1c)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67249-2bb7d96b4b57dc925f70a272;ecb9d64c-ce7c-4131-90d1-3ee94df0d83f)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "audio_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "generated_outputs": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67244-2f0c03134248291c601b966c;70ca0561-5588-42e7-9bb0-7ed9a6928ee1)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67248-762fbecd765e0a823c880b65;106a2b40-939c-49fa-b080-1caa9d835c1c)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67249-2bb7d96b4b57dc925f70a272;ecb9d64c-ce7c-4131-90d1-3ee94df0d83f)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        }
+      ],
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "READY"
+    },
+    "subtitle_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "READY"
+    },
+    "editing_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "generated_outputs": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67244-2f0c03134248291c601b966c;70ca0561-5588-42e7-9bb0-7ed9a6928ee1)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67248-762fbecd765e0a823c880b65;106a2b40-939c-49fa-b080-1caa9d835c1c)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67249-2bb7d96b4b57dc925f70a272;ecb9d64c-ce7c-4131-90d1-3ee94df0d83f)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "visuals_input": true,
+      "audio_input": true,
+      "subtitles_input": true,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "READY"
+    },
+    "quality_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "visual_quality_check": true,
+      "audio_quality_check": true,
+      "subtitle_quality_check": true,
+      "sync_check": true,
+      "render_check": true,
+      "final_quality_status": "READY"
+    },
+    "final_output": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "visuals": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67244-2f0c03134248291c601b966c;70ca0561-5588-42e7-9bb0-7ed9a6928ee1)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67248-762fbecd765e0a823c880b65;106a2b40-939c-49fa-b080-1caa9d835c1c)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67249-2bb7d96b4b57dc925f70a272;ecb9d64c-ce7c-4131-90d1-3ee94df0d83f)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        }
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "subtitles": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "quality_status": "READY",
+      "status": "READY"
+    }
+  },
+  {
+    "job_id": "031fad65-a6f8-410e-ae5d-8d0d5593966f",
+    "status": "COMPLETED",
+    "current_stage": "COMPLETED",
+    "created_at": "2026-10-07T16:28:26.020370",
+    "request": {
+      "topic": "artificial intelligence",
+      "type": "film",
+      "language": "ur",
+      "duration": "auto"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "content_type": "film",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "FILM_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "idea_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "creative_direction": "READY",
+      "idea_status": "READY"
+    },
+    "script_result": {
+      "status": "READY",
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "script_status": "READY"
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": {
+        "topic": "artificial intelligence",
+        "content_type": "film",
+        "visuals": [
+          {
+            "scene": 1,
+            "result": {
+              "status": "COMPLETED",
+              "provider": "Pollinations",
+              "output": "output/job_unknown_scene_1.png",
+              "attempted_providers": [
+                {
+                  "provider": "Hugging Face",
+                  "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac6732c-276273f25383214874b9bb07;5970f9bd-7343-4762-9904-bad7b4a94466)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+                },
+                {
+                  "provider": "Pollinations",
+                  "status": "COMPLETED"
+                }
+              ]
+            }
+          },
+          {
+            "scene": 2,
+            "result": {
+              "status": "COMPLETED",
+              "provider": "Pollinations",
+              "output": "output/job_unknown_scene_2.png",
+              "attempted_providers": [
+                {
+                  "provider": "Hugging Face",
+                  "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac6732e-66a215976e0b6d5144828ac0;dac1613b-5c43-41bc-a6c1-06205525665f)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+                },
+                {
+                  "provider": "Pollinations",
+                  "status": "COMPLETED"
+                }
+              ]
+            }
+          },
+          {
+            "scene": 3,
+            "result": {
+              "status": "FAILED",
+              "provider": null,
+              "errors": [
+                {
+                  "provider": "Hugging Face",
+                  "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67332-1fd45983343a51b211b17d3d;509d44f0-fc89-4366-99f0-7af5434a1a6b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+                },
+                {
+                  "provider": "Pollinations",
+                  "error": "Pollinations HTTP 402: {}"
+                }
+              ]
+            }
+          }
+        ],
+        "scenes": [
+          {
+            "scene": 1,
+            "title": "Opening",
+            "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+          },
+          {
+            "scene": 2,
+            "title": "Development",
+            "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+          },
+          {
+            "scene": 3,
+            "title": "Ending",
+            "description": "[ENDING] نتیجہ اور اختتامی اثر"
+          }
+        ],
+        "dialogue": [
+          {
+            "scene": 1,
+            "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+          }
+        ],
+        "subtitles": [
+          "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+          "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+          "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+          "[ENDING] نتیجہ اور اختتامی اثر"
+        ],
+        "quality_status": "FAILED",
+        "status": "READY"
+      }
+    },
+    "production_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true,
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ]
+    },
+    "script_plan": {
+      "topic": "artificial intelligence",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "ideas": [
+        "artificial intelligence کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "artificial intelligence پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "script_status": "READY"
+    },
+    "scene_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "storyboard_status": "READY"
+    },
+    "generation_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "READY",
+      "generated_outputs": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac6732c-276273f25383214874b9bb07;5970f9bd-7343-4762-9904-bad7b4a94466)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_2.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac6732e-66a215976e0b6d5144828ac0;dac1613b-5c43-41bc-a6c1-06205525665f)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67332-1fd45983343a51b211b17d3d;509d44f0-fc89-4366-99f0-7af5434a1a6b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "audio_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "generated_outputs": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac6732c-276273f25383214874b9bb07;5970f9bd-7343-4762-9904-bad7b4a94466)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_2.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac6732e-66a215976e0b6d5144828ac0;dac1613b-5c43-41bc-a6c1-06205525665f)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67332-1fd45983343a51b211b17d3d;509d44f0-fc89-4366-99f0-7af5434a1a6b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        }
+      ],
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "READY"
+    },
+    "subtitle_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "READY"
+    },
+    "editing_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "script": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "generated_outputs": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac6732c-276273f25383214874b9bb07;5970f9bd-7343-4762-9904-bad7b4a94466)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_2.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac6732e-66a215976e0b6d5144828ac0;dac1613b-5c43-41bc-a6c1-06205525665f)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67332-1fd45983343a51b211b17d3d;509d44f0-fc89-4366-99f0-7af5434a1a6b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "visuals_input": true,
+      "audio_input": true,
+      "subtitles_input": true,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "READY"
+    },
+    "quality_plan": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "language": "ur",
+      "visual_quality_check": true,
+      "audio_quality_check": true,
+      "subtitle_quality_check": true,
+      "sync_check": true,
+      "render_check": true,
+      "final_quality_status": "FAILED",
+      "generation_quality_check": false
+    },
+    "final_output": {
+      "topic": "artificial intelligence",
+      "content_type": "film",
+      "visuals": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac6732c-276273f25383214874b9bb07;5970f9bd-7343-4762-9904-bad7b4a94466)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_unknown_scene_2.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac6732e-66a215976e0b6d5144828ac0;dac1613b-5c43-41bc-a6c1-06205525665f)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67332-1fd45983343a51b211b17d3d;509d44f0-fc89-4366-99f0-7af5434a1a6b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        }
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "subtitles": [
+        "[OPENING] artificial intelligence: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] artificial intelligence پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] artificial intelligence کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "quality_status": "FAILED",
+      "status": "READY"
+    }
+  },
+  {
+    "job_id": "c4982da2-ece1-4eff-a608-3dfb22266759",
+    "status": "COMPLETED",
+    "current_stage": "COMPLETED",
+    "created_at": "2026-10-07T17:16:13.922955",
+    "request": {
+      "topic": "provider fallback QC test",
+      "type": "film",
+      "language": "ur",
+      "duration": "auto"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "provider fallback QC test",
+      "language": "ur",
+      "content_type": "film",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "FILM_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    },
+    "idea_result": {
+      "status": "READY",
+      "topic": "provider fallback QC test",
+      "content_type": "film",
+      "ideas": [
+        "provider fallback QC test کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "provider fallback QC test پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "creative_direction": "READY",
+      "idea_status": "READY"
+    },
+    "script_result": {
+      "status": "READY",
+      "topic": "provider fallback QC test",
+      "content_type": "film",
+      "ideas": [
+        "provider fallback QC test کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "provider fallback QC test پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "script": [
+        "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] provider fallback QC test پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "script_status": "READY"
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": {
+        "topic": "provider fallback QC test",
+        "content_type": "film",
+        "visuals": [
+          {
+            "scene": 1,
+            "result": {
+              "status": "COMPLETED",
+              "provider": "Pollinations",
+              "output": "output/job_c4982da2-ece1-4eff-a608-3dfb22266759_scene_1.png",
+              "attempted_providers": [
+                {
+                  "provider": "Hugging Face",
+                  "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67e65-03ffffa36e973f5b03819a40;d7c24d69-b252-4205-b4e4-daed10dede5b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+                },
+                {
+                  "provider": "Pollinations",
+                  "status": "COMPLETED"
+                }
+              ]
+            }
+          },
+          {
+            "scene": 2,
+            "result": {
+              "status": "FAILED",
+              "provider": null,
+              "errors": [
+                {
+                  "provider": "Hugging Face",
+                  "error": "Provider marked unhealthy"
+                },
+                {
+                  "provider": "Pollinations",
+                  "error": "Pollinations HTTP 402: {}"
+                }
+              ]
+            }
+          },
+          {
+            "scene": 3,
+            "result": {
+              "status": "FAILED",
+              "provider": null,
+              "errors": [
+                {
+                  "provider": "Hugging Face",
+                  "error": "Provider marked unhealthy"
+                },
+                {
+                  "provider": "Pollinations",
+                  "error": "Provider marked unhealthy"
+                }
+              ]
+            }
+          }
+        ],
+        "scenes": [
+          {
+            "scene": 1,
+            "title": "Opening",
+            "description": "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+          },
+          {
+            "scene": 2,
+            "title": "Development",
+            "description": "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور"
+          },
+          {
+            "scene": 3,
+            "title": "Ending",
+            "description": "[ENDING] نتیجہ اور اختتامی اثر"
+          }
+        ],
+        "dialogue": [
+          {
+            "scene": 1,
+            "dialogue": "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+          }
+        ],
+        "subtitles": [
+          "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک",
+          "[STORY] provider fallback QC test پر مبنی مرکزی تخلیقی تصور",
+          "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور",
+          "[ENDING] نتیجہ اور اختتامی اثر"
+        ],
+        "quality_status": "FAILED",
+        "status": "BLOCKED"
+      }
+    },
+    "production_plan": {
+      "topic": "provider fallback QC test",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": true,
+      "visual_generation_required": true,
+      "audio_required": true,
+      "subtitles_required": true,
+      "editing_required": true,
+      "quality_control_required": true,
+      "ideas": [
+        "provider fallback QC test کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "provider fallback QC test پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+      ]
+    },
+    "script_plan": {
+      "topic": "provider fallback QC test",
+      "language": "ur",
+      "duration": "auto",
+      "content_type": "film",
+      "ideas": [
+        "provider fallback QC test کے لیے ایک مضبوط film تصور"
+      ],
+      "concepts": [
+        "provider fallback QC test پر مبنی مرکزی تخلیقی تصور"
+      ],
+      "hooks": [
+        "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+      ],
+      "script": [
+        "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] provider fallback QC test پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "script_status": "READY"
+    },
+    "scene_plan": {
+      "topic": "provider fallback QC test",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [
+        "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] provider fallback QC test پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "storyboard_status": "READY"
+    },
+    "generation_plan": {
+      "topic": "provider fallback QC test",
+      "content_type": "film",
+      "language": "ur",
+      "duration": "auto",
+      "script": [
+        "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] provider fallback QC test پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "visual_generation": true,
+      "image_generation": true,
+      "video_generation": true,
+      "provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "generation_status": "READY",
+      "generated_outputs": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_c4982da2-ece1-4eff-a608-3dfb22266759_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67e65-03ffffa36e973f5b03819a40;d7c24d69-b252-4205-b4e4-daed10dede5b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Provider marked unhealthy"
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Provider marked unhealthy"
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Provider marked unhealthy"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "audio_plan": {
+      "topic": "provider fallback QC test",
+      "content_type": "film",
+      "script": [
+        "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] provider fallback QC test پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "generated_outputs": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_c4982da2-ece1-4eff-a608-3dfb22266759_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67e65-03ffffa36e973f5b03819a40;d7c24d69-b252-4205-b4e4-daed10dede5b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Provider marked unhealthy"
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Provider marked unhealthy"
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Provider marked unhealthy"
+              }
+            ]
+          }
+        }
+      ],
+      "voice_required": true,
+      "music_required": true,
+      "sfx_required": true,
+      "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "music_provider_routing": "UNIFIED_PROVIDER_ROUTER",
+      "audio_status": "READY"
+    },
+    "subtitle_plan": {
+      "topic": "provider fallback QC test",
+      "content_type": "film",
+      "language": "ur",
+      "script": [
+        "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] provider fallback QC test پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "captions_required": true,
+      "subtitle_generation": true,
+      "subtitle_status": "READY"
+    },
+    "editing_plan": {
+      "topic": "provider fallback QC test",
+      "content_type": "film",
+      "language": "ur",
+      "script": [
+        "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] provider fallback QC test پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "generated_outputs": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_c4982da2-ece1-4eff-a608-3dfb22266759_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67e65-03ffffa36e973f5b03819a40;d7c24d69-b252-4205-b4e4-daed10dede5b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Provider marked unhealthy"
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Provider marked unhealthy"
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Provider marked unhealthy"
+              }
+            ]
+          }
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "visuals_input": true,
+      "audio_input": true,
+      "subtitles_input": true,
+      "timeline_editing": true,
+      "final_render": true,
+      "editing_status": "READY"
+    },
+    "quality_plan": {
+      "topic": "provider fallback QC test",
+      "content_type": "film",
+      "language": "ur",
+      "visual_quality_check": true,
+      "audio_quality_check": true,
+      "subtitle_quality_check": true,
+      "sync_check": true,
+      "render_check": true,
+      "final_quality_status": "FAILED",
+      "generation_quality_check": false
+    },
+    "final_output": {
+      "topic": "provider fallback QC test",
+      "content_type": "film",
+      "visuals": [
+        {
+          "scene": 1,
+          "result": {
+            "status": "COMPLETED",
+            "provider": "Pollinations",
+            "output": "output/job_c4982da2-ece1-4eff-a608-3dfb22266759_scene_1.png",
+            "attempted_providers": [
+              {
+                "provider": "Hugging Face",
+                "error": "Client error '402 Payment Required' for url 'https://router.huggingface.co/fal-ai/fal-ai/fast-sdxl' (Request ID: Root=1-6ac67e65-03ffffa36e973f5b03819a40;d7c24d69-b252-4205-b4e4-daed10dede5b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have no remaining credits. Purchase pre-paid credits to continue using Inference Providers. Alternatively, subscribe to PRO to get monthly included credits."
+              },
+              {
+                "provider": "Pollinations",
+                "status": "COMPLETED"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 2,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Provider marked unhealthy"
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Pollinations HTTP 402: {}"
+              }
+            ]
+          }
+        },
+        {
+          "scene": 3,
+          "result": {
+            "status": "FAILED",
+            "provider": null,
+            "errors": [
+              {
+                "provider": "Hugging Face",
+                "error": "Provider marked unhealthy"
+              },
+              {
+                "provider": "Pollinations",
+                "error": "Provider marked unhealthy"
+              }
+            ]
+          }
+        }
+      ],
+      "scenes": [
+        {
+          "scene": 1,
+          "title": "Opening",
+          "description": "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        },
+        {
+          "scene": 2,
+          "title": "Development",
+          "description": "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور"
+        },
+        {
+          "scene": 3,
+          "title": "Ending",
+          "description": "[ENDING] نتیجہ اور اختتامی اثر"
+        }
+      ],
+      "dialogue": [
+        {
+          "scene": 1,
+          "dialogue": "provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک"
+        }
+      ],
+      "subtitles": [
+        "[OPENING] provider fallback QC test: ایک مؤثر آغاز اور مضبوط ہک",
+        "[STORY] provider fallback QC test پر مبنی مرکزی تخلیقی تصور",
+        "[DEVELOPMENT] provider fallback QC test کے لیے ایک مضبوط film تصور",
+        "[ENDING] نتیجہ اور اختتامی اثر"
+      ],
+      "quality_status": "FAILED",
+      "status": "BLOCKED"
+    }
+  },
+  {
+    "job_id": "86a1f964-d32a-45d6-832a-8aac969b0281",
+    "status": "CREATED",
+    "current_stage": "CREATED",
+    "created_at": "2026-10-07T17:39:47.311798",
+    "request": {
+      "prompt": "Create a PDF report",
+      "type": "pdf",
+      "topic": "Test Report"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "Test Report",
+      "language": "auto",
+      "content_type": "pdf",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "PDF_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": false,
+        "visual_generation": false,
+        "audio": false,
+        "subtitles": false,
+        "editing": false,
+        "quality_control": true
+      }
+    }
+  },
+  {
+    "job_id": "b84cf722-08ea-42e9-bd70-6e11305c6d38",
+    "status": "CREATED",
+    "current_stage": "CREATED",
+    "created_at": "2026-10-07T17:40:17.813655",
+    "request": {
+      "prompt": "Create a PDF report",
+      "type": "pdf",
+      "topic": "Test Report"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "Test Report",
+      "language": "auto",
+      "content_type": "pdf",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "PDF_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": false,
+        "visual_generation": false,
+        "audio": false,
+        "subtitles": false,
+        "editing": false,
+        "quality_control": true
+      }
+    }
+  },
+  {
+    "job_id": "c5ae0082-5c80-4d7f-9c87-e61c0b88e0e5",
+    "status": "COMPLETED",
+    "current_stage": "COMPLETED",
+    "created_at": "2026-10-07T17:59:12.069512",
+    "request": {
+      "topic": "Test PDF",
+      "type": "pdf"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "Test PDF",
+      "language": "auto",
+      "content_type": "pdf",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "PDF_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": false,
+        "visual_generation": false,
+        "audio": false,
+        "subtitles": false,
+        "editing": false,
+        "quality_control": true
+      }
+    },
+    "idea_result": {
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "script_result": {
+      "script": [
+        "PDF test"
+      ],
+      "scenes": [],
+      "dialogue": []
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": {
+        "topic": "Test PDF",
+        "content_type": "pdf",
+        "visuals": [],
+        "scenes": [],
+        "dialogue": [],
+        "subtitles": [],
+        "quality_status": "READY",
+        "status": "READY"
+      }
+    },
+    "production_plan": {
+      "topic": "Test PDF",
+      "language": "auto",
+      "duration": "auto",
+      "content_type": "pdf",
+      "research_required": true,
+      "script_required": true,
+      "scene_breakdown_required": false,
+      "visual_generation_required": false,
+      "audio_required": false,
+      "subtitles_required": false,
+      "editing_required": false,
+      "quality_control_required": true,
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "script_plan": {
+      "topic": "Test PDF",
+      "language": "auto",
+      "duration": "auto",
+      "content_type": "pdf",
+      "ideas": [],
+      "concepts": [],
+      "hooks": [],
+      "script": [
+        "PDF test"
+      ],
+      "scenes": [],
+      "dialogue": [],
+      "script_status": "READY"
+    },
+    "quality_plan": {
+      "topic": "",
+      "content_type": "general",
+      "language": "auto",
+      "visual_quality_check": true,
+      "audio_quality_check": true,
+      "subtitle_quality_check": true,
+      "sync_check": true,
+      "render_check": true,
+      "generation_quality_check": true,
+      "final_quality_status": "READY"
+    },
+    "final_output": {
+      "topic": "Test PDF",
+      "content_type": "pdf",
+      "visuals": [],
+      "scenes": [],
+      "dialogue": [],
+      "subtitles": [],
+      "quality_status": "READY",
+      "status": "READY"
+    }
+  },
+  {
+    "job_id": "fde1e704-68d5-4eb3-b49a-950d1b9c6c4c",
+    "status": "CREATED",
+    "current_stage": "CREATED",
+    "created_at": "2026-10-07T18:00:12.278879",
+    "request": {
+      "topic": "Test Film",
+      "type": "film"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "Test Film",
+      "language": "auto",
+      "content_type": "film",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "FILM_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": true,
+        "storyboard": true,
+        "visual_generation": true,
+        "audio": true,
+        "subtitles": true,
+        "editing": true,
+        "quality_control": true
+      }
+    }
+  },
+  {
+    "job_id": "735481b0-9dce-4e87-b536-70f3dffd2fdc",
+    "status": "COMPLETED",
+    "current_stage": "COMPLETED",
+    "created_at": "2026-10-07T18:04:11.657086",
+    "request": {
+      "topic": "Test Reply",
+      "type": "communication"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "Test Reply",
+      "language": "auto",
+      "content_type": "communication",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "COMMUNICATION_WORKFLOW",
+      "production_plan": {
+        "research": false,
+        "idea": false,
+        "script": true,
+        "storyboard": false,
+        "visual_generation": false,
+        "audio": false,
+        "subtitles": false,
+        "editing": false,
+        "quality_control": true
+      }
+    },
+    "idea_result": {
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "script_result": {
+      "script": [
+        "Reply test"
+      ],
+      "scenes": [],
+      "dialogue": []
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": {
+        "topic": "Test Reply",
+        "content_type": "communication",
+        "visuals": [],
+        "scenes": [],
+        "dialogue": [],
+        "subtitles": [],
+        "quality_status": "READY",
+        "status": "READY"
+      }
+    },
+    "production_plan": {
+      "topic": "Test Reply",
+      "language": "auto",
+      "duration": "auto",
+      "content_type": "communication",
+      "research_required": false,
+      "script_required": true,
+      "scene_breakdown_required": false,
+      "visual_generation_required": false,
+      "audio_required": false,
+      "subtitles_required": false,
+      "editing_required": false,
+      "quality_control_required": true,
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "script_plan": {
+      "topic": "Test Reply",
+      "language": "auto",
+      "duration": "auto",
+      "content_type": "communication",
+      "ideas": [],
+      "concepts": [],
+      "hooks": [],
+      "script": [
+        "Reply test"
+      ],
+      "scenes": [],
+      "dialogue": [],
+      "script_status": "READY"
+    },
+    "quality_plan": {
+      "topic": "",
+      "content_type": "general",
+      "language": "auto",
+      "visual_quality_check": true,
+      "audio_quality_check": true,
+      "subtitle_quality_check": true,
+      "sync_check": true,
+      "render_check": true,
+      "generation_quality_check": true,
+      "final_quality_status": "READY"
+    },
+    "final_output": {
+      "topic": "Test Reply",
+      "content_type": "communication",
+      "visuals": [],
+      "scenes": [],
+      "dialogue": [],
+      "subtitles": [],
+      "quality_status": "READY",
+      "status": "READY"
+    }
+  },
+  {
+    "job_id": "d1488422-62c7-437e-9b97-e7ac088ab0f0",
+    "status": "COMPLETED",
+    "current_stage": "COMPLETED",
+    "created_at": "2026-10-07T18:06:15.513390",
+    "request": {
+      "topic": "Test Project Plan",
+      "type": "project_management"
+    },
+    "stages": [],
+    "brain_analysis": {
+      "status": "READY",
+      "topic": "Test Project Plan",
+      "language": "auto",
+      "content_type": "project_management",
+      "category_detection": "COMPLETED",
+      "workflow_selection": "PROJECT_MANAGEMENT_WORKFLOW",
+      "production_plan": {
+        "research": true,
+        "idea": true,
+        "script": false,
+        "storyboard": false,
+        "visual_generation": false,
+        "audio": false,
+        "subtitles": false,
+        "editing": false,
+        "quality_control": true
+      }
+    },
+    "idea_result": {
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "script_result": {
+      "script": [],
+      "scenes": [],
+      "dialogue": []
+    },
+    "stage_result": {
+      "stage": "COMPLETED",
+      "status": "READY",
+      "final_output": {
+        "topic": "Test Project Plan",
+        "content_type": "project_management",
+        "visuals": [],
+        "scenes": [],
+        "dialogue": [],
+        "subtitles": [],
+        "quality_status": "READY",
+        "status": "READY"
+      }
+    },
+    "production_plan": {
+      "topic": "Test Project Plan",
+      "language": "auto",
+      "duration": "auto",
+      "content_type": "project_management",
+      "research_required": true,
+      "script_required": false,
+      "scene_breakdown_required": false,
+      "visual_generation_required": false,
+      "audio_required": false,
+      "subtitles_required": false,
+      "editing_required": false,
+      "quality_control_required": true,
+      "ideas": [],
+      "concepts": [],
+      "hooks": []
+    },
+    "quality_plan": {
+      "topic": "",
+      "content_type": "general",
+      "language": "auto",
+      "visual_quality_check": true,
+      "audio_quality_check": true,
+      "subtitle_quality_check": true,
+      "sync_check": true,
+      "render_check": true,
+      "generation_quality_check": true,
+      "final_quality_status": "READY"
+    },
+    "final_output": {
+      "topic": "Test Project Plan",
+      "content_type": "project_management",
+      "visuals": [],
+      "scenes": [],
+      "dialogue": [],
+      "subtitles": [],
+      "quality_status": "READY",
+      "status": "READY"
+    }
+  }
+]

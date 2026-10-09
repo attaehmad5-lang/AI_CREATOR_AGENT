@@ -1,0 +1,281 @@
+{
+  "manager": "JOB_DEPENDENCY_MANAGER",
+  "strategy": "SCENE_MEDIA_DEPENDENCY",
+  "total_jobs": 30,
+  "jobs_with_dependencies": 10,
+  "independent_jobs": 20,
+  "dependencies": [
+    {
+      "job_id": "VOICE_SCENE_01",
+      "scene": 1,
+      "media_type": "VOICE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "VOICE_SCENE_02",
+      "scene": 2,
+      "media_type": "VOICE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "VOICE_SCENE_03",
+      "scene": 3,
+      "media_type": "VOICE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "VOICE_SCENE_04",
+      "scene": 4,
+      "media_type": "VOICE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "VOICE_SCENE_05",
+      "scene": 5,
+      "media_type": "VOICE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "VOICE_SCENE_06",
+      "scene": 6,
+      "media_type": "VOICE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "VOICE_SCENE_07",
+      "scene": 7,
+      "media_type": "VOICE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "VOICE_SCENE_08",
+      "scene": 8,
+      "media_type": "VOICE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "VOICE_SCENE_09",
+      "scene": 9,
+      "media_type": "VOICE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "VOICE_SCENE_10",
+      "scene": 10,
+      "media_type": "VOICE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "IMG_SCENE_01",
+      "scene": 1,
+      "media_type": "IMAGE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "IMG_SCENE_02",
+      "scene": 2,
+      "media_type": "IMAGE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "IMG_SCENE_03",
+      "scene": 3,
+      "media_type": "IMAGE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "IMG_SCENE_04",
+      "scene": 4,
+      "media_type": "IMAGE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "IMG_SCENE_05",
+      "scene": 5,
+      "media_type": "IMAGE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "IMG_SCENE_06",
+      "scene": 6,
+      "media_type": "IMAGE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "IMG_SCENE_07",
+      "scene": 7,
+      "media_type": "IMAGE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "IMG_SCENE_08",
+      "scene": 8,
+      "media_type": "IMAGE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "IMG_SCENE_09",
+      "scene": 9,
+      "media_type": "IMAGE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "IMG_SCENE_10",
+      "scene": 10,
+      "media_type": "IMAGE",
+      "depends_on": [],
+      "dependency_count": 0,
+      "dependency_status": "READY"
+    },
+    {
+      "job_id": "VIDEO_SCENE_01",
+      "scene": 1,
+      "media_type": "VIDEO",
+      "depends_on": [
+        "1_IMAGE",
+        "1_VOICE"
+      ],
+      "dependency_count": 2,
+      "dependency_status": "WAITING"
+    },
+    {
+      "job_id": "VIDEO_SCENE_02",
+      "scene": 2,
+      "media_type": "VIDEO",
+      "depends_on": [
+        "2_IMAGE",
+        "2_VOICE"
+      ],
+      "dependency_count": 2,
+      "dependency_status": "WAITING"
+    },
+    {
+      "job_id": "VIDEO_SCENE_03",
+      "scene": 3,
+      "media_type": "VIDEO",
+      "depends_on": [
+        "3_IMAGE",
+        "3_VOICE"
+      ],
+      "dependency_count": 2,
+      "dependency_status": "WAITING"
+    },
+    {
+      "job_id": "VIDEO_SCENE_04",
+      "scene": 4,
+      "media_type": "VIDEO",
+      "depends_on": [
+        "4_IMAGE",
+        "4_VOICE"
+      ],
+      "dependency_count": 2,
+      "dependency_status": "WAITING"
+    },
+    {
+      "job_id": "VIDEO_SCENE_05",
+      "scene": 5,
+      "media_type": "VIDEO",
+      "depends_on": [
+        "5_IMAGE",
+        "5_VOICE"
+      ],
+      "dependency_count": 2,
+      "dependency_status": "WAITING"
+    },
+    {
+      "job_id": "VIDEO_SCENE_06",
+      "scene": 6,
+      "media_type": "VIDEO",
+      "depends_on": [
+        "6_IMAGE",
+        "6_VOICE"
+      ],
+      "dependency_count": 2,
+      "dependency_status": "WAITING"
+    },
+    {
+      "job_id": "VIDEO_SCENE_07",
+      "scene": 7,
+      "media_type": "VIDEO",
+      "depends_on": [
+        "7_IMAGE",
+        "7_VOICE"
+      ],
+      "dependency_count": 2,
+      "dependency_status": "WAITING"
+    },
+    {
+      "job_id": "VIDEO_SCENE_08",
+      "scene": 8,
+      "media_type": "VIDEO",
+      "depends_on": [
+        "8_IMAGE",
+        "8_VOICE"
+      ],
+      "dependency_count": 2,
+      "dependency_status": "WAITING"
+    },
+    {
+      "job_id": "VIDEO_SCENE_09",
+      "scene": 9,
+      "media_type": "VIDEO",
+      "depends_on": [
+        "9_IMAGE",
+        "9_VOICE"
+      ],
+      "dependency_count": 2,
+      "dependency_status": "WAITING"
+    },
+    {
+      "job_id": "VIDEO_SCENE_10",
+      "scene": 10,
+      "media_type": "VIDEO",
+      "depends_on": [
+        "10_IMAGE",
+        "10_VOICE"
+      ],
+      "dependency_count": 2,
+      "dependency_status": "WAITING"
+    }
+  ],
+  "status": "READY",
+  "created_at": "2026-10-06T20:40:43.284228"
+}

@@ -1,0 +1,29 @@
+{
+    "project": "World Most Popular Documentary Filming",
+    "engine": "Provider Health Check",
+    "status": "READY",
+    "checks": {
+        "image": {
+            "configured": false,
+            "model_configured": false,
+            "api_key_configured": false,
+            "status": "READY_FOR_CONNECTION"
+        },
+        "video": {
+            "configured": false,
+            "model_configured": false,
+            "api_key_configured": false,
+            "status": "READY_FOR_CONNECTION"
+        },
+        "voice": {
+            "configured": false,
+            "model_configured": false,
+            "api_key_configured": false,
+            "status": "READY_FOR_CONNECTION"
+        }
+    },
+    "security_check": {
+        "source_code_api_keys": false,
+        "key_logging": false
+    }
+}

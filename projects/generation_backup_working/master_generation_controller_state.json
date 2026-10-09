@@ -1,0 +1,19 @@
+{
+  "controller": "MASTER_GENERATION_CONTROLLER",
+  "version": "1.0",
+  "pipeline_integrity": true,
+  "total_jobs": 30,
+  "ready_jobs": 0,
+  "waiting_for_dependency": 10,
+  "waiting_for_provider": 20,
+  "providers_ready": true,
+  "assets_total": 30,
+  "assets_completed": 0,
+  "retry_available": 30,
+  "generation_started": false,
+  "controller_state": "WAITING_FOR_DEPENDENCIES",
+  "safe_mode": true,
+  "real_provider_call": false,
+  "status": "READY",
+  "created_at": "2026-10-07T09:14:32.239133"
+}
