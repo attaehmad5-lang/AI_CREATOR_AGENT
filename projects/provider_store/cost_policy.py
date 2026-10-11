@@ -98,10 +98,10 @@ class ProviderCostPolicy:
                 raise ValueError("Invalid usage ledger reservation record")
             for record in reservations.values():
                 try:
-                    created_at = record.get("created_at")
-                    if not isinstance(created_at, str):
+                    reserved_at = record.get("reserved_at")
+                    if not isinstance(reserved_at, str):
                         raise ValueError("missing timestamp")
-                    datetime.fromisoformat(created_at)
+                    datetime.fromisoformat(reserved_at)
                 except (TypeError, ValueError) as exc:
                     raise ValueError("Invalid usage ledger reservation timestamp") from exc
         self.ledger = loaded
