@@ -15,8 +15,8 @@ class ConnectionManagerTests(unittest.TestCase):
         self.catalog_path.write_text(
             json.dumps({
                 "providers": [
-                    {"id": "public_image", "auth_type": "NONE"},
-                    {"id": "token_image", "auth_type": "API_TOKEN", "token_env": "TEST_PROVIDER_TOKEN"},
+                    {"id": "public_image", "auth_type": "NONE", "category": "image"},
+                    {"id": "token_image", "auth_type": "API_TOKEN", "token_env": "TEST_PROVIDER_TOKEN", "category": "image"},
                 ]
             }),
             encoding="utf-8",
