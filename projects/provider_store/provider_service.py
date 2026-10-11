@@ -267,7 +267,10 @@ class ProviderService:
                         "saved": committed_credit.get("committed") is True
                         or committed_credit.get("status") == "ALREADY_COMMITTED",
                     }
-                    if credit_result.get("status") == "ALREADY_COMMITTED":
+                    if (
+                        credit_result.get("status") == "ALREADY_COMMITTED"
+                        and (cost_result is None or cost_result.get("saved") is not True)
+                    ):
                         duplicate_finalization = True
                 except Exception as exc:
                     credit_result = {"status": "CREDIT_COMMIT_FAILED", "saved": False, "error_type": type(exc).__name__}
