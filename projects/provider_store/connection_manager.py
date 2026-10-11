@@ -461,17 +461,26 @@ class ConnectionManager:
         if parsed.fragment:
             return {"valid": False, "status": "FRAGMENT_REJECTED"}
         normalized_host = hostname.casefold().rstrip(".")
+        normalized_allowed = (
+            {str(host).casefold().rstrip(".") for host in allowed_hosts}
+            if allowed_hosts is not None else None
+        )
         is_loopback = normalized_host == "localhost"
         try:
-            is_loopback = is_loopback or ip_address(normalized_host).is_loopback
+            address = ip_address(normalized_host)
+            is_loopback = is_loopback or address.is_loopback
+            # Private, link-local, and reserved literal IPs are unsafe defaults for
+            # outbound provider calls. An explicit per-provider allowlist is required.
+            if not address.is_global and (
+                normalized_allowed is None or normalized_host not in normalized_allowed
+            ):
+                return {"valid": False, "status": "NON_PUBLIC_ADDRESS_REJECTED"}
         except ValueError:
             pass
         if parsed.scheme == "http" and not (allow_loopback_http and is_loopback):
             return {"valid": False, "status": "HTTPS_REQUIRED"}
-        if allowed_hosts is not None:
-            normalized_allowed = {str(host).casefold().rstrip(".") for host in allowed_hosts}
-            if normalized_host not in normalized_allowed:
-                return {"valid": False, "status": "HOST_NOT_ALLOWLISTED"}
+        if normalized_allowed is not None and normalized_host not in normalized_allowed:
+            return {"valid": False, "status": "HOST_NOT_ALLOWLISTED"}
         return {
             "valid": True,
             "status": "VALID",
