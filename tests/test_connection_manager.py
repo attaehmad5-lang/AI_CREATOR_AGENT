@@ -392,6 +392,24 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertEqual(called, [])
 
+    def test_custom_api_key_and_credential_env_references_are_supported(self):
+        self.manager.catalog["providers"].append({
+            "id": "custom_api", "auth_type": "API_KEY", "api_key_env": "CUSTOM_API_KEY",
+            "category": "image",
+        })
+        self.manager.catalog["providers"].append({
+            "id": "custom_credential", "auth_type": "API_KEY", "credential_env": "CUSTOM_CREDENTIAL",
+            "category": "image",
+        })
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        self.manager = ConnectionManager(self.catalog_path, self.state_path)
+        api_key = self.manager.credential_status("custom_api", {"CUSTOM_API_KEY": "private"})
+        credential = self.manager.credential_status("custom_credential", {"CUSTOM_CREDENTIAL": "private"})
+        self.assertEqual(api_key["status"], "CREDENTIALS_PRESENT")
+        self.assertEqual(credential["status"], "CREDENTIALS_PRESENT")
+        self.assertNotIn("private", repr(api_key))
+        self.assertNotIn("private", repr(credential))
+
     def test_connectivity_fails_closed_when_state_cannot_be_read_or_saved(self):
         self.state_path.write_text("{invalid-json", encoding="utf-8")
         called = []
