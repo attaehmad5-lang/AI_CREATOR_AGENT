@@ -29,6 +29,11 @@ class ProviderServiceTests(unittest.TestCase):
         }), encoding="utf-8")
         self.state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
         self.connections = ConnectionManager(self.catalog_path, self.state_path)
+        verified = self.connections.verify_connectivity(
+            "image", lambda provider, **kwargs: {"ok": True}
+        )
+        if verified.get("verified") is not True:
+            raise AssertionError("test fixture provider failed stub verification")
         self.health = ProviderHealthManager(self.root / "health.json")
         self.cost = ProviderCostPolicy(self.root / "cost.json", project_budgets={"film": 10.0})
         self.quota = ProviderQuotaManager(self.root / "quota.json", limits={"image": {"daily": 10}})
