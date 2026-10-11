@@ -425,7 +425,7 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["released"])
         self.assertNotIn("job-2", self.cost.ledger["projects"]["film"]["reservations"])
         self.assertEqual(self.quota.data["requests"]["job-2"]["status"], "RELEASED")
-        self.assertEqual(self.quota.usage(provider_id="image")["hourly"], 0)
+        self.assertEqual(self.quota.usage(provider_id="image")["daily"], 0)
 
     def test_failed_started_request_retains_cost_reservation_when_charge_is_unknown(self):
         self.cost.reserve_usage(
