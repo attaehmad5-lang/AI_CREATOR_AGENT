@@ -1,4 +1,5 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 from projects.provider_store.retry_policy import CircuitBreaker, RetryPolicy
 
@@ -53,6 +54,15 @@ class RetryPolicyTests(unittest.TestCase):
         self.assertFalse(breaker.allow_request(), "only one half-open probe may run at a time")
         breaker.record_success()
         self.assertEqual(breaker.state, "CLOSED")
+
+    def test_circuit_breaker_admits_only_one_concurrent_half_open_probe(self):
+        now = [0.0]
+        breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=1, clock=lambda: now[0])
+        breaker.record_failure()
+        now[0] = 1.0
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(lambda _: breaker.allow_request(), range(40)))
+        self.assertEqual(sum(results), 1)
 
     def test_circuit_breaker_reopens_after_half_open_failure(self):
         now = [0.0]
