@@ -1,1 +1,889 @@
-{"store":"AI_CREATOR_AGENT_PROVIDER_STORE","version":"3.0","status":"READY","subscription_policy":"USER_CONTROLLED","providers":[{"id":"huggingface","name":"Hugging Face","category":"image","status":"CONNECTED","auth_type":"API_TOKEN","connection_type":"API","subscription_required":false,"enabled":true},{"id":"pollinations","name":"Pollinations","category":"image","status":"READY","auth_type":"NONE","connection_type":"API","subscription_required":false,"enabled":true,"zero_cost_allowed":true},{"id":"openai_image","name":"OpenAI Image","category":"image","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"google_image","name":"Google Image / Nano Banana","category":"image","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"recraft","name":"Recraft","category":"image","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"ideogram","name":"Ideogram","category":"image","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"black_forest_labs","name":"Black Forest Labs / FLUX","category":"image","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"stability_ai","name":"Stability AI","category":"image","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"replicate","name":"Replicate","category":"image","status":"LOCKED","auth_type":"API_TOKEN","connection_type":"API","subscription_required":true,"enabled":false},{"id":"fal_ai","name":"fal.ai","category":"image","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"elevenlabs","name":"ElevenLabs","category":"voice","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"openai_voice","name":"OpenAI Voice","category":"voice","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"google_speech","name":"Google Speech","category":"voice","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"cartesia","name":"Cartesia","category":"voice","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"playht","name":"PlayHT","category":"voice","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"deepgram","name":"Deepgram","category":"voice","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"suno","name":"Suno","category":"music","status":"LOCKED","auth_type":"ACCOUNT","connection_type":"MANUAL_CONNECT","subscription_required":true,"enabled":false},{"id":"udio","name":"Udio","category":"music","status":"LOCKED","auth_type":"ACCOUNT","connection_type":"MANUAL_CONNECT","subscription_required":true,"enabled":false},{"id":"google_lyria","name":"Google Lyria","category":"music","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"stability_audio","name":"Stability Audio","category":"music","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"google_veo","name":"Google Veo","category":"video","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"openai_sora","name":"OpenAI Sora","category":"video","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"runway","name":"Runway","category":"video","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"kling","name":"Kling AI","category":"video","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"luma","name":"Luma","category":"video","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"pika","name":"Pika","category":"video","status":"LOCKED","auth_type":"ACCOUNT","connection_type":"MANUAL_CONNECT","subscription_required":true,"enabled":false},{"id":"minimax_hailuo","name":"MiniMax / Hailuo","category":"video","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"heygen","name":"HeyGen","category":"lipsync","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"synthesia","name":"Synthesia","category":"lipsync","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"sync_labs","name":"Sync Labs","category":"lipsync","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"hedra","name":"Hedra","category":"lipsync","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"whisper","name":"Whisper","category":"transcription","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"assemblyai","name":"AssemblyAI","category":"transcription","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"topaz","name":"Topaz","category":"upscaling","status":"LOCKED","auth_type":"ACCOUNT","connection_type":"MANUAL_CONNECT","subscription_required":true,"enabled":false},{"id":"magnific","name":"Magnific","category":"upscaling","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false},{"id":"adobe_firefly","name":"Adobe Firefly","category":"image_editing","status":"LOCKED","auth_type":"API_KEY","connection_type":"API","subscription_required":true,"enabled":false}]}
+{
+  "store": "AI_CREATOR_AGENT_PROVIDER_STORE",
+  "version": "3.0",
+  "status": "READY",
+  "subscription_policy": "USER_CONTROLLED",
+  "providers": [
+    {
+      "id": "huggingface",
+      "name": "Hugging Face",
+      "category": "image",
+      "status": "CONNECTED",
+      "auth_type": "API_TOKEN",
+      "connection_type": "API",
+      "subscription_required": false,
+      "enabled": true,
+      "allowed_hosts": [
+        "router.huggingface.co",
+        "api-inference.huggingface.co"
+      ],
+      "token_env": "HF_TOKEN"
+    },
+    {
+      "id": "pollinations",
+      "name": "Pollinations",
+      "category": "image",
+      "status": "READY",
+      "auth_type": "NONE",
+      "connection_type": "API",
+      "subscription_required": false,
+      "enabled": true,
+      "allowed_hosts": [
+        "image.pollinations.ai"
+      ],
+      "zero_cost_allowed": true
+    },
+    {
+      "id": "openai_image",
+      "name": "OpenAI Image",
+      "category": "image",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.openai.com"
+      ],
+      "token_env": "OPENAI_API_KEY"
+    },
+    {
+      "id": "google_image",
+      "name": "Google Image / Nano Banana",
+      "category": "image",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "generativelanguage.googleapis.com",
+        "aiplatform.googleapis.com"
+      ],
+      "token_env": "GOOGLE_API_KEY",
+      "auth_header_name": "x-goog-api-key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "recraft",
+      "name": "Recraft",
+      "category": "image",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "external-api.recraft.ai"
+      ],
+      "token_env": "RECRAFT_API_KEY"
+    },
+    {
+      "id": "ideogram",
+      "name": "Ideogram",
+      "category": "image",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.ideogram.ai"
+      ],
+      "token_env": "IDEOGRAM_API_KEY",
+      "auth_header_name": "Api-Key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "black_forest_labs",
+      "name": "Black Forest Labs / FLUX",
+      "category": "image",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.bfl.ai"
+      ],
+      "token_env": "BFL_API_KEY",
+      "auth_header_name": "x-key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "stability_ai",
+      "name": "Stability AI",
+      "category": "image",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.stability.ai"
+      ],
+      "token_env": "STABILITY_API_KEY"
+    },
+    {
+      "id": "replicate",
+      "name": "Replicate",
+      "category": "image",
+      "status": "LOCKED",
+      "auth_type": "API_TOKEN",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.replicate.com"
+      ],
+      "token_env": "REPLICATE_API_TOKEN"
+    },
+    {
+      "id": "fal_ai",
+      "name": "fal.ai",
+      "category": "image",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "queue.fal.run",
+        "fal.run"
+      ],
+      "token_env": "FAL_KEY",
+      "auth_header_name": "Authorization",
+      "auth_scheme": "Key"
+    },
+    {
+      "id": "elevenlabs",
+      "name": "ElevenLabs",
+      "category": "voice",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "subscription_url": "https://elevenlabs.io",
+      "official_api_url": "https://elevenlabs.io/docs/api-reference",
+      "allowed_hosts": [
+        "api.elevenlabs.io"
+      ],
+      "token_env": "ELEVENLABS_API_KEY",
+      "auth_header_name": "xi-api-key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "openai_voice",
+      "name": "OpenAI Voice",
+      "category": "voice",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.openai.com"
+      ],
+      "token_env": "OPENAI_API_KEY"
+    },
+    {
+      "id": "google_speech",
+      "name": "Google Speech",
+      "category": "voice",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "texttospeech.googleapis.com",
+        "speech.googleapis.com"
+      ],
+      "token_env": "GOOGLE_API_KEY",
+      "auth_header_name": "x-goog-api-key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "cartesia",
+      "name": "Cartesia",
+      "category": "voice",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.cartesia.ai"
+      ],
+      "token_env": "CARTESIA_API_KEY",
+      "auth_header_name": "Cartesia-API-Key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "playht",
+      "name": "PlayHT",
+      "category": "voice",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.play.ht"
+      ],
+      "token_env": "PLAYHT_API_KEY"
+    },
+    {
+      "id": "deepgram",
+      "name": "Deepgram",
+      "category": "voice",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.deepgram.com"
+      ],
+      "token_env": "DEEPGRAM_API_KEY",
+      "auth_header_name": "Authorization",
+      "auth_scheme": "Token"
+    },
+    {
+      "id": "suno",
+      "name": "Suno",
+      "category": "music",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT",
+      "connection_type": "MANUAL_CONNECT",
+      "subscription_required": true,
+      "enabled": false
+    },
+    {
+      "id": "udio",
+      "name": "Udio",
+      "category": "music",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT",
+      "connection_type": "MANUAL_CONNECT",
+      "subscription_required": true,
+      "enabled": false
+    },
+    {
+      "id": "google_lyria",
+      "name": "Google Lyria",
+      "category": "music",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "generativelanguage.googleapis.com",
+        "aiplatform.googleapis.com"
+      ],
+      "token_env": "GOOGLE_API_KEY",
+      "auth_header_name": "x-goog-api-key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "stability_audio",
+      "name": "Stability Audio",
+      "category": "music",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.stability.ai"
+      ],
+      "token_env": "STABILITY_API_KEY"
+    },
+    {
+      "id": "google_veo",
+      "name": "Google Veo",
+      "category": "video",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "generativelanguage.googleapis.com",
+        "aiplatform.googleapis.com"
+      ],
+      "token_env": "GOOGLE_API_KEY",
+      "auth_header_name": "x-goog-api-key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "openai_sora",
+      "name": "OpenAI Sora",
+      "category": "video",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.openai.com"
+      ],
+      "token_env": "OPENAI_API_KEY"
+    },
+    {
+      "id": "runway",
+      "name": "Runway",
+      "category": "video",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.dev.runwayml.com"
+      ],
+      "token_env": "RUNWAY_API_KEY"
+    },
+    {
+      "id": "kling",
+      "name": "Kling AI",
+      "category": "video",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.klingai.com"
+      ],
+      "token_env": "KLING_API_KEY"
+    },
+    {
+      "id": "luma",
+      "name": "Luma",
+      "category": "video",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.lumalabs.ai"
+      ],
+      "token_env": "LUMA_API_KEY"
+    },
+    {
+      "id": "pika",
+      "name": "Pika",
+      "category": "video",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT",
+      "connection_type": "MANUAL_CONNECT",
+      "subscription_required": true,
+      "enabled": false
+    },
+    {
+      "id": "minimax_hailuo",
+      "name": "MiniMax / Hailuo",
+      "category": "video",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.minimax.io"
+      ],
+      "token_env": "MINIMAX_API_KEY"
+    },
+    {
+      "id": "heygen",
+      "name": "HeyGen",
+      "category": "lipsync",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.heygen.com"
+      ],
+      "token_env": "HEYGEN_API_KEY"
+    },
+    {
+      "id": "synthesia",
+      "name": "Synthesia",
+      "category": "lipsync",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.synthesia.io"
+      ],
+      "token_env": "SYNTHESIA_API_KEY"
+    },
+    {
+      "id": "sync_labs",
+      "name": "Sync Labs",
+      "category": "lipsync",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.sync.so"
+      ],
+      "token_env": "SYNC_LABS_API_KEY"
+    },
+    {
+      "id": "hedra",
+      "name": "Hedra",
+      "category": "lipsync",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.hedra.com"
+      ],
+      "token_env": "HEDRA_API_KEY"
+    },
+    {
+      "id": "whisper",
+      "name": "Whisper",
+      "category": "transcription",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.openai.com"
+      ],
+      "token_env": "OPENAI_API_KEY"
+    },
+    {
+      "id": "assemblyai",
+      "name": "AssemblyAI",
+      "category": "transcription",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.assemblyai.com"
+      ],
+      "token_env": "ASSEMBLYAI_API_KEY",
+      "auth_header_name": "Authorization",
+      "auth_scheme": ""
+    },
+    {
+      "id": "topaz",
+      "name": "Topaz",
+      "category": "upscaling",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT",
+      "connection_type": "MANUAL_CONNECT",
+      "subscription_required": true,
+      "enabled": false
+    },
+    {
+      "id": "magnific",
+      "name": "Magnific",
+      "category": "upscaling",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "api.magnific.ai"
+      ],
+      "token_env": "MAGNIFIC_API_KEY"
+    },
+    {
+      "id": "adobe_firefly",
+      "name": "Adobe Firefly",
+      "category": "image_editing",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "allowed_hosts": [
+        "firefly-api.adobe.io"
+      ],
+      "token_env": "ADOBE_FIREFLY_API_KEY"
+    },
+    {
+      "id": "openai_script",
+      "name": "OpenAI",
+      "category": "script_story",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "story_generation",
+        "screenplay",
+        "scene_breakdown",
+        "character_development",
+        "dialogue_writing"
+      ],
+      "allowed_hosts": [
+        "api.openai.com"
+      ],
+      "token_env": "OPENAI_API_KEY"
+    },
+    {
+      "id": "google_gemini_script",
+      "name": "Google Gemini",
+      "category": "script_story",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "story_generation",
+        "screenplay",
+        "character_development",
+        "dialogue_writing",
+        "storyboard_planning"
+      ],
+      "allowed_hosts": [
+        "generativelanguage.googleapis.com",
+        "aiplatform.googleapis.com"
+      ],
+      "token_env": "GOOGLE_API_KEY",
+      "auth_header_name": "x-goog-api-key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "anthropic_claude_script",
+      "name": "Anthropic Claude",
+      "category": "script_story",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "story_generation",
+        "screenplay",
+        "scene_breakdown",
+        "character_development",
+        "dialogue_writing"
+      ],
+      "allowed_hosts": [
+        "api.anthropic.com"
+      ],
+      "token_env": "ANTHROPIC_API_KEY",
+      "auth_header_name": "x-api-key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "adobe_firefly_advanced",
+      "name": "Adobe Firefly",
+      "category": "advanced_image_editing",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "inpainting",
+        "outpainting",
+        "object_removal",
+        "background_removal",
+        "background_replacement",
+        "relighting",
+        "image_restoration"
+      ],
+      "allowed_hosts": [
+        "firefly-api.adobe.io"
+      ],
+      "token_env": "ADOBE_FIREFLY_API_KEY"
+    },
+    {
+      "id": "replicate_image_editing",
+      "name": "Replicate",
+      "category": "advanced_image_editing",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "inpainting",
+        "outpainting",
+        "object_removal",
+        "background_removal",
+        "image_restoration"
+      ],
+      "allowed_hosts": [
+        "api.replicate.com"
+      ],
+      "token_env": "REPLICATE_API_TOKEN"
+    },
+    {
+      "id": "runway_image_editing",
+      "name": "Runway",
+      "category": "advanced_image_editing",
+      "status": "LOCKED",
+      "auth_type": "API_KEY_OR_ACCOUNT",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "object_removal",
+        "background_replacement",
+        "image_editing",
+        "image_restoration"
+      ],
+      "allowed_hosts": [
+        "api.dev.runwayml.com"
+      ],
+      "token_env": "RUNWAY_API_KEY"
+    },
+    {
+      "id": "topaz_advanced",
+      "name": "Topaz Labs",
+      "category": "advanced_upscaling",
+      "status": "LOCKED",
+      "auth_type": "API_KEY_OR_ACCOUNT",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "image_upscaling",
+        "face_restoration",
+        "detail_enhancement",
+        "denoise",
+        "old_photo_restoration",
+        "video_upscaling"
+      ]
+    },
+    {
+      "id": "magnific_advanced",
+      "name": "Magnific AI",
+      "category": "advanced_upscaling",
+      "status": "LOCKED",
+      "auth_type": "API_KEY_OR_ACCOUNT",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "image_upscaling",
+        "face_restoration",
+        "detail_enhancement",
+        "old_photo_restoration"
+      ],
+      "allowed_hosts": [
+        "api.magnific.ai"
+      ],
+      "token_env": "MAGNIFIC_API_KEY"
+    },
+    {
+      "id": "krea_upscaling",
+      "name": "Krea AI",
+      "category": "advanced_upscaling",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT_OR_API",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "image_upscaling",
+        "detail_enhancement",
+        "image_restoration"
+      ]
+    },
+    {
+      "id": "assemblyai_advanced",
+      "name": "AssemblyAI",
+      "category": "advanced_transcription",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "speech_to_text",
+        "speaker_detection",
+        "subtitle_generation",
+        "caption_timing",
+        "transcript_cleanup"
+      ],
+      "allowed_hosts": [
+        "api.assemblyai.com"
+      ],
+      "token_env": "ASSEMBLYAI_API_KEY"
+    },
+    {
+      "id": "deepgram_transcription",
+      "name": "Deepgram",
+      "category": "advanced_transcription",
+      "status": "LOCKED",
+      "auth_type": "API_KEY",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "speech_to_text",
+        "speaker_detection",
+        "transcript_cleanup",
+        "caption_timing"
+      ],
+      "allowed_hosts": [
+        "api.deepgram.com"
+      ],
+      "token_env": "DEEPGRAM_API_KEY"
+    },
+    {
+      "id": "google_cloud_speech",
+      "name": "Google Cloud Speech-to-Text",
+      "category": "advanced_transcription",
+      "status": "LOCKED",
+      "auth_type": "API_KEY_OR_SERVICE_ACCOUNT",
+      "connection_type": "API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "speech_to_text",
+        "speaker_detection",
+        "subtitle_generation",
+        "caption_timing",
+        "transcript_cleanup"
+      ],
+      "allowed_hosts": [
+        "speech.googleapis.com",
+        "texttospeech.googleapis.com"
+      ],
+      "token_env": "GOOGLE_API_KEY",
+      "auth_header_name": "x-goog-api-key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "elevenlabs_advanced_audio",
+      "name": "ElevenLabs",
+      "category": "advanced_audio",
+      "status": "LOCKED",
+      "auth_type": "API_KEY_OR_ACCOUNT",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "voice_generation",
+        "voice_cloning",
+        "voice_dubbing",
+        "audio_enhancement",
+        "noise_removal"
+      ],
+      "allowed_hosts": [
+        "api.elevenlabs.io"
+      ],
+      "token_env": "ELEVENLABS_API_KEY",
+      "auth_header_name": "xi-api-key",
+      "auth_scheme": ""
+    },
+    {
+      "id": "playht_advanced_audio",
+      "name": "PlayHT",
+      "category": "advanced_audio",
+      "status": "LOCKED",
+      "auth_type": "API_KEY_OR_ACCOUNT",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "voice_generation",
+        "voice_cloning",
+        "voice_dubbing",
+        "audio_enhancement"
+      ],
+      "allowed_hosts": [
+        "api.play.ht"
+      ],
+      "token_env": "PLAYHT_API_KEY"
+    },
+    {
+      "id": "suno_advanced_audio",
+      "name": "Suno",
+      "category": "advanced_audio",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT_OR_API",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "music_generation",
+        "sound_effect_generation",
+        "audio_generation"
+      ]
+    },
+    {
+      "id": "runway_advanced_video",
+      "name": "Runway",
+      "category": "advanced_video_editing",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT_OR_API",
+      "connection_type": "API_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "video_editing",
+        "scene_detection",
+        "object_removal",
+        "background_replacement",
+        "color_grading",
+        "video_restoration"
+      ],
+      "allowed_hosts": [
+        "api.dev.runwayml.com"
+      ],
+      "token_env": "RUNWAY_API_KEY"
+    },
+    {
+      "id": "adobe_premiere_advanced",
+      "name": "Adobe Premiere Pro",
+      "category": "advanced_video_editing",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT",
+      "connection_type": "ACCOUNT_OR_API",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "video_editing",
+        "scene_detection",
+        "color_grading",
+        "video_restoration"
+      ]
+    },
+    {
+      "id": "davinci_resolve_advanced",
+      "name": "DaVinci Resolve",
+      "category": "advanced_video_editing",
+      "status": "LOCKED",
+      "auth_type": "ACCOUNT_OR_LOCAL",
+      "connection_type": "LOCAL_OR_ACCOUNT",
+      "subscription_required": true,
+      "enabled": false,
+      "capabilities": [
+        "video_editing",
+        "scene_detection",
+        "color_grading",
+        "video_restoration",
+        "audio_editing"
+      ]
+    }
+  ]
+}
