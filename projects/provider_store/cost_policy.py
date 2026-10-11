@@ -270,7 +270,7 @@ class ProviderCostPolicy:
         """
         if not isinstance(project_id, str) or not project_id.strip() or not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_USAGE_RECORD", "saved": False}
-        if charge_outcome not in {"not_incurred", "incurred", "unknown"}:
+        if not isinstance(charge_outcome, str) or charge_outcome not in {"not_incurred", "incurred", "unknown"}:
             return {"status": "INVALID_CHARGE_OUTCOME", "saved": False, "request_id": request_id}
         with self._lock:
             project = self.ledger["projects"].get(project_id)
