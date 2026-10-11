@@ -32,6 +32,22 @@ class UnifiedProviderRegistry:
         )
         self.connection_manager = self.store.manager
 
+    @property
+    def core(self) -> dict[str, Any]:
+        providers = [
+            provider for provider in self.all_providers()
+            if provider.get("category") not in ADVANCED_CATEGORIES
+        ]
+        return {"version": "1.0", "status": "READY", "providers": providers}
+
+    @property
+    def advanced(self) -> dict[str, Any]:
+        providers = [
+            provider for provider in self.all_providers()
+            if provider.get("category") in ADVANCED_CATEGORIES
+        ]
+        return {"version": "1.0", "status": "READY", "providers": providers}
+
     def all_providers(self) -> list[dict[str, Any]]:
         return self.store.list_providers()
 
