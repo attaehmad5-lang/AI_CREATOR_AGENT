@@ -228,6 +228,7 @@ class ProviderRoutingManager:
                 billing_mode = decision.get("billing_mode")
 
             cost_reserved = False
+            cost_reservation_created = False
             if billing_mode == "PAID_APPROVED" and self.cost_policy is not None:
                 reserve_cost = getattr(self.cost_policy, "reserve_usage", None)
                 if callable(reserve_cost):
@@ -249,21 +250,30 @@ class ProviderRoutingManager:
                         decisions.append({"provider": provider_id, "status": status})
                         continue
                     cost_reserved = True
+                    # Roll back only a reservation created by this routing attempt.
+                    # An existing reservation may belong to an attempt that already started.
+                    cost_reservation_created = cost_reservation.get("status") == "RESERVED"
 
             if self.quota_manager is not None:
                 try:
                     quota = self.quota_manager.reserve(provider_id=provider_id, request_id=request_id)
                 except Exception as exc:
-                    if cost_reserved:
+                    if cost_reservation_created:
                         self.cost_policy.release_reservation(
-                            project_id=project_id, request_id=request_id, provider_id=provider_id
+                            project_id=project_id,
+                            request_id=request_id,
+                            provider_id=provider_id,
+                            charge_outcome="not_incurred",
                         )
                     decisions.append({"provider": provider_id, "status": "QUOTA_CHECK_FAILED", "error_type": type(exc).__name__})
                     continue
                 if not isinstance(quota, dict) or quota.get("status") not in {"RESERVED", "ALREADY_RESERVED"}:
-                    if cost_reserved:
+                    if cost_reservation_created:
                         self.cost_policy.release_reservation(
-                            project_id=project_id, request_id=request_id, provider_id=provider_id
+                            project_id=project_id,
+                            request_id=request_id,
+                            provider_id=provider_id,
+                            charge_outcome="not_incurred",
                         )
                     status = quota.get("status", "QUOTA_REJECTED") if isinstance(quota, dict) else "INVALID_QUOTA_RESPONSE"
                     decisions.append({"provider": provider_id, "status": status})
