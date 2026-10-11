@@ -118,6 +118,20 @@ class ConnectionManagerTests(unittest.TestCase):
         }
         self.assertEqual(self.manager.register_provider(provider)["status"], "INVALID_PROVIDER")
 
+    def test_discovery_filters_by_category_case_insensitively(self):
+        results = self.manager.discover_providers(category="IMAGE")
+        self.assertEqual({item["id"] for item in results}, {"public_image", "token_image"})
+
+    def test_discovery_filters_by_capability(self):
+        self.manager.catalog["providers"][0]["capabilities"] = ["generate", "edit"]
+        results = self.manager.discover_providers(capability="EDIT")
+        self.assertEqual([item["id"] for item in results], ["public_image"])
+
+    def test_discovery_enabled_only_excludes_unspecified_and_disabled(self):
+        self.manager.catalog["providers"][0]["enabled"] = True
+        results = self.manager.discover_providers(enabled_only=True)
+        self.assertEqual([item["id"] for item in results], ["public_image"])
+
 
 if __name__ == "__main__":
     unittest.main()
