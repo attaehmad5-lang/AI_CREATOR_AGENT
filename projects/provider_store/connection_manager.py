@@ -254,6 +254,10 @@ class ConnectionManager:
                         or not provider["secret_ref"].strip()
                         or len(provider["secret_ref"]) > 256
                         or any(ord(char) < 32 for char in provider["secret_ref"])
+                        or any(
+                            marker in provider["secret_ref"].casefold()
+                            for marker in ("token=", "api_key=", "password=", "secret=", "bearer ")
+                        )
                     ):
                         errors.append(f"providers[{index}].secret_ref must be a safe non-empty reference")
                     if "capabilities" in provider and not (
