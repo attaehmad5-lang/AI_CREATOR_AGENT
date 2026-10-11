@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from collections import deque
@@ -49,7 +50,7 @@ class ProviderHealthManager:
         if latency_ms is not None and (
             not isinstance(latency_ms, (int, float))
             or isinstance(latency_ms, bool)
-            or not __import__("math").isfinite(latency_ms)
+            or not math.isfinite(latency_ms)
             or latency_ms < 0
         ):
             return {"status": "INVALID_LATENCY", "saved": False}
@@ -117,6 +118,20 @@ class ProviderHealthManager:
         stale_after_seconds: float = 300.0,
         max_latency_ms: float | None = None,
     ) -> dict[str, Any]:
+        if (
+            not isinstance(stale_after_seconds, (int, float))
+            or isinstance(stale_after_seconds, bool)
+            or not math.isfinite(stale_after_seconds)
+            or stale_after_seconds < 0
+        ):
+            return {"eligible": False, "status": "INVALID_HEALTH_POLICY", "reason": "INVALID_STALE_LIMIT"}
+        if max_latency_ms is not None and (
+            not isinstance(max_latency_ms, (int, float))
+            or isinstance(max_latency_ms, bool)
+            or not math.isfinite(max_latency_ms)
+            or max_latency_ms < 0
+        ):
+            return {"eligible": False, "status": "INVALID_HEALTH_POLICY", "reason": "INVALID_LATENCY_LIMIT"}
         record = self.data["providers"].get(provider_id)
         if not isinstance(record, dict) or not record.get("last_checked_at"):
             return {"eligible": False, "status": "UNKNOWN", "reason": "NO_HEALTH_EVIDENCE"}
