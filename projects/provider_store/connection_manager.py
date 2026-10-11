@@ -67,27 +67,32 @@ class ConnectionManager:
             raise ValueError(f"Expected a JSON object in {path.name}")
         return data
 
-    def _save(self) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+    @staticmethod
+    def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+        """Persist JSON with same-directory atomic replacement."""
+        path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(
-            prefix=f".{self.state_path.name}.",
+            prefix=f".{path.name}.",
             suffix=".tmp",
-            dir=str(self.state_path.parent),
+            dir=str(path.parent),
             text=True,
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(self.state, stream, indent=2, ensure_ascii=False)
+                json.dump(data, stream, indent=2, ensure_ascii=False)
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temp_name, self.state_path)
+            os.replace(temp_name, path)
         except Exception:
             try:
                 os.unlink(temp_name)
             except FileNotFoundError:
                 pass
             raise
+
+    def _save(self) -> None:
+        self._atomic_write_json(self.state_path, self.state)
 
     def list_providers(self) -> list[dict[str, Any]]:
         providers = self.catalog.get("providers", [])
@@ -100,6 +105,46 @@ class ConnectionManager:
 
     def provider_exists(self, provider_id: str) -> bool:
         return self.get_provider(provider_id) is not None
+
+    def register_provider(
+        self, provider: dict[str, Any], *, overwrite: bool = False
+    ) -> dict[str, Any]:
+        """Register validated provider metadata; never accept credentials in catalog data."""
+        if not isinstance(provider, dict):
+            return {"status": "INVALID_PROVIDER", "reason": "provider must be an object"}
+        required = ("id", "name", "category", "auth_type", "connection_type")
+        if any(not isinstance(provider.get(key), str) or not provider[key].strip() for key in required):
+            return {
+                "status": "INVALID_PROVIDER",
+                "reason": "required non-empty string fields: " + ", ".join(required),
+            }
+        provider_id = provider["id"].strip()
+        if any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id):
+            return {"status": "INVALID_PROVIDER", "reason": "provider id contains unsupported characters"}
+
+        # Metadata may name an environment variable, but must never contain a secret value.
+        forbidden = {"api_key", "apikey", "token", "secret", "password", "credential_value"}
+        if any(str(key).lower().replace("-", "_") in forbidden for key in provider):
+            return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id}
+
+        providers = self.list_providers()
+        existing = next((item for item in providers if item.get("id") == provider_id), None)
+        if existing is not None and not overwrite:
+            return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
+        safe_provider = dict(provider)
+        safe_provider["id"] = provider_id
+        updated = [item for item in providers if item.get("id") != provider_id]
+        updated.append(safe_provider)
+        new_catalog = dict(self.catalog)
+        new_catalog["providers"] = updated
+        self._atomic_write_json(self.catalog_path, new_catalog)
+        self.catalog = new_catalog
+        return {
+            "status": "REGISTERED",
+            "provider": provider_id,
+            "saved": True,
+            "overwritten": existing is not None,
+        }
 
     def get_state(self, provider_id: str) -> dict[str, Any]:
         item = self.state["providers"].get(provider_id)
