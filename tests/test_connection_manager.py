@@ -1,9 +1,30 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+
+
+def _set_provider_state_in_process(args):
+    catalog_path, state_path, provider_id = args
+    manager = ConnectionManager(catalog_path, state_path)
+    return manager.set_state(provider_id, "READY")["saved"]
+
+
+def _register_provider_in_process(args):
+    catalog_path, state_path, index = args
+    manager = ConnectionManager(catalog_path, state_path)
+    result = manager.register_provider({
+        "id": f"process_provider_{index}",
+        "name": f"Process Provider {index}",
+        "category": "image",
+        "auth_type": "NONE",
+        "connection_type": "API",
+        "enabled": True,
+    })
+    return result["status"]
 
 
 class ConnectionManagerTests(unittest.TestCase):
@@ -29,6 +50,64 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_concurrent_connection_state_updates_across_processes_preserve_records(self):
+        catalog_path = self.root / "process_state_catalog.json"
+        state_path = self.root / "process_state.json"
+        catalog = {
+            "providers": [
+                {
+                    "id": f"state_provider_{index}",
+                    "name": f"State Provider {index}",
+                    "category": "image",
+                    "auth_type": "NONE",
+                    "connection_type": "API",
+                    "enabled": True,
+                }
+                for index in range(20)
+            ]
+        }
+        catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        state_path.write_text(
+            json.dumps({"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}),
+            encoding="utf-8",
+        )
+        args = [
+            (str(catalog_path), str(state_path), f"state_provider_{index}")
+            for index in range(20)
+        ]
+        with ProcessPoolExecutor(max_workers=4) as pool:
+            saved = list(pool.map(_set_provider_state_in_process, args))
+
+        self.assertTrue(all(saved))
+        loaded = ConnectionManager(catalog_path, state_path)
+        self.assertEqual(len(loaded.state["providers"]), 20)
+        self.assertTrue(all(
+            loaded.get_state(f"state_provider_{index}")["status"] == "READY"
+            for index in range(20)
+        ))
+
+    def test_concurrent_catalog_registration_across_processes_preserves_all_providers(self):
+        catalog_path = self.root / "process_registration_catalog.json"
+        state_path = self.root / "process_registration_state.json"
+        catalog_path.write_text(
+            json.dumps({"providers": []}), encoding="utf-8"
+        )
+        state_path.write_text(
+            json.dumps({"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}),
+            encoding="utf-8",
+        )
+        args = [
+            (str(catalog_path), str(state_path), index)
+            for index in range(20)
+        ]
+        with ProcessPoolExecutor(max_workers=4) as pool:
+            statuses = list(pool.map(_register_provider_in_process, args))
+
+        self.assertEqual(statuses.count("REGISTERED"), 20)
+        loaded = ConnectionManager(catalog_path, state_path)
+        self.assertEqual(len(loaded.list_providers()), 20)
+        self.assertEqual(len({p["id"] for p in loaded.list_providers()}), 20)
 
     def test_loads_catalog_and_unknown_state(self):
         self.assertTrue(self.manager.provider_exists("public_image"))
