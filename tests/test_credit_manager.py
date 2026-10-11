@@ -233,6 +233,19 @@ class ProviderCreditManagerTests(unittest.TestCase):
         self.path.write_text(json.dumps({"providers": {"bad": {"free_credits_remaining": "many", "verified": True, "observed_at": "2026-10-11T12:00:00+00:00"}}}), encoding="utf-8")
         with self.assertRaises(ValueError):
             ProviderCreditManager(self.path)
+        self.path.write_text(json.dumps({
+            "providers": {},
+            "reservations": {},
+            "usage": {
+                "job": {
+                    "provider_id": "provider", "amount": 1.0, "unit": "USD",
+                    "committed_at": "2026-10-11T12:00:00+00:00",
+                    "snapshot_version": "invalid",
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ProviderCreditManager(self.path)
 
 
 if __name__ == "__main__":
