@@ -484,17 +484,18 @@ class ConnectionManager:
     def get_state(self, provider_id: str) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "UNKNOWN", "verified": False}
-        item = self.state["providers"].get(provider_id)
-        if not isinstance(item, dict):
-            return {"status": "UNKNOWN", "verified": False}
-        result = self._sanitize_public_data(item)
-        # Older records may say CONNECTED without any live verification evidence.
-        if result.get("status") == "CONNECTED" and result.get("verified") is not True:
-            result["reported_status"] = "CONNECTED"
-            result["status"] = "UNKNOWN"
-            result["verified"] = False
-        # Return a copy so callers cannot mutate internal state without validation.
-        return result
+        with self._state_transaction():
+            item = self.state["providers"].get(provider_id)
+            if not isinstance(item, dict):
+                return {"status": "UNKNOWN", "verified": False}
+            result = self._sanitize_public_data(item)
+            # Older records may say CONNECTED without any live verification evidence.
+            if result.get("status") == "CONNECTED" and result.get("verified") is not True:
+                result["reported_status"] = "CONNECTED"
+                result["status"] = "UNKNOWN"
+                result["verified"] = False
+            # Return a copy so callers cannot mutate internal state without validation.
+            return result
 
     def set_state(
         self,
@@ -520,31 +521,33 @@ class ConnectionManager:
                 "saved": False,
             }
 
-        existing = self.state["providers"].get(provider_id, {})
-        record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
-        record.update({
-            "status": status,
-            "verified": bool(verified),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
-        self.state["providers"][provider_id] = record
-        self._save()
-        return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
+        with self._state_transaction():
+            existing = self.state["providers"].get(provider_id, {})
+            record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+            record.update({
+                "status": status,
+                "verified": bool(verified),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            self.state["providers"][provider_id] = record
+            self._save()
+            return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
 
     def _mark_connected_after_probe(self, provider_id: str) -> dict[str, Any]:
         """Record CONNECTED only after the provider-specific probe succeeds."""
         if not self.provider_exists(provider_id):
             return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
-        existing = self.state["providers"].get(provider_id, {})
-        record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
-        record.update({
-            "status": "CONNECTED",
-            "verified": True,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
-        self.state["providers"][provider_id] = record
-        self._save()
-        return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
+        with self._state_transaction():
+            existing = self.state["providers"].get(provider_id, {})
+            record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+            record.update({
+                "status": "CONNECTED",
+                "verified": True,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            self.state["providers"][provider_id] = record
+            self._save()
+            return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
 
     @staticmethod
     def validate_endpoint(
@@ -653,21 +656,22 @@ class ConnectionManager:
             configuration["endpoint"] = endpoint.strip()
         if not configuration:
             return {"status": "NO_CONFIGURATION", "provider": provider_id, "saved": False}
-        state = self.state["providers"].get(provider_id, {})
-        record = dict(state) if isinstance(state, dict) else {}
-        current = record.get("configuration", {})
-        merged = dict(current) if isinstance(current, dict) else {}
-        merged.update(configuration)
-        record["configuration"] = merged
-        record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
-        self.state["providers"][provider_id] = record
-        self._save()
-        return {
-            "status": "CONFIGURED",
-            "provider": provider_id,
-            "saved": True,
-            "configuration": dict(merged),
-        }
+        with self._state_transaction():
+            state = self.state["providers"].get(provider_id, {})
+            record = dict(state) if isinstance(state, dict) else {}
+            current = record.get("configuration", {})
+            merged = dict(current) if isinstance(current, dict) else {}
+            merged.update(configuration)
+            record["configuration"] = merged
+            record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
+            self.state["providers"][provider_id] = record
+            self._save()
+            return {
+                "status": "CONFIGURED",
+                "provider": provider_id,
+                "saved": True,
+                "configuration": dict(merged),
+            }
 
     def verify_connectivity(
         self,
@@ -821,16 +825,17 @@ class ConnectionManager:
         }
 
     def summary(self) -> dict[str, int]:
-        result = {state: 0 for state in sorted(self.VALID_STATES)}
-        for item in self.state["providers"].values():
-            status = item.get("status", "UNKNOWN") if isinstance(item, dict) else "UNKNOWN"
-            # Do not count legacy, unverified CONNECTED records as healthy connections.
-            if status == "CONNECTED" and item.get("verified") is not True:
-                status = "UNKNOWN"
-            if status not in result:
-                status = "UNKNOWN"
-            result[status] += 1
-        return result
+        with self._state_transaction():
+            result = {state: 0 for state in sorted(self.VALID_STATES)}
+            for item in self.state["providers"].values():
+                status = item.get("status", "UNKNOWN") if isinstance(item, dict) else "UNKNOWN"
+                # Do not count legacy, unverified CONNECTED records as healthy connections.
+                if status == "CONNECTED" and item.get("verified") is not True:
+                    status = "UNKNOWN"
+                if status not in result:
+                    status = "UNKNOWN"
+                result[status] += 1
+            return result
 
 
 if __name__ == "__main__":
