@@ -59,11 +59,17 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             free_credits={"primary": 0.0, "fallback": 2.0},
         )
         self.assertEqual(free_first["provider"], "fallback")
-        cheapest = router.route(
+        cost_policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        cost_router = ProviderRoutingManager(self.connections, cost_policy=cost_policy)
+        cheapest = cost_router.route(
             category="image", project_id="film", strategy="LOWEST_COST",
             estimated_costs={"primary": 1.5, "fallback": 0.2},
+            paid_approved_providers={"primary", "fallback"},
+            request_id="lowest-cost-job",
         )
+        self.assertTrue(cheapest["allowed"])
         self.assertEqual(cheapest["provider"], "fallback")
+        self.assertEqual(cheapest["billing_mode"], "PAID_APPROVED")
 
     def test_round_robin_distributes_across_eligible_providers(self):
         router = ProviderRoutingManager(self.connections, default_strategy="ROUND_ROBIN")
@@ -86,6 +92,15 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(routed["allowed"])
         self.assertEqual(routed["provider"], "fallback")
         self.assertTrue(routed["health_verified"])
+
+    def test_positive_cost_route_requires_cost_policy_or_verified_credits(self):
+        router = ProviderRoutingManager(self.connections)
+        result = router.route(
+            category="image", project_id="film", estimated_cost=1.0
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertEqual(result["decisions"][0]["status"], "COST_POLICY_REQUIRED")
 
     def test_cost_policy_blocks_paid_route_without_budget_or_approval(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
