@@ -804,6 +804,12 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "HOST_NOT_ALLOWLISTED")
         self.assertEqual(
+            ConnectionManager.validate_endpoint(
+                "https://provider.example:0", allowed_hosts={"provider.example"}
+            )["status"],
+            "INVALID_PORT",
+        )
+        self.assertEqual(
             ConnectionManager.validate_endpoint("https://169.254.169.254/latest/meta-data")["status"],
             "NON_PUBLIC_ADDRESS_REJECTED",
         )
