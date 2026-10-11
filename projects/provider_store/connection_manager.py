@@ -424,11 +424,13 @@ class ConnectionManager:
                 "saved": False,
             }
 
-        record: dict[str, Any] = {
+        existing = self.state["providers"].get(provider_id, {})
+        record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+        record.update({
             "status": status,
             "verified": bool(verified),
             "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
+        })
         self.state["providers"][provider_id] = record
         self._save()
         return {"provider": provider_id, **record, "saved": True}
