@@ -268,6 +268,15 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "CONNECTED")
         self.assertEqual(seen[0]["endpoint"], "https://api.example.com/v1/models")
         self.assertEqual(seen[0]["model"], "image-v1")
+        self.manager.state["providers"]["public_image"]["configuration"]["endpoint"] = "https://evil.example.com/models"
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+        called = []
+        rejected = self.manager.verify_connectivity(
+            "public_image",
+            lambda provider, **kwargs: called.append(True) or {"ok": True},
+        )
+        self.assertNotEqual(rejected["status"], "CONNECTED")
+        self.assertEqual(called, [])
 
     def test_connectivity_never_probes_with_expired_credentials(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
