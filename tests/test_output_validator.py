@@ -121,6 +121,10 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             ProviderOutputValidator(min_size_bytes=10, max_size_bytes=1)
         with self.assertRaises(ValueError):
             ProviderOutputValidator(max_json_depth=0)
+        self.assertEqual(
+            ProviderOutputValidator().validate_file("bad\\x00path.txt", modality="text")["status"],
+            "INVALID_PATH",
+        )
 
 
 if __name__ == "__main__":
