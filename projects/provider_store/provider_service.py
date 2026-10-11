@@ -17,6 +17,7 @@ class ProviderService:
         output_validator: Any | None = None,
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
+        credit_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -27,6 +28,7 @@ class ProviderService:
             (output_validator, "validate_file", "output_validator"),
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
+            (credit_manager, "commit", "credit_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -38,6 +40,7 @@ class ProviderService:
         self.output_validator = output_validator
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
+        self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
 
     def verify_provider(
         self,
@@ -136,6 +139,9 @@ class ProviderService:
         latency_ms: float | None = None,
         error_code: str | None = None,
         charge_outcome: str = "unknown",
+        billing_mode: str | None = None,
+        credit_outcome: str = "used",
+        actual_credit_amount: float | None = None,
     ) -> dict[str, Any]:
         """Account for a started request without assuming ambiguous failures were free.
 
@@ -150,12 +156,19 @@ class ProviderService:
             return {"status": "INVALID_EXECUTION_RESULT", "finalized": False}
         if not isinstance(charge_outcome, str) or charge_outcome not in {"unknown", "incurred", "not_incurred"}:
             return {"status": "INVALID_CHARGE_OUTCOME", "finalized": False}
+        if billing_mode is not None and billing_mode not in {"ZERO_COST", "FREE_CREDITS", "PAID_APPROVED"}:
+            return {"status": "INVALID_BILLING_MODE", "finalized": False}
+        if not isinstance(credit_outcome, str) or credit_outcome not in {"unknown", "used", "not_used"}:
+            return {"status": "INVALID_CREDIT_OUTCOME", "finalized": False}
+        if actual_credit_amount is not None and not self._valid_amount(actual_credit_amount):
+            return {"status": "INVALID_CREDIT_AMOUNT", "finalized": False}
         if not self._valid_amount(estimated_cost) or not self._valid_amount(actual_cost):
             return {"status": "INVALID_COST_AMOUNT", "finalized": False}
         if latency_ms is not None and not self._valid_amount(latency_ms):
             return {"status": "INVALID_LATENCY", "finalized": False}
         cost_result: dict[str, Any] | None = None
         quota_result: dict[str, Any] | None = None
+        credit_result: dict[str, Any] | None = None
         duplicate_finalization = False
         if self.cost_policy is not None:
             ledger = getattr(self.cost_policy, "ledger", {})
@@ -224,6 +237,37 @@ class ProviderService:
                         duplicate_finalization = True
                 except Exception as exc:
                     cost_result = {"status": "COST_RECONCILIATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if billing_mode == "FREE_CREDITS":
+            if self.credit_manager is None:
+                credit_result = {"status": "CREDIT_MANAGER_UNAVAILABLE", "saved": False}
+            elif credit_outcome == "unknown":
+                credit_result = {"status": "CREDIT_OUTCOME_UNKNOWN", "saved": False}
+            elif credit_outcome == "not_used":
+                try:
+                    released_credit = self.credit_manager.release(
+                        request_id=request_id, provider_id=provider_id
+                    )
+                    credit_result = {
+                        **released_credit,
+                        "saved": released_credit.get("released") is True
+                        or released_credit.get("status") == "RESERVATION_NOT_FOUND",
+                    }
+                except Exception as exc:
+                    credit_result = {"status": "CREDIT_RELEASE_FAILED", "saved": False, "error_type": type(exc).__name__}
+            else:
+                try:
+                    committed_credit = self.credit_manager.commit(
+                        request_id=request_id, actual_amount=actual_credit_amount
+                    )
+                    credit_result = {
+                        **committed_credit,
+                        "saved": committed_credit.get("committed") is True
+                        or committed_credit.get("status") == "ALREADY_COMMITTED",
+                    }
+                    if credit_result.get("status") == "ALREADY_COMMITTED":
+                        duplicate_finalization = True
+                except Exception as exc:
+                    credit_result = {"status": "CREDIT_COMMIT_FAILED", "saved": False, "error_type": type(exc).__name__}
         if (
             isinstance(cost_result, dict)
             and cost_result.get("status") == "DUPLICATE_REQUEST"
@@ -259,6 +303,7 @@ class ProviderService:
         finalized = (
             (cost_result is None or cost_result.get("saved") is True)
             and (quota_result is None or quota_result.get("committed") is True or quota_result.get("status") == "ALREADY_COMMITTED")
+            and (credit_result is None or credit_result.get("saved") is True)
             and (health_result is None or health_result.get("saved") is True)
         )
         return {
@@ -266,6 +311,7 @@ class ProviderService:
             "finalized": finalized,
             "cost": cost_result,
             "quota": quota_result,
+            "credits": credit_result,
             "health": health_result,
         }
 
@@ -297,6 +343,13 @@ class ProviderService:
                     results["quota"] = release(request_id=request_id, provider_id=provider_id)
                 except Exception as exc:
                     results["quota"] = {"status": "QUOTA_RELEASE_FAILED", "error_type": type(exc).__name__}
+        if self.credit_manager is not None:
+            release = getattr(self.credit_manager, "release", None)
+            if callable(release):
+                try:
+                    results["credits"] = release(request_id=request_id, provider_id=provider_id)
+                except Exception as exc:
+                    results["credits"] = {"status": "CREDIT_RELEASE_FAILED", "error_type": type(exc).__name__}
         released = all(
             item.get("status") in {"RESERVATION_RELEASED", "RELEASED", "RESERVATION_NOT_FOUND"}
             for item in results.values()
