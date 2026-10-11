@@ -365,6 +365,26 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertEqual(called, [])
 
+    def test_persisted_secret_bearing_model_is_rejected_before_probe(self):
+        self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        self.manager.state["providers"]["public_image"] = {
+            "status": "CONNECTED", "verified": True,
+            "configuration": {
+                "endpoint": "https://api.example.com/health",
+                "model": "api_key=private-value",
+            },
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+        called = []
+        result = self.manager.verify_connectivity(
+            "public_image",
+            lambda provider, **kwargs: called.append(True) or {"ok": True},
+        )
+        self.assertEqual(result["status"], "SENSITIVE_CONFIGURATION_REJECTED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(called, [])
+
     def test_connectivity_never_probes_with_expired_credentials(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
