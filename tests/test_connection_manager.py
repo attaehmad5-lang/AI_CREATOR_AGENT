@@ -485,12 +485,18 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_metadata_returns_detached_copy_and_filters_sensitive_fields(self):
         self.manager.catalog["providers"][0]["official_api_url"] = "https://example.invalid"
         self.manager.catalog["providers"][0]["token_env"] = "PUBLIC_IMAGE_TOKEN"
-        self.manager.catalog["providers"][0]["access_token"] = "must-not-appear"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         metadata = self.manager.get_provider_metadata("public_image")
         self.assertEqual(metadata["official_api_url"], "https://example.invalid")
         self.assertEqual(metadata["token_env"], "PUBLIC_IMAGE_TOKEN")
         self.assertNotIn("access_token", metadata)
+        sanitized = ConnectionManager._sanitize_public_data({
+            "access_token": "must-not-appear",
+            "nested": {"refresh_token": "also-secret", "region": "global"},
+        })
+        self.assertNotIn("access_token", sanitized)
+        self.assertNotIn("refresh_token", repr(sanitized))
+        self.assertNotIn("must-not-appear", repr(sanitized))
         metadata["name"] = "mutated"
         self.assertNotEqual(self.manager.get_provider("public_image").get("name"), "mutated")
 
