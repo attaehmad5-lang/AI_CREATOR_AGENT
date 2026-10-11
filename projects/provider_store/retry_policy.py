@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import random
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -125,25 +126,42 @@ class CircuitBreaker:
         self.clock = clock or time.monotonic
         self.failures = 0
         self.opened_at: float | None = None
+        self._half_open_probe_in_flight = False
+        self._lock = threading.Lock()
 
-    @property
-    def state(self) -> str:
+    def _state_unlocked(self) -> str:
         if self.opened_at is None:
             return "CLOSED"
         if self.clock() - self.opened_at >= self.cooldown_seconds:
             return "HALF_OPEN"
         return "OPEN"
 
+    @property
+    def state(self) -> str:
+        with self._lock:
+            return self._state_unlocked()
+
     def allow_request(self) -> bool:
-        return self.state in {"CLOSED", "HALF_OPEN"}
+        with self._lock:
+            current = self._state_unlocked()
+            if current == "CLOSED":
+                return True
+            if current == "HALF_OPEN" and not self._half_open_probe_in_flight:
+                self._half_open_probe_in_flight = True
+                return True
+            return False
 
     def record_success(self) -> None:
-        self.failures = 0
-        self.opened_at = None
+        with self._lock:
+            self.failures = 0
+            self.opened_at = None
+            self._half_open_probe_in_flight = False
 
     def record_failure(self) -> str:
-        was_half_open = self.state == "HALF_OPEN"
-        self.failures += 1
-        if was_half_open or (self.failures >= self.failure_threshold and self.opened_at is None):
-            self.opened_at = self.clock()
-        return self.state
+        with self._lock:
+            was_half_open = self._state_unlocked() == "HALF_OPEN"
+            self.failures += 1
+            if was_half_open or (self.failures >= self.failure_threshold and self.opened_at is None):
+                self.opened_at = self.clock()
+            self._half_open_probe_in_flight = False
+            return self._state_unlocked()
