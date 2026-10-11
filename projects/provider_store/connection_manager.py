@@ -695,6 +695,40 @@ class ConnectionManager:
                 "configuration": dict(merged),
             }
 
+    def get_provider_configuration(self, provider_id: str) -> dict[str, Any]:
+        """Return validated non-secret runtime configuration for a known provider."""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "configuration": {}}
+        with self._state_transaction():
+            state = self.state["providers"].get(provider_id, {})
+            raw = state.get("configuration", {}) if isinstance(state, dict) else {}
+            if not isinstance(raw, dict):
+                return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
+            configuration = self._sanitize_public_data(raw)
+        if self._contains_credential_value_field(configuration):
+            return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
+        model = configuration.get("model")
+        if model is not None and (
+            not isinstance(model, str) or not model.strip() or len(model) > 200
+        ):
+            return {"status": "INVALID_MODEL", "provider": provider_id, "configuration": {}}
+        endpoint = configuration.get("endpoint")
+        if endpoint is not None:
+            allowed_hosts_raw = provider.get("allowed_hosts")
+            allowed_hosts = (
+                {item for item in allowed_hosts_raw if isinstance(item, str)}
+                if isinstance(allowed_hosts_raw, list) else None
+            )
+            validation = self.validate_endpoint(endpoint, allowed_hosts=allowed_hosts)
+            if not validation["valid"]:
+                return {"status": validation["status"], "provider": provider_id, "configuration": {}}
+        return {
+            "status": "CONFIGURED" if configuration else "NO_CONFIGURATION",
+            "provider": provider_id,
+            "configuration": configuration,
+        }
+
     def verify_connectivity(
         self,
         provider_id: str,
@@ -720,6 +754,16 @@ class ConnectionManager:
             or timeout_seconds <= 0
         ):
             return {"status": "INVALID_TIMEOUT", "provider": provider_id, "verified": False}
+        configuration_result = self.get_provider_configuration(provider_id)
+        if configuration_result.get("status") not in {"CONFIGURED", "NO_CONFIGURATION"}:
+            return {
+                "status": configuration_result.get("status", "INVALID_CONFIGURATION"),
+                "provider": provider_id,
+                "verified": False,
+            }
+        if configuration_result.get("configuration"):
+            provider = dict(provider)
+            provider["configuration"] = configuration_result["configuration"]
         credentials = self.credential_status(provider_id, environ)
         blocked_credential_states = {
             "CREDENTIALS_MISSING",
