@@ -106,7 +106,7 @@ class ProviderOutputValidator:
         if extension not in self.EXTENSIONS[normalized_modality]:
             return {"valid": False, "status": "EXTENSION_MISMATCH", "extension": extension}
         try:
-            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
             descriptor = os.open(artifact, flags)
             with os.fdopen(descriptor, "rb") as stream:
                 file_stat = os.fstat(stream.fileno())
