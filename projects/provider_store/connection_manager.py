@@ -951,7 +951,11 @@ class ConnectionManager:
         if provider.get("enabled") is False:
             return {"status": "DISABLED", "provider": provider_id, "verified": False}
         auth_type = str(provider.get("auth_type", "NONE")).upper()
-        if auth_type not in {"ACCOUNT", "MANUAL", "MANUAL_CONNECT", "OAUTH_BROWSER"}:
+        manual_modes = {"ACCOUNT", "MANUAL", "MANUAL_CONNECT", "OAUTH_BROWSER"}
+        if not (
+            auth_type in manual_modes
+            or any(mode in auth_type for mode in ("ACCOUNT", "MANUAL", "OAUTH_BROWSER", "SERVICE_ACCOUNT", "LOCAL"))
+        ):
             return {"status": "MANUAL_CONNECTION_NOT_APPLICABLE", "provider": provider_id, "verified": False}
         if manual_session is None:
             return {"status": "MANUAL_SESSION_REQUIRED", "provider": provider_id, "verified": False}
