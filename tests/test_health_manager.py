@@ -161,6 +161,12 @@ class ProviderHealthManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path)
 
+    def test_active_probe_fails_closed_when_health_state_cannot_be_saved(self):
+        self.path.write_text("{invalid-json", encoding="utf-8")
+        result = self.manager.active_probe("image", lambda **kwargs: True)
+        self.assertEqual(result["status"], "HEALTH_RECORD_FAILED")
+        self.assertFalse(result["verified"])
+
     def test_active_probe_rejects_invalid_provider_before_calling_probe(self):
         calls = []
         result = self.manager.active_probe("", lambda **kwargs: calls.append(True) or True)
