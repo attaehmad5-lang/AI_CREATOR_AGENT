@@ -8,7 +8,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .connection_manager import ConnectionManager
+try:
+    from .connection_manager import ConnectionManager
+except ImportError:  # direct script execution compatibility
+    from connection_manager import ConnectionManager
 
 
 class ProviderStoreManager:
