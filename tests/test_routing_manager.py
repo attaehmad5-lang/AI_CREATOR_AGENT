@@ -164,6 +164,31 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["billing_mode"], "FREE_CREDITS")
         self.assertTrue(result["credit_reserved"])
 
+    def test_quota_rejection_releases_new_free_credit_reservation(self):
+        credits = ProviderCreditManager(self.root / "credits-quota.json")
+        credits.refresh(
+            "primary",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 5.0,
+                "unit": "USD", "source": "official-account-api",
+            },
+        )
+        quota = ProviderQuotaManager(
+            self.root / "quota-credit-rollback.json",
+            limits={"primary": {"hourly": 1}},
+        )
+        quota.reserve(provider_id="primary", request_id="already-used")
+        router = ProviderRoutingManager(
+            self.connections, quota_manager=quota, credit_manager=credits
+        )
+        result = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            request_id="credit-rollback-job",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertNotIn("credit-rollback-job", credits.data["reservations"])
+        self.assertEqual(credits.usable_free_credits(unit="USD"), {"primary": 5.0})
+
     def test_credit_balance_with_incompatible_unit_cannot_authorize_route(self):
         credits = ProviderCreditManager(self.root / "credits-units.json")
         credits.refresh(
