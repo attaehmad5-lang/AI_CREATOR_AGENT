@@ -68,6 +68,8 @@ class ProviderHTTPConnectivityProbe:
         "cartesia": ("Cartesia-API-Key", ""),
         "deepgram": ("Authorization", "Token"),
         "assemblyai": ("Authorization", ""),
+        "ideogram": ("Api-Key", ""),
+        "black_forest_labs": ("x-key", ""),
     }
 
     def __init__(
