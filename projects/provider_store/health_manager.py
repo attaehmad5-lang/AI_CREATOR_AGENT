@@ -47,7 +47,10 @@ class ProviderHealthManager:
         if not isinstance(success, bool):
             return {"status": "INVALID_RESULT", "saved": False}
         if latency_ms is not None and (
-            not isinstance(latency_ms, (int, float)) or isinstance(latency_ms, bool) or latency_ms < 0
+            not isinstance(latency_ms, (int, float))
+            or isinstance(latency_ms, bool)
+            or not __import__("math").isfinite(latency_ms)
+            or latency_ms < 0
         ):
             return {"status": "INVALID_LATENCY", "saved": False}
         providers = self.data["providers"]
