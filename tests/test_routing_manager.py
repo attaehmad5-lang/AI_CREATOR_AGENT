@@ -125,6 +125,10 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             router.route(category="image", project_id="film", strategy="HEALTHIEST_FIRST")["status"],
             "HEALTH_DATA_REQUIRED",
         )
+        self.assertEqual(
+            router.select_fallback(failed_provider="primary")["status"],
+            "INVALID_ROUTE_REQUEST",
+        )
 
 
 if __name__ == "__main__":
