@@ -310,6 +310,7 @@ class ProviderCostPolicy:
                     and existing.get("provider_id") == provider_id
                     and existing.get("estimated_cost") == float(estimated_cost)
                     and existing.get("actual_cost") == 0.0
+                    and existing.get("execution_success") is False
                     and existing.get("charge_outcome") == "not_incurred"
                 ):
                     return {"status": "DUPLICATE_REQUEST", "saved": True, "request_id": request_id}
@@ -328,6 +329,7 @@ class ProviderCostPolicy:
                 "estimated_cost": float(estimated_cost),
                 "actual_cost": 0.0,
                 "variance": round(-float(estimated_cost), 6),
+                "execution_success": False,
                 "charge_outcome": "not_incurred",
                 "recorded_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -387,6 +389,7 @@ class ProviderCostPolicy:
         estimated_cost: float,
         actual_cost: float,
         request_id: str,
+        success: bool | None = None,
     ) -> dict[str, Any]:
         """Record actual usage idempotently and flag estimate variance/budget breaches."""
         with self._transaction():
@@ -396,6 +399,7 @@ class ProviderCostPolicy:
                 estimated_cost=estimated_cost,
                 actual_cost=actual_cost,
                 request_id=request_id,
+                success=success,
             )
 
     def _reconcile_usage_unlocked(
@@ -406,18 +410,33 @@ class ProviderCostPolicy:
         estimated_cost: float,
         actual_cost: float,
         request_id: str,
+        success: bool | None = None,
     ) -> dict[str, Any]:
         if not all(isinstance(v, str) and v.strip() for v in (project_id, provider_id, request_id)):
             return {"status": "INVALID_USAGE_RECORD", "saved": False}
         if not self._valid_amount(estimated_cost) or not self._valid_amount(actual_cost):
             return {"status": "INVALID_COST_AMOUNT", "saved": False}
+        if success is not None and not isinstance(success, bool):
+            return {"status": "INVALID_EXECUTION_RESULT", "saved": False}
         projects = self.ledger["projects"]
         project = projects.setdefault(
             project_id, {"actual_spend": 0.0, "requests": {}, "reservations": {}}
         )
         requests = project.setdefault("requests", {})
         if request_id in requests:
-            return {"status": "DUPLICATE_REQUEST", "saved": False, "request_id": request_id}
+            existing = requests.get(request_id)
+            same_request = (
+                isinstance(existing, dict)
+                and existing.get("provider_id") == provider_id
+                and existing.get("estimated_cost") == float(estimated_cost)
+                and existing.get("actual_cost") == float(actual_cost)
+                and (success is None or existing.get("execution_success") == success)
+            )
+            return {
+                "status": "DUPLICATE_REQUEST" if same_request else "REQUEST_ID_CONFLICT",
+                "saved": bool(same_request),
+                "request_id": request_id,
+            }
         reservations = project.setdefault("reservations", {})
         reservation = reservations.get(request_id)
         if reservation is not None and (
@@ -434,6 +453,8 @@ class ProviderCostPolicy:
             "variance": round(float(actual_cost) - float(estimated_cost), 6),
             "recorded_at": datetime.now(timezone.utc).isoformat(),
         }
+        if success is not None:
+            record["execution_success"] = success
         requests[request_id] = record
         project["actual_spend"] = round(float(project.get("actual_spend", 0.0)) + float(actual_cost), 6)
         if self.ledger_path:
