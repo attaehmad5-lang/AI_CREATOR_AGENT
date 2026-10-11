@@ -319,6 +319,32 @@ class ConnectionManagerTests(unittest.TestCase):
             "DISABLED",
         )
 
+    def test_endpoint_validation_requires_https_and_blocks_embedded_credentials(self):
+        self.assertEqual(
+            ConnectionManager.validate_endpoint("http://provider.example")["status"],
+            "HTTPS_REQUIRED",
+        )
+        self.assertEqual(
+            ConnectionManager.validate_endpoint("https://user:pass@provider.example")["status"],
+            "EMBEDDED_CREDENTIALS_REJECTED",
+        )
+        self.assertTrue(ConnectionManager.validate_endpoint("https://provider.example")["valid"])
+
+    def test_endpoint_validation_enforces_allowlist_and_local_http_policy(self):
+        result = ConnectionManager.validate_endpoint(
+            "https://other.example", allowed_hosts={"provider.example"}
+        )
+        self.assertEqual(result["status"], "HOST_NOT_ALLOWLISTED")
+        self.assertEqual(
+            ConnectionManager.validate_endpoint("http://127.0.0.1:8000")["status"],
+            "HTTPS_REQUIRED",
+        )
+        local = ConnectionManager.validate_endpoint(
+            "http://127.0.0.1:8000", allow_loopback_http=True
+        )
+        self.assertTrue(local["valid"])
+        self.assertFalse(local["tls_verification_required"])
+
 
 if __name__ == "__main__":
     unittest.main()
