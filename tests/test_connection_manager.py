@@ -565,6 +565,7 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def test_connectivity_fails_closed_when_state_cannot_be_read_or_saved(self):
         self.state_path.write_text("{invalid-json", encoding="utf-8")
+        self.assertEqual(self.manager.get_state("public_image")["status"], "STATE_READ_FAILED")
         called = []
         result = self.manager.verify_connectivity(
             "public_image", lambda provider, **kwargs: called.append(True) or {"ok": True}
