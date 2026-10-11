@@ -95,6 +95,11 @@ class ProviderCostPolicy:
             "approval_recorded": True,
         }
 
+    @classmethod
+    def _sortable_credit_amount(cls, value: Any) -> float:
+        """Return a safe sort key; the policy validator still rejects invalid input."""
+        return float(value) if cls._valid_amount(value) else 0.0
+
     def select_provider(
         self,
         providers: list[dict[str, Any]],
@@ -105,13 +110,19 @@ class ProviderCostPolicy:
         paid_approved_providers: set[str] | None = None,
     ) -> dict[str, Any]:
         """Prefer eligible free-credit providers before any explicitly approved paid route."""
-        free_credits = free_credits or {}
-        paid_approved_providers = paid_approved_providers or set()
+        if not isinstance(providers, list) or not isinstance(estimated_costs, dict):
+            return {"allowed": False, "status": "INVALID_SELECTION_INPUT"}
+        if free_credits is not None and not isinstance(free_credits, dict):
+            return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
+        if paid_approved_providers is not None and not isinstance(paid_approved_providers, (set, frozenset)):
+            return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
+        free_credits = {} if free_credits is None else free_credits
+        paid_approved_providers = set() if paid_approved_providers is None else paid_approved_providers
         candidates = sorted(
             (p for p in providers if isinstance(p, dict)),
             key=lambda p: (
-                0 if free_credits.get(str(p.get("id")), 0) > 0 else 1,
-                -float(free_credits.get(str(p.get("id")), 0) or 0),
+                0 if self._sortable_credit_amount(free_credits.get(str(p.get("id")), 0)) > 0 else 1,
+                -self._sortable_credit_amount(free_credits.get(str(p.get("id")), 0)),
                 str(p.get("id", "")),
             ),
         )
