@@ -483,6 +483,23 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("manual-session-secret", self.state_path.read_text(encoding="utf-8"))
         self.assertNotIn("session", self.manager.get_state("manual_music"))
 
+    def test_account_auth_cannot_be_verified_through_api_token_path(self):
+        registered = self.manager.register_provider({
+            "id": "account_only", "name": "Account Only", "category": "music",
+            "auth_type": "ACCOUNT", "connection_type": "BROWSER_SESSION",
+            "token_env": "ACCOUNT_TOKEN", "enabled": True,
+        })
+        self.assertTrue(registered["saved"])
+        called = []
+        result = self.manager.verify_connectivity(
+            "account_only",
+            lambda provider, **kwargs: called.append(True) or {"ok": True},
+            environ={"ACCOUNT_TOKEN": "must-not-bypass-account-login"},
+        )
+        self.assertEqual(result["status"], "MANUAL_CONNECTION_REQUIRED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(called, [])
+
     def test_manual_account_connection_requires_session_and_account_auth_type(self):
         called = []
         missing = self.manager.verify_manual_connection(
