@@ -12,6 +12,7 @@ from projects.provider_store.unified_provider_router import UnifiedProviderRoute
 from projects.provider_store.provider_status_manager import ProviderStatusManager
 from projects.provider_store.provider_unlock_manager import ProviderUnlockManager
 from projects.provider_store.unlock_flow_manager import UnlockFlowManager
+from projects.provider_store.provider_flow import ProviderFlow
 
 
 class ProviderStoreCompatibilityTests(unittest.TestCase):
@@ -36,6 +37,7 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             status_manager = ProviderStatusManager(connection_manager=connection_manager)
             unlock_manager = ProviderUnlockManager(connection_manager=connection_manager)
             unlock_flow = UnlockFlowManager(connection_manager=connection_manager)
+            flow = ProviderFlow(manager=unlock_flow)
             self.assertEqual(status_manager.get_status("test-image"), "UNKNOWN")
             self.assertFalse(status_manager.is_available("test-image"))
             info = unlock_manager.connection_info("test-image")
@@ -43,6 +45,7 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             self.assertEqual(info["status"], "UNKNOWN")
             self.assertFalse(info["verified"])
             prepared = unlock_flow.prepare("test-image")
+            self.assertEqual(flow.available_providers()[0]["id"], "test-image")
             self.assertEqual(prepared["catalog_status"], "CONNECTED")
             self.assertEqual(prepared["current_status"], "UNKNOWN")
             self.assertFalse(prepared["verified"])
