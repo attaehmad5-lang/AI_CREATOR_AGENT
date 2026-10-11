@@ -60,6 +60,14 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_rejects_unknown_provider_and_invalid_state(self):
         self.assertEqual(self.manager.set_state("missing", "READY")["status"], "NOT_FOUND")
         self.assertEqual(self.manager.set_state("public_image", "NOT_A_STATE")["status"], "INVALID_STATE")
+        self.assertEqual(
+            self.manager.set_state("public_image", "CONNECTED", verified="true")["status"],
+            "INVALID_VERIFICATION_FLAG",
+        )
+        self.assertEqual(
+            self.manager.set_state("public_image", "CONNECTED", verified=1)["status"],
+            "INVALID_VERIFICATION_FLAG",
+        )
 
     def test_connected_requires_verification(self):
         result = self.manager.set_state("public_image", "CONNECTED")
