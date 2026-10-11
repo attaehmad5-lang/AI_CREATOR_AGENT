@@ -39,7 +39,10 @@ class ProviderOutputValidator:
         "json": {".json"},
     }
 
-    def __init__(self, *, min_size_bytes: int = 1, max_size_bytes: int = 1_000_000_000) -> None:
+    def __init__(
+        self, *, min_size_bytes: int = 1, max_size_bytes: int = 1_000_000_000,
+        max_json_depth: int = 128,
+    ) -> None:
         if (
             not isinstance(min_size_bytes, int)
             or isinstance(min_size_bytes, bool)
@@ -49,8 +52,41 @@ class ProviderOutputValidator:
             or max_size_bytes < min_size_bytes
         ):
             raise ValueError("output size limits must be valid positive integers")
+        if (
+            not isinstance(max_json_depth, int)
+            or isinstance(max_json_depth, bool)
+            or max_json_depth < 1
+            or max_json_depth > 4096
+        ):
+            raise ValueError("max_json_depth must be an integer between 1 and 4096")
         self.min_size_bytes = min_size_bytes
         self.max_size_bytes = max_size_bytes
+        self.max_json_depth = max_json_depth
+
+    @staticmethod
+    def _json_depth_within_limit(stream: Any, max_depth: int) -> bool:
+        depth = 0
+        in_string = False
+        escaped = False
+        for chunk in iter(lambda: stream.read(64 * 1024), b""):
+            for byte in chunk:
+                if in_string:
+                    if escaped:
+                        escaped = False
+                    elif byte == 0x5C:
+                        escaped = True
+                    elif byte == 0x22:
+                        in_string = False
+                    continue
+                if byte == 0x22:
+                    in_string = True
+                elif byte in (0x7B, 0x5B):
+                    depth += 1
+                    if depth > max_depth:
+                        return False
+                elif byte in (0x7D, 0x5D):
+                    depth -= 1
+        return True
 
     def validate_file(self, path: str | Path, *, modality: str) -> dict[str, Any]:
         """Validate existence, size, extension, signature/content, and compute SHA-256."""
@@ -92,6 +128,9 @@ class ProviderOutputValidator:
                 else:
                     if size > 10_000_000:
                         return {"valid": False, "status": "OUTPUT_TOO_LARGE", "size_bytes": size}
+                    stream.seek(0)
+                    if not self._json_depth_within_limit(stream, self.max_json_depth):
+                        return {"valid": False, "status": "JSON_NESTING_LIMIT"}
                     stream.seek(0)
                     def reject_nonstandard_constant(token: str) -> None:
                         raise ValueError(f"non-standard JSON constant: {token}")
