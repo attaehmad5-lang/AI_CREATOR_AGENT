@@ -153,6 +153,13 @@ class ProviderHealthManagerTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path)
+        self.path.write_text(
+            '{"providers":{"image":{"status":"DEGRADED","consecutive_failures":1,"history":['
+            '{"success":false,"timestamp":"2026-01-01T00:00:00+00:00","error_code":"token=secret"}]}}}',
+            encoding="utf-8",
+        )
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path)
 
     def test_active_probe_rejects_invalid_provider_before_calling_probe(self):
         calls = []
