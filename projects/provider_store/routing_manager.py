@@ -250,6 +250,12 @@ class ProviderRoutingManager:
                 # a free-credit route; raw caller-provided balances were rejected above.
                 billing_mode = "FREE_CREDITS"
             elif self.cost_policy is not None:
+                if estimated_cost_unit.strip() != "USD":
+                    decisions.append({
+                        "provider": provider_id,
+                        "status": "COST_UNIT_NOT_SUPPORTED_FOR_BUDGET_POLICY",
+                    })
+                    continue
                 try:
                     decision = self.cost_policy.evaluate_request(
                         provider,
