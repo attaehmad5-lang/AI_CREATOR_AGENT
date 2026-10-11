@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
@@ -177,7 +178,7 @@ class ProviderHealthManagerTests(unittest.TestCase):
     def test_future_health_evidence_and_malformed_latency_fail_closed(self):
         future = (self.now[0] + timedelta(seconds=30)).isoformat()
         self.path.write_text(
-            __import__("json").dumps({
+            json.dumps({
                 "version": "1.0",
                 "providers": {
                     "image": {
