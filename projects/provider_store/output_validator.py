@@ -93,9 +93,11 @@ class ProviderOutputValidator:
                     if size > 10_000_000:
                         return {"valid": False, "status": "OUTPUT_TOO_LARGE", "size_bytes": size}
                     stream.seek(0)
+                    def reject_nonstandard_constant(token: str) -> None:
+                        raise ValueError(f"non-standard JSON constant: {token}")
                     try:
-                        json.load(stream)
-                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        json.load(stream, parse_constant=reject_nonstandard_constant)
+                    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                         return {"valid": False, "status": "INVALID_JSON"}
                     mime = "application/json"
             digest = hashlib.sha256()
