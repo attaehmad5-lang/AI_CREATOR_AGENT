@@ -38,6 +38,15 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "VERIFIED_CREDIT_MANAGER_REQUIRED")
 
+    def test_subscription_required_provider_needs_positive_cost_estimate(self):
+        result = self.policy.evaluate_request(
+            {"id": "paid", "enabled": True, "subscription_required": True},
+            project_id="documentary", estimated_cost=0.0,
+            paid_usage_approved=True,
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "COST_ESTIMATE_REQUIRED")
+
     def test_paid_usage_is_blocked_without_explicit_approval(self):
         result = self.policy.evaluate_request(
             {"id": "paid", "enabled": True, "subscription_required": True},
