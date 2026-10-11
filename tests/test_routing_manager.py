@@ -136,6 +136,55 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(fallback["provider"], "fallback")
         self.assertEqual(quota.data["requests"]["job-1"]["provider_id"], "fallback")
 
+    def test_paid_routing_reserves_budget_and_requires_idempotency_key(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        router = ProviderRoutingManager(self.connections, cost_policy=policy)
+        missing_id = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary"},
+        )
+        self.assertFalse(missing_id["allowed"])
+        self.assertTrue(any(
+            item["status"] == "COST_RESERVATION_REQUEST_ID_REQUIRED"
+            for item in missing_id["decisions"]
+        ))
+        routed = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary"}, request_id="paid-job",
+        )
+        self.assertEqual(routed["provider"], "primary")
+        self.assertTrue(routed["cost_reserved"])
+        self.assertEqual(
+            policy.ledger["projects"]["film"]["reservations"]["paid-job"]["provider_id"],
+            "primary",
+        )
+
+    def test_fallback_releases_and_reassigns_budget_and_quota_reservations(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        quota = ProviderQuotaManager(
+            self.root / "quotas.json",
+            limits={"primary": {"hourly": 2}, "fallback": {"hourly": 2}},
+        )
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=policy, quota_manager=quota
+        )
+        first = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary", "fallback"}, request_id="job-1",
+        )
+        self.assertEqual(first["provider"], "primary")
+        fallback = router.select_fallback(
+            failed_provider="primary",
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary", "fallback"}, request_id="job-1",
+        )
+        self.assertEqual(fallback["provider"], "fallback")
+        self.assertEqual(
+            policy.ledger["projects"]["film"]["reservations"]["job-1"]["provider_id"],
+            "fallback",
+        )
+        self.assertEqual(quota.data["requests"]["job-1"]["provider_id"], "fallback")
+
     def test_quota_enabled_routing_requires_request_id(self):
         quota = ProviderQuotaManager(
             self.root / "quotas.json", limits={"primary": {"daily": 2}}
