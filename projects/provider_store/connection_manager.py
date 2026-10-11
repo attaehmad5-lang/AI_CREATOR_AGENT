@@ -753,6 +753,8 @@ class ConnectionManager:
             raw = state.get("configuration", {}) if isinstance(state, dict) else {}
             if not isinstance(raw, dict):
                 return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
+            if self._contains_credential_value_field(raw):
+                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
             configuration = self._sanitize_public_data(raw)
         if self._contains_credential_value_field(configuration):
             return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
