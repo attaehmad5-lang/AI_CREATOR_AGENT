@@ -256,6 +256,37 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(second["provider"], "fallback")
         self.assertTrue(second["quota_reserved"])
 
+    def test_free_credit_fallback_requires_new_id_unless_unstarted_is_confirmed(self):
+        credits = ProviderCreditManager(self.root / "credit-fallback.json")
+        for provider_id in ("primary", "fallback"):
+            credits.refresh(
+                provider_id,
+                lambda _: {
+                    "verified": True, "free_credits_remaining": 5.0,
+                    "unit": "USD", "source": "official-account-api",
+                },
+            )
+        router = ProviderRoutingManager(self.connections, credit_manager=credits)
+        first = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            request_id="credit-fallback-same-id",
+        )
+        self.assertEqual(first["provider"], "primary")
+        blocked = router.select_fallback(
+            failed_provider="primary", category="image", project_id="film",
+            request_id="credit-fallback-same-id",
+        )
+        self.assertFalse(blocked["allowed"])
+        self.assertEqual(blocked["status"], "NEW_FALLBACK_REQUEST_ID_REQUIRED")
+        fallback = router.select_fallback(
+            failed_provider="primary", release_reservations=True,
+            category="image", project_id="film", estimated_cost=1.0,
+            request_id="credit-fallback-same-id",
+        )
+        self.assertTrue(fallback["allowed"])
+        self.assertEqual(fallback["provider"], "fallback")
+        self.assertEqual(credits.data["reservations"]["credit-fallback-same-id"]["provider_id"], "fallback")
+
     def test_fallback_releases_failed_provider_quota_reservation(self):
         quota = ProviderQuotaManager(
             self.root / "quotas.json",
