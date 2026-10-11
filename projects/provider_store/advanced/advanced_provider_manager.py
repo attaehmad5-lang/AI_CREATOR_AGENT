@@ -22,6 +22,10 @@ class AdvancedProviderManager:
             catalog_path, state_path, connection_manager=connection_manager
         )
 
+    @property
+    def catalog(self) -> dict[str, Any]:
+        return {"version": "1.0", "status": "READY", "providers": self.list_providers()}
+
     def list_providers(self) -> list[dict[str, Any]]:
         return [
             provider for provider in self.store.list_providers()
