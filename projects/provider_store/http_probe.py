@@ -70,6 +70,10 @@ class ProviderHTTPConnectivityProbe:
         "assemblyai": ("Authorization", ""),
         "ideogram": ("Api-Key", ""),
         "black_forest_labs": ("x-key", ""),
+        "anthropic_claude_script": ("x-api-key", ""),
+    }
+    _DEFAULT_PROBE_HEADERS = {
+        "anthropic_claude_script": {"anthropic-version": "2023-06-01"},
     }
 
     def __init__(
@@ -125,6 +129,10 @@ class ProviderHTTPConnectivityProbe:
             "Accept": "application/json, */*;q=0.8",
             "User-Agent": "AI_CREATOR_AGENT-ProviderProbe/1.0",
         }
+        for name, value in self._DEFAULT_PROBE_HEADERS.get(
+            str(provider.get("id", "")).casefold(), {}
+        ).items():
+            headers[name] = value
         raw_auth_type = provider.get("auth_type", "NONE")
         if not isinstance(raw_auth_type, str) or not raw_auth_type.strip():
             raise ValueError("INVALID_AUTH_TYPE")
