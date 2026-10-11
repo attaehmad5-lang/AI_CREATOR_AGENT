@@ -243,6 +243,57 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "VERIFIED_CREDIT_MANAGER_REQUIRED")
 
+    def test_duplicate_quota_request_cannot_route_provider_twice(self):
+        quota = ProviderQuotaManager(
+            self.root / "duplicate-quota.json",
+            limits={"primary": {"hourly": 3}, "fallback": {"hourly": 3}},
+        )
+        router = ProviderRoutingManager(self.connections, quota_manager=quota)
+        first = router.route(category="image", project_id="film", request_id="duplicate-route")
+        second = router.route(category="image", project_id="film", request_id="duplicate-route")
+        self.assertTrue(first["allowed"])
+        self.assertFalse(second["allowed"])
+        self.assertEqual(second["status"], "REQUEST_ALREADY_RESERVED")
+        self.assertEqual(quota.data["requests"]["duplicate-route"]["status"], "RESERVED")
+
+    def test_duplicate_paid_reservation_cannot_start_second_provider_call(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        router = ProviderRoutingManager(self.connections, cost_policy=policy)
+        options = dict(
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary"}, request_id="duplicate-paid-route",
+        )
+        first = router.route(**options)
+        second = router.route(**options)
+        self.assertTrue(first["allowed"])
+        self.assertFalse(second["allowed"])
+        self.assertEqual(second["status"], "REQUEST_ALREADY_RESERVED")
+        self.assertIn("duplicate-paid-route", policy.ledger["projects"]["film"]["reservations"])
+
+    def test_duplicate_free_credit_reservation_cannot_start_second_provider_call(self):
+        credits = ProviderCreditManager(self.root / "duplicate-credit.json")
+        credits.refresh(
+            "primary",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 5.0,
+                "unit": "USD", "source": "official-account-api",
+            },
+        )
+        router = ProviderRoutingManager(self.connections, credit_manager=credits)
+        options = dict(
+            category="image", project_id="film", estimated_cost=1.0,
+            request_id="duplicate-credit-route",
+        )
+        first = router.route(**options)
+        second = router.route(**options)
+        self.assertTrue(first["allowed"])
+        self.assertFalse(second["allowed"])
+        self.assertEqual(second["status"], "REQUEST_ALREADY_RESERVED")
+        self.assertEqual(
+            credits.data["reservations"]["duplicate-credit-route"]["provider_id"],
+            "primary",
+        )
+
     def test_quota_manager_blocks_over_limit_provider_and_uses_fallback(self):
         quota = ProviderQuotaManager(
             self.root / "quotas.json",
