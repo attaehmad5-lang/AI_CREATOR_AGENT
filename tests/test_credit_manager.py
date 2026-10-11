@@ -120,6 +120,31 @@ class ProviderCreditManagerTests(unittest.TestCase):
         self.assertEqual(blocked_refresh["status"], "CREDIT_BALANCE_UPDATED")
         self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 3.0})
 
+    def test_credit_refresh_rejects_snapshot_older_than_local_usage(self):
+        self.manager.refresh(
+            "image-provider",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 5.0,
+                "unit": "USD", "source": "official-account-api",
+            },
+        )
+        self.manager.reserve(
+            provider_id="image-provider", amount=2.0, request_id="old-snapshot-job", unit="USD"
+        )
+        self.manager.commit(request_id="old-snapshot-job")
+        stale_observation = self.now[0].isoformat()
+        self.now[0] += timedelta(seconds=10)
+        result = self.manager.refresh(
+            "image-provider",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 5.0,
+                "unit": "USD", "source": "official-account-api",
+                "observed_at": stale_observation,
+            },
+        )
+        self.assertEqual(result["status"], "CREDIT_SNAPSHOT_PREDATES_LOCAL_USAGE")
+        self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 3.0})
+
     def test_credit_refresh_is_blocked_while_reservation_is_in_flight(self):
         self.manager.refresh(
             "image-provider",
