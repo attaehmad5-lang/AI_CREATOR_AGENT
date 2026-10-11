@@ -573,6 +573,12 @@ class ConnectionManager:
             from urllib.parse import urlsplit
             if urlsplit(endpoint).query:
                 return {"status": "QUERY_PARAMETERS_REJECTED", "provider": provider_id, "saved": False}
+            if not allowed_hosts:
+                return {
+                    "status": "HOST_ALLOWLIST_REQUIRED",
+                    "provider": provider_id,
+                    "saved": False,
+                }
             configuration["endpoint"] = endpoint.strip()
         if not configuration:
             return {"status": "NO_CONFIGURATION", "provider": provider_id, "saved": False}
