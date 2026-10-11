@@ -233,7 +233,13 @@ class ProviderService:
         if self.quota_manager is not None:
             try:
                 quota_result = self.quota_manager.commit(request_id=request_id)
-                if isinstance(quota_result, dict) and quota_result.get("status") == "ALREADY_COMMITTED":
+                if (
+                    isinstance(quota_result, dict)
+                    and quota_result.get("status") == "ALREADY_COMMITTED"
+                    and (cost_result is None or cost_result.get("saved") is not True)
+                ):
+                    # Quota may win the race before the first cost-ledger writer reaches
+                    # this point. A newly saved cost record still owns the health event.
                     duplicate_finalization = True
             except Exception as exc:
                 quota_result = {"status": "QUOTA_COMMIT_FAILED", "committed": False, "error_type": type(exc).__name__}
