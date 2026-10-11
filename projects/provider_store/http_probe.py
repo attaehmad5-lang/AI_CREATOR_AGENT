@@ -149,7 +149,7 @@ class ProviderHTTPConnectivityProbe:
             auth_scheme = provider.get("auth_scheme", default_scheme)
             allowed_auth_headers = {
                 "authorization", "x-api-key", "api-key", "xi-api-key",
-                "x-goog-api-key", "cartesia-api-key", "x-auth-token",
+                "x-goog-api-key", "cartesia-api-key", "x-auth-token", "x-key",
             }
             if (
                 not isinstance(header_name, str)
