@@ -6,6 +6,8 @@ from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.cost_policy import ProviderCostPolicy
+from projects.provider_store.credit_manager import ProviderCreditManager
+from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
@@ -122,6 +124,41 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(self.cost.ledger["projects"]["film"]["actual_spend"], 1.5)
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
         self.assertEqual(self.quota.data["requests"]["job-concurrent-finalize"]["status"], "COMMITTED")
+
+    def test_free_credit_route_reserves_and_finalizes_verified_credits(self):
+        credits = ProviderCreditManager(self.root / "service-credits.json")
+        credits.refresh(
+            "image",
+            lambda _: {
+                "verified": True,
+                "free_credits_remaining": 5.0,
+                "unit": "USD",
+                "source": "official-account-api",
+            },
+        )
+        router = ProviderRoutingManager(self.connections, credit_manager=credits)
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            health_manager=self.health,
+            credit_manager=credits,
+        )
+        route = service.route_request(
+            category="image", project_id="film", estimated_cost=1.0,
+            request_id="service-credit-job",
+        )
+        self.assertTrue(route["allowed"])
+        self.assertTrue(route["credit_reserved"])
+        self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
+        finalized = service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="service-credit-job",
+            estimated_cost=1.0, actual_cost=0.0, success=True,
+            billing_mode="FREE_CREDITS", credit_outcome="used",
+            actual_credit_amount=1.0,
+        )
+        self.assertTrue(finalized["finalized"])
+        self.assertEqual(finalized["credits"]["status"], "COMMITTED")
+        self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
 
     def test_unstarted_request_releases_reservations_only_when_explicitly_called(self):
         self.cost.reserve_usage(
