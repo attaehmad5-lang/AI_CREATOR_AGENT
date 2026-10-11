@@ -20,6 +20,15 @@ class RetryPolicyTests(unittest.TestCase):
         self.assertEqual(result.delay_seconds, 7)
         self.assertEqual(result.reason, "RATE_LIMIT_RETRY_AFTER")
 
+    def test_retry_after_is_capped_by_configured_maximum(self):
+        policy = RetryPolicy(
+            max_attempts=4, base_delay_seconds=1, max_delay_seconds=10,
+            jitter_fraction=0, random_fn=lambda: 0,
+        )
+        result = policy.decide(attempt=1, status_code=429, retry_after=999999)
+        self.assertTrue(result.retry)
+        self.assertEqual(result.delay_seconds, 10)
+
     def test_auth_and_nonretryable_errors_are_not_retried(self):
         policy = RetryPolicy()
         self.assertFalse(policy.decide(attempt=1, status_code=401).retry)
