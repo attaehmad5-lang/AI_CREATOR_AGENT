@@ -337,6 +337,16 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(state["status"], "ERROR")
         self.assertFalse(state["verified"])
 
+    def test_catalog_provider_credentials_resolve_from_environment_references(self):
+        catalog_path = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
+        manager = ConnectionManager(catalog_path, self.state_path)
+        status = manager.credential_status("google_image", {"GOOGLE_API_KEY": "test-only-secret"})
+        self.assertEqual(status["status"], "CREDENTIALS_PRESENT")
+        self.assertEqual(status["credential_name"], "GOOGLE_API_KEY")
+        self.assertNotIn("test-only-secret", repr(status))
+        missing = manager.credential_status("google_image", {})
+        self.assertEqual(missing["status"], "CREDENTIALS_MISSING")
+
     def test_connectivity_never_probes_with_expired_credentials(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
