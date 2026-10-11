@@ -20,8 +20,13 @@ class ProviderHealthManager:
         failure_threshold: int = 3,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        if history_limit < 1 or failure_threshold < 1:
-            raise ValueError("history_limit and failure_threshold must be >= 1")
+        if (
+            not isinstance(history_limit, int) or isinstance(history_limit, bool) or history_limit < 1
+            or not isinstance(failure_threshold, int) or isinstance(failure_threshold, bool) or failure_threshold < 1
+        ):
+            raise ValueError("history_limit and failure_threshold must be positive integers")
+        if clock is not None and not callable(clock):
+            raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.history_limit = history_limit
         self.failure_threshold = failure_threshold
@@ -94,7 +99,12 @@ class ProviderHealthManager:
     def active_probe(self, provider_id: str, probe: Any, *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         if not callable(probe):
             return {"provider": provider_id, "status": "INVALID_PROBE", "verified": False}
-        if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
+        if (
+            not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+        ):
             return {"provider": provider_id, "status": "INVALID_TIMEOUT", "verified": False}
         started = __import__("time").monotonic()
         try:
