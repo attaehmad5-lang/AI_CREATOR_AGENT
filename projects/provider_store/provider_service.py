@@ -167,6 +167,8 @@ class ProviderService:
             return {"status": "INVALID_CREDIT_AMOUNT", "finalized": False}
         if not self._valid_amount(estimated_cost) or not self._valid_amount(actual_cost):
             return {"status": "INVALID_COST_AMOUNT", "finalized": False}
+        if actual_cost > 0 and charge_outcome == "not_incurred":
+            return {"status": "INCONSISTENT_CHARGE_OUTCOME", "finalized": False}
         if latency_ms is not None and not self._valid_amount(latency_ms):
             return {"status": "INVALID_LATENCY", "finalized": False}
         cost_result: dict[str, Any] | None = None
@@ -190,9 +192,9 @@ class ProviderService:
                     cost_result = {"status": "REQUEST_ID_CONFLICT", "saved": False}
                 else:
                     cost_result = {"status": "DUPLICATE_REQUEST", "saved": True}
-            elif not success and actual_cost == 0:
-                # A failed started request with no reported charge is not proof of
-                # a free request. Unknown/uncertain outcomes retain the reservation.
+            elif estimated_cost > 0 and actual_cost == 0:
+                # A zero actual-cost report is not proof of no charge, even if the
+                # generation succeeded. Only explicit provider confirmation closes it.
                 try:
                     if charge_outcome == "not_incurred":
                         record_no_charge = getattr(self.cost_policy, "record_no_charge", None)
@@ -204,6 +206,7 @@ class ProviderService:
                                 provider_id=provider_id,
                                 estimated_cost=estimated_cost,
                                 request_id=request_id,
+                                success=success,
                             )
                     else:
                         release = getattr(self.cost_policy, "release_reservation", None)
