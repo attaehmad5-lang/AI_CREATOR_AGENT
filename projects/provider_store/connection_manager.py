@@ -790,7 +790,7 @@ class ConnectionManager:
         timeout_seconds: float = 5.0,
         environ: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Run an explicitly injected, timeout-aware probe; only success marks CONNECTED."""
+        """Run an explicitly injected probe; only persisted success marks CONNECTED."""
         import time
 
         provider = self.get_provider(provider_id)
@@ -807,104 +807,90 @@ class ConnectionManager:
             or timeout_seconds <= 0
         ):
             return {"status": "INVALID_TIMEOUT", "provider": provider_id, "verified": False}
+
+        def save_state(status: str) -> bool:
+            try:
+                result = self.set_state(provider_id, status)
+            except Exception:
+                return False
+            return isinstance(result, dict) and result.get("saved") is True
+
         try:
             configuration_result = self.get_provider_configuration(provider_id)
         except Exception as exc:
             return {
-                "status": "STATE_READ_FAILED",
-                "provider": provider_id,
-                "verified": False,
-                "error_type": type(exc).__name__,
+                "status": "STATE_READ_FAILED", "provider": provider_id,
+                "verified": False, "error_type": type(exc).__name__,
             }
         if configuration_result.get("status") not in {"CONFIGURED", "NO_CONFIGURATION"}:
-            try:
-                self.set_state(provider_id, "ERROR")
-            except Exception:
-                pass
+            if not save_state("ERROR"):
+                return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
             return {
                 "status": configuration_result.get("status", "INVALID_CONFIGURATION"),
-                "provider": provider_id,
-                "verified": False,
+                "provider": provider_id, "verified": False,
             }
         if configuration_result.get("configuration"):
             provider = dict(provider)
             provider["configuration"] = configuration_result["configuration"]
+
         credentials = self.credential_status(provider_id, environ)
         blocked_credential_states = {
-            "CREDENTIALS_MISSING",
-            "CREDENTIALS_EXPIRED",
-            "CREDENTIAL_EXPIRY_INVALID",
-            "INVALID_ENVIRONMENT",
-            "MANUAL_CONNECTION_REQUIRED",
+            "CREDENTIALS_MISSING", "CREDENTIALS_EXPIRED", "CREDENTIAL_EXPIRY_INVALID",
+            "INVALID_ENVIRONMENT", "MANUAL_CONNECTION_REQUIRED",
         }
         if credentials["status"] in blocked_credential_states:
-            try:
-                self.set_state(provider_id, "ERROR")
-            except Exception:
-                pass
+            if not save_state("ERROR"):
+                return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
             return {
-                "status": credentials["status"],
-                "provider": provider_id,
-                "verified": False,
+                "status": credentials["status"], "provider": provider_id, "verified": False,
             }
-        try:
-            self.set_state(provider_id, "CONNECTING")
-        except Exception as exc:
-            return {
-                "status": "STATE_SAVE_FAILED",
-                "provider": provider_id,
-                "verified": False,
-                "error_type": type(exc).__name__,
-            }
+        if not save_state("CONNECTING"):
+            return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
+
         started = time.monotonic()
         try:
             result = probe(dict(provider), timeout_seconds=float(timeout_seconds))
             if result is not True and not (isinstance(result, dict) and result.get("ok") is True):
-                try:
-                    self.set_state(provider_id, "ERROR")
-                except Exception:
+                if not save_state("ERROR"):
                     return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
                 return {
-                    "status": "CONNECTION_FAILED",
-                    "provider": provider_id,
-                    "verified": False,
+                    "status": "CONNECTION_FAILED", "provider": provider_id, "verified": False,
                     "latency_ms": round((time.monotonic() - started) * 1000, 2),
                 }
         except Exception as exc:
             name = type(exc).__name__.casefold()
-            if isinstance(exc, (TimeoutError,)) or "timeout" in name:
+            if isinstance(exc, TimeoutError) or "timeout" in name:
                 status = "TIMEOUT"
-            elif isinstance(exc, PermissionError) or any(term in name for term in ("auth", "unauthorized", "forbidden")):
+            elif isinstance(exc, PermissionError) or any(
+                term in name for term in ("auth", "unauthorized", "forbidden")
+            ):
                 status = "AUTHENTICATION_OR_PERMISSION_FAILED"
-            elif isinstance(exc, (ConnectionError, OSError)) or any(term in name for term in ("connection", "network")):
+            elif isinstance(exc, (ConnectionError, OSError)) or any(
+                term in name for term in ("connection", "network")
+            ):
                 status = "NETWORK_ERROR"
             else:
                 status = "PROBE_FAILED"
-            try:
-                self.set_state(provider_id, "ERROR")
-            except Exception:
+            if not save_state("ERROR"):
                 return {
-                    "status": "STATE_SAVE_FAILED",
-                    "provider": provider_id,
-                    "verified": False,
+                    "status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False,
                     "error_type": type(exc).__name__,
                 }
             return {
-                "status": status,
-                "provider": provider_id,
-                "verified": False,
+                "status": status, "provider": provider_id, "verified": False,
                 "error_type": type(exc).__name__,
                 "latency_ms": round((time.monotonic() - started) * 1000, 2),
             }
-        latency = round((time.monotonic() - started) * 1000, 2)
-        saved = self._mark_connected_after_probe(provider_id)
-        if not saved.get("saved"):
+
+        try:
+            saved = self._mark_connected_after_probe(provider_id)
+        except Exception:
+            saved = {"saved": False}
+        if not isinstance(saved, dict) or saved.get("saved") is not True:
             return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
         return {
-            "status": "CONNECTED",
-            "provider": provider_id,
-            "verified": True,
-            "latency_ms": latency,
+            "status": "CONNECTED", "provider": provider_id, "verified": True,
+            "latency_ms": round((time.monotonic() - started) * 1000, 2),
             "checked_at": saved["updated_at"],
         }
 
