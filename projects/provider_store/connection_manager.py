@@ -601,6 +601,8 @@ class ConnectionManager:
             return {"valid": False, "status": "HTTPS_REQUIRED"}
         if parsed.username is not None or parsed.password is not None:
             return {"valid": False, "status": "EMBEDDED_CREDENTIALS_REJECTED"}
+        if parsed.query:
+            return {"valid": False, "status": "QUERY_PARAMETERS_REJECTED"}
         if parsed.fragment:
             return {"valid": False, "status": "FRAGMENT_REJECTED"}
         normalized_host = hostname.casefold().rstrip(".")
