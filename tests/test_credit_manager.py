@@ -126,6 +126,27 @@ class ProviderCreditManagerTests(unittest.TestCase):
         self.assertEqual(duplicate["status"], "ALREADY_COMMITTED")
         self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 3.0})
 
+    def test_credit_snapshot_timestamp_cannot_regress(self):
+        self.manager.refresh(
+            "image-provider",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 5.0,
+                "unit": "USD", "source": "official-account-api",
+                "observed_at": self.now[0].isoformat(),
+            },
+        )
+        older = (self.now[0] - timedelta(seconds=1)).isoformat()
+        result = self.manager.refresh(
+            "image-provider",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 999.0,
+                "unit": "USD", "source": "official-account-api",
+                "observed_at": older,
+            },
+        )
+        self.assertEqual(result["status"], "CREDIT_SNAPSHOT_NOT_NEWER")
+        self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 5.0})
+
     def test_credit_refresh_rejects_snapshot_older_than_local_usage(self):
         self.manager.refresh(
             "image-provider",
