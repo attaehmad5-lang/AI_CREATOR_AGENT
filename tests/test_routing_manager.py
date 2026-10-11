@@ -214,6 +214,49 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
         self.assertEqual(quota.data["requests"]["job-1"]["provider_id"], "fallback")
 
+    def test_fallback_preserves_possible_charges_and_requires_new_attempt_id(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        quota = ProviderQuotaManager(
+            self.root / "quotas.json",
+            limits={"primary": {"hourly": 3}, "fallback": {"hourly": 3}},
+        )
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=policy, quota_manager=quota
+        )
+        router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary", "fallback"}, request_id="attempt-1",
+        )
+        same_id = router.select_fallback(
+            failed_provider="primary",
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary", "fallback"}, request_id="attempt-1",
+        )
+        self.assertEqual(same_id["status"], "NEW_FALLBACK_REQUEST_ID_REQUIRED")
+        self.assertEqual(
+            policy.ledger["projects"]["film"]["reservations"]["attempt-1"]["provider_id"],
+            "primary",
+        )
+        self.assertEqual(quota.data["requests"]["attempt-1"]["provider_id"], "primary")
+
+        fallback = router.select_fallback(
+            failed_provider="primary",
+            failed_request_id="attempt-1",
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary", "fallback"}, request_id="attempt-2",
+        )
+        self.assertEqual(fallback["provider"], "fallback")
+        self.assertEqual(
+            policy.ledger["projects"]["film"]["reservations"]["attempt-1"]["provider_id"],
+            "primary",
+        )
+        self.assertEqual(
+            policy.ledger["projects"]["film"]["reservations"]["attempt-2"]["provider_id"],
+            "fallback",
+        )
+        self.assertEqual(quota.data["requests"]["attempt-1"]["provider_id"], "primary")
+        self.assertEqual(quota.data["requests"]["attempt-2"]["provider_id"], "fallback")
+
     def test_quota_enabled_routing_requires_request_id(self):
         quota = ProviderQuotaManager(
             self.root / "quotas.json", limits={"primary": {"daily": 2}}
