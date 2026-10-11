@@ -1,4 +1,4 @@
-"""Persistent, concurrency-safe provider request quotas with reserve/commit/release."""
+"""Persistent, process-local concurrency-safe quotas with reserve/commit/release."""
 from __future__ import annotations
 
 import json
