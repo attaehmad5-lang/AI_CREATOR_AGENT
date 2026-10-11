@@ -41,6 +41,7 @@ class ConnectionManager:
         self.catalog_path = Path(catalog_path) if catalog_path else self._default_catalog()
         self.state_path = Path(state_path) if state_path else DEFAULT_STATE
         self.catalog = self._load_json(self.catalog_path)
+        self.validate_catalog_schema(self.catalog, raise_on_error=True)
         self.state = self._load_json(self.state_path, default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}})
         self.state.setdefault("providers", {})
         # Runtime instances are intentionally process-local and never serialized.
@@ -95,6 +96,55 @@ class ConnectionManager:
 
     def _save(self) -> None:
         self._atomic_write_json(self.state_path, self.state)
+
+    @staticmethod
+    def validate_catalog_schema(
+        catalog: dict[str, Any], *, raise_on_error: bool = False
+    ) -> dict[str, Any]:
+        """Validate catalog structure, provider identities, and safe metadata fields."""
+        errors: list[str] = []
+        if not isinstance(catalog, dict):
+            errors.append("catalog must be an object")
+        else:
+            providers = catalog.get("providers")
+            if not isinstance(providers, list):
+                errors.append("providers must be a list")
+            else:
+                seen: set[str] = set()
+                for index, provider in enumerate(providers):
+                    if not isinstance(provider, dict):
+                        errors.append(f"providers[{index}] must be an object")
+                        continue
+                    provider_id = provider.get("id")
+                    if not isinstance(provider_id, str) or not provider_id.strip():
+                        errors.append(f"providers[{index}].id must be a non-empty string")
+                    elif provider_id in seen:
+                        errors.append(f"duplicate provider id: {provider_id}")
+                    else:
+                        seen.add(provider_id)
+                    for key in ("name", "category", "auth_type", "connection_type"):
+                        if key in provider and not isinstance(provider[key], str):
+                            errors.append(f"providers[{index}].{key} must be a string")
+                    if "enabled" in provider and not isinstance(provider["enabled"], bool):
+                        errors.append(f"providers[{index}].enabled must be boolean")
+                    if "capabilities" in provider and not (
+                        isinstance(provider["capabilities"], list)
+                        and all(isinstance(item, str) for item in provider["capabilities"])
+                    ):
+                        errors.append(f"providers[{index}].capabilities must be a list of strings")
+                    sensitive_keys = {
+                        str(key).casefold().replace("-", "_")
+                        for key in provider
+                    }
+                    if any(
+                        key in sensitive_keys
+                        for key in ("api_key", "api_token", "access_token", "refresh_token", "password", "secret", "credential_value")
+                    ):
+                        errors.append(f"providers[{index}] contains a forbidden credential value field")
+        result = {"valid": not errors, "errors": errors, "provider_count": len(catalog.get("providers", [])) if isinstance(catalog, dict) and isinstance(catalog.get("providers"), list) else 0}
+        if errors and raise_on_error:
+            raise ValueError("Invalid provider catalog: " + "; ".join(errors))
+        return result
 
     def list_providers(self) -> list[dict[str, Any]]:
         providers = self.catalog.get("providers", [])
