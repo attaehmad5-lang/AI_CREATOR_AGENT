@@ -30,7 +30,8 @@
       "enabled": true,
       "allowed_hosts": [
         "image.pollinations.ai"
-      ]
+      ],
+      "zero_cost_allowed": true
     },
     {
       "id": "openai_image",
