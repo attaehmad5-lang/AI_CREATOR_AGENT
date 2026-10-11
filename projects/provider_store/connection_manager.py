@@ -1029,6 +1029,12 @@ class ConnectionManager:
             return {"status": "NOT_FOUND", "provider": provider_id}
 
         auth_type = str(provider.get("auth_type", "NONE")).upper()
+        if auth_type in {"ACCOUNT", "MANUAL", "MANUAL_CONNECT", "OAUTH_BROWSER"}:
+            return {
+                "provider": provider_id,
+                "status": "MANUAL_CONNECTION_REQUIRED",
+                "credential_present": False,
+            }
         token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env")
         if not token_env:
             token_env = {
