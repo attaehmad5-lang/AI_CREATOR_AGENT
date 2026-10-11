@@ -104,6 +104,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
                 "verified": True,
                 "free_credits_remaining": 2.0,
                 "source": "official-account-api",
+                "unit": "USD",
             },
         )
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
@@ -114,6 +115,25 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "fallback")
         self.assertEqual(result["billing_mode"], "FREE_CREDITS")
+
+    def test_credit_balance_with_incompatible_unit_cannot_authorize_route(self):
+        credits = ProviderCreditManager(self.root / "credits-units.json")
+        credits.refresh(
+            "fallback",
+            lambda _: {
+                "verified": True,
+                "free_credits_remaining": 100.0,
+                "source": "official-account-api",
+                "unit": "credits",
+            },
+        )
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=policy, credit_manager=credits
+        )
+        result = router.route(category="image", project_id="film", estimated_cost=1.0)
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
 
     def test_routing_rejects_unverified_credit_overrides(self):
         credits = ProviderCreditManager(self.root / "credits.json")
