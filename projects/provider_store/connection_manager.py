@@ -383,6 +383,71 @@ class ConnectionManager:
         self._save()
         return {"provider": provider_id, **record, "saved": True}
 
+    def verify_connectivity(
+        self,
+        provider_id: str,
+        probe: Any,
+        *,
+        timeout_seconds: float = 5.0,
+        environ: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Run an explicitly injected, timeout-aware probe; only success marks CONNECTED."""
+        import time
+
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "verified": False}
+        if provider.get("enabled") is False:
+            return {"status": "DISABLED", "provider": provider_id, "verified": False}
+        if not callable(probe):
+            return {"status": "INVALID_PROBE", "provider": provider_id, "verified": False}
+        if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
+            return {"status": "INVALID_TIMEOUT", "provider": provider_id, "verified": False}
+        credentials = self.credential_status(provider_id, environ)
+        if credentials["status"] == "CREDENTIALS_MISSING":
+            return {"status": "CREDENTIALS_MISSING", "provider": provider_id, "verified": False}
+        self.set_state(provider_id, "CONNECTING")
+        started = time.monotonic()
+        try:
+            result = probe(dict(provider), timeout_seconds=float(timeout_seconds))
+            if result is not True and not (isinstance(result, dict) and result.get("ok") is True):
+                self.set_state(provider_id, "ERROR")
+                return {
+                    "status": "CONNECTION_FAILED",
+                    "provider": provider_id,
+                    "verified": False,
+                    "latency_ms": round((time.monotonic() - started) * 1000, 2),
+                }
+        except Exception as exc:
+            name = type(exc).__name__.casefold()
+            if isinstance(exc, (TimeoutError,)) or "timeout" in name:
+                status = "TIMEOUT"
+            elif isinstance(exc, PermissionError) or any(term in name for term in ("auth", "unauthorized", "forbidden")):
+                status = "AUTHENTICATION_OR_PERMISSION_FAILED"
+            elif isinstance(exc, (ConnectionError, OSError)) or any(term in name for term in ("connection", "network")):
+                status = "NETWORK_ERROR"
+            else:
+                status = "PROBE_FAILED"
+            self.set_state(provider_id, "ERROR")
+            return {
+                "status": status,
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+                "latency_ms": round((time.monotonic() - started) * 1000, 2),
+            }
+        latency = round((time.monotonic() - started) * 1000, 2)
+        saved = self.set_state(provider_id, "CONNECTED", verified=True)
+        if not saved.get("saved"):
+            return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
+        return {
+            "status": "CONNECTED",
+            "provider": provider_id,
+            "verified": True,
+            "latency_ms": latency,
+            "checked_at": saved["updated_at"],
+        }
+
     def credential_status(self, provider_id: str, environ: dict[str, str] | None = None) -> dict[str, Any]:
         provider = self.get_provider(provider_id)
         if provider is None:
