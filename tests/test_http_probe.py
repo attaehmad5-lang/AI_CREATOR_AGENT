@@ -99,6 +99,21 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         self.assertNotIn(secret_body.decode(), str(caught.exception))
         self.assertEqual(len(opener.calls), 1)
 
+    def test_redirects_are_rejected_and_http_error_response_is_closed(self):
+        error = HTTPError(
+            "https://api.example.com/health", 302, "Found",
+            {"Location": "https://evil.example.com/redirect"}, None,
+        )
+        opener = _Opener(error=error)
+        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        with self.assertRaises(ConnectionError):
+            probe({
+                "id": "public_provider", "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertTrue(error.closed)
+
     def test_manual_account_auth_is_not_faked_by_http_probe(self):
         opener = _Opener()
         probe = ProviderHTTPConnectivityProbe(opener=opener)
