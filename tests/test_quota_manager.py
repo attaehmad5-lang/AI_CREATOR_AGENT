@@ -10,8 +10,11 @@ from projects.provider_store.quota_manager import ProviderQuotaManager
 
 def _reserve_quota_in_process(args):
     state_path, request_id = args
+    fixed_now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
     manager = ProviderQuotaManager(
-        state_path, limits={"image": {"hourly": 3}}
+        state_path,
+        limits={"image": {"hourly": 3}},
+        clock=lambda: fixed_now,
     )
     return manager.reserve(
         provider_id="image", request_id=request_id
