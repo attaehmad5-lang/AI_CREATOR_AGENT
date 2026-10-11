@@ -900,7 +900,7 @@ class ConnectionManager:
             return {"status": "NOT_FOUND", "provider": provider_id}
 
         auth_type = str(provider.get("auth_type", "NONE")).upper()
-        token_env = provider.get("token_env")
+        token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env")
         if not token_env:
             token_env = {
                 "huggingface": "HF_TOKEN",
@@ -940,6 +940,8 @@ class ConnectionManager:
             return {"provider": provider_id, "status": "NO_CREDENTIAL_REQUIRED", "credential_present": True}
         if not token_env:
             return {"provider": provider_id, "status": "MANUAL_CONNECTION_REQUIRED", "credential_present": False}
+        if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
+            return {"provider": provider_id, "status": "INVALID_ENVIRONMENT", "credential_present": False}
 
         if environ is not None and not isinstance(environ, dict):
             return {"provider": provider_id, "status": "INVALID_ENVIRONMENT", "credential_present": False}
