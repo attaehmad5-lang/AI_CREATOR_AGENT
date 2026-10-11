@@ -277,6 +277,56 @@ class ProviderCostPolicy:
                 "budget_remaining": round(remaining - float(estimated_cost), 6),
             }
 
+    def record_no_charge(
+        self,
+        *,
+        project_id: str,
+        provider_id: str,
+        estimated_cost: float,
+        request_id: str,
+    ) -> dict[str, Any]:
+        """Persist a terminal, idempotent record when the provider confirms no charge."""
+        if not all(isinstance(v, str) and v.strip() for v in (project_id, provider_id, request_id)):
+            return {"status": "INVALID_USAGE_RECORD", "saved": False}
+        if not self._valid_amount(estimated_cost):
+            return {"status": "INVALID_COST_AMOUNT", "saved": False}
+        with self._transaction():
+            project = self.ledger["projects"].setdefault(
+                project_id, {"actual_spend": 0.0, "requests": {}, "reservations": {}}
+            )
+            requests = project.setdefault("requests", {})
+            existing = requests.get(request_id)
+            if existing is not None:
+                if (
+                    isinstance(existing, dict)
+                    and existing.get("provider_id") == provider_id
+                    and existing.get("estimated_cost") == float(estimated_cost)
+                    and existing.get("actual_cost") == 0.0
+                    and existing.get("charge_outcome") == "not_incurred"
+                ):
+                    return {"status": "DUPLICATE_REQUEST", "saved": True, "request_id": request_id}
+                return {"status": "REQUEST_ID_CONFLICT", "saved": False, "request_id": request_id}
+            reservations = project.setdefault("reservations", {})
+            reservation = reservations.get(request_id)
+            if reservation is not None and (
+                not isinstance(reservation, dict)
+                or reservation.get("provider_id") != provider_id
+                or reservation.get("estimated_cost") != float(estimated_cost)
+            ):
+                return {"status": "REQUEST_ID_CONFLICT", "saved": False, "request_id": request_id}
+            reservations.pop(request_id, None)
+            requests[request_id] = {
+                "provider_id": provider_id,
+                "estimated_cost": float(estimated_cost),
+                "actual_cost": 0.0,
+                "variance": round(-float(estimated_cost), 6),
+                "charge_outcome": "not_incurred",
+                "recorded_at": datetime.now(timezone.utc).isoformat(),
+            }
+            if self.ledger_path:
+                self._save()
+            return {"status": "NO_CHARGE_RECORDED", "saved": True, "request_id": request_id}
+
     def release_reservation(
         self,
         *,
