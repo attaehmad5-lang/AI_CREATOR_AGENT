@@ -122,6 +122,8 @@ class ProviderRoutingManager:
                 "status": "PROVIDER_DISCOVERY_FAILED",
                 "error_type": type(exc).__name__,
             }
+        if not isinstance(discovered, list):
+            return {"allowed": False, "status": "PROVIDER_DISCOVERY_FAILED", "reason": "INVALID_DISCOVERY_RESULT"}
 
         candidates: list[dict[str, Any]] = []
         decisions: list[dict[str, Any]] = []
@@ -135,14 +137,20 @@ class ProviderRoutingManager:
                 continue
             health_record: dict[str, Any] = {}
             if self.health_manager is not None:
-                health = self.health_manager.is_eligible(provider_id)
+                try:
+                    health = self.health_manager.is_eligible(provider_id)
+                except Exception as exc:
+                    decisions.append({"provider": provider_id, "status": "HEALTH_CHECK_FAILED", "error_type": type(exc).__name__})
+                    continue
                 if not isinstance(health, dict) or health.get("eligible") is not True:
                     decisions.append({
                         "provider": provider_id,
                         "status": health.get("status", "HEALTH_UNKNOWN") if isinstance(health, dict) else "HEALTH_UNKNOWN",
                     })
                     continue
-                raw_health = getattr(self.health_manager, "data", {}).get("providers", {}).get(provider_id, {})
+                raw_data = getattr(self.health_manager, "data", {})
+                raw_providers = raw_data.get("providers", {}) if isinstance(raw_data, dict) else {}
+                raw_health = raw_providers.get(provider_id, {}) if isinstance(raw_providers, dict) else {}
                 if isinstance(raw_health, dict):
                     health_record = raw_health
             cost = estimates.get(provider_id, estimated_cost)
@@ -178,14 +186,18 @@ class ProviderRoutingManager:
             cost = provider["_route_cost"]
             credit = credits.get(provider_id, 0.0)
             if self.cost_policy is not None:
-                decision = self.cost_policy.evaluate_request(
-                    provider,
-                    project_id=project_id,
-                    estimated_cost=cost,
-                    free_credits_remaining=credit,
-                    paid_usage_approved=provider_id in approvals,
-                )
-                if not decision.get("allowed"):
+                try:
+                    decision = self.cost_policy.evaluate_request(
+                        provider,
+                        project_id=project_id,
+                        estimated_cost=cost,
+                        free_credits_remaining=credit,
+                        paid_usage_approved=provider_id in approvals,
+                    )
+                except Exception as exc:
+                    decisions.append({"provider": provider_id, "status": "COST_POLICY_FAILED", "error_type": type(exc).__name__})
+                    continue
+                if not isinstance(decision, dict) or not decision.get("allowed"):
                     decisions.append({"provider": provider_id, "status": decision.get("status", "POLICY_REJECTED")})
                     continue
                 return {
@@ -222,6 +234,8 @@ class ProviderRoutingManager:
         """Route around a failed provider without retrying that same provider."""
         if not isinstance(failed_provider, str) or not failed_provider.strip():
             return {"allowed": False, "status": "INVALID_FAILED_PROVIDER"}
+        if not isinstance(route_options.get("category"), str) or not isinstance(route_options.get("project_id"), str):
+            return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_AND_PROJECT_REQUIRED"}
         excluded = route_options.get("excluded_providers", frozenset())
         if not isinstance(excluded, (set, frozenset)):
             return {"allowed": False, "status": "INVALID_EXCLUDED_PROVIDER_SET"}
