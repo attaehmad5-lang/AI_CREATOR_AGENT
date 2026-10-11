@@ -163,6 +163,34 @@ class ConnectionManagerTests(unittest.TestCase):
             "NOT_FOUND",
         )
 
+    def test_unload_provider_calls_close_and_removes_instance(self):
+        class Closable:
+            def __init__(self):
+                self.closed = False
+            def close(self):
+                self.closed = True
+        instance = Closable()
+        self.manager.load_provider("public_image", lambda metadata: instance)
+        result = self.manager.unload_provider("public_image")
+        self.assertEqual(result["status"], "UNLOADED")
+        self.assertTrue(instance.closed)
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_unload_provider_preserves_instance_if_cleanup_fails(self):
+        class BrokenCleanup:
+            def close(self):
+                raise RuntimeError("sensitive endpoint details")
+        instance = BrokenCleanup()
+        self.manager.load_provider("public_image", lambda metadata: instance)
+        result = self.manager.unload_provider("public_image")
+        self.assertEqual(result["status"], "UNLOAD_FAILED")
+        self.assertNotIn("sensitive endpoint details", repr(result))
+        self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
+
+    def test_unload_provider_reports_not_loaded_and_unknown(self):
+        self.assertEqual(self.manager.unload_provider("public_image")["status"], "NOT_LOADED")
+        self.assertEqual(self.manager.unload_provider("missing")["status"], "NOT_FOUND")
+
 
 if __name__ == "__main__":
     unittest.main()
