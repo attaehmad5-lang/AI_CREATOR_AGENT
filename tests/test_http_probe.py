@@ -213,6 +213,17 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             probe(provider, timeout_seconds=float("inf"))
 
+    def test_null_authentication_type_is_rejected(self):
+        opener = _Opener()
+        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        with self.assertRaisesRegex(ValueError, "INVALID_AUTH_TYPE"):
+            probe({
+                "id": "p", "auth_type": None,
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertEqual(opener.calls, [])
+
     def test_missing_host_allowlist_is_rejected_before_network(self):
         opener = _Opener()
         probe = ProviderHTTPConnectivityProbe(opener=opener)
