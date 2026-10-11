@@ -59,6 +59,36 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertEqual(result["provider"], "free")
         self.assertEqual(result["billing_mode"], "FREE_CREDITS")
 
+    def test_provider_selection_rejects_malformed_credit_amount_without_crashing(self):
+        result = self.policy.select_provider(
+            [{"id": "free", "enabled": True}],
+            project_id="documentary",
+            estimated_costs={"free": 1.0},
+            free_credits={"free": "not-a-number"},
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertEqual(result["decisions"][0]["status"], "INVALID_COST_AMOUNT")
+
+    def test_provider_selection_rejects_invalid_credit_map_type(self):
+        result = self.policy.select_provider(
+            [{"id": "free", "enabled": True}],
+            project_id="documentary",
+            estimated_costs={"free": 1.0},
+            free_credits=["invalid"],
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "INVALID_FREE_CREDIT_MAP")
+
+    def test_provider_selection_rejects_invalid_selection_input(self):
+        result = self.policy.select_provider(
+            "not-a-provider-list",
+            project_id="documentary",
+            estimated_costs={"free": 1.0},
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "INVALID_SELECTION_INPUT")
+
     def test_reconciliation_is_idempotent_and_persists_actual_usage(self):
         first = self.policy.reconcile_usage(
             project_id="documentary", provider_id="paid", estimated_cost=1.0,
