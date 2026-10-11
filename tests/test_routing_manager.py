@@ -42,6 +42,25 @@ class ProviderRoutingManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_routing_rejects_unverified_provider_even_if_catalog_label_says_connected(self):
+        self.connections.set_state("primary", "READY")
+        router = ProviderRoutingManager(self.connections)
+        result = router.route(
+            category="image", project_id="film", excluded_providers={"fallback"}
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertEqual(result["decisions"][0]["status"], "CONNECTION_NOT_VERIFIED")
+
+    def test_explicit_catalog_only_planning_can_skip_connection_evidence(self):
+        self.connections.set_state("primary", "READY")
+        router = ProviderRoutingManager(self.connections, require_verified_connection=False)
+        result = router.route(
+            category="image", project_id="film", excluded_providers={"fallback"}
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "primary")
+
     def test_primary_route_skips_disabled_and_orders_by_priority(self):
         router = ProviderRoutingManager(self.connections)
         result = router.route(category="image", project_id="film")
