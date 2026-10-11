@@ -201,6 +201,17 @@ class ProviderCostPolicyTests(unittest.TestCase):
             "RESERVATION_NOT_FOUND",
         )
 
+    def test_malformed_charge_outcomes_fail_closed_without_exception(self):
+        for value in ([], {}, 1, None):
+            with self.subTest(value=value):
+                result = self.policy.release_reservation(
+                    project_id="documentary",
+                    request_id="invalid-charge-outcome",
+                    charge_outcome=value,
+                )
+                self.assertEqual(result["status"], "INVALID_CHARGE_OUTCOME")
+                self.assertFalse(result["saved"])
+
     def test_unknown_charge_outcome_does_not_free_quota_for_another_request(self):
         self.policy.reserve_usage(
             project_id="documentary", provider_id="paid", estimated_cost=4.0, request_id="timeout-job"
