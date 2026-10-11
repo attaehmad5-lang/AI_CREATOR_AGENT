@@ -8,6 +8,7 @@ from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
+from projects.provider_store.credit_manager import ProviderCreditManager
 
 
 class ProviderRoutingManagerTests(unittest.TestCase):
@@ -94,6 +95,33 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+
+    def test_verified_credit_manager_drives_free_first_routing(self):
+        credits = ProviderCreditManager(self.root / "credits.json")
+        credits.refresh(
+            "fallback",
+            lambda _: {
+                "verified": True,
+                "free_credits_remaining": 2.0,
+                "source": "official-account-api",
+            },
+        )
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=policy, credit_manager=credits
+        )
+        result = router.route(category="image", project_id="film", estimated_cost=1.0)
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["billing_mode"], "FREE_CREDITS")
+
+    def test_routing_rejects_unverified_credit_overrides(self):
+        credits = ProviderCreditManager(self.root / "credits.json")
+        router = ProviderRoutingManager(self.connections, credit_manager=credits)
+        result = router.route(
+            category="image", project_id="film", free_credits={"primary": 999.0}
+        )
+        self.assertEqual(result["status"], "UNVERIFIED_FREE_CREDIT_INPUT_REJECTED")
 
     def test_cost_policy_selects_free_credit_provider_before_paid_fallback(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
