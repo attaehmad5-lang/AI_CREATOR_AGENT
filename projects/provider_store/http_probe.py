@@ -5,6 +5,7 @@ an endpoint supports generation or that a provider has available credits.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 from typing import Any
@@ -64,6 +65,7 @@ class ProviderHTTPConnectivityProbe:
         if (
             not isinstance(timeout_seconds, (int, float))
             or isinstance(timeout_seconds, bool)
+            or not math.isfinite(timeout_seconds)
             or timeout_seconds <= 0
         ):
             raise ValueError("timeout_seconds must be positive")
@@ -75,6 +77,8 @@ class ProviderHTTPConnectivityProbe:
         if not isinstance(endpoint, str) or not endpoint.strip():
             raise ValueError("ENDPOINT_NOT_CONFIGURED")
         allowed_hosts = provider.get("allowed_hosts")
+        if not isinstance(allowed_hosts, (list, set, tuple)) or not allowed_hosts:
+            raise ValueError("HOST_ALLOWLIST_REQUIRED")
         validation = ConnectionManager.validate_endpoint(
             endpoint,
             allowed_hosts=allowed_hosts if isinstance(allowed_hosts, (list, set, tuple)) else None,
