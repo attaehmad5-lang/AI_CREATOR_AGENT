@@ -202,11 +202,15 @@ class ConnectionManager:
             raise ValueError("Invalid provider catalog: " + "; ".join(errors))
         return result
 
-    def list_providers(self) -> list[dict[str, Any]]:
+    def _list_providers_unlocked(self) -> list[dict[str, Any]]:
         providers = self.catalog.get("providers", [])
         if not isinstance(providers, list):
             raise ValueError("Provider catalog 'providers' must be a list")
         return [item for item in providers if isinstance(item, dict)]
+
+    def list_providers(self) -> list[dict[str, Any]]:
+        with self._catalog_transaction():
+            return self._list_providers_unlocked()
 
     def get_provider(self, provider_id: str) -> dict[str, Any] | None:
         return next((p for p in self.list_providers() if p.get("id") == provider_id), None)
@@ -240,7 +244,7 @@ class ConnectionManager:
         if not isinstance(enabled, bool):
             return {"status": "INVALID_ENABLED_VALUE", "provider": provider_id, "saved": False}
         with self._catalog_transaction():
-            providers = self.list_providers()
+            providers = self._list_providers_unlocked()
             index = next((i for i, item in enumerate(providers) if item.get("id") == provider_id), None)
             if index is None:
                 return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
@@ -437,7 +441,7 @@ class ConnectionManager:
             return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id}
 
         with self._catalog_transaction():
-            providers = self.list_providers()
+            providers = self._list_providers_unlocked()
             existing = next((item for item in providers if item.get("id") == provider_id), None)
             if existing is not None and not overwrite:
                 return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
