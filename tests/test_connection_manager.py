@@ -462,6 +462,46 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("private", repr(api_key))
         self.assertNotIn("private", repr(credential))
 
+    def test_manual_account_session_is_verified_without_persisting_session_data(self):
+        registered = self.manager.register_provider({
+            "id": "manual_music", "name": "Manual Music", "category": "music",
+            "auth_type": "ACCOUNT", "connection_type": "BROWSER_SESSION", "enabled": True,
+        })
+        self.assertTrue(registered["saved"])
+        session = {"access_token": "manual-session-secret"}
+        seen = []
+        result = self.manager.verify_manual_connection(
+            "manual_music", session,
+            lambda provider, *, session, timeout_seconds: seen.append(session) or {"ok": True},
+            timeout_seconds=3.0,
+        )
+        self.assertEqual(result["status"], "CONNECTED")
+        self.assertTrue(result["verified"])
+        self.assertEqual(seen, [session])
+        self.assertNotIn("manual-session-secret", repr(result))
+        self.assertNotIn("manual-session-secret", self.catalog_path.read_text(encoding="utf-8"))
+        self.assertNotIn("manual-session-secret", self.state_path.read_text(encoding="utf-8"))
+        self.assertNotIn("session", self.manager.get_state("manual_music"))
+
+    def test_manual_account_connection_requires_session_and_account_auth_type(self):
+        called = []
+        missing = self.manager.verify_manual_connection(
+            "token_image", object(),
+            lambda provider, **kwargs: called.append(True) or {"ok": True},
+        )
+        self.assertEqual(missing["status"], "MANUAL_CONNECTION_NOT_APPLICABLE")
+        no_session = self.manager.register_provider({
+            "id": "manual_without_session", "name": "Manual", "category": "music",
+            "auth_type": "ACCOUNT", "connection_type": "BROWSER_SESSION", "enabled": True,
+        })
+        self.assertTrue(no_session["saved"])
+        result = self.manager.verify_manual_connection(
+            "manual_without_session", None,
+            lambda provider, **kwargs: called.append(True) or {"ok": True},
+        )
+        self.assertEqual(result["status"], "MANUAL_SESSION_REQUIRED")
+        self.assertEqual(called, [])
+
     def test_connectivity_fails_closed_when_state_cannot_be_read_or_saved(self):
         self.state_path.write_text("{invalid-json", encoding="utf-8")
         called = []
