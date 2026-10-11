@@ -9,6 +9,7 @@ import json
 import math
 import os
 import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ class ProviderCostPolicy:
         project_budgets: dict[str, float] | None = None,
     ) -> None:
         self.ledger_path = Path(ledger_path) if ledger_path else None
+        self._lock = threading.RLock()
         if project_budgets is not None and not isinstance(project_budgets, dict):
             raise ValueError("project_budgets must be a mapping")
         self.project_budgets = dict(project_budgets or {})
@@ -47,6 +49,16 @@ class ProviderCostPolicy:
                     raise ValueError("Invalid usage ledger requests")
                 if any(not isinstance(request_id, str) or not isinstance(record, dict) for request_id, record in requests.items()):
                     raise ValueError("Invalid usage ledger request record")
+                reservations = project.get("reservations", {})
+                if not isinstance(reservations, dict):
+                    raise ValueError("Invalid usage ledger reservations")
+                if any(
+                    not isinstance(request_id, str)
+                    or not isinstance(record, dict)
+                    or not self._valid_amount(record.get("estimated_cost"))
+                    for request_id, record in reservations.items()
+                ):
+                    raise ValueError("Invalid usage ledger reservation record")
             self.ledger = loaded
             self.ledger.setdefault("projects", {})
 
@@ -57,6 +69,17 @@ class ProviderCostPolicy:
     def _spent(self, project_id: str) -> float:
         project = self.ledger["projects"].get(project_id, {})
         return float(project.get("actual_spend", 0.0)) if isinstance(project, dict) else 0.0
+
+    def _reserved(self, project_id: str) -> float:
+        project = self.ledger["projects"].get(project_id, {})
+        reservations = project.get("reservations", {}) if isinstance(project, dict) else {}
+        if not isinstance(reservations, dict):
+            return 0.0
+        return sum(
+            float(record["estimated_cost"])
+            for record in reservations.values()
+            if isinstance(record, dict) and self._valid_amount(record.get("estimated_cost"))
+        )
 
     def evaluate_request(
         self,
@@ -101,7 +124,7 @@ class ProviderCostPolicy:
             }
         if not self._valid_amount(budget):
             return {"allowed": False, "status": "INVALID_PROJECT_BUDGET", "provider": provider["id"]}
-        remaining = max(0.0, budget - self._spent(project_id))
+        remaining = max(0.0, budget - self._spent(project_id) - self._reserved(project_id))
         if estimated_cost > remaining:
             return {
                 "allowed": False, "status": "PROJECT_BUDGET_EXCEEDED",
