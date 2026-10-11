@@ -196,8 +196,9 @@ class ConnectionManager:
                         if key in provider and not isinstance(provider[key], str):
                             errors.append(f"providers[{index}].{key} must be a string")
                     auth_types = {
-                        "NONE", "API_KEY", "API_TOKEN", "ACCOUNT", "ACCOUNT_OR_API",
-                        "ACCOUNT_OR_LOCAL", "API_KEY_OR_ACCOUNT", "API_KEY_OR_SERVICE_ACCOUNT",
+                        "NONE", "API_KEY", "API_TOKEN", "ACCOUNT", "MANUAL",
+                        "MANUAL_CONNECT", "OAUTH_BROWSER", "ACCOUNT_OR_API", "ACCOUNT_OR_LOCAL",
+                        "API_KEY_OR_ACCOUNT", "API_KEY_OR_SERVICE_ACCOUNT",
                     }
                     connection_types = {
                         "API", "ACCOUNT_OR_API", "API_OR_ACCOUNT", "LOCAL_OR_ACCOUNT",
