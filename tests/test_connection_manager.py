@@ -525,6 +525,12 @@ class ConnectionManagerTests(unittest.TestCase):
             )["status"],
             "QUERY_PARAMETERS_REJECTED",
         )
+        self.assertEqual(
+            self.manager.configure_provider(
+                "public_image", endpoint="https://provider.example/api"
+            )["status"],
+            "HOST_ALLOWLIST_REQUIRED",
+        )
         self.assertNotIn("configuration", self.manager.get_state("public_image"))
 
 
