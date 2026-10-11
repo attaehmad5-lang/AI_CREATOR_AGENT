@@ -108,6 +108,44 @@ class ConnectionManager:
     def provider_exists(self, provider_id: str) -> bool:
         return self.get_provider(provider_id) is not None
 
+    def set_provider_enabled(
+        self, provider_id: str, enabled: bool
+    ) -> dict[str, Any]:
+        """Enable/disable catalog eligibility only; never purchases or proves connectivity."""
+        if not isinstance(enabled, bool):
+            return {"status": "INVALID_ENABLED_VALUE", "provider": provider_id, "saved": False}
+        providers = self.list_providers()
+        index = next((i for i, item in enumerate(providers) if item.get("id") == provider_id), None)
+        if index is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+        updated = [dict(item) for item in providers]
+        updated[index]["enabled"] = enabled
+        new_catalog = dict(self.catalog)
+        new_catalog["providers"] = updated
+        self._atomic_write_json(self.catalog_path, new_catalog)
+        self.catalog = new_catalog
+        if not enabled and provider_id in self._loaded_providers:
+            unload_result = self.unload_provider(provider_id)
+            if unload_result["status"] not in {"UNLOADED", "NOT_LOADED"}:
+                # The catalog remains disabled even if cleanup failed: fail closed.
+                return {
+                    "status": "DISABLED_CLEANUP_FAILED",
+                    "provider": provider_id,
+                    "saved": True,
+                    "runtime_unloaded": False,
+                }
+        return {
+            "status": "ENABLED" if enabled else "DISABLED",
+            "provider": provider_id,
+            "saved": True,
+            "runtime_unloaded": not enabled,
+            "note": "Eligibility only; no purchase, billing, or live connectivity check performed.",
+        }
+
+    def is_provider_enabled(self, provider_id: str) -> bool:
+        provider = self.get_provider(provider_id)
+        return provider is not None and provider.get("enabled") is True
+
     def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
         """Instantiate a provider through an injected factory, without dynamic imports."""
         provider = self.get_provider(provider_id)
