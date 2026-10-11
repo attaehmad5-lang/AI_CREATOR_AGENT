@@ -98,7 +98,7 @@ class ProviderOutputValidator:
         if (
             not isinstance(path, (str, Path))
             or not str(path).strip()
-            or "\\x00" in str(path)
+            or "\x00" in str(path)
         ):
             return {"valid": False, "status": "INVALID_PATH"}
         artifact = Path(path)
