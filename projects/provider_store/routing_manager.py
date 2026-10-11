@@ -296,36 +296,63 @@ class ProviderRoutingManager:
             "decisions": decisions,
         }
 
-    def select_fallback(self, *, failed_provider: str, **route_options: Any) -> dict[str, Any]:
-        """Route around a failed provider without retrying that same provider."""
+    def select_fallback(
+        self,
+        *,
+        failed_provider: str,
+        release_reservations: bool = False,
+        failed_request_id: str | None = None,
+        **route_options: Any,
+    ) -> dict[str, Any]:
+        """Route around a failed provider without assuming its request was free.
+
+        By default, reservations are retained because a failed API call may still
+        consume quota or incur cost. Release them only when the caller knows the
+        provider request did not start or could not be billed.
+        """
         if not isinstance(failed_provider, str) or not failed_provider.strip():
             return {"allowed": False, "status": "INVALID_FAILED_PROVIDER"}
+        if not isinstance(release_reservations, bool):
+            return {"allowed": False, "status": "INVALID_RESERVATION_RELEASE_POLICY"}
         if not isinstance(route_options.get("category"), str) or not isinstance(route_options.get("project_id"), str):
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_AND_PROJECT_REQUIRED"}
         request_id = route_options.get("request_id")
+        old_request_id = failed_request_id or request_id
         project_id = route_options.get("project_id")
-        if isinstance(request_id, str) and self.cost_policy is not None:
+        has_old_reservation = False
+        if isinstance(old_request_id, str) and self.cost_policy is not None:
             ledger = getattr(self.cost_policy, "ledger", {})
             projects = ledger.get("projects", {}) if isinstance(ledger, dict) else {}
             project = projects.get(project_id, {}) if isinstance(projects, dict) else {}
             reservations = project.get("reservations", {}) if isinstance(project, dict) else {}
-            record = reservations.get(request_id) if isinstance(reservations, dict) else None
+            record = reservations.get(old_request_id) if isinstance(reservations, dict) else None
             if isinstance(record, dict) and record.get("provider_id") == failed_provider:
-                release_cost = getattr(self.cost_policy, "release_reservation", None)
-                if callable(release_cost):
-                    try:
-                        release_cost(project_id=project_id, request_id=request_id, provider_id=failed_provider)
-                    except Exception:
-                        return {"allowed": False, "status": "COST_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
-        if self.quota_manager is not None and isinstance(request_id, str):
+                has_old_reservation = True
+                if release_reservations:
+                    release_cost = getattr(self.cost_policy, "release_reservation", None)
+                    if callable(release_cost):
+                        try:
+                            release_cost(project_id=project_id, request_id=old_request_id, provider_id=failed_provider)
+                        except Exception:
+                            return {"allowed": False, "status": "COST_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
+        if self.quota_manager is not None and isinstance(old_request_id, str):
             raw_data = getattr(self.quota_manager, "data", {})
             records = raw_data.get("requests", {}) if isinstance(raw_data, dict) else {}
-            record = records.get(request_id) if isinstance(records, dict) else None
+            record = records.get(old_request_id) if isinstance(records, dict) else None
             if isinstance(record, dict) and record.get("provider_id") == failed_provider and record.get("status") == "RESERVED":
-                try:
-                    self.quota_manager.release(request_id=request_id, provider_id=failed_provider)
-                except Exception:
-                    return {"allowed": False, "status": "QUOTA_RELEASE_FAILED", "failed_provider": failed_provider}
+                has_old_reservation = True
+                if release_reservations:
+                    try:
+                        self.quota_manager.release(request_id=old_request_id, provider_id=failed_provider)
+                    except Exception:
+                        return {"allowed": False, "status": "QUOTA_RELEASE_FAILED", "failed_provider": failed_provider}
+        if has_old_reservation and not release_reservations and request_id == old_request_id:
+            return {
+                "allowed": False,
+                "status": "NEW_FALLBACK_REQUEST_ID_REQUIRED",
+                "failed_provider": failed_provider,
+                "failed_request_id": old_request_id,
+            }
         excluded = route_options.get("excluded_providers", frozenset())
         if not isinstance(excluded, (set, frozenset)):
             return {"allowed": False, "status": "INVALID_EXCLUDED_PROVIDER_SET"}
