@@ -500,6 +500,17 @@ class ConnectionManagerTests(unittest.TestCase):
         metadata["name"] = "mutated"
         self.assertNotEqual(self.manager.get_provider("public_image").get("name"), "mutated")
 
+    def test_catalog_status_is_not_exposed_as_live_connection_status(self):
+        self.manager.catalog["providers"][0]["status"] = "CONNECTED"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        listed = self.manager.list_providers()[0]
+        metadata = self.manager.get_provider_metadata("public_image")
+        self.assertEqual(listed["catalog_status"], "CONNECTED")
+        self.assertNotIn("status", listed)
+        self.assertEqual(metadata["catalog_status"], "CONNECTED")
+        self.assertNotIn("status", metadata)
+        self.assertNotEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
+
     def test_metadata_returns_none_for_unknown_provider(self):
         self.assertIsNone(self.manager.get_provider_metadata("not_registered"))
 
