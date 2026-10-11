@@ -377,6 +377,29 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(local["valid"])
         self.assertFalse(local["tls_verification_required"])
 
+    def test_provider_model_configuration_is_persisted_without_credentials(self):
+        result = self.manager.configure_provider("public_image", model="test-model-v1")
+        self.assertEqual(result["status"], "CONFIGURED")
+        reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertEqual(
+            reloaded.get_state("public_image")["configuration"]["model"], "test-model-v1"
+        )
+
+    def test_provider_endpoint_configuration_rejects_unsafe_or_secret_urls(self):
+        self.assertEqual(
+            self.manager.configure_provider(
+                "public_image", endpoint="http://provider.example/api"
+            )["status"],
+            "HTTPS_REQUIRED",
+        )
+        self.assertEqual(
+            self.manager.configure_provider(
+                "public_image", endpoint="https://provider.example/api?api_key=secret"
+            )["status"],
+            "QUERY_PARAMETERS_REJECTED",
+        )
+        self.assertNotIn("configuration", self.manager.get_state("public_image"))
+
 
 if __name__ == "__main__":
     unittest.main()
