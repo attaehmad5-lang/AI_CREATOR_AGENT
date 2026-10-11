@@ -165,6 +165,48 @@ class ConnectionManager:
         provider = self.get_provider(provider_id)
         return provider is not None and provider.get("enabled") is True
 
+    def validate_provider_contract(self, provider_id: str, instance: Any) -> dict[str, Any]:
+        """Validate the callable surface required by the provider's declared modality."""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+        category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
+        contracts: dict[str, tuple[tuple[str, ...], ...]] = {
+            "image": (("generate_image",),),
+            "video": (("generate_video",),),
+            "voice": (("generate_speech", "generate_audio"),),
+            "audio": (("generate_audio", "generate_speech"),),
+            "music": (("generate_music",),),
+            "text": (("generate_text",),),
+            "language_model": (("generate_text",),),
+            "transcription": (("transcribe",),),
+            "translation": (("translate",),),
+            "dubbing": (("dub",),),
+            "image_editing": (("edit_image",),),
+            "upscaling": (("upscale_image",),),
+            "lipsync": (("generate_lipsync",),),
+        }
+        requirements = contracts.get(category)
+        if requirements is None:
+            return {
+                "status": "UNSUPPORTED_MODALITY",
+                "provider": provider_id,
+                "valid": False,
+                "contract_version": "1.0",
+            }
+        missing = [
+            " or ".join(alternatives)
+            for alternatives in requirements
+            if not any(callable(getattr(instance, name, None)) for name in alternatives)
+        ]
+        return {
+            "status": "VALID" if not missing else "CONTRACT_VIOLATION",
+            "provider": provider_id,
+            "valid": not missing,
+            "missing_methods": missing,
+            "contract_version": "1.0",
+        }
+
     def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
         """Instantiate a provider through an injected factory, without dynamic imports."""
         provider = self.get_provider(provider_id)
@@ -188,6 +230,15 @@ class ConnectionManager:
             }
         if instance is None:
             return {"status": "LOAD_FAILED", "provider": provider_id, "loaded": False}
+        contract = self.validate_provider_contract(provider_id, instance)
+        if not contract["valid"]:
+            return {
+                "status": "CONTRACT_VIOLATION",
+                "provider": provider_id,
+                "loaded": False,
+                "contract_status": contract["status"],
+                "missing_methods": contract.get("missing_methods", []),
+            }
         self._loaded_providers[provider_id] = instance
         return {"status": "LOADED", "provider": provider_id, "loaded": True}
 
