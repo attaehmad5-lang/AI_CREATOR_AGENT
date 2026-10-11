@@ -72,6 +72,8 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         cases = [
             ("elevenlabs", "ELEVENLABS_API_KEY", "xi-api-key", "secret-eleven", "secret-eleven"),
             ("fal_ai", "FAL_KEY", "authorization", "secret-fal", "Key secret-fal"),
+            ("ideogram", "IDEOGRAM_API_KEY", "api-key", "secret-ideogram", "secret-ideogram"),
+            ("black_forest_labs", "BFL_API_KEY", "x-key", "secret-bfl", "secret-bfl"),
         ]
         for provider_id, env_name, expected_header, secret, expected_value in cases:
             with self.subTest(provider=provider_id):
