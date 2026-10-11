@@ -98,6 +98,10 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(second["cost"]["status"], "DUPLICATE_REQUEST")
         self.assertEqual(second["health"]["status"], "SKIPPED_DUPLICATE_FINALIZATION")
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
+        conflict = self.service.finalize_started_request(**{**kwargs, "success": False})
+        self.assertFalse(conflict["finalized"])
+        self.assertEqual(conflict["cost"]["status"], "REQUEST_ID_CONFLICT")
+        self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
         invalid = self.service.finalize_started_request(**{**kwargs, "actual_cost": float("nan")})
         self.assertEqual(invalid["status"], "INVALID_COST_AMOUNT")
 
