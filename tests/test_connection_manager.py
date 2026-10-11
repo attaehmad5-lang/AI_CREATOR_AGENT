@@ -69,6 +69,14 @@ class ConnectionManagerTests(unittest.TestCase):
         self.manager.state["providers"]["token_image"] = {"status": "unexpected"}
         self.assertEqual(self.manager.summary()["UNKNOWN"], 1)
 
+    def test_legacy_connected_state_is_not_treated_as_verified(self):
+        self.manager.state["providers"]["token_image"] = {"status": "CONNECTED"}
+        state = self.manager.get_state("token_image")
+        self.assertEqual(state["status"], "UNKNOWN")
+        self.assertEqual(state["reported_status"], "CONNECTED")
+        self.assertFalse(state["verified"])
+        self.assertEqual(self.manager.summary()["UNKNOWN"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
