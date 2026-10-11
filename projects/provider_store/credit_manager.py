@@ -166,8 +166,8 @@ class ProviderCreditManager:
                     "provider": provider_id,
                     "verified": False,
                 }
-            current_snapshot = self.data["providers"].get(provider_id, {})
-            current_version = current_snapshot.get("snapshot_version", 1) if isinstance(current_snapshot, dict) else 1
+            current_snapshot = self.data["providers"].get(provider_id)
+            current_version = current_snapshot.get("snapshot_version", 1) if isinstance(current_snapshot, dict) else 0
             for item in self.data["usage"].values():
                 if (
                     isinstance(item, dict)
