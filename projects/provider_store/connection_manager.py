@@ -138,6 +138,30 @@ class ConnectionManager:
         """Return a process-local instance; callers must not persist or log it."""
         return self._loaded_providers.get(provider_id)
 
+    def unload_provider(self, provider_id: str) -> dict[str, Any]:
+        """Release a loaded provider; preserve it if its cleanup hook fails."""
+        if not self.provider_exists(provider_id):
+            return {"status": "NOT_FOUND", "provider": provider_id, "unloaded": False}
+        if provider_id not in self._loaded_providers:
+            return {"status": "NOT_LOADED", "provider": provider_id, "unloaded": False}
+        instance = self._loaded_providers[provider_id]
+        cleanup = getattr(instance, "close", None)
+        if not callable(cleanup):
+            cleanup = getattr(instance, "shutdown", None)
+        if callable(cleanup):
+            try:
+                cleanup()
+            except Exception as exc:
+                # Keep the instance registered so the caller can inspect/retry cleanup.
+                return {
+                    "status": "UNLOAD_FAILED",
+                    "provider": provider_id,
+                    "error_type": type(exc).__name__,
+                    "unloaded": False,
+                }
+        del self._loaded_providers[provider_id]
+        return {"status": "UNLOADED", "provider": provider_id, "unloaded": True}
+
     def discover_providers(
         self,
         *,
