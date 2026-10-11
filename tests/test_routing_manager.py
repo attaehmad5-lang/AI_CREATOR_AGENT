@@ -203,6 +203,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(first["provider"], "primary")
         fallback = router.select_fallback(
             failed_provider="primary",
+            release_reservations=True,
             category="image", project_id="film", estimated_cost=1.0,
             paid_approved_providers={"primary", "fallback"}, request_id="job-1",
         )
