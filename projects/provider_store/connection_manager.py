@@ -208,9 +208,19 @@ class ConnectionManager:
             raise ValueError("Provider catalog 'providers' must be a list")
         return [item for item in providers if isinstance(item, dict)]
 
+    @staticmethod
+    def _public_provider_view(provider: dict[str, Any]) -> dict[str, Any]:
+        """Detach catalog data and distinguish catalog labels from live connection state."""
+        import copy
+        safe = copy.deepcopy(provider)
+        if "status" in safe:
+            safe["catalog_status"] = safe.pop("status")
+        return safe
+
     def list_providers(self) -> list[dict[str, Any]]:
+        """Return detached provider records; catalog status is never live-connection proof."""
         with self._catalog_transaction():
-            return self._list_providers_unlocked()
+            return [self._public_provider_view(item) for item in self._list_providers_unlocked()]
 
     def get_provider(self, provider_id: str) -> dict[str, Any] | None:
         return next((p for p in self.list_providers() if p.get("id") == provider_id), None)
