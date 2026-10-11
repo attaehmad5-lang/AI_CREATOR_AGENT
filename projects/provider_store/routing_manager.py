@@ -213,13 +213,44 @@ class ProviderRoutingManager:
                     continue
                 billing_mode = decision.get("billing_mode")
 
+            cost_reserved = False
+            if billing_mode == "PAID_APPROVED" and self.cost_policy is not None:
+                reserve_cost = getattr(self.cost_policy, "reserve_usage", None)
+                if callable(reserve_cost):
+                    if not isinstance(request_id, str) or not request_id.strip():
+                        decisions.append({"provider": provider_id, "status": "COST_RESERVATION_REQUEST_ID_REQUIRED"})
+                        continue
+                    try:
+                        cost_reservation = reserve_cost(
+                            project_id=project_id,
+                            provider_id=provider_id,
+                            estimated_cost=cost,
+                            request_id=request_id,
+                        )
+                    except Exception as exc:
+                        decisions.append({"provider": provider_id, "status": "COST_RESERVATION_FAILED", "error_type": type(exc).__name__})
+                        continue
+                    if not isinstance(cost_reservation, dict) or cost_reservation.get("status") not in {"RESERVED", "ALREADY_RESERVED"}:
+                        status = cost_reservation.get("status", "COST_RESERVATION_REJECTED") if isinstance(cost_reservation, dict) else "INVALID_COST_RESERVATION_RESPONSE"
+                        decisions.append({"provider": provider_id, "status": status})
+                        continue
+                    cost_reserved = True
+
             if self.quota_manager is not None:
                 try:
                     quota = self.quota_manager.reserve(provider_id=provider_id, request_id=request_id)
                 except Exception as exc:
+                    if cost_reserved:
+                        self.cost_policy.release_reservation(
+                            project_id=project_id, request_id=request_id, provider_id=provider_id
+                        )
                     decisions.append({"provider": provider_id, "status": "QUOTA_CHECK_FAILED", "error_type": type(exc).__name__})
                     continue
                 if not isinstance(quota, dict) or quota.get("status") not in {"RESERVED", "ALREADY_RESERVED"}:
+                    if cost_reserved:
+                        self.cost_policy.release_reservation(
+                            project_id=project_id, request_id=request_id, provider_id=provider_id
+                        )
                     status = quota.get("status", "QUOTA_REJECTED") if isinstance(quota, dict) else "INVALID_QUOTA_RESPONSE"
                     decisions.append({"provider": provider_id, "status": status})
                     continue
@@ -236,6 +267,8 @@ class ProviderRoutingManager:
             }
             if billing_mode is not None:
                 result["billing_mode"] = billing_mode
+            if cost_reserved:
+                result["cost_reserved"] = True
             if self.quota_manager is not None:
                 result["quota_reserved"] = True
                 result["request_id"] = request_id
@@ -256,8 +289,23 @@ class ProviderRoutingManager:
         if not isinstance(route_options.get("category"), str) or not isinstance(route_options.get("project_id"), str):
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_AND_PROJECT_REQUIRED"}
         request_id = route_options.get("request_id")
+        project_id = route_options.get("project_id")
+        if isinstance(request_id, str) and self.cost_policy is not None:
+            ledger = getattr(self.cost_policy, "ledger", {})
+            projects = ledger.get("projects", {}) if isinstance(ledger, dict) else {}
+            project = projects.get(project_id, {}) if isinstance(projects, dict) else {}
+            reservations = project.get("reservations", {}) if isinstance(project, dict) else {}
+            record = reservations.get(request_id) if isinstance(reservations, dict) else None
+            if isinstance(record, dict) and record.get("provider_id") == failed_provider:
+                release_cost = getattr(self.cost_policy, "release_reservation", None)
+                if callable(release_cost):
+                    try:
+                        release_cost(project_id=project_id, request_id=request_id, provider_id=failed_provider)
+                    except Exception:
+                        return {"allowed": False, "status": "COST_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
         if self.quota_manager is not None and isinstance(request_id, str):
-            records = getattr(self.quota_manager, "data", {}).get("requests", {})
+            raw_data = getattr(self.quota_manager, "data", {})
+            records = raw_data.get("requests", {}) if isinstance(raw_data, dict) else {}
             record = records.get(request_id) if isinstance(records, dict) else None
             if isinstance(record, dict) and record.get("provider_id") == failed_provider and record.get("status") == "RESERVED":
                 try:
