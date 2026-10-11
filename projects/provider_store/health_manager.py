@@ -186,14 +186,34 @@ class ProviderHealthManager:
         started = __import__("time").monotonic()
         try:
             result = probe(timeout_seconds=float(timeout_seconds))
-            if result is not True and not (isinstance(result, dict) and result.get("ok") is True):
-                self.record_result(provider_id, success=False, error_code="PROBE_FAILED")
-                return {"provider": provider_id, "status": "PROBE_FAILED", "verified": False}
         except Exception as exc:
             name = type(exc).__name__.casefold()
             code = "TIMEOUT" if isinstance(exc, TimeoutError) or "timeout" in name else "NETWORK_ERROR"
-            self.record_result(provider_id, success=False, error_code=code)
+            try:
+                recorded = self.record_result(provider_id, success=False, error_code=code)
+            except Exception as persist_exc:
+                return {
+                    "provider": provider_id,
+                    "status": "HEALTH_RECORD_FAILED",
+                    "verified": False,
+                    "error_type": type(persist_exc).__name__,
+                }
+            if not isinstance(recorded, dict) or recorded.get("saved") is not True:
+                return {"provider": provider_id, "status": "HEALTH_RECORD_FAILED", "verified": False}
             return {"provider": provider_id, "status": code, "verified": False, "error_type": type(exc).__name__}
+        if result is not True and not (isinstance(result, dict) and result.get("ok") is True):
+            try:
+                recorded = self.record_result(provider_id, success=False, error_code="PROBE_FAILED")
+            except Exception as exc:
+                return {
+                    "provider": provider_id,
+                    "status": "HEALTH_RECORD_FAILED",
+                    "verified": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(recorded, dict) or recorded.get("saved") is not True:
+                return {"provider": provider_id, "status": "HEALTH_RECORD_FAILED", "verified": False}
+            return {"provider": provider_id, "status": "PROBE_FAILED", "verified": False}
         latency = (__import__("time").monotonic() - started) * 1000
         try:
             recorded = self.record_result(provider_id, success=True, latency_ms=latency)
