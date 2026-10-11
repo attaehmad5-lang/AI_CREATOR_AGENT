@@ -29,14 +29,14 @@ class ProviderCostPolicyTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_free_credits_are_used_before_paid_approval(self):
+    def test_unverified_numeric_credits_cannot_authorize_free_usage(self):
         provider = {"id": "free", "enabled": True, "subscription_required": False}
         result = self.policy.evaluate_request(
             provider, project_id="documentary", estimated_cost=2.0,
             free_credits_remaining=3.0, paid_usage_approved=False,
         )
-        self.assertTrue(result["allowed"])
-        self.assertEqual(result["billing_mode"], "FREE_CREDITS")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "VERIFIED_CREDIT_MANAGER_REQUIRED")
 
     def test_paid_usage_is_blocked_without_explicit_approval(self):
         result = self.policy.evaluate_request(
@@ -89,16 +89,15 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "PROJECT_BUDGET_EXCEEDED")
 
-    def test_provider_selection_prefers_free_eligible_provider(self):
+    def test_provider_selection_rejects_caller_supplied_free_credit_balance(self):
         result = self.policy.select_provider(
             [{"id": "paid", "enabled": True}, {"id": "free", "enabled": True}],
             project_id="documentary",
             estimated_costs={"paid": 1.0, "free": 1.0},
             free_credits={"free": 2.0},
         )
-        self.assertTrue(result["allowed"])
-        self.assertEqual(result["provider"], "free")
-        self.assertEqual(result["billing_mode"], "FREE_CREDITS")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "VERIFIED_CREDIT_MANAGER_REQUIRED")
 
     def test_provider_selection_rejects_malformed_credit_amount_without_crashing(self):
         result = self.policy.select_provider(
@@ -108,8 +107,7 @@ class ProviderCostPolicyTests(unittest.TestCase):
             free_credits={"free": "not-a-number"},
         )
         self.assertFalse(result["allowed"])
-        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
-        self.assertEqual(result["decisions"][0]["status"], "INVALID_COST_AMOUNT")
+        self.assertEqual(result["status"], "INVALID_FREE_CREDIT_MAP")
 
     def test_provider_selection_rejects_invalid_credit_map_type(self):
         result = self.policy.select_provider(
