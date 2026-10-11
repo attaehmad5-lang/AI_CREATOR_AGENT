@@ -125,6 +125,47 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
         self.assertEqual(self.quota.data["requests"]["job-concurrent-finalize"]["status"], "COMMITTED")
 
+    def test_successful_zero_cost_report_needs_explicit_no_charge_confirmation(self):
+        self.cost.reserve_usage(
+            project_id="film", provider_id="image", estimated_cost=2.0,
+            request_id="successful-charge-unknown",
+        )
+        self.quota.reserve(provider_id="image", request_id="successful-charge-unknown")
+        unknown = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="successful-charge-unknown",
+            estimated_cost=2.0, actual_cost=0.0, success=True,
+        )
+        self.assertFalse(unknown["finalized"])
+        self.assertEqual(unknown["cost"]["status"], "CHARGE_OUTCOME_UNKNOWN")
+        self.assertIn("successful-charge-unknown", self.cost.ledger["projects"]["film"]["reservations"])
+        self.assertEqual(unknown["quota"]["status"], "COMMITTED")
+
+        self.cost.reserve_usage(
+            project_id="film", provider_id="image", estimated_cost=2.0,
+            request_id="successful-confirmed-free",
+        )
+        self.quota.reserve(provider_id="image", request_id="successful-confirmed-free")
+        confirmed = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="successful-confirmed-free",
+            estimated_cost=2.0, actual_cost=0.0, success=True, charge_outcome="not_incurred",
+        )
+        self.assertTrue(confirmed["finalized"])
+        self.assertEqual(confirmed["cost"]["status"], "NO_CHARGE_RECORDED")
+        repeated = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="successful-confirmed-free",
+            estimated_cost=2.0, actual_cost=0.0, success=True, charge_outcome="not_incurred",
+        )
+        self.assertTrue(repeated["finalized"])
+        self.assertEqual(repeated["cost"]["status"], "DUPLICATE_REQUEST")
+
+    def test_actual_cost_cannot_conflict_with_not_incurred_charge_outcome(self):
+        result = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="contradictory-charge",
+            estimated_cost=2.0, actual_cost=1.0, success=True, charge_outcome="not_incurred",
+        )
+        self.assertFalse(result["finalized"])
+        self.assertEqual(result["status"], "INCONSISTENT_CHARGE_OUTCOME")
+
     def test_free_credit_route_reserves_and_finalizes_verified_credits(self):
         credits = ProviderCreditManager(self.root / "service-credits.json")
         credits.refresh(
