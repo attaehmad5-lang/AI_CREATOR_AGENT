@@ -347,6 +347,12 @@ class ConnectionManager:
         enabled_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Discover catalog entries by modality/capability without probing providers."""
+        if category is not None and (not isinstance(category, str) or not category.strip()):
+            return []
+        if capability is not None and (not isinstance(capability, str) or not capability.strip()):
+            return []
+        if not isinstance(enabled_only, bool):
+            return []
         wanted_category = category.strip().casefold() if category else None
         wanted_capability = capability.strip().casefold() if capability else None
         discovered: list[dict[str, Any]] = []
@@ -437,6 +443,8 @@ class ConnectionManager:
         return value
 
     def get_state(self, provider_id: str) -> dict[str, Any]:
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "UNKNOWN", "verified": False}
         item = self.state["providers"].get(provider_id)
         if not isinstance(item, dict):
             return {"status": "UNKNOWN", "verified": False}
@@ -456,9 +464,11 @@ class ConnectionManager:
         *,
         verified: bool = False,
     ) -> dict[str, Any]:
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER", "saved": False}
         if not self.provider_exists(provider_id):
             return {"status": "NOT_FOUND", "provider": provider_id}
-        if status not in self.VALID_STATES:
+        if not isinstance(status, str) or status not in self.VALID_STATES:
             return {"status": "INVALID_STATE", "provider": provider_id}
         if not isinstance(verified, bool):
             return {"status": "INVALID_VERIFICATION_FLAG", "provider": provider_id, "saved": False}
@@ -495,6 +505,11 @@ class ConnectionManager:
             return {"valid": False, "status": "INVALID_LOOPBACK_HTTP_POLICY"}
         if not isinstance(endpoint, str) or not endpoint.strip():
             return {"valid": False, "status": "INVALID_ENDPOINT"}
+        if allowed_hosts is not None and (
+            not isinstance(allowed_hosts, (set, frozenset, list, tuple))
+            or any(not isinstance(host, str) or not host.strip() for host in allowed_hosts)
+        ):
+            return {"valid": False, "status": "INVALID_HOST_ALLOWLIST"}
         try:
             parsed = urlsplit(endpoint.strip())
             hostname = parsed.hostname
@@ -628,6 +643,7 @@ class ConnectionManager:
             "CREDENTIALS_MISSING",
             "CREDENTIALS_EXPIRED",
             "CREDENTIAL_EXPIRY_INVALID",
+            "INVALID_ENVIRONMENT",
             "MANUAL_CONNECTION_REQUIRED",
         }
         if credentials["status"] in blocked_credential_states:
@@ -699,6 +715,8 @@ class ConnectionManager:
         if not token_env:
             return {"provider": provider_id, "status": "MANUAL_CONNECTION_REQUIRED", "credential_present": False}
 
+        if environ is not None and not isinstance(environ, dict):
+            return {"provider": provider_id, "status": "INVALID_ENVIRONMENT", "credential_present": False}
         env = os.environ if environ is None else environ
         present = bool(str(env.get(str(token_env), "")).strip())
         if not present:
