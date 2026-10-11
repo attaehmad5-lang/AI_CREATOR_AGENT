@@ -225,6 +225,20 @@ class ConnectionManagerTests(unittest.TestCase):
             self.manager.set_provider_enabled("missing", True)["status"], "NOT_FOUND"
         )
 
+    def test_metadata_returns_detached_copy_and_filters_sensitive_fields(self):
+        self.manager.catalog["providers"][0]["official_api_url"] = "https://example.invalid"
+        self.manager.catalog["providers"][0]["token_env"] = "PUBLIC_IMAGE_TOKEN"
+        self.manager.catalog["providers"][0]["access_token"] = "must-not-appear"
+        metadata = self.manager.get_provider_metadata("public_image")
+        self.assertEqual(metadata["official_api_url"], "https://example.invalid")
+        self.assertEqual(metadata["token_env"], "PUBLIC_IMAGE_TOKEN")
+        self.assertNotIn("access_token", metadata)
+        metadata["name"] = "mutated"
+        self.assertNotEqual(self.manager.get_provider("public_image").get("name"), "mutated")
+
+    def test_metadata_returns_none_for_unknown_provider(self):
+        self.assertIsNone(self.manager.get_provider_metadata("not_registered"))
+
 
 if __name__ == "__main__":
     unittest.main()
