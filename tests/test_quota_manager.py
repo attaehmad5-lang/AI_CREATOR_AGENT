@@ -1,11 +1,21 @@
 import json
 import tempfile
 import unittest
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from projects.provider_store.quota_manager import ProviderQuotaManager
+
+
+def _reserve_quota_in_process(args):
+    state_path, request_id = args
+    manager = ProviderQuotaManager(
+        state_path, limits={"image": {"hourly": 3}}
+    )
+    return manager.reserve(
+        provider_id="image", request_id=request_id
+    )["status"]
 
 
 class ProviderQuotaManagerTests(unittest.TestCase):
@@ -53,6 +63,18 @@ class ProviderQuotaManagerTests(unittest.TestCase):
             results = list(pool.map(reserve, range(40)))
         self.assertEqual(sum(item["status"] == "RESERVED" for item in results), 2)
         self.assertEqual(sum(item["status"] == "QUOTA_EXCEEDED" for item in results), 38)
+
+    def test_concurrent_reservations_across_processes_never_exceed_limit(self):
+        args = [
+            (str(self.path), f"process-job-{index}")
+            for index in range(20)
+        ]
+        with ProcessPoolExecutor(max_workers=4) as pool:
+            statuses = list(pool.map(_reserve_quota_in_process, args))
+
+        self.assertEqual(statuses.count("RESERVED"), 3)
+        self.assertEqual(statuses.count("QUOTA_EXCEEDED"), 17)
+        self.assertEqual(self.manager.usage(provider_id="image")["hourly"], 3)
 
     def test_state_persists_and_old_windows_expire(self):
         self.manager.reserve(provider_id="image", request_id="job-1")
