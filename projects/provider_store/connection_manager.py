@@ -733,6 +733,11 @@ class ConnectionManager:
             not isinstance(model, str) or not model.strip() or len(model) > 200
         ):
             return {"status": "INVALID_MODEL", "provider": provider_id, "configuration": {}}
+        if isinstance(model, str) and any(
+            marker in model.casefold()
+            for marker in ("api_key=", "token=", "password=", "secret=", "bearer ")
+        ):
+            return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
         endpoint = configuration.get("endpoint")
         if endpoint is not None:
             allowed_hosts_raw = provider.get("allowed_hosts")
