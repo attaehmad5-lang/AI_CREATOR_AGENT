@@ -42,6 +42,7 @@ class ProviderCostPolicyTests(unittest.TestCase):
         for provider in (
             {"id": "paid", "enabled": True, "subscription_required": "true"},
             {"id": "paid", "enabled": "true", "subscription_required": True},
+            {"id": "free", "enabled": True, "subscription_required": False, "zero_cost_allowed": "true"},
         ):
             result = self.policy.evaluate_request(
                 provider, project_id="documentary", estimated_cost=0.0,
@@ -49,6 +50,14 @@ class ProviderCostPolicyTests(unittest.TestCase):
             )
             self.assertFalse(result["allowed"])
             self.assertEqual(result["status"], "INVALID_PROVIDER_CONFIGURATION")
+
+    def test_zero_cost_requires_explicit_provider_evidence(self):
+        result = self.policy.evaluate_request(
+            {"id": "unknown-free", "enabled": True, "subscription_required": False},
+            project_id="documentary", estimated_cost=0.0,
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "ZERO_COST_NOT_VERIFIED")
 
     def test_subscription_required_provider_needs_positive_cost_estimate(self):
         result = self.policy.evaluate_request(
