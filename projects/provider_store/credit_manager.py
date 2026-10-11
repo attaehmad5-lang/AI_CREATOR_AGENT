@@ -194,6 +194,17 @@ class ProviderCreditManager:
                             "provider": provider_id,
                             "verified": False,
                         }
+            if isinstance(current_snapshot, dict):
+                try:
+                    previous_observation = self._parse_timestamp(current_snapshot.get("observed_at"))
+                except ValueError:
+                    return {"status": "INVALID_EXISTING_CREDIT_TIMESTAMP", "provider": provider_id, "verified": False}
+                if observed <= previous_observation:
+                    return {
+                        "status": "CREDIT_SNAPSHOT_NOT_NEWER",
+                        "provider": provider_id,
+                        "verified": False,
+                    }
             record["snapshot_version"] = int(current_version) + 1
             self.data["providers"][provider_id] = record
             self._save()
