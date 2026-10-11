@@ -170,14 +170,22 @@ class ProviderCreditManager:
             "age_seconds": age,
         }
 
-    def usable_free_credits(self) -> dict[str, float]:
-        """Return only fresh verified balances; stale or unknown balances never authorize free routing."""
+    def usable_free_credits(self, *, unit: str | None = None) -> dict[str, float]:
+        """Return fresh verified balances, optionally restricted to a comparable cost unit."""
+        if unit is not None and (
+            not isinstance(unit, str) or not unit.strip() or len(unit) > 32
+        ):
+            return {}
         result: dict[str, float] = {}
         with self._transaction():
             provider_ids = list(self.data.get("providers", {}).keys())
         for provider_id in provider_ids:
             balance = self.get_balance(provider_id)
-            if balance.get("status") == "CREDIT_BALANCE_FRESH" and balance.get("verified") is True:
+            if (
+                balance.get("status") == "CREDIT_BALANCE_FRESH"
+                and balance.get("verified") is True
+                and (unit is None or balance.get("unit") == unit.strip())
+            ):
                 result[provider_id] = float(balance["free_credits_remaining"])
         return result
 
