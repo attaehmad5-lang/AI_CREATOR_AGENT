@@ -159,6 +159,16 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(finalized["finalized"])
         self.assertEqual(finalized["credits"]["status"], "COMMITTED")
         self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
+        unstarted_route = service.route_request(
+            category="image", project_id="film", estimated_cost=1.0,
+            request_id="unstarted-credit-job",
+        )
+        self.assertTrue(unstarted_route["allowed"])
+        released = service.release_unstarted_request(
+            project_id="film", provider_id="image", request_id="unstarted-credit-job"
+        )
+        self.assertTrue(released["released"])
+        self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
 
     def test_unstarted_request_releases_reservations_only_when_explicitly_called(self):
         self.cost.reserve_usage(
