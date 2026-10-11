@@ -325,7 +325,7 @@ class ProviderService:
         if not all(isinstance(value, str) and value.strip() for value in (project_id, provider_id, request_id)):
             return {"status": "INVALID_USAGE_RECORD", "released": False}
         results: dict[str, Any] = {}
-        if self.cost_policy is None and self.quota_manager is None:
+        if self.cost_policy is None and self.quota_manager is None and self.credit_manager is None:
             return {"status": "RESERVATION_MANAGERS_UNAVAILABLE", "released": False}
         if self.cost_policy is not None:
             release = getattr(self.cost_policy, "release_reservation", None)
