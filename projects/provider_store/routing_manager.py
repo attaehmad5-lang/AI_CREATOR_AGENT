@@ -71,7 +71,7 @@ class ProviderRoutingManager:
         free_credits: dict[str, float] | None = None,
         paid_approved_providers: set[str] | frozenset[str] | None = None,
         excluded_providers: set[str] | frozenset[str] | None = None,
-        require_health_evidence: bool = True,
+        require_health_evidence: bool = False,
     ) -> dict[str, Any]:
         """Return the first policy-compliant provider and the decisions that led to it."""
         if not isinstance(category, str) or not category.strip():
@@ -99,7 +99,7 @@ class ProviderRoutingManager:
         approvals = set() if paid_approved_providers is None else paid_approved_providers
         excluded = set() if excluded_providers is None else excluded_providers
 
-        if selected_strategy == "HEALTHIEST_FIRST" and self.health_manager is None:
+        if (selected_strategy == "HEALTHIEST_FIRST" or require_health_evidence) and self.health_manager is None:
             return {"allowed": False, "status": "HEALTH_DATA_REQUIRED"}
 
         try:
@@ -137,11 +137,6 @@ class ProviderRoutingManager:
                 raw_health = getattr(self.health_manager, "data", {}).get("providers", {}).get(provider_id, {})
                 if isinstance(raw_health, dict):
                     health_record = raw_health
-            elif require_health_evidence:
-                # No health manager means discovery can be used, but the result is
-                # explicitly unverified; no live connectivity is inferred here.
-                pass
-
             cost = estimates.get(provider_id, estimated_cost)
             if not self._valid_amount(cost):
                 decisions.append({"provider": provider_id, "status": "INVALID_COST_AMOUNT"})
