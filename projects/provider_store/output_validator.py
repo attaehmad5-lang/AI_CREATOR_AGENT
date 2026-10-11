@@ -1,6 +1,7 @@
 """Local validation for provider-generated artifacts before they enter a project."""
 from __future__ import annotations
 
+import codecs
 import hashlib
 import json
 from pathlib import Path
@@ -80,12 +81,17 @@ class ProviderOutputValidator:
                         return {"valid": False, "status": "SIGNATURE_MISMATCH"}
                 elif normalized_modality == "text":
                     stream.seek(0)
+                    decoder = codecs.getincrementaldecoder("utf-8")()
                     try:
-                        stream.read().decode("utf-8")
+                        for chunk in iter(lambda: stream.read(64 * 1024), b""):
+                            decoder.decode(chunk)
+                        decoder.decode(b"", final=True)
                     except UnicodeDecodeError:
                         return {"valid": False, "status": "INVALID_TEXT_ENCODING"}
                     mime = "text/plain"
                 else:
+                    if size > 10_000_000:
+                        return {"valid": False, "status": "OUTPUT_TOO_LARGE", "size_bytes": size}
                     stream.seek(0)
                     try:
                         json.load(stream)
@@ -115,9 +121,9 @@ class ProviderOutputValidator:
                 continue
             if mime == "image/webp" and header[8:12] != b"WEBP":
                 continue
-            if mime in {"audio/wav", "video/avi"} and len(header) >= 12:
+            if mime in {"audio/wav", "video/avi"}:
                 expected = b"WAVE" if mime == "audio/wav" else b"AVI "
-                if header[8:12] != expected:
+                if len(header) < 12 or header[8:12] != expected:
                     continue
             return mime
         # MP3 files may omit ID3 and start with an MPEG audio frame sync.
