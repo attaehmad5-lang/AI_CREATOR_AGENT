@@ -155,7 +155,8 @@ class ConnectionManager:
                     for marker in (
                         "access_token", "refresh_token", "api_key", "apikey",
                         "password", "secret", "credential", "authorization",
-                        "bearer", "private_key", "session_token",
+                        "bearer", "token", "private_key", "signing_key",
+                        "encryption_key", "key_material", "cookie", "session",
                     )
                 ):
                     return True
