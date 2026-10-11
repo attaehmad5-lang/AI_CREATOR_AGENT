@@ -22,7 +22,7 @@ This guide describes the current implementation in this branch. It is not a clai
 4. **Do not release reservations just because a provider failed.** A failed API request may still consume quota or cost. `select_fallback` keeps reservations by default and requires a new attempt ID when a previous attempt may have started. Set `release_reservations=True` only when the caller knows the provider request did not start or could not be billed.
 5. **Connectivity checks are injected.** `ConnectionManager.verify_connectivity` passes a timeout to the probe, but arbitrary Python callbacks cannot be forcibly stopped if they ignore it. Each provider-specific probe must enforce its own network timeout.
 6. **Output validation is not full decoding.** Signatures and basic content checks detect many mismatches, but do not replace media decoding, malware scanning, or semantic quality checks.
-7. **Persistence limits.** JSON files use atomic replacement and managers use process-local locks. These locks do not coordinate independent OS processes sharing the same files; cross-process transactions still need a database or file-locking layer.
+7. **Persistence limits.** Shared JSON state for provider connection/catalog, health, credits, cost budgets, and quotas uses atomic replacement plus OS-level interprocess lock files and reload-before-mutate. This prevents lost read-modify-write updates across local processes when every writer uses these manager APIs. It is not a single transaction across multiple manager files, and it does not coordinate separate devices, containers with non-shared lock semantics, or external writers bypassing these APIs. SQLite or a transactional database is preferred for production multi-worker coordination.
 8. **Secrets stay outside the catalog.** Store environment-variable names or references, not credential values. Returned provider metadata and state views redact credential-like fields.
 
 ## Verification
@@ -35,4 +35,4 @@ python -c "import json; from pathlib import Path; [json.loads(p.read_text(encodi
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Live provider API probes, OAuth/token refresh, complete multimodal adapters, end-to-end generation execution, cross-process reservation safety, and the full canonical A–P checklist remain separate verification requirements.
+Live provider API probes, OAuth/token refresh, complete multimodal adapters, end-to-end generation execution, live provider API probes, OAuth/token refresh, complete multimodal adapters, end-to-end generation execution, provider-specific network failure injection, cross-manager atomic transactions, and individual verification of every item in the canonical feature checklist remain separate requirements.
