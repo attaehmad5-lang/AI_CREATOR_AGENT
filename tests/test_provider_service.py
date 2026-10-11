@@ -288,6 +288,41 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(self.quota.data["requests"]["execute-not-started"]["status"], "RELEASED")
         self.assertEqual(self.quota.reserve(provider_id="image", request_id="execute-not-started")["status"], "ALREADY_RELEASED")
 
+    def test_execute_failure_uses_supported_retry_metadata_and_requires_idempotency(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, cost_policy=self.cost, quota_manager=self.quota,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="retryable-provider-failure",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: {
+                "started": True, "success": False, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "status_code": 503,
+                "attempt": 1, "idempotent": True,
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_FAILED")
+        self.assertTrue(result["retry_decision"]["retry"])
+        self.assertEqual(result["retry_decision"]["reason"], "TRANSIENT_HTTP_FAILURE")
+
+        unsafe = service.execute_routed_request(
+            category="image", project_id="film", request_id="non-idempotent-provider-failure",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: {
+                "started": True, "success": False, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "status_code": 503,
+                "attempt": 1,
+            },
+            modality="image",
+        )
+        self.assertFalse(unsafe["retry_decision"]["retry"])
+        self.assertEqual(unsafe["retry_decision"]["reason"], "NON_IDEMPOTENT_REQUEST")
+
     def test_execute_routed_request_rejects_contradictory_not_started_result(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
