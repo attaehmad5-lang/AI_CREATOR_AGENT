@@ -28,6 +28,7 @@ class ProviderRoutingManager:
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
+        require_verified_connection: bool = True,
     ) -> None:
         if connection_manager is None or not callable(getattr(connection_manager, "discover_providers", None)):
             raise ValueError("connection_manager must support provider discovery")
@@ -39,6 +40,10 @@ class ProviderRoutingManager:
             raise ValueError("quota_manager must support request reservations")
         if credit_manager is not None and not callable(getattr(credit_manager, "usable_free_credits", None)):
             raise ValueError("credit_manager must provide fresh verified balances")
+        if not isinstance(require_verified_connection, bool):
+            raise ValueError("require_verified_connection must be boolean")
+        if require_verified_connection and not callable(getattr(connection_manager, "get_state", None)):
+            raise ValueError("connection_manager must support verified runtime state")
         normalized_strategy = str(default_strategy).upper()
         if normalized_strategy not in self.STRATEGIES:
             raise ValueError("unsupported routing strategy")
@@ -48,6 +53,7 @@ class ProviderRoutingManager:
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager
         self.default_strategy = normalized_strategy
+        self.require_verified_connection = require_verified_connection
         self._round_robin_counters: dict[str, int] = {}
         self._lock = threading.Lock()
 
@@ -166,6 +172,23 @@ class ProviderRoutingManager:
                 continue
             if provider.get("enabled") is not True:
                 continue
+            if self.require_verified_connection:
+                try:
+                    connection_state = self.connection_manager.get_state(provider_id)
+                except Exception as exc:
+                    decisions.append({
+                        "provider": provider_id,
+                        "status": "CONNECTION_STATE_LOOKUP_FAILED",
+                        "error_type": type(exc).__name__,
+                    })
+                    continue
+                if not (
+                    isinstance(connection_state, dict)
+                    and connection_state.get("status") == "CONNECTED"
+                    and connection_state.get("verified") is True
+                ):
+                    decisions.append({"provider": provider_id, "status": "CONNECTION_NOT_VERIFIED"})
+                    continue
             health_record: dict[str, Any] = {}
             if self.health_manager is not None:
                 try:
