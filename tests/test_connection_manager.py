@@ -133,6 +133,20 @@ class ConnectionManagerTests(unittest.TestCase):
                 self.assertFalse(invalid["valid"])
                 self.assertTrue(any("allowed_hosts" in error for error in invalid["errors"]))
 
+    def test_catalog_schema_rejects_unsafe_auth_headers_and_schemes(self):
+        for field, value in (
+            ("auth_header_name", "Host"),
+            ("auth_header_name", "Cookie"),
+            ("auth_scheme", "Digest"),
+            ("auth_scheme", "Bearer\\r\\nInjected"),
+        ):
+            with self.subTest(field=field, value=value):
+                result = ConnectionManager.validate_catalog_schema({
+                    "providers": [{"id": "provider", field: value}]
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any(field in error for error in result["errors"]))
+
     def test_catalog_schema_rejects_secret_values_in_environment_reference_fields(self):
         for field, value in (
             ("token_env", "secret-token-value"),
