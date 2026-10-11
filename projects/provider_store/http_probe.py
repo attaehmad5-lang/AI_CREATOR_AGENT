@@ -123,7 +123,10 @@ class ProviderHTTPConnectivityProbe:
             "Accept": "application/json, */*;q=0.8",
             "User-Agent": "AI_CREATOR_AGENT-ProviderProbe/1.0",
         }
-        auth_type = str(provider.get("auth_type", "NONE")).upper()
+        raw_auth_type = provider.get("auth_type", "NONE")
+        if not isinstance(raw_auth_type, str) or not raw_auth_type.strip():
+            raise ValueError("INVALID_AUTH_TYPE")
+        auth_type = raw_auth_type.strip().upper()
         if auth_type not in {"NONE", "PUBLIC", "ANONYMOUS"}:
             if auth_type in {"ACCOUNT", "MANUAL", "MANUAL_CONNECT", "OAUTH_BROWSER"}:
                 raise PermissionError("manual account connection is required")
