@@ -105,8 +105,14 @@ class ConnectionManager:
         item = self.state["providers"].get(provider_id)
         if not isinstance(item, dict):
             return {"status": "UNKNOWN", "verified": False}
+        result = dict(item)
+        # Older records may say CONNECTED without any live verification evidence.
+        if result.get("status") == "CONNECTED" and result.get("verified") is not True:
+            result["reported_status"] = "CONNECTED"
+            result["status"] = "UNKNOWN"
+            result["verified"] = False
         # Return a copy so callers cannot mutate internal state without validation.
-        return dict(item)
+        return result
 
     def set_state(
         self,
@@ -114,7 +120,6 @@ class ConnectionManager:
         status: str,
         *,
         verified: bool = False,
-        detail: str | None = None,
     ) -> dict[str, Any]:
         if not self.provider_exists(provider_id):
             return {"status": "NOT_FOUND", "provider": provider_id}
@@ -132,9 +137,6 @@ class ConnectionManager:
             "verified": bool(verified),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        if detail:
-            # Do not store arbitrary provider exception text; it may contain secrets.
-            record["detail"] = str(detail)[:200]
         self.state["providers"][provider_id] = record
         self._save()
         return {"provider": provider_id, **record, "saved": True}
@@ -173,6 +175,9 @@ class ConnectionManager:
         result = {state: 0 for state in sorted(self.VALID_STATES)}
         for item in self.state["providers"].values():
             status = item.get("status", "UNKNOWN") if isinstance(item, dict) else "UNKNOWN"
+            # Do not count legacy, unverified CONNECTED records as healthy connections.
+            if status == "CONNECTED" and item.get("verified") is not True:
+                status = "UNKNOWN"
             if status not in result:
                 status = "UNKNOWN"
             result[status] += 1
