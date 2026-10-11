@@ -133,7 +133,10 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in results], ["public_image"])
 
     def test_load_provider_uses_factory_and_keeps_instance_in_memory(self):
-        instance = object()
+        class ImageProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+        instance = ImageProvider()
         result = self.manager.load_provider("public_image", lambda metadata: instance)
         self.assertEqual(result["status"], "LOADED")
         self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
@@ -163,10 +166,33 @@ class ConnectionManagerTests(unittest.TestCase):
             "NOT_FOUND",
         )
 
+    def test_provider_contract_accepts_required_modality_method(self):
+        class ImageProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+        result = self.manager.validate_provider_contract("public_image", ImageProvider())
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["contract_version"], "1.0")
+
+    def test_provider_contract_rejects_missing_method_and_prevents_loading(self):
+        instance = object()
+        contract = self.manager.validate_provider_contract("public_image", instance)
+        self.assertEqual(contract["status"], "CONTRACT_VIOLATION")
+        loaded = self.manager.load_provider("public_image", lambda metadata: instance)
+        self.assertEqual(loaded["status"], "CONTRACT_VIOLATION")
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_provider_contract_handles_unknown_modality_explicitly(self):
+        self.manager.catalog["providers"][0]["category"] = "quantum"
+        result = self.manager.validate_provider_contract("public_image", object())
+        self.assertEqual(result["status"], "UNSUPPORTED_MODALITY")
+
     def test_unload_provider_calls_close_and_removes_instance(self):
         class Closable:
             def __init__(self):
                 self.closed = False
+            def generate_image(self, prompt, output_path):
+                return None
             def close(self):
                 self.closed = True
         instance = Closable()
@@ -178,6 +204,8 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def test_unload_provider_preserves_instance_if_cleanup_fails(self):
         class BrokenCleanup:
+            def generate_image(self, prompt, output_path):
+                return None
             def close(self):
                 raise RuntimeError("sensitive endpoint details")
         instance = BrokenCleanup()
@@ -207,6 +235,8 @@ class ConnectionManagerTests(unittest.TestCase):
         class Closable:
             def __init__(self):
                 self.closed = False
+            def generate_image(self, prompt, output_path):
+                return None
             def close(self):
                 self.closed = True
         instance = Closable()
