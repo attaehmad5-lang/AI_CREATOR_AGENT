@@ -306,12 +306,18 @@ class ProviderRoutingManager:
                 except Exception as exc:
                     decisions.append({"provider": provider_id, "status": "CREDIT_RESERVATION_FAILED", "error_type": type(exc).__name__})
                     continue
-                if not isinstance(credit_reservation, dict) or credit_reservation.get("status") not in {"RESERVED", "ALREADY_RESERVED"}:
+                if isinstance(credit_reservation, dict) and credit_reservation.get("status") == "ALREADY_RESERVED":
+                    return {
+                        "allowed": False, "status": "REQUEST_ALREADY_RESERVED",
+                        "provider": provider_id, "request_id": request_id,
+                        "decisions": decisions,
+                    }
+                if not isinstance(credit_reservation, dict) or credit_reservation.get("status") != "RESERVED":
                     status = credit_reservation.get("status", "CREDIT_RESERVATION_REJECTED") if isinstance(credit_reservation, dict) else "INVALID_CREDIT_RESERVATION_RESPONSE"
                     decisions.append({"provider": provider_id, "status": status})
                     continue
                 credit_reserved = True
-                credit_reservation_created = credit_reservation.get("status") == "RESERVED"
+                credit_reservation_created = True
             if billing_mode == "PAID_APPROVED" and self.cost_policy is not None:
                 reserve_cost = getattr(self.cost_policy, "reserve_usage", None)
                 if callable(reserve_cost):
@@ -328,14 +334,18 @@ class ProviderRoutingManager:
                     except Exception as exc:
                         decisions.append({"provider": provider_id, "status": "COST_RESERVATION_FAILED", "error_type": type(exc).__name__})
                         continue
-                    if not isinstance(cost_reservation, dict) or cost_reservation.get("status") not in {"RESERVED", "ALREADY_RESERVED"}:
+                    if isinstance(cost_reservation, dict) and cost_reservation.get("status") == "ALREADY_RESERVED":
+                        return {
+                            "allowed": False, "status": "REQUEST_ALREADY_RESERVED",
+                            "provider": provider_id, "request_id": request_id,
+                            "decisions": decisions,
+                        }
+                    if not isinstance(cost_reservation, dict) or cost_reservation.get("status") != "RESERVED":
                         status = cost_reservation.get("status", "COST_RESERVATION_REJECTED") if isinstance(cost_reservation, dict) else "INVALID_COST_RESERVATION_RESPONSE"
                         decisions.append({"provider": provider_id, "status": status})
                         continue
                     cost_reserved = True
-                    # Roll back only a reservation created by this routing attempt.
-                    # An existing reservation may belong to an attempt that already started.
-                    cost_reservation_created = cost_reservation.get("status") == "RESERVED"
+                    cost_reservation_created = True
 
             if self.quota_manager is not None:
                 try:
@@ -352,7 +362,13 @@ class ProviderRoutingManager:
                         self.credit_manager.release(request_id=request_id, provider_id=provider_id)
                     decisions.append({"provider": provider_id, "status": "QUOTA_CHECK_FAILED", "error_type": type(exc).__name__})
                     continue
-                if not isinstance(quota, dict) or quota.get("status") not in {"RESERVED", "ALREADY_RESERVED"}:
+                if isinstance(quota, dict) and quota.get("status") == "ALREADY_RESERVED":
+                    return {
+                        "allowed": False, "status": "REQUEST_ALREADY_RESERVED",
+                        "provider": provider_id, "request_id": request_id,
+                        "reservations_retained": True, "decisions": decisions,
+                    }
+                if not isinstance(quota, dict) or quota.get("status") != "RESERVED":
                     if cost_reservation_created:
                         self.cost_policy.release_reservation(
                             project_id=project_id,
