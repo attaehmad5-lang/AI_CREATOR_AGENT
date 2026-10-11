@@ -332,7 +332,12 @@ class ProviderRoutingManager:
                     release_cost = getattr(self.cost_policy, "release_reservation", None)
                     if callable(release_cost):
                         try:
-                            release_cost(project_id=project_id, request_id=old_request_id, provider_id=failed_provider)
+                            release_cost(
+                                project_id=project_id,
+                                request_id=old_request_id,
+                                provider_id=failed_provider,
+                                charge_outcome="not_incurred",
+                            )
                         except Exception:
                             return {"allowed": False, "status": "COST_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
         if self.quota_manager is not None and isinstance(old_request_id, str):
