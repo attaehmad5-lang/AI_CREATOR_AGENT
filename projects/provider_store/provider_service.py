@@ -83,6 +83,48 @@ class ProviderService:
             "health": health,
         }
 
+    def verify_manual_provider(
+        self,
+        provider_id: str,
+        manual_session: Any,
+        probe: Any,
+        *,
+        timeout_seconds: float = 5.0,
+    ) -> dict[str, Any]:
+        """Verify an externally authorized account session and record safe health metadata."""
+        try:
+            connection = self.connection_manager.verify_manual_connection(
+                provider_id, manual_session, probe, timeout_seconds=timeout_seconds
+            )
+        except Exception as exc:
+            connection = {
+                "status": "MANUAL_CONNECTION_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        health: dict[str, Any] | None = None
+        if self.health_manager is not None and isinstance(provider_id, str) and provider_id.strip():
+            try:
+                health = self.health_manager.record_result(
+                    provider_id,
+                    success=connection.get("verified") is True,
+                    latency_ms=connection.get("latency_ms"),
+                    error_code=None if connection.get("verified") is True else str(connection.get("status", "MANUAL_CONNECTION_FAILED")),
+                )
+            except Exception as exc:
+                health = {
+                    "status": "HEALTH_RECORD_FAILED", "saved": False,
+                    "error_type": type(exc).__name__,
+                }
+        return {
+            "status": connection.get("status", "UNKNOWN"),
+            "provider": provider_id,
+            "verified": connection.get("verified") is True,
+            "connection": connection,
+            "health": health,
+        }
+
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
