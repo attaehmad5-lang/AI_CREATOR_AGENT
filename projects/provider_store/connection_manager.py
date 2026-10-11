@@ -241,6 +241,8 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].auth_scheme is not permitted")
                     if "subscription_required" in provider and not isinstance(provider["subscription_required"], bool):
                         errors.append(f"providers[{index}].subscription_required must be boolean")
+                    if "zero_cost_allowed" in provider and not isinstance(provider["zero_cost_allowed"], bool):
+                        errors.append(f"providers[{index}].zero_cost_allowed must be boolean")
                     for reference_key in ("token_env", "token_expiry_env", "api_key_env", "credential_env"):
                         if reference_key in provider and (
                             not isinstance(provider[reference_key], str)
