@@ -315,6 +315,14 @@ class ConnectionManagerTests(unittest.TestCase):
         })
         self.assertFalse(result["valid"])
         self.assertTrue(any("credential value" in error for error in result["errors"]))
+        for secret_key in ("client_secret", "db_password", "authorization_header", "session_token"):
+            result = ConnectionManager.validate_catalog_schema({
+                "providers": [{
+                    "id": "compound_secret",
+                    "metadata": {secret_key: "must-not-be-stored"},
+                }]
+            })
+            self.assertFalse(result["valid"], secret_key)
 
     def test_register_provider_rejects_secret_values_in_metadata(self):
         provider = {
