@@ -162,6 +162,18 @@ class ProviderCreditManager:
                     "provider": provider_id,
                     "verified": False,
                 }
+            for item in self.data["usage"].values():
+                if isinstance(item, dict) and item.get("provider_id") == provider_id:
+                    try:
+                        committed_at = self._parse_timestamp(item.get("committed_at"))
+                    except ValueError:
+                        return {"status": "INVALID_LOCAL_USAGE_TIMESTAMP", "provider": provider_id, "verified": False}
+                    if observed < committed_at:
+                        return {
+                            "status": "CREDIT_SNAPSHOT_PREDATES_LOCAL_USAGE",
+                            "provider": provider_id,
+                            "verified": False,
+                        }
             self.data["providers"][provider_id] = record
             # A fresh official snapshot includes previously completed usage, so old
             # local debits for this provider can now be discarded.
