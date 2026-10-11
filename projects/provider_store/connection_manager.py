@@ -472,7 +472,9 @@ class ConnectionManager:
             return {"status": "INVALID_STATE", "provider": provider_id}
         if not isinstance(verified, bool):
             return {"status": "INVALID_VERIFICATION_FLAG", "provider": provider_id, "saved": False}
-        if status == "CONNECTED" and verified is not True:
+        # Public state updates may record administrative states, but cannot mint
+        # proof of connectivity. Only verify_connectivity may mark a provider verified.
+        if verified is True or status == "CONNECTED":
             return {
                 "status": "VERIFICATION_REQUIRED",
                 "provider": provider_id,
@@ -484,6 +486,21 @@ class ConnectionManager:
         record.update({
             "status": status,
             "verified": bool(verified),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        self.state["providers"][provider_id] = record
+        self._save()
+        return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
+
+    def _mark_connected_after_probe(self, provider_id: str) -> dict[str, Any]:
+        """Record CONNECTED only after the provider-specific probe succeeds."""
+        if not self.provider_exists(provider_id):
+            return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+        existing = self.state["providers"].get(provider_id, {})
+        record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+        record.update({
+            "status": "CONNECTED",
+            "verified": True,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })
         self.state["providers"][provider_id] = record
@@ -683,7 +700,7 @@ class ConnectionManager:
                 "latency_ms": round((time.monotonic() - started) * 1000, 2),
             }
         latency = round((time.monotonic() - started) * 1000, 2)
-        saved = self.set_state(provider_id, "CONNECTED", verified=True)
+        saved = self._mark_connected_after_probe(provider_id)
         if not saved.get("saved"):
             return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
         return {
