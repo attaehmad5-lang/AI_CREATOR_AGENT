@@ -165,6 +165,50 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(fallback["provider"], "fallback")
         self.assertEqual(quota.data["requests"]["job-1"]["provider_id"], "fallback")
 
+    def test_quota_rejection_releases_new_cost_reservation(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        quota = ProviderQuotaManager(
+            self.root / "quota-rollback.json",
+            limits={"primary": {"hourly": 1}, "fallback": {"hourly": 1}},
+        )
+        quota.reserve(provider_id="primary", request_id="quota-blocker")
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=policy, quota_manager=quota
+        )
+
+        result = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary"}, request_id="paid-job",
+        )
+
+        self.assertFalse(result["allowed"])
+        reservations = policy.ledger["projects"]["film"]["reservations"]
+        self.assertNotIn("paid-job", reservations)
+
+    def test_quota_rejection_does_not_release_preexisting_cost_reservation(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        quota = ProviderQuotaManager(
+            self.root / "quota-existing.json",
+            limits={"primary": {"hourly": 1}, "fallback": {"hourly": 1}},
+        )
+        quota.reserve(provider_id="primary", request_id="quota-blocker")
+        policy.reserve_usage(
+            project_id="film", provider_id="primary",
+            estimated_cost=1.0, request_id="existing-paid-job",
+        )
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=policy, quota_manager=quota
+        )
+
+        result = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary"}, request_id="existing-paid-job",
+        )
+
+        self.assertFalse(result["allowed"])
+        reservation = policy.ledger["projects"]["film"]["reservations"]["existing-paid-job"]
+        self.assertEqual(reservation["provider_id"], "primary")
+
     def test_paid_routing_reserves_budget_and_requires_idempotency_key(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
