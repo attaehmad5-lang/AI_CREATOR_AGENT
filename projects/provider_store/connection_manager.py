@@ -223,6 +223,22 @@ class ConnectionManager:
                             or len({host.casefold().rstrip(".") for host in hosts if isinstance(host, str)}) != len(hosts)
                         ):
                             errors.append(f"providers[{index}].allowed_hosts contains invalid or duplicate hostnames")
+                    if "auth_header_name" in provider:
+                        safe_auth_headers = {
+                            "authorization", "x-api-key", "api-key", "xi-api-key",
+                            "x-goog-api-key", "cartesia-api-key", "x-auth-token", "x-key",
+                        }
+                        header = provider["auth_header_name"]
+                        if (
+                            not isinstance(header, str)
+                            or header.casefold() not in safe_auth_headers
+                        ):
+                            errors.append(f"providers[{index}].auth_header_name is not permitted")
+                    if "auth_scheme" in provider and (
+                        not isinstance(provider["auth_scheme"], str)
+                        or provider["auth_scheme"].casefold() not in {"", "bearer", "key", "token", "basic"}
+                    ):
+                        errors.append(f"providers[{index}].auth_scheme is not permitted")
                     if "subscription_required" in provider and not isinstance(provider["subscription_required"], bool):
                         errors.append(f"providers[{index}].subscription_required must be boolean")
                     for reference_key in ("token_env", "token_expiry_env", "api_key_env", "credential_env"):
