@@ -500,11 +500,19 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("access_token", metadata)
         sanitized = ConnectionManager._sanitize_public_data({
             "access_token": "must-not-appear",
-            "nested": {"refresh_token": "also-secret", "region": "global"},
+            "authorization_header": "bearer-secret",
+            "client_secret": "client-secret",
+            "nested": {
+                "refresh_token": "also-secret",
+                "session_cookie": "cookie-secret",
+                "signing_key": "private-key",
+                "region": "global",
+            },
         })
-        self.assertNotIn("access_token", sanitized)
-        self.assertNotIn("refresh_token", repr(sanitized))
-        self.assertNotIn("must-not-appear", repr(sanitized))
+        for secret_key in ("access_token", "authorization_header", "client_secret"):
+            self.assertNotIn(secret_key, sanitized)
+        for secret_value in ("refresh_token", "must-not-appear", "bearer-secret", "client-secret", "cookie-secret", "private-key"):
+            self.assertNotIn(secret_value, repr(sanitized))
         metadata["name"] = "mutated"
         self.assertNotEqual(self.manager.get_provider("public_image").get("name"), "mutated")
 
