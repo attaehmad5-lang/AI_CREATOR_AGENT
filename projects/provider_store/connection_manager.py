@@ -965,13 +965,12 @@ class ConnectionManager:
             provider = dict(provider)
             provider["configuration"] = configuration_result["configuration"]
 
-        for status in ("CONNECTING",):
-            try:
-                saved_state = self.set_state(provider_id, status)
-            except Exception:
-                saved_state = {"saved": False}
-            if not isinstance(saved_state, dict) or saved_state.get("saved") is not True:
-                return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
+        try:
+            saved_state = self.set_state(provider_id, "CONNECTING")
+        except Exception:
+            saved_state = {"saved": False}
+        if not isinstance(saved_state, dict) or saved_state.get("saved") is not True:
+            return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
 
         started = time.monotonic()
         try:
