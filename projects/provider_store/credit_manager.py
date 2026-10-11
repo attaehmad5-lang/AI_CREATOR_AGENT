@@ -66,6 +66,10 @@ class ProviderCreditManager:
                 or not isinstance(record.get("source"), str)
                 or not record.get("source", "").strip()
                 or len(record.get("source", "")) > 120
+                or any(
+                    marker in record.get("source", "").casefold()
+                    for marker in ("token=", "api_key=", "password=", "secret=", "bearer ")
+                )
             ):
                 raise ValueError("invalid provider credit snapshot")
             self._parse_timestamp(record.get("observed_at"))
@@ -142,7 +146,10 @@ class ProviderCreditManager:
         if not self._valid_amount(amount):
             return {"status": "INVALID_CREDIT_AMOUNT", "provider": provider_id, "verified": False}
         source = result.get("source")
-        if not isinstance(source, str) or not source.strip() or len(source) > 120:
+        if (
+            not isinstance(source, str) or not source.strip() or len(source) > 120
+            or any(marker in source.casefold() for marker in ("token=", "api_key=", "password=", "secret=", "bearer "))
+        ):
             return {"status": "INVALID_CREDIT_SOURCE", "provider": provider_id, "verified": False}
         unit = result.get("unit", "credits")
         if not isinstance(unit, str) or not unit.strip() or len(unit) > 32:
