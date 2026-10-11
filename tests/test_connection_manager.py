@@ -82,6 +82,37 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(reloaded.get_state("public_image")["status"], "READY")
         self.assertIn("updated_at", reloaded.get_state("public_image"))
 
+    def test_loaded_state_is_schema_checked_and_secrets_are_redacted(self):
+        self.state_path.write_text(
+            json.dumps({
+                "version": "1.0",
+                "providers": {
+                    "public_image": {
+                        "status": "READY",
+                        "configuration": {
+                            "model": "safe-model",
+                            "api_key": "do-not-return",
+                            "nested": {"refresh_token": "also-secret", "region": "global"},
+                        },
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+        visible = manager.get_state("public_image")
+        self.assertEqual(visible["configuration"]["model"], "safe-model")
+        self.assertEqual(visible["configuration"]["nested"]["region"], "global")
+        self.assertNotIn("api_key", repr(visible))
+        self.assertNotIn("refresh_token", repr(visible))
+        self.assertNotIn("do-not-return", repr(visible))
+        self.assertNotIn("also-secret", repr(visible))
+
+    def test_invalid_connection_state_schema_is_rejected(self):
+        self.state_path.write_text(json.dumps({"providers": []}), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ConnectionManager(self.catalog_path, self.state_path)
+
     def test_state_updates_preserve_existing_nonsecret_configuration(self):
         self.manager.state["providers"]["public_image"] = {
             "status": "READY", "configuration": {"model": "local-test"},
