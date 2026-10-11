@@ -255,7 +255,7 @@ class ProviderCostPolicy:
                 "budget_remaining": round(remaining - float(estimated_cost), 6),
             }
 
-    def release_reservation(self, *, project_id: str, request_id: str) -> dict[str, Any]:
+    def release_reservation(self, *, project_id: str, request_id: str, provider_id: str | None = None) -> dict[str, Any]:
         """Release a reservation when its provider job is cancelled or safely aborted."""
         if not isinstance(project_id, str) or not project_id.strip() or not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_USAGE_RECORD", "saved": False}
@@ -264,6 +264,9 @@ class ProviderCostPolicy:
             reservations = project.get("reservations", {}) if isinstance(project, dict) else {}
             if not isinstance(reservations, dict) or request_id not in reservations:
                 return {"status": "RESERVATION_NOT_FOUND", "saved": False, "request_id": request_id}
+            record = reservations.get(request_id)
+            if provider_id is not None and (not isinstance(record, dict) or record.get("provider_id") != provider_id):
+                return {"status": "REQUEST_PROVIDER_MISMATCH", "saved": False, "request_id": request_id}
             reservations.pop(request_id)
             if self.ledger_path:
                 self._save()
