@@ -255,10 +255,23 @@ class ProviderCostPolicy:
                 "budget_remaining": round(remaining - float(estimated_cost), 6),
             }
 
-    def release_reservation(self, *, project_id: str, request_id: str, provider_id: str | None = None) -> dict[str, Any]:
-        """Release a reservation when its provider job is cancelled or safely aborted."""
+    def release_reservation(
+        self,
+        *,
+        project_id: str,
+        request_id: str,
+        provider_id: str | None = None,
+        charge_outcome: str = "unknown",
+    ) -> dict[str, Any]:
+        """Release budget only when the caller confirms no charge was incurred.
+
+        Ambiguous failures deliberately retain the reservation: providers may accept a
+        request and charge for it even when the client times out or loses the response.
+        """
         if not isinstance(project_id, str) or not project_id.strip() or not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_USAGE_RECORD", "saved": False}
+        if charge_outcome not in {"not_incurred", "incurred", "unknown"}:
+            return {"status": "INVALID_CHARGE_OUTCOME", "saved": False, "request_id": request_id}
         with self._lock:
             project = self.ledger["projects"].get(project_id)
             reservations = project.get("reservations", {}) if isinstance(project, dict) else {}
@@ -267,6 +280,20 @@ class ProviderCostPolicy:
             record = reservations.get(request_id)
             if provider_id is not None and (not isinstance(record, dict) or record.get("provider_id") != provider_id):
                 return {"status": "REQUEST_PROVIDER_MISMATCH", "saved": False, "request_id": request_id}
+            if charge_outcome == "unknown":
+                return {
+                    "status": "RESERVATION_RETAINED_CHARGE_OUTCOME_UNKNOWN",
+                    "saved": False,
+                    "request_id": request_id,
+                    "reserved_amount": record.get("estimated_cost") if isinstance(record, dict) else None,
+                }
+            if charge_outcome == "incurred":
+                return {
+                    "status": "RECONCILIATION_REQUIRED",
+                    "saved": False,
+                    "request_id": request_id,
+                    "reserved_amount": record.get("estimated_cost") if isinstance(record, dict) else None,
+                }
             reservations.pop(request_id)
             if self.ledger_path:
                 self._save()
