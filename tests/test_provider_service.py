@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import unittest
 from pathlib import Path
@@ -104,6 +105,23 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
         invalid = self.service.finalize_started_request(**{**kwargs, "actual_cost": float("nan")})
         self.assertEqual(invalid["status"], "INVALID_COST_AMOUNT")
+
+    def test_concurrent_finalization_is_idempotent(self):
+        self.cost.reserve_usage(
+            project_id="film", provider_id="image", estimated_cost=2.0,
+            request_id="job-concurrent-finalize",
+        )
+        self.quota.reserve(provider_id="image", request_id="job-concurrent-finalize")
+        kwargs = dict(
+            project_id="film", provider_id="image", request_id="job-concurrent-finalize",
+            estimated_cost=2.0, actual_cost=1.5, success=True, latency_ms=10,
+        )
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda _: self.service.finalize_started_request(**kwargs), range(12)))
+        self.assertTrue(all(result["finalized"] for result in results))
+        self.assertEqual(self.cost.ledger["projects"]["film"]["actual_spend"], 1.5)
+        self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
+        self.assertEqual(self.quota.data["requests"]["job-concurrent-finalize"]["status"], "COMMITTED")
 
     def test_unstarted_request_releases_reservations_only_when_explicitly_called(self):
         self.cost.reserve_usage(
