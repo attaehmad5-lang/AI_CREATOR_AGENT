@@ -182,12 +182,37 @@ class ProviderCostPolicyTests(unittest.TestCase):
             project_id="documentary", provider_id="paid",
             estimated_cost=2.0, request_id="job-2",
         )
-        released = self.policy.release_reservation(project_id="documentary", request_id="job-2")
+        retained = self.policy.release_reservation(project_id="documentary", request_id="job-2")
+        self.assertEqual(retained["status"], "RESERVATION_RETAINED_CHARGE_OUTCOME_UNKNOWN")
+        self.assertIn("job-2", self.policy.ledger["projects"]["documentary"]["reservations"])
+        requires_reconciliation = self.policy.release_reservation(
+            project_id="documentary", request_id="job-2", charge_outcome="incurred"
+        )
+        self.assertEqual(requires_reconciliation["status"], "RECONCILIATION_REQUIRED")
+        self.assertIn("job-2", self.policy.ledger["projects"]["documentary"]["reservations"])
+        released = self.policy.release_reservation(
+            project_id="documentary", request_id="job-2", charge_outcome="not_incurred"
+        )
         self.assertEqual(released["status"], "RESERVATION_RELEASED")
         self.assertEqual(
-            self.policy.release_reservation(project_id="documentary", request_id="job-2")["status"],
+            self.policy.release_reservation(
+                project_id="documentary", request_id="job-2", charge_outcome="not_incurred"
+            )["status"],
             "RESERVATION_NOT_FOUND",
         )
+
+    def test_unknown_charge_outcome_does_not_free_quota_for_another_request(self):
+        self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid", estimated_cost=6.0, request_id="timeout-job"
+        )
+        outcome = self.policy.release_reservation(
+            project_id="documentary", request_id="timeout-job", charge_outcome="unknown"
+        )
+        self.assertEqual(outcome["status"], "RESERVATION_RETAINED_CHARGE_OUTCOME_UNKNOWN")
+        blocked = self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid", estimated_cost=5.0, request_id="next-job"
+        )
+        self.assertEqual(blocked["status"], "PROJECT_BUDGET_EXCEEDED")
 
     def test_actual_cost_overrun_triggers_budget_alert(self):
         result = self.policy.reconcile_usage(
