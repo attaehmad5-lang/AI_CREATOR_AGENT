@@ -275,6 +275,32 @@ class ProviderRoutingManager:
 
             cost_reserved = False
             cost_reservation_created = False
+            credit_reserved = False
+            credit_reservation_created = False
+            if billing_mode == "FREE_CREDITS":
+                if not isinstance(request_id, str) or not request_id.strip():
+                    decisions.append({"provider": provider_id, "status": "CREDIT_RESERVATION_REQUEST_ID_REQUIRED"})
+                    continue
+                reserve_credit = getattr(self.credit_manager, "reserve", None)
+                if not callable(reserve_credit):
+                    decisions.append({"provider": provider_id, "status": "CREDIT_RESERVATION_MANAGER_UNAVAILABLE"})
+                    continue
+                try:
+                    credit_reservation = reserve_credit(
+                        provider_id=provider_id,
+                        amount=cost,
+                        request_id=request_id,
+                        unit=estimated_cost_unit.strip(),
+                    )
+                except Exception as exc:
+                    decisions.append({"provider": provider_id, "status": "CREDIT_RESERVATION_FAILED", "error_type": type(exc).__name__})
+                    continue
+                if not isinstance(credit_reservation, dict) or credit_reservation.get("status") not in {"RESERVED", "ALREADY_RESERVED"}:
+                    status = credit_reservation.get("status", "CREDIT_RESERVATION_REJECTED") if isinstance(credit_reservation, dict) else "INVALID_CREDIT_RESERVATION_RESPONSE"
+                    decisions.append({"provider": provider_id, "status": status})
+                    continue
+                credit_reserved = True
+                credit_reservation_created = credit_reservation.get("status") == "RESERVED"
             if billing_mode == "PAID_APPROVED" and self.cost_policy is not None:
                 reserve_cost = getattr(self.cost_policy, "reserve_usage", None)
                 if callable(reserve_cost):
@@ -311,6 +337,8 @@ class ProviderRoutingManager:
                             provider_id=provider_id,
                             charge_outcome="not_incurred",
                         )
+                    if credit_reservation_created:
+                        self.credit_manager.release(request_id=request_id, provider_id=provider_id)
                     decisions.append({"provider": provider_id, "status": "QUOTA_CHECK_FAILED", "error_type": type(exc).__name__})
                     continue
                 if not isinstance(quota, dict) or quota.get("status") not in {"RESERVED", "ALREADY_RESERVED"}:
@@ -321,6 +349,8 @@ class ProviderRoutingManager:
                             provider_id=provider_id,
                             charge_outcome="not_incurred",
                         )
+                    if credit_reservation_created:
+                        self.credit_manager.release(request_id=request_id, provider_id=provider_id)
                     status = quota.get("status", "QUOTA_REJECTED") if isinstance(quota, dict) else "INVALID_QUOTA_RESPONSE"
                     decisions.append({"provider": provider_id, "status": status})
                     continue
@@ -340,6 +370,9 @@ class ProviderRoutingManager:
                 result["billing_mode"] = billing_mode
             if cost_reserved:
                 result["cost_reserved"] = True
+            if credit_reserved:
+                result["credit_reserved"] = True
+                result["request_id"] = request_id
             if self.quota_manager is not None:
                 result["quota_reserved"] = True
                 result["request_id"] = request_id
