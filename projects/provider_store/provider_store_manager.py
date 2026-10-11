@@ -42,16 +42,20 @@ class ProviderStoreManager:
 
     def status(self) -> dict[str, Any]:
         providers = self.list_providers()
+        connected_verified = 0
+        for provider in providers:
+            provider_id = provider.get("id")
+            if not isinstance(provider_id, str) or not provider_id:
+                continue
+            state = self.manager.get_state(provider_id)
+            if state.get("status") == "CONNECTED" and state.get("verified") is True:
+                connected_verified += 1
         return {
             "store": "AI_CREATOR_AGENT_PROVIDER_STORE",
             "version": "1.0",
             "status": "READY",
             "providers_total": len(providers),
-            "connected_verified": sum(
-                1 for provider in providers
-                if self.manager.get_state(provider.get("id", "")).get("status") == "CONNECTED"
-                and self.manager.get_state(provider.get("id", "")).get("verified") is True
-            ),
+            "connected_verified": connected_verified,
             "ready": True,
         }
 
