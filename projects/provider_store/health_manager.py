@@ -40,6 +40,18 @@ class ProviderHealthManager:
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}}
         self._reload_state()
 
+    @staticmethod
+    def _parse_timestamp(value: Any) -> datetime:
+        if not isinstance(value, str):
+            raise ValueError("invalid provider health timestamp")
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("invalid provider health timestamp") from exc
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
     def _reload_state(self) -> None:
         """Reload the latest valid state while holding the interprocess lock."""
         if not self.state_path.exists():
