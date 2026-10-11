@@ -288,8 +288,8 @@ class ProviderService:
             retry = self.retry_decision(
                 attempt=adapter_result.get("attempt", 1),
                 status_code=adapter_result.get("status_code"),
-                error_code=error_code,
                 retry_after=adapter_result.get("retry_after"),
+                idempotent=adapter_result.get("idempotent", False),
             )
         if accounting_required:
             status = "EXECUTION_ACCOUNTING_REQUIRED"
