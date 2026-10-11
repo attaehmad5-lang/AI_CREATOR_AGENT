@@ -90,6 +90,9 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             categories = CategoryManager(store=store)
             self.assertEqual(len(registry.all_providers()), 2)
             self.assertEqual(registry.status()["advanced_providers"], 1)
+            self.assertEqual(len(registry.core["providers"]), 1)
+            self.assertEqual(len(registry.advanced["providers"]), 1)
+            self.assertEqual([p["id"] for p in advanced.catalog["providers"]], ["story"])
             self.assertEqual([p["id"] for p in advanced.list_providers()], ["story"])
             self.assertEqual([p["id"] for p in categories.providers_by_category("image")], ["image"])
 
