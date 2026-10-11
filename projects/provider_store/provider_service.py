@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Any
+import re
+import time
 
 
 class ProviderService:
@@ -101,6 +103,188 @@ class ProviderService:
             return {"valid": False, "status": "OUTPUT_VALIDATION_FAILED", "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {
             "valid": False, "status": "INVALID_OUTPUT_VALIDATION_RESPONSE"
+        }
+
+    @staticmethod
+    def _safe_error_code(value: Any, default: str) -> str:
+        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", value):
+            return default
+        lowered = value.casefold()
+        if any(term in lowered for term in ("token", "secret", "password", "credential", "authorization", "bearer")):
+            return default
+        return value
+
+    def execute_routed_request(
+        self,
+        *,
+        category: str,
+        project_id: str,
+        request_id: str,
+        estimated_cost: float,
+        adapter: Any,
+        modality: str,
+        output_path: Any = None,
+        estimated_cost_unit: str = "USD",
+        adapter_options: dict[str, Any] | None = None,
+        **route_options: Any,
+    ) -> dict[str, Any]:
+        """Route and invoke one adapter attempt, validate output, then account safely.
+
+        This method deliberately does not auto-retry: after an adapter exception, it
+        may be impossible to know whether a paid/credit-consuming request started.
+        """
+        if not callable(adapter):
+            return {"status": "INVALID_ADAPTER", "executed": False}
+        if not isinstance(adapter_options, (dict, type(None))):
+            return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
+        if not isinstance(request_id, str) or not request_id.strip():
+            return {"status": "INVALID_REQUEST_ID", "executed": False}
+        if not isinstance(category, str) or not category.strip():
+            return {"status": "INVALID_CATEGORY", "executed": False}
+        if not isinstance(project_id, str) or not project_id.strip():
+            return {"status": "INVALID_PROJECT_ID", "executed": False}
+        if not self._valid_amount(estimated_cost):
+            return {"status": "INVALID_COST_AMOUNT", "executed": False}
+
+        route = self.route_request(
+            category=category,
+            project_id=project_id,
+            request_id=request_id,
+            estimated_cost=estimated_cost,
+            estimated_cost_unit=estimated_cost_unit,
+            **route_options,
+        )
+        if not isinstance(route, dict) or route.get("allowed") is not True:
+            return {"status": "ROUTING_REJECTED", "executed": False, "route": route}
+        provider_id = route.get("provider")
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+
+        options = dict(adapter_options or {})
+        options["provider_id"] = provider_id
+        options["request_id"] = request_id
+        started_at = time.monotonic()
+        try:
+            adapter_result = adapter(**options)
+        except Exception as exc:
+            # The adapter may have transmitted the request before failing. Do not
+            # release cost, quota, or credit reservations on this ambiguous outcome.
+            return {
+                "status": "EXECUTION_OUTCOME_UNKNOWN",
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                "reservations_retained": True,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
+            return {
+                "status": "EXECUTION_OUTCOME_UNKNOWN",
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                "reservations_retained": True,
+            }
+        if adapter_result["started"] is False:
+            released = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            return {
+                "status": "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED",
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                "release": released,
+            }
+
+        accounting_required = False
+        reported_success = adapter_result.get("success")
+        if not isinstance(reported_success, bool):
+            reported_success = False
+            accounting_required = True
+        actual_cost = adapter_result.get("actual_cost")
+        if not self._valid_amount(actual_cost):
+            actual_cost = 0.0
+            accounting_required = True
+        charge_outcome = adapter_result.get("charge_outcome", "unknown")
+        if not isinstance(charge_outcome, str) or charge_outcome not in {"unknown", "incurred", "not_incurred"}:
+            charge_outcome = "unknown"
+            accounting_required = True
+        if actual_cost > 0 and charge_outcome == "not_incurred":
+            charge_outcome = "unknown"
+            accounting_required = True
+
+        credit_outcome = adapter_result.get("credit_outcome", "unknown")
+        if not isinstance(credit_outcome, str) or credit_outcome not in {"unknown", "used", "not_used"}:
+            credit_outcome = "unknown"
+            accounting_required = True
+        actual_credit_amount = adapter_result.get("actual_credit_amount")
+        if actual_credit_amount is not None and not self._valid_amount(actual_credit_amount):
+            actual_credit_amount = None
+            credit_outcome = "unknown"
+            accounting_required = True
+
+        latency_ms = adapter_result.get("latency_ms")
+        if not self._valid_amount(latency_ms):
+            latency_ms = (time.monotonic() - started_at) * 1000
+        output_validation = None
+        final_success = reported_success
+        output_error = None
+        if reported_success:
+            final_path = adapter_result.get("output_path", output_path)
+            if final_path is None:
+                output_validation = {"valid": False, "status": "OUTPUT_PATH_REQUIRED"}
+            else:
+                output_validation = self.validate_output(final_path, modality=modality)
+            if not isinstance(output_validation, dict) or output_validation.get("valid") is not True:
+                final_success = False
+                output_error = "OUTPUT_VALIDATION_FAILED"
+
+        error_code = self._safe_error_code(
+            adapter_result.get("error_code"),
+            output_error or ("PROVIDER_EXECUTION_FAILED" if not final_success else "PROVIDER_EXECUTION_SUCCEEDED"),
+        )
+        finalization = self.finalize_started_request(
+            project_id=project_id,
+            provider_id=provider_id,
+            request_id=request_id,
+            estimated_cost=estimated_cost,
+            actual_cost=actual_cost,
+            success=final_success,
+            latency_ms=latency_ms,
+            error_code=None if final_success else error_code,
+            charge_outcome=charge_outcome,
+            billing_mode=route.get("billing_mode"),
+            credit_outcome=credit_outcome,
+            actual_credit_amount=actual_credit_amount,
+        )
+        retry = None
+        if not final_success and self.retry_policy is not None:
+            retry = self.retry_decision(
+                attempt=adapter_result.get("attempt", 1),
+                status_code=adapter_result.get("status_code"),
+                error_code=error_code,
+                retry_after=adapter_result.get("retry_after"),
+            )
+        if accounting_required:
+            status = "EXECUTION_ACCOUNTING_REQUIRED"
+        elif output_error is not None:
+            status = "OUTPUT_VALIDATION_FAILED"
+        elif not final_success:
+            status = "EXECUTION_FAILED"
+        elif finalization.get("finalized") is True:
+            status = "EXECUTION_SUCCEEDED"
+        else:
+            status = "EXECUTION_FINALIZATION_PARTIAL"
+        return {
+            "status": status,
+            "executed": True,
+            "provider": provider_id,
+            "request_id": request_id,
+            "billing_mode": route.get("billing_mode"),
+            "output": output_validation,
+            "finalization": finalization,
+            "retry_decision": retry,
         }
 
     def retry_decision(self, **failure: Any) -> dict[str, Any]:
