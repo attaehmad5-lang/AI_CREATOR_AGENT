@@ -151,7 +151,12 @@ class ConnectionManager:
                 if normalized in safe_reference_keys:
                     continue
                 if normalized in forbidden_keys or any(
-                    marker in normalized for marker in ("access_token", "refresh_token", "api_key", "apikey")
+                    marker in normalized
+                    for marker in (
+                        "access_token", "refresh_token", "api_key", "apikey",
+                        "password", "secret", "credential", "authorization",
+                        "bearer", "private_key", "session_token",
+                    )
                 ):
                     return True
                 if ConnectionManager._contains_credential_value_field(item):
