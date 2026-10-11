@@ -4,6 +4,8 @@ from __future__ import annotations
 import codecs
 import hashlib
 import json
+import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -104,12 +106,25 @@ class ProviderOutputValidator:
         if extension not in self.EXTENSIONS[normalized_modality]:
             return {"valid": False, "status": "EXTENSION_MISMATCH", "extension": extension}
         try:
-            size = artifact.stat().st_size
-            if size < self.min_size_bytes:
-                return {"valid": False, "status": "OUTPUT_TOO_SMALL", "size_bytes": size}
-            if size > self.max_size_bytes:
-                return {"valid": False, "status": "OUTPUT_TOO_LARGE", "size_bytes": size}
-            with artifact.open("rb") as stream:
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(artifact, flags)
+            with os.fdopen(descriptor, "rb") as stream:
+                file_stat = os.fstat(stream.fileno())
+                if not stat.S_ISREG(file_stat.st_mode):
+                    return {"valid": False, "status": "INVALID_FILE_TYPE"}
+                if not hasattr(os, "O_NOFOLLOW"):
+                    path_stat = os.lstat(artifact)
+                    if (
+                        stat.S_ISLNK(path_stat.st_mode)
+                        or path_stat.st_dev != file_stat.st_dev
+                        or path_stat.st_ino != file_stat.st_ino
+                    ):
+                        return {"valid": False, "status": "SYMLINK_REJECTED"}
+                size = file_stat.st_size
+                if size < self.min_size_bytes:
+                    return {"valid": False, "status": "OUTPUT_TOO_SMALL", "size_bytes": size}
+                if size > self.max_size_bytes:
+                    return {"valid": False, "status": "OUTPUT_TOO_LARGE", "size_bytes": size}
                 header = stream.read(32)
                 if normalized_modality in self.SIGNATURES:
                     mime = self._match_signature(normalized_modality, header)
@@ -139,11 +154,13 @@ class ProviderOutputValidator:
                     except (json.JSONDecodeError, UnicodeDecodeError, ValueError, RecursionError):
                         return {"valid": False, "status": "INVALID_JSON"}
                     mime = "application/json"
-            digest = hashlib.sha256()
-            with artifact.open("rb") as stream:
+                digest = hashlib.sha256()
+                stream.seek(0)
                 for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                     digest.update(chunk)
         except OSError:
+            if artifact.is_symlink():
+                return {"valid": False, "status": "SYMLINK_REJECTED"}
             return {"valid": False, "status": "OUTPUT_READ_FAILED"}
         return {
             "valid": True,
