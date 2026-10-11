@@ -398,6 +398,7 @@ class ProviderCostPolicy:
         actual_cost: float,
         request_id: str,
         success: bool | None = None,
+        charge_outcome: str | None = None,
     ) -> dict[str, Any]:
         """Record actual usage idempotently and flag estimate variance/budget breaches."""
         with self._transaction():
@@ -408,6 +409,7 @@ class ProviderCostPolicy:
                 actual_cost=actual_cost,
                 request_id=request_id,
                 success=success,
+                charge_outcome=charge_outcome,
             )
 
     def _reconcile_usage_unlocked(
@@ -419,6 +421,7 @@ class ProviderCostPolicy:
         actual_cost: float,
         request_id: str,
         success: bool | None = None,
+        charge_outcome: str | None = None,
     ) -> dict[str, Any]:
         if not all(isinstance(v, str) and v.strip() for v in (project_id, provider_id, request_id)):
             return {"status": "INVALID_USAGE_RECORD", "saved": False}
@@ -426,6 +429,18 @@ class ProviderCostPolicy:
             return {"status": "INVALID_COST_AMOUNT", "saved": False}
         if success is not None and not isinstance(success, bool):
             return {"status": "INVALID_EXECUTION_RESULT", "saved": False}
+        if charge_outcome is not None and (
+            not isinstance(charge_outcome, str)
+            or charge_outcome not in {"unknown", "incurred", "not_incurred"}
+        ):
+            return {"status": "INVALID_CHARGE_OUTCOME", "saved": False}
+        if actual_cost > 0 and charge_outcome == "not_incurred":
+            return {"status": "INCONSISTENT_CHARGE_OUTCOME", "saved": False}
+        if estimated_cost > 0 and actual_cost == 0 and charge_outcome != "not_incurred":
+            return {
+                "status": "RECONCILIATION_REQUIRED" if charge_outcome == "incurred" else "CHARGE_OUTCOME_UNKNOWN",
+                "saved": False,
+            }
         projects = self.ledger["projects"]
         project = projects.setdefault(
             project_id, {"actual_spend": 0.0, "requests": {}, "reservations": {}}
@@ -439,6 +454,7 @@ class ProviderCostPolicy:
                 and existing.get("estimated_cost") == float(estimated_cost)
                 and existing.get("actual_cost") == float(actual_cost)
                 and (success is None or existing.get("execution_success") == success)
+                and (charge_outcome is None or existing.get("charge_outcome") == charge_outcome)
             )
             return {
                 "status": "DUPLICATE_REQUEST" if same_request else "REQUEST_ID_CONFLICT",
@@ -463,6 +479,8 @@ class ProviderCostPolicy:
         }
         if success is not None:
             record["execution_success"] = success
+        if charge_outcome is not None:
+            record["charge_outcome"] = charge_outcome
         requests[request_id] = record
         project["actual_spend"] = round(float(project.get("actual_spend", 0.0)) + float(actual_cost), 6)
         if self.ledger_path:
