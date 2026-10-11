@@ -148,6 +148,21 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         self.assertEqual(headers.get("x-goog-api-key"), secret)
         self.assertNotIn(secret, repr(result))
 
+    def test_custom_auth_header_cannot_override_transport_headers(self):
+        opener = _Opener()
+        probe = ProviderHTTPConnectivityProbe(
+            environ={"HF_TOKEN": "private"},
+            opener=opener,
+        )
+        with self.assertRaisesRegex(ValueError, "header name is not permitted"):
+            probe({
+                "id": "huggingface", "auth_type": "API_TOKEN",
+                "auth_header_name": "Host", "token_env": "HF_TOKEN",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertEqual(opener.calls, [])
+
     def test_api_auth_fails_closed_for_unknown_or_malformed_environment_reference(self):
         opener = _Opener()
         probe = ProviderHTTPConnectivityProbe(environ={"HF_TOKEN": "private"}, opener=opener)
