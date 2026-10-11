@@ -89,6 +89,12 @@ class ProviderHealthManager:
                     or latency < 0
                 ):
                     raise ValueError("Invalid provider health latency")
+                error_code = event.get("error_code")
+                if error_code is not None and (
+                    not isinstance(error_code, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", error_code)
+                ):
+                    raise ValueError("Invalid provider health error code")
             for timestamp_key in ("last_checked_at", "last_success_at", "last_failure_at"):
                 if timestamp_key in record:
                     self._parse_timestamp(record[timestamp_key])
