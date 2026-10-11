@@ -175,33 +175,36 @@ class ProviderService:
                     cost_result = {"status": "DUPLICATE_REQUEST", "saved": True}
             elif not success and actual_cost == 0:
                 # A failed started request with no reported charge is not proof of
-                # a free request. Keep its budget reservation unless the provider
-                # explicitly confirms that no charge was incurred.
-                release = getattr(self.cost_policy, "release_reservation", None)
-                if not callable(release):
-                    cost_result = {"status": "CHARGE_OUTCOME_UNKNOWN", "saved": False}
-                else:
-                    try:
-                        cost_result = release(
-                            project_id=project_id,
-                            request_id=request_id,
-                            provider_id=provider_id,
-                            charge_outcome=charge_outcome,
-                        )
-                        if charge_outcome == "unknown":
-                            cost_result = {
-                                **cost_result,
-                                "status": "CHARGE_OUTCOME_UNKNOWN",
-                                "saved": False,
-                            }
-                        elif charge_outcome == "incurred":
-                            cost_result = {
-                                **cost_result,
-                                "status": "RECONCILIATION_REQUIRED",
-                                "saved": False,
-                            }
-                    except Exception as exc:
-                        cost_result = {"status": "COST_RECONCILIATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+                # a free request. Unknown/uncertain outcomes retain the reservation.
+                try:
+                    if charge_outcome == "not_incurred":
+                        record_no_charge = getattr(self.cost_policy, "record_no_charge", None)
+                        if not callable(record_no_charge):
+                            cost_result = {"status": "NO_CHARGE_LEDGER_UNAVAILABLE", "saved": False}
+                        else:
+                            cost_result = record_no_charge(
+                                project_id=project_id,
+                                provider_id=provider_id,
+                                estimated_cost=estimated_cost,
+                                request_id=request_id,
+                            )
+                    else:
+                        release = getattr(self.cost_policy, "release_reservation", None)
+                        if not callable(release):
+                            cost_result = {"status": "CHARGE_OUTCOME_UNKNOWN", "saved": False}
+                        else:
+                            cost_result = release(
+                                project_id=project_id,
+                                request_id=request_id,
+                                provider_id=provider_id,
+                                charge_outcome=charge_outcome,
+                            )
+                            if charge_outcome == "unknown":
+                                cost_result = {**cost_result, "status": "CHARGE_OUTCOME_UNKNOWN", "saved": False}
+                            elif charge_outcome == "incurred":
+                                cost_result = {**cost_result, "status": "RECONCILIATION_REQUIRED", "saved": False}
+                except Exception as exc:
+                    cost_result = {"status": "COST_RECONCILIATION_FAILED", "saved": False, "error_type": type(exc).__name__}
             else:
                 try:
                     cost_result = self.cost_policy.reconcile_usage(
