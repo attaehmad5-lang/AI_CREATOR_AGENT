@@ -484,7 +484,9 @@ class ConnectionManager:
             safe_reference_keys = {"token_env", "api_key_env", "secret_ref", "credential_env"}
             secret_fragments = (
                 "password", "secret", "credential", "api_key", "apikey",
-                "access_token", "refresh_token",
+                "access_token", "refresh_token", "token", "authorization",
+                "bearer", "private_key", "signing_key", "encryption_key",
+                "key_material", "cookie", "session",
             )
             for key, item in value.items():
                 normalized = str(key).casefold().replace("-", "_")
