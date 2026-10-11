@@ -556,8 +556,18 @@ class ConnectionManager:
         if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
             return {"status": "INVALID_TIMEOUT", "provider": provider_id, "verified": False}
         credentials = self.credential_status(provider_id, environ)
-        if credentials["status"] == "CREDENTIALS_MISSING":
-            return {"status": "CREDENTIALS_MISSING", "provider": provider_id, "verified": False}
+        blocked_credential_states = {
+            "CREDENTIALS_MISSING",
+            "CREDENTIALS_EXPIRED",
+            "CREDENTIAL_EXPIRY_INVALID",
+            "MANUAL_CONNECTION_REQUIRED",
+        }
+        if credentials["status"] in blocked_credential_states:
+            return {
+                "status": credentials["status"],
+                "provider": provider_id,
+                "verified": False,
+            }
         self.set_state(provider_id, "CONNECTING")
         started = time.monotonic()
         try:
