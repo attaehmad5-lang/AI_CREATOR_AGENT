@@ -418,6 +418,7 @@ class ConnectionManagerTests(unittest.TestCase):
             "DEEPGRAM_API_KEY", "RUNWAY_API_KEY", "KLING_API_KEY", "LUMA_API_KEY",
             "MINIMAX_API_KEY", "HEYGEN_API_KEY", "SYNTHESIA_API_KEY", "SYNC_LABS_API_KEY",
             "HEDRA_API_KEY", "ASSEMBLYAI_API_KEY", "MAGNIFIC_API_KEY", "ADOBE_FIREFLY_API_KEY",
+            "ANTHROPIC_API_KEY",
         )
         all_credentials = {name: "test-only-secret" for name in env_names}
         for provider in manager.list_providers():
