@@ -194,6 +194,81 @@ class ProviderCostPolicy:
             decisions.append({"provider": provider_id, "status": decision["status"]})
         return {"allowed": False, "status": "NO_POLICY_COMPLIANT_PROVIDER", "decisions": decisions}
 
+    def reserve_usage(
+        self,
+        *,
+        project_id: str,
+        provider_id: str,
+        estimated_cost: float,
+        request_id: str,
+    ) -> dict[str, Any]:
+        """Atomically reserve budget for a request before paid execution starts."""
+        if not all(isinstance(value, str) and value.strip() for value in (project_id, provider_id, request_id)):
+            return {"status": "INVALID_USAGE_RECORD", "saved": False}
+        if not self._valid_amount(estimated_cost) or estimated_cost <= 0:
+            return {"status": "INVALID_COST_AMOUNT", "saved": False}
+        with self._lock:
+            budget = self.project_budgets.get(project_id)
+            if budget is None:
+                return {"status": "PROJECT_BUDGET_REQUIRED", "saved": False}
+            if not self._valid_amount(budget):
+                return {"status": "INVALID_PROJECT_BUDGET", "saved": False}
+            project = self.ledger["projects"].setdefault(
+                project_id, {"actual_spend": 0.0, "requests": {}, "reservations": {}}
+            )
+            requests = project.setdefault("requests", {})
+            reservations = project.setdefault("reservations", {})
+            if request_id in requests:
+                return {"status": "DUPLICATE_REQUEST", "saved": False, "request_id": request_id}
+            existing = reservations.get(request_id)
+            if existing is not None:
+                if (
+                    isinstance(existing, dict)
+                    and existing.get("provider_id") == provider_id
+                    and existing.get("estimated_cost") == float(estimated_cost)
+                ):
+                    return {"status": "ALREADY_RESERVED", "saved": False, "request_id": request_id}
+                return {"status": "REQUEST_ID_CONFLICT", "saved": False, "request_id": request_id}
+            spent = float(project.get("actual_spend", 0.0))
+            reserved = self._reserved(project_id)
+            remaining = max(0.0, budget - spent - reserved)
+            if estimated_cost > remaining:
+                return {
+                    "status": "PROJECT_BUDGET_EXCEEDED",
+                    "saved": False,
+                    "budget_remaining": remaining,
+                }
+            reservations[request_id] = {
+                "provider_id": provider_id,
+                "estimated_cost": float(estimated_cost),
+                "reserved_at": datetime.now(timezone.utc).isoformat(),
+            }
+            if self.ledger_path:
+                self._save()
+            return {
+                "status": "RESERVED",
+                "saved": True,
+                "project_id": project_id,
+                "provider_id": provider_id,
+                "request_id": request_id,
+                "reserved_amount": float(estimated_cost),
+                "budget_remaining": round(remaining - float(estimated_cost), 6),
+            }
+
+    def release_reservation(self, *, project_id: str, request_id: str) -> dict[str, Any]:
+        """Release a reservation when its provider job is cancelled or safely aborted."""
+        if not isinstance(project_id, str) or not project_id.strip() or not isinstance(request_id, str) or not request_id.strip():
+            return {"status": "INVALID_USAGE_RECORD", "saved": False}
+        with self._lock:
+            project = self.ledger["projects"].get(project_id)
+            reservations = project.get("reservations", {}) if isinstance(project, dict) else {}
+            if not isinstance(reservations, dict) or request_id not in reservations:
+                return {"status": "RESERVATION_NOT_FOUND", "saved": False, "request_id": request_id}
+            reservations.pop(request_id)
+            if self.ledger_path:
+                self._save()
+            return {"status": "RESERVATION_RELEASED", "saved": True, "request_id": request_id}
+
     def reconcile_usage(
         self,
         *,
@@ -204,15 +279,37 @@ class ProviderCostPolicy:
         request_id: str,
     ) -> dict[str, Any]:
         """Record actual usage idempotently and flag estimate variance/budget breaches."""
+        with self._lock:
+            return self._reconcile_usage_unlocked(
+                project_id=project_id,
+                provider_id=provider_id,
+                estimated_cost=estimated_cost,
+                actual_cost=actual_cost,
+                request_id=request_id,
+            )
+
+    def _reconcile_usage_unlocked(
+        self,
+        *,
+        project_id: str,
+        provider_id: str,
+        estimated_cost: float,
+        actual_cost: float,
+        request_id: str,
+    ) -> dict[str, Any]:
         if not all(isinstance(v, str) and v.strip() for v in (project_id, provider_id, request_id)):
             return {"status": "INVALID_USAGE_RECORD", "saved": False}
         if not self._valid_amount(estimated_cost) or not self._valid_amount(actual_cost):
             return {"status": "INVALID_COST_AMOUNT", "saved": False}
         projects = self.ledger["projects"]
-        project = projects.setdefault(project_id, {"actual_spend": 0.0, "requests": {}})
+        project = projects.setdefault(
+            project_id, {"actual_spend": 0.0, "requests": {}, "reservations": {}}
+        )
         requests = project.setdefault("requests", {})
         if request_id in requests:
             return {"status": "DUPLICATE_REQUEST", "saved": False, "request_id": request_id}
+        reservations = project.setdefault("reservations", {})
+        reservations.pop(request_id, None)
         record = {
             "provider_id": provider_id,
             "estimated_cost": float(estimated_cost),
