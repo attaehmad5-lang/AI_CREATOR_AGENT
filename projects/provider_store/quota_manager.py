@@ -120,13 +120,15 @@ class ProviderQuotaManager:
             self._save()
             return {"status": "COMMITTED", "request_id": request_id, "committed": True}
 
-    def release(self, *, request_id: str) -> dict[str, Any]:
+    def release(self, *, request_id: str, provider_id: str | None = None) -> dict[str, Any]:
         if not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST", "released": False}
         with self._lock:
             record = self.data["requests"].get(request_id)
             if not isinstance(record, dict):
                 return {"status": "RESERVATION_NOT_FOUND", "released": False}
+            if provider_id is not None and record.get("provider_id") != provider_id:
+                return {"status": "REQUEST_PROVIDER_MISMATCH", "released": False}
             if record.get("status") == "COMMITTED":
                 return {"status": "ALREADY_COMMITTED", "released": False}
             if record.get("status") != "RESERVED":
