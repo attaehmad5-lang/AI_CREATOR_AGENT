@@ -110,6 +110,7 @@ class ProviderCreditManagerTests(unittest.TestCase):
         )
         self.assertEqual(self.manager.commit(request_id="credit-job")["status"], "COMMITTED")
         self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 3.0})
+        self.now[0] += timedelta(seconds=1)
         blocked_refresh = self.manager.refresh(
             "image-provider",
             lambda _: {
