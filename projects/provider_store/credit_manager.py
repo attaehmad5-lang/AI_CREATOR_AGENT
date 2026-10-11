@@ -79,6 +79,11 @@ class ProviderCreditManager:
                 raise ValueError("invalid provider credit usage record")
             timestamp_key = "created_at" if request_id in loaded["reservations"] else "committed_at"
             self._parse_timestamp(record.get(timestamp_key))
+            if request_id in loaded["usage"]:
+                version = record.get("snapshot_version", 1)
+                if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+                    raise ValueError("invalid provider credit usage snapshot version")
+                record.setdefault("snapshot_version", 1)
         self.data = loaded
 
     @contextmanager
