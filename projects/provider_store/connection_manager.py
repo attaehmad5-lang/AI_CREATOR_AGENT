@@ -239,16 +239,17 @@ class ConnectionManager:
         """Enable/disable catalog eligibility only; never purchases or proves connectivity."""
         if not isinstance(enabled, bool):
             return {"status": "INVALID_ENABLED_VALUE", "provider": provider_id, "saved": False}
-        providers = self.list_providers()
-        index = next((i for i, item in enumerate(providers) if item.get("id") == provider_id), None)
-        if index is None:
-            return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
-        updated = [dict(item) for item in providers]
-        updated[index]["enabled"] = enabled
-        new_catalog = dict(self.catalog)
-        new_catalog["providers"] = updated
-        self._atomic_write_json(self.catalog_path, new_catalog)
-        self.catalog = new_catalog
+        with self._catalog_transaction():
+            providers = self.list_providers()
+            index = next((i for i, item in enumerate(providers) if item.get("id") == provider_id), None)
+            if index is None:
+                return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+            updated = [dict(item) for item in providers]
+            updated[index]["enabled"] = enabled
+            new_catalog = dict(self.catalog)
+            new_catalog["providers"] = updated
+            self._atomic_write_json(self.catalog_path, new_catalog)
+            self.catalog = new_catalog
         if not enabled and provider_id in self._loaded_providers:
             unload_result = self.unload_provider(provider_id)
             if unload_result["status"] not in {"UNLOADED", "NOT_LOADED"}:
@@ -435,24 +436,25 @@ class ConnectionManager:
         if self._contains_credential_value_field(provider):
             return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id}
 
-        providers = self.list_providers()
-        existing = next((item for item in providers if item.get("id") == provider_id), None)
-        if existing is not None and not overwrite:
-            return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
-        safe_provider = dict(provider)
-        safe_provider["id"] = provider_id
-        updated = [item for item in providers if item.get("id") != provider_id]
-        updated.append(safe_provider)
-        new_catalog = dict(self.catalog)
-        new_catalog["providers"] = updated
-        self._atomic_write_json(self.catalog_path, new_catalog)
-        self.catalog = new_catalog
-        return {
-            "status": "REGISTERED",
-            "provider": provider_id,
-            "saved": True,
-            "overwritten": existing is not None,
-        }
+        with self._catalog_transaction():
+            providers = self.list_providers()
+            existing = next((item for item in providers if item.get("id") == provider_id), None)
+            if existing is not None and not overwrite:
+                return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
+            safe_provider = dict(provider)
+            safe_provider["id"] = provider_id
+            updated = [item for item in providers if item.get("id") != provider_id]
+            updated.append(safe_provider)
+            new_catalog = dict(self.catalog)
+            new_catalog["providers"] = updated
+            self._atomic_write_json(self.catalog_path, new_catalog)
+            self.catalog = new_catalog
+            return {
+                "status": "REGISTERED",
+                "provider": provider_id,
+                "saved": True,
+                "overwritten": existing is not None,
+            }
 
     @staticmethod
     def _sanitize_public_data(value: Any) -> Any:
