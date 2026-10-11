@@ -158,6 +158,23 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             probe(provider)
         self.assertEqual(opener.calls, [])
 
+    def test_custom_credential_env_reference_is_supported(self):
+        secret = "custom-provider-secret"
+        opener = _Opener()
+        probe = ProviderHTTPConnectivityProbe(
+            environ={"CUSTOM_CREDENTIAL": secret}, opener=opener
+        )
+        result = probe({
+            "id": "custom", "auth_type": "API_KEY",
+            "credential_env": "CUSTOM_CREDENTIAL",
+            "allowed_hosts": ["api.example.com"],
+            "configuration": {"endpoint": "https://api.example.com/health"},
+        })
+        self.assertTrue(result["ok"])
+        headers = {key.casefold(): value for key, value in opener.calls[0][0].header_items()}
+        self.assertEqual(headers["authorization"], f"Bearer {secret}")
+        self.assertNotIn(secret, repr(result))
+
     def test_host_allowlist_is_required_even_for_public_https_hosts(self):
         opener = _Opener()
         probe = ProviderHTTPConnectivityProbe(opener=opener)
