@@ -74,6 +74,16 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(reloaded.get_state("public_image")["status"], "READY")
         self.assertIn("updated_at", reloaded.get_state("public_image"))
 
+    def test_state_updates_preserve_existing_nonsecret_configuration(self):
+        self.manager.state["providers"]["public_image"] = {
+            "status": "READY", "configuration": {"model": "local-test"},
+            "last_success_at": "2026-01-01T00:00:00+00:00",
+        }
+        self.manager.set_state("public_image", "ERROR")
+        state = self.manager.get_state("public_image")
+        self.assertEqual(state["configuration"]["model"], "local-test")
+        self.assertEqual(state["last_success_at"], "2026-01-01T00:00:00+00:00")
+
     def test_credential_check_never_returns_secret(self):
         secret = "do-not-leak-this-token"
         result = self.manager.credential_status(
