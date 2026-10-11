@@ -26,6 +26,7 @@ class ProviderRoutingManager:
         health_manager: Any | None = None,
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
+        credit_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
     ) -> None:
         if connection_manager is None or not callable(getattr(connection_manager, "discover_providers", None)):
@@ -36,6 +37,8 @@ class ProviderRoutingManager:
             raise ValueError("cost_policy must support request evaluation")
         if quota_manager is not None and not callable(getattr(quota_manager, "reserve", None)):
             raise ValueError("quota_manager must support request reservations")
+        if credit_manager is not None and not callable(getattr(credit_manager, "usable_free_credits", None)):
+            raise ValueError("credit_manager must provide fresh verified balances")
         normalized_strategy = str(default_strategy).upper()
         if normalized_strategy not in self.STRATEGIES:
             raise ValueError("unsupported routing strategy")
@@ -43,6 +46,7 @@ class ProviderRoutingManager:
         self.health_manager = health_manager
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
+        self.credit_manager = credit_manager
         self.default_strategy = normalized_strategy
         self._round_robin_counters: dict[str, int] = {}
         self._lock = threading.Lock()
@@ -92,6 +96,8 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_COST_ESTIMATES"}
         if free_credits is not None and not isinstance(free_credits, dict):
             return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
+        if self.credit_manager is not None and free_credits is not None:
+            return {"allowed": False, "status": "UNVERIFIED_FREE_CREDIT_INPUT_REJECTED"}
         if paid_approved_providers is not None and not isinstance(paid_approved_providers, (set, frozenset)):
             return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
         if excluded_providers is not None and not isinstance(excluded_providers, (set, frozenset)):
@@ -100,7 +106,15 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_HEALTH_POLICY"}
 
         estimates = {} if estimated_costs is None else estimated_costs
-        credits = {} if free_credits is None else free_credits
+        if self.credit_manager is not None:
+            try:
+                credits = self.credit_manager.usable_free_credits()
+            except Exception as exc:
+                return {"allowed": False, "status": "CREDIT_BALANCE_LOOKUP_FAILED", "error_type": type(exc).__name__}
+            if not isinstance(credits, dict):
+                return {"allowed": False, "status": "INVALID_VERIFIED_CREDIT_MAP"}
+        else:
+            credits = {} if free_credits is None else free_credits
         approvals = set() if paid_approved_providers is None else paid_approved_providers
         excluded = set() if excluded_providers is None else excluded_providers
         if any(not isinstance(key, str) or not self._valid_amount(value) for key, value in estimates.items()):
