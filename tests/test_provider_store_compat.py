@@ -107,6 +107,24 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             self.assertFalse(after["route_selected"])
             self.assertEqual(after["available"][0]["id"], "image")
 
+    def test_production_registry_contains_all_advanced_provider_entries(self):
+        project_root = Path(__file__).resolve().parents[1]
+        main_catalog = project_root / "projects" / "provider_store" / "provider_catalog.json"
+        advanced_catalog = project_root / "projects" / "provider_store" / "advanced" / "advanced_provider_catalog.json"
+        main_ids = {p["id"] for p in json.loads(main_catalog.read_text(encoding="utf-8"))["providers"]}
+        advanced_ids = {p["id"] for p in json.loads(advanced_catalog.read_text(encoding="utf-8"))["providers"]}
+        self.assertEqual(len(main_ids), 54)
+        self.assertEqual(len(advanced_ids), 18)
+        self.assertTrue(advanced_ids.issubset(main_ids))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = ConnectionManager(main_catalog, Path(tmp) / "state.json")
+            registry = UnifiedProviderRegistry(connection_manager=manager)
+            advanced = AdvancedProviderManager(connection_manager=manager)
+            self.assertEqual(len(registry.all_providers()), 54)
+            self.assertEqual(len(advanced.list_providers()), 18)
+            self.assertEqual(registry.status()["advanced_providers"], 18)
+
     def test_store_facade_rejects_mixed_manager_and_path_arguments(self):
         with self.assertRaises(ValueError):
             ProviderStoreManager(
