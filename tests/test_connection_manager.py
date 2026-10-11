@@ -500,6 +500,26 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertEqual(called, [])
 
+    def test_manual_connection_failure_and_timeout_never_mark_connected(self):
+        self.manager.register_provider({
+            "id": "manual_failure", "name": "Manual Failure", "category": "music",
+            "auth_type": "ACCOUNT", "connection_type": "BROWSER_SESSION", "enabled": True,
+        })
+        failed = self.manager.verify_manual_connection(
+            "manual_failure", object(), lambda provider, **kwargs: {"ok": False}
+        )
+        self.assertEqual(failed["status"], "MANUAL_CONNECTION_FAILED")
+        self.assertFalse(failed["verified"])
+        self.assertEqual(self.manager.get_state("manual_failure")["status"], "ERROR")
+        timed_out = self.manager.verify_manual_connection(
+            "manual_failure", object(),
+            lambda provider, **kwargs: (_ for _ in ()).throw(TimeoutError("private session details")),
+        )
+        self.assertEqual(timed_out["status"], "TIMEOUT")
+        self.assertFalse(timed_out["verified"])
+        self.assertNotIn("private session details", repr(timed_out))
+        self.assertEqual(self.manager.get_state("manual_failure")["status"], "ERROR")
+
     def test_manual_account_connection_requires_session_and_account_auth_type(self):
         called = []
         missing = self.manager.verify_manual_connection(
