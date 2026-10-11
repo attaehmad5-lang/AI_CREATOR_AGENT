@@ -50,6 +50,7 @@ class RetryPolicyTests(unittest.TestCase):
         now[0] += 5
         self.assertEqual(breaker.state, "HALF_OPEN")
         self.assertTrue(breaker.allow_request())
+        self.assertFalse(breaker.allow_request(), "only one half-open probe may run at a time")
         breaker.record_success()
         self.assertEqual(breaker.state, "CLOSED")
 
