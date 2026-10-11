@@ -652,6 +652,8 @@ class ConnectionManager:
             return {"valid": False, "status": "INVALID_LOOPBACK_HTTP_POLICY"}
         if not isinstance(endpoint, str) or not endpoint.strip():
             return {"valid": False, "status": "INVALID_ENDPOINT"}
+        if any(ord(char) < 32 or ord(char) == 127 for char in endpoint):
+            return {"valid": False, "status": "INVALID_ENDPOINT"}
         if allowed_hosts is not None and (
             not isinstance(allowed_hosts, (set, frozenset, list, tuple))
             or any(not isinstance(host, str) or not host.strip() for host in allowed_hosts)
