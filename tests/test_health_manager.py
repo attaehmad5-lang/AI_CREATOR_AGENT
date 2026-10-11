@@ -73,6 +73,10 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.record_result("image", success=True, latency_ms=float("nan"))["status"], "INVALID_LATENCY")
         self.assertEqual(self.manager.record_result("image", success=True, latency_ms=float("inf"))["status"], "INVALID_LATENCY")
         self.assertEqual(self.manager.record_result("image", success=True, latency_ms=True)["status"], "INVALID_LATENCY")
+        self.assertEqual(self.manager.is_eligible("image", stale_after_seconds=-1)["status"], "INVALID_HEALTH_POLICY")
+        self.assertEqual(self.manager.is_eligible("image", stale_after_seconds=float("nan"))["status"], "INVALID_HEALTH_POLICY")
+        self.assertEqual(self.manager.is_eligible("image", max_latency_ms=-1)["status"], "INVALID_HEALTH_POLICY")
+        self.assertEqual(self.manager.is_eligible("image", max_latency_ms=float("inf"))["status"], "INVALID_HEALTH_POLICY")
 
 
 if __name__ == "__main__":
