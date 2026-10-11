@@ -98,6 +98,14 @@ class ProviderRoutingManager:
         credits = {} if free_credits is None else free_credits
         approvals = set() if paid_approved_providers is None else paid_approved_providers
         excluded = set() if excluded_providers is None else excluded_providers
+        if any(not isinstance(key, str) or not self._valid_amount(value) for key, value in estimates.items()):
+            return {"allowed": False, "status": "INVALID_COST_ESTIMATES"}
+        if any(not isinstance(key, str) or not self._valid_amount(value) for key, value in credits.items()):
+            return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
+        if any(not isinstance(value, str) for value in approvals):
+            return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
+        if any(not isinstance(value, str) for value in excluded):
+            return {"allowed": False, "status": "INVALID_EXCLUDED_PROVIDER_SET"}
 
         if (selected_strategy == "HEALTHIEST_FIRST" or require_health_evidence) and self.health_manager is None:
             return {"allowed": False, "status": "HEALTH_DATA_REQUIRED"}
