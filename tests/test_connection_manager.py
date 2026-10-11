@@ -269,6 +269,56 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_metadata_returns_none_for_unknown_provider(self):
         self.assertIsNone(self.manager.get_provider_metadata("not_registered"))
 
+    def test_connectivity_probe_marks_connected_only_after_success(self):
+        result = self.manager.verify_connectivity(
+            "public_image", lambda provider, timeout_seconds: True
+        )
+        self.assertEqual(result["status"], "CONNECTED")
+        self.assertTrue(result["verified"])
+        self.assertEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
+        self.assertTrue(self.manager.get_state("public_image")["verified"])
+
+    def test_connectivity_probe_requires_credentials_and_never_probes_without_them(self):
+        called = []
+        result = self.manager.verify_connectivity(
+            "token_image", lambda *args, **kwargs: called.append(True), environ={}
+        )
+        self.assertEqual(result["status"], "CREDENTIALS_MISSING")
+        self.assertEqual(called, [])
+
+    def test_connectivity_probe_classifies_timeout_and_does_not_claim_connected(self):
+        def timeout_probe(provider, timeout_seconds):
+            raise TimeoutError("timeout")
+        result = self.manager.verify_connectivity("public_image", timeout_probe)
+        self.assertEqual(result["status"], "TIMEOUT")
+        self.assertFalse(result["verified"])
+        self.assertNotEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
+
+    def test_connectivity_probe_classifies_auth_and_network_failures_without_details(self):
+        def auth_probe(provider, timeout_seconds):
+            raise PermissionError("private credential details")
+        result = self.manager.verify_connectivity("public_image", auth_probe)
+        self.assertEqual(result["status"], "AUTHENTICATION_OR_PERMISSION_FAILED")
+        self.assertNotIn("private credential details", repr(result))
+        def network_probe(provider, timeout_seconds):
+            raise ConnectionError("private endpoint details")
+        result = self.manager.verify_connectivity("public_image", network_probe)
+        self.assertEqual(result["status"], "NETWORK_ERROR")
+        self.assertNotIn("private endpoint details", repr(result))
+
+    def test_connectivity_probe_validates_timeout_and_disabled_provider(self):
+        self.assertEqual(
+            self.manager.verify_connectivity(
+                "public_image", lambda *a, **k: True, timeout_seconds=0
+            )["status"],
+            "INVALID_TIMEOUT",
+        )
+        self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(
+            self.manager.verify_connectivity("public_image", lambda *a, **k: True)["status"],
+            "DISABLED",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
