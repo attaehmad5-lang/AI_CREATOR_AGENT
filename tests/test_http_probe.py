@@ -1,6 +1,10 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from urllib.error import HTTPError
 
+from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.http_probe import ProviderHTTPConnectivityProbe
 
 
@@ -201,6 +205,38 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 "configuration": {"endpoint": "https://api.example.com/health"},
             })
         self.assertEqual(opener.calls, [])
+
+    def test_http_probe_integrates_with_connection_manager_and_persists_only_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = root / "catalog.json"
+            state = root / "state.json"
+            catalog.write_text(json.dumps({
+                "providers": [{
+                    "id": "huggingface", "name": "Hugging Face", "category": "image",
+                    "auth_type": "API_TOKEN", "connection_type": "API", "enabled": True,
+                    "token_env": "HF_TOKEN", "allowed_hosts": ["api.example.com"],
+                }]
+            }), encoding="utf-8")
+            state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog, state)
+            configured = manager.configure_provider(
+                "huggingface", endpoint="https://api.example.com/health", model="test-model"
+            )
+            self.assertTrue(configured["saved"])
+            opener = _Opener()
+            probe = ProviderHTTPConnectivityProbe(
+                environ={"HF_TOKEN": "never-persist-this"}, opener=opener
+            )
+            result = manager.verify_connectivity(
+                "huggingface", probe, environ={"HF_TOKEN": "never-persist-this"}
+            )
+            self.assertEqual(result["status"], "CONNECTED")
+            self.assertTrue(result["verified"])
+            self.assertEqual(manager.get_state("huggingface")["status"], "CONNECTED")
+            self.assertNotIn("never-persist-this", state.read_text(encoding="utf-8"))
+            self.assertNotIn("never-persist-this", repr(result))
+            self.assertTrue(opener.response.closed)
 
     def test_manual_account_auth_is_not_faked_by_http_probe(self):
         opener = _Opener()
