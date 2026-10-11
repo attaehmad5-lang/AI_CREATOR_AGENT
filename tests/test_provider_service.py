@@ -285,7 +285,8 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
         self.assertTrue(result["release"]["released"])
         self.assertNotIn("execute-not-started", self.cost.ledger["projects"]["film"]["reservations"])
-        self.assertNotIn("execute-not-started", self.quota.data["requests"])
+        self.assertEqual(self.quota.data["requests"]["execute-not-started"]["status"], "RELEASED")
+        self.assertEqual(self.quota.reserve(provider_id="image", request_id="execute-not-started")["status"], "ALREADY_RELEASED")
 
     def test_execute_routed_request_rejects_contradictory_not_started_result(self):
         router = ProviderRoutingManager(
