@@ -286,6 +286,30 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn("execute-not-started", self.cost.ledger["projects"]["film"]["reservations"])
         self.assertEqual(self.quota.data["requests"]["execute-not-started"]["status"], "RELEASED")
 
+    def test_execute_routed_request_rejects_contradictory_not_started_result(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="execute-contradictory-start",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=lambda **kwargs: {
+                "started": False, "success": True, "actual_cost": 1.0,
+                "charge_outcome": "incurred",
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "INCONSISTENT_START_RESULT")
+        self.assertTrue(result["reservations_retained"])
+        self.assertIn(
+            "execute-contradictory-start",
+            self.cost.ledger["projects"]["film"]["reservations"],
+        )
+
     def test_execute_routed_request_retains_reservations_after_ambiguous_adapter_error(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
