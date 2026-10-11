@@ -417,7 +417,9 @@ class ConnectionManager:
             return {"status": "NOT_FOUND", "provider": provider_id}
         if status not in self.VALID_STATES:
             return {"status": "INVALID_STATE", "provider": provider_id}
-        if status == "CONNECTED" and not verified:
+        if not isinstance(verified, bool):
+            return {"status": "INVALID_VERIFICATION_FLAG", "provider": provider_id, "saved": False}
+        if status == "CONNECTED" and verified is not True:
             return {
                 "status": "VERIFICATION_REQUIRED",
                 "provider": provider_id,
