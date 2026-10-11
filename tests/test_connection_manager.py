@@ -253,6 +253,22 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "CREDENTIALS_EXPIRING")
 
+    def test_configured_endpoint_and_model_are_passed_to_probe(self):
+        self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        configured = self.manager.configure_provider(
+            "public_image", endpoint="https://api.example.com/v1/models", model="image-v1"
+        )
+        self.assertTrue(configured["saved"])
+        seen = []
+        result = self.manager.verify_connectivity(
+            "public_image",
+            lambda provider, **kwargs: seen.append(provider.get("configuration")) or {"ok": True},
+        )
+        self.assertEqual(result["status"], "CONNECTED")
+        self.assertEqual(seen[0]["endpoint"], "https://api.example.com/v1/models")
+        self.assertEqual(seen[0]["model"], "image-v1")
+
     def test_connectivity_never_probes_with_expired_credentials(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
