@@ -35,6 +35,28 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
         self.assertEqual(len(self.manager.list_providers()), 2)
 
+    def test_catalog_schema_validation_detects_duplicate_ids_and_secret_fields(self):
+        result = ConnectionManager.validate_catalog_schema({
+            "providers": [
+                {"id": "same", "api_token": "must-not-be-here"},
+                {"id": "same", "enabled": "yes"},
+            ]
+        })
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("duplicate" in error for error in result["errors"]))
+        self.assertTrue(any("credential value" in error for error in result["errors"]))
+        self.assertTrue(any("enabled must be boolean" in error for error in result["errors"]))
+
+    def test_constructor_rejects_invalid_catalog_schema(self):
+        bad_catalog = self.root / "bad_catalog.json"
+        bad_catalog.write_text(json.dumps({"providers": "not-a-list"}), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "Invalid provider catalog"):
+            ConnectionManager(bad_catalog, self.state_path)
+
+    def test_catalog_schema_accepts_existing_registry_shape(self):
+        result = ConnectionManager.validate_catalog_schema(self.manager.catalog)
+        self.assertTrue(result["valid"], result["errors"])
+
     def test_rejects_unknown_provider_and_invalid_state(self):
         self.assertEqual(self.manager.set_state("missing", "READY")["status"], "NOT_FOUND")
         self.assertEqual(self.manager.set_state("public_image", "NOT_A_STATE")["status"], "INVALID_STATE")
