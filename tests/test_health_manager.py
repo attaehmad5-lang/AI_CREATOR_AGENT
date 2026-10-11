@@ -1,10 +1,24 @@
 import tempfile
 import unittest
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from projects.provider_store.health_manager import ProviderHealthManager
+
+
+def _record_health_in_process(args):
+    state_path, index = args
+    fixed_now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    manager = ProviderHealthManager(
+        state_path,
+        history_limit=200,
+        failure_threshold=200,
+        clock=lambda: fixed_now,
+    )
+    return manager.record_result(
+        "image", success=False, error_code=f"PROCESS_{index}"
+    )["saved"]
 
 
 class ProviderHealthManagerTests(unittest.TestCase):
@@ -38,6 +52,20 @@ class ProviderHealthManagerTests(unittest.TestCase):
         record = manager.data["providers"]["image"]
         self.assertEqual(len(record["history"]), 100)
         self.assertEqual(record["consecutive_failures"], 100)
+
+    def test_concurrent_health_updates_across_processes_preserve_history(self):
+        args = [(str(self.path), index) for index in range(20)]
+        with ProcessPoolExecutor(max_workers=4) as pool:
+            saved = list(pool.map(_record_health_in_process, args))
+
+        self.assertTrue(all(saved))
+        loaded = ProviderHealthManager(
+            self.path, history_limit=200, failure_threshold=200,
+            clock=lambda: self.now[0],
+        )
+        record = loaded.data["providers"]["image"]
+        self.assertEqual(len(record["history"]), 20)
+        self.assertEqual(record["consecutive_failures"], 20)
 
     def test_success_and_failure_history_persist(self):
         self.manager.record_result("image", success=True, latency_ms=42)
