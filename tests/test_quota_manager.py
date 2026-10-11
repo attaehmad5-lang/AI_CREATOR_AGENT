@@ -57,6 +57,8 @@ class ProviderQuotaManagerTests(unittest.TestCase):
         self.manager.reserve(provider_id="image", request_id="job-1")
         self.manager.reserve(provider_id="image", request_id="job-2")
         self.assertEqual(self.manager.release(request_id="job-1")["status"], "RELEASED")
+        self.assertEqual(self.manager.data["requests"]["job-1"]["status"], "RELEASED")
+        self.assertEqual(self.manager.reserve(provider_id="image", request_id="job-1")["status"], "ALREADY_RELEASED")
         self.assertEqual(self.manager.reserve(provider_id="image", request_id="job-3")["status"], "RESERVED")
 
     def test_concurrent_reservations_never_exceed_limit(self):
