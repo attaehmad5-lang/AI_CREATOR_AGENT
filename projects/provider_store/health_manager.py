@@ -53,6 +53,33 @@ class ProviderHealthManager:
         if not isinstance(loaded, dict) or not isinstance(loaded.get("providers", {}), dict):
             raise ValueError("Invalid provider health state")
         loaded.setdefault("providers", {})
+        for provider_id, record in loaded["providers"].items():
+            if not isinstance(provider_id, str) or not provider_id.strip() or not isinstance(record, dict):
+                raise ValueError("Invalid provider health record")
+            status = record.get("status")
+            if status is not None and status not in {"HEALTHY", "DEGRADED", "UNHEALTHY"}:
+                raise ValueError("Invalid provider health status")
+            failures = record.get("consecutive_failures", 0)
+            if not isinstance(failures, int) or isinstance(failures, bool) or failures < 0:
+                raise ValueError("Invalid provider consecutive failure count")
+            history = record.get("history", [])
+            if not isinstance(history, list):
+                raise ValueError("Invalid provider health history")
+            for event in history:
+                if not isinstance(event, dict) or not isinstance(event.get("success"), bool):
+                    raise ValueError("Invalid provider health history event")
+                self._parse_timestamp(event.get("timestamp"))
+                latency = event.get("latency_ms")
+                if latency is not None and (
+                    not isinstance(latency, (int, float))
+                    or isinstance(latency, bool)
+                    or not math.isfinite(latency)
+                    or latency < 0
+                ):
+                    raise ValueError("Invalid provider health latency")
+            for timestamp_key in ("last_checked_at", "last_success_at", "last_failure_at"):
+                if timestamp_key in record:
+                    self._parse_timestamp(record[timestamp_key])
         self.data = loaded
 
     @contextmanager
