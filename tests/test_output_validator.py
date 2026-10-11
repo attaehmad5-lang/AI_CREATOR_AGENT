@@ -93,7 +93,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         path.write_text("[" * 1500 + "0" + "]" * 1500, encoding="utf-8")
         result = validator.validate_file(path, modality="json")
         self.assertFalse(result["valid"])
-        self.assertEqual(result["status"], "INVALID_JSON")
+        self.assertEqual(result["status"], "JSON_NESTING_LIMIT")
 
     def test_symlinks_and_unsupported_modalities_fail_closed(self):
         source = self.root / "source.txt"
@@ -119,6 +119,8 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             ProviderOutputValidator(max_size_bytes=0)
         with self.assertRaises(ValueError):
             ProviderOutputValidator(min_size_bytes=10, max_size_bytes=1)
+        with self.assertRaises(ValueError):
+            ProviderOutputValidator(max_json_depth=0)
 
 
 if __name__ == "__main__":
