@@ -9,9 +9,13 @@ import json
 import math
 import os
 import tempfile
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+from .interprocess_lock import interprocess_file_lock
 
 
 MODULE_DIR = Path(__file__).resolve().parent
@@ -46,6 +50,7 @@ class ConnectionManager:
         self.state = self._load_json(self.state_path, default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}})
         if not isinstance(self.state.get("providers"), dict):
             raise ValueError("Invalid connection state schema: providers must be an object")
+        self._lock = threading.RLock()
         # Runtime instances are intentionally process-local and never serialized.
         self._loaded_providers: dict[str, Any] = {}
 
@@ -98,6 +103,38 @@ class ConnectionManager:
 
     def _save(self) -> None:
         self._atomic_write_json(self.state_path, self.state)
+
+    def _reload_catalog(self) -> None:
+        catalog = self._load_json(self.catalog_path)
+        self.validate_catalog_schema(catalog, raise_on_error=True)
+        self.catalog = catalog
+
+    def _reload_state(self) -> None:
+        state = self._load_json(
+            self.state_path,
+            default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}},
+        )
+        if not isinstance(state.get("providers"), dict):
+            raise ValueError("Invalid connection state schema: providers must be an object")
+        self.state = state
+
+    @contextmanager
+    def _catalog_transaction(self) -> Iterator[None]:
+        """Lock, reload, mutate, and persist the shared provider catalog atomically."""
+        with self._lock:
+            lock_path = self.catalog_path.with_name(self.catalog_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                self._reload_catalog()
+                yield
+
+    @contextmanager
+    def _state_transaction(self) -> Iterator[None]:
+        """Lock and reload shared connection state before each read-modify-write."""
+        with self._lock:
+            lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                self._reload_state()
+                yield
 
     @staticmethod
     def _contains_credential_value_field(value: Any) -> bool:
