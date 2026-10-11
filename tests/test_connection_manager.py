@@ -77,6 +77,47 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(state["verified"])
         self.assertEqual(self.manager.summary()["UNKNOWN"], 1)
 
+    def test_register_provider_persists_valid_metadata(self):
+        provider = {
+            "id": "local_image", "name": "Local Image", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "REGISTERED")
+        reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertEqual(reloaded.get_provider("local_image")["name"], "Local Image")
+
+    def test_register_provider_rejects_duplicate_without_overwrite(self):
+        provider = {
+            "id": "token_image", "name": "Replacement", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API",
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "ALREADY_EXISTS")
+        self.assertEqual(self.manager.get_provider("token_image")["auth_type"], "API_TOKEN")
+
+    def test_register_provider_rejects_missing_contract_fields(self):
+        result = self.manager.register_provider({"id": "broken"})
+        self.assertEqual(result["status"], "INVALID_PROVIDER")
+        self.assertFalse(result.get("saved", False))
+
+    def test_register_provider_rejects_secret_values_in_metadata(self):
+        provider = {
+            "id": "unsafe", "name": "Unsafe", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API",
+            "api_key": "never-store-this",
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertFalse(self.manager.provider_exists("unsafe"))
+
+    def test_register_provider_rejects_invalid_id(self):
+        provider = {
+            "id": "../unsafe", "name": "Unsafe", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        self.assertEqual(self.manager.register_provider(provider)["status"], "INVALID_PROVIDER")
+
 
 if __name__ == "__main__":
     unittest.main()
