@@ -481,6 +481,60 @@ class ConnectionManager:
             "tls_verification_required": parsed.scheme == "https",
         }
 
+    def configure_provider(
+        self,
+        provider_id: str,
+        *,
+        model: str | None = None,
+        endpoint: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist non-secret endpoint/model settings after endpoint safety checks."""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+        configuration: dict[str, Any] = {}
+        if model is not None:
+            if not isinstance(model, str) or not model.strip() or len(model) > 200:
+                return {"status": "INVALID_MODEL", "provider": provider_id, "saved": False}
+            if any(term in model.casefold() for term in ("api_key=", "token=", "password=", "secret=")):
+                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
+            configuration["model"] = model.strip()
+        if endpoint is not None:
+            allowed_hosts_raw = provider.get("allowed_hosts")
+            allowed_hosts = (
+                {item for item in allowed_hosts_raw if isinstance(item, str)}
+                if isinstance(allowed_hosts_raw, list) else None
+            )
+            validation = self.validate_endpoint(endpoint, allowed_hosts=allowed_hosts)
+            if not validation["valid"]:
+                return {
+                    "status": validation["status"],
+                    "provider": provider_id,
+                    "saved": False,
+                }
+            # Do not persist URLs containing query parameters: they can carry credentials.
+            from urllib.parse import urlsplit
+            if urlsplit(endpoint).query:
+                return {"status": "QUERY_PARAMETERS_REJECTED", "provider": provider_id, "saved": False}
+            configuration["endpoint"] = endpoint.strip()
+        if not configuration:
+            return {"status": "NO_CONFIGURATION", "provider": provider_id, "saved": False}
+        state = self.state["providers"].get(provider_id, {})
+        record = dict(state) if isinstance(state, dict) else {}
+        current = record.get("configuration", {})
+        merged = dict(current) if isinstance(current, dict) else {}
+        merged.update(configuration)
+        record["configuration"] = merged
+        record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
+        self.state["providers"][provider_id] = record
+        self._save()
+        return {
+            "status": "CONFIGURED",
+            "provider": provider_id,
+            "saved": True,
+            "configuration": dict(merged),
+        }
+
     def verify_connectivity(
         self,
         provider_id: str,
