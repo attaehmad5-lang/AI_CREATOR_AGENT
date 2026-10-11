@@ -407,6 +407,19 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "HOST_NOT_ALLOWLISTED")
         self.assertEqual(
+            ConnectionManager.validate_endpoint("https://169.254.169.254/latest/meta-data")["status"],
+            "NON_PUBLIC_ADDRESS_REJECTED",
+        )
+        self.assertEqual(
+            ConnectionManager.validate_endpoint("https://10.0.0.8")["status"],
+            "NON_PUBLIC_ADDRESS_REJECTED",
+        )
+        self.assertTrue(
+            ConnectionManager.validate_endpoint(
+                "https://10.0.0.8", allowed_hosts={"10.0.0.8"}
+            )["valid"]
+        )
+        self.assertEqual(
             ConnectionManager.validate_endpoint("http://127.0.0.1:8000")["status"],
             "HTTPS_REQUIRED",
         )
