@@ -315,7 +315,7 @@ class ConnectionManagerTests(unittest.TestCase):
         })
         self.assertFalse(result["valid"])
         self.assertTrue(any("credential value" in error for error in result["errors"]))
-        for secret_key in ("client_secret", "db_password", "authorization_header", "session_token"):
+        for secret_key in ("client_secret", "db_password", "authorization_header", "session_token", "oauth_token", "id_token", "session_cookie", "signing_key"):
             result = ConnectionManager.validate_catalog_schema({
                 "providers": [{
                     "id": "compound_secret",
