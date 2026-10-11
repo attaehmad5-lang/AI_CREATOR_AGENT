@@ -125,6 +125,13 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(any("duplicate" in error for error in result["errors"]))
         self.assertTrue(any("credential value" in error for error in result["errors"]))
         self.assertTrue(any("enabled must be boolean" in error for error in result["errors"]))
+        for hosts in ([], ["https://api.example.com"], ["api..example.com"], ["api.example.com", "API.EXAMPLE.COM"], ["-bad.example"]):
+            with self.subTest(hosts=hosts):
+                invalid = ConnectionManager.validate_catalog_schema({
+                    "providers": [{"id": "provider", "allowed_hosts": hosts}]
+                })
+                self.assertFalse(invalid["valid"])
+                self.assertTrue(any("allowed_hosts" in error for error in invalid["errors"]))
 
     def test_catalog_schema_rejects_secret_values_in_environment_reference_fields(self):
         for field, value in (
