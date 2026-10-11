@@ -166,6 +166,8 @@ class ProviderHealthManager:
             return {"provider": provider_id, "status": status, "saved": True, "history_size": len(history)}
 
     def active_probe(self, provider_id: str, probe: Any, *, timeout_seconds: float = 5.0) -> dict[str, Any]:
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"provider": provider_id, "status": "INVALID_PROVIDER", "verified": False}
         if not callable(probe):
             return {"provider": provider_id, "status": "INVALID_PROBE", "verified": False}
         if (
