@@ -219,6 +219,7 @@ class ProviderCreditManagerTests(unittest.TestCase):
         cases = [
             {"verified": True, "free_credits_remaining": float("nan"), "source": "api"},
             {"verified": True, "free_credits_remaining": 1.0, "source": ""},
+            {"verified": True, "free_credits_remaining": 1.0, "source": "token=secret"},
             {"verified": True, "free_credits_remaining": 1.0, "source": "api", "observed_at": "not-a-time"},
             {
                 "verified": True, "free_credits_remaining": 1.0, "source": "api",
@@ -226,7 +227,7 @@ class ProviderCreditManagerTests(unittest.TestCase):
             },
         ]
         expected = [
-            "INVALID_CREDIT_AMOUNT", "INVALID_CREDIT_SOURCE",
+            "INVALID_CREDIT_AMOUNT", "INVALID_CREDIT_SOURCE", "INVALID_CREDIT_SOURCE",
             "INVALID_CREDIT_TIMESTAMP", "FUTURE_CREDIT_TIMESTAMP",
         ]
         for result, status in zip(cases, expected):
