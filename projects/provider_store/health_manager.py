@@ -98,6 +98,14 @@ class ProviderHealthManager:
             for timestamp_key in ("last_checked_at", "last_success_at", "last_failure_at"):
                 if timestamp_key in record:
                     self._parse_timestamp(record[timestamp_key])
+            latency = record.get("last_latency_ms")
+            if latency is not None and (
+                not isinstance(latency, (int, float))
+                or isinstance(latency, bool)
+                or not math.isfinite(latency)
+                or latency < 0
+            ):
+                raise ValueError("Invalid provider last health latency")
         self.data = loaded
 
     @contextmanager
@@ -261,6 +269,8 @@ class ProviderHealthManager:
             age = (self.clock().astimezone(timezone.utc) - checked.astimezone(timezone.utc)).total_seconds()
         except (ValueError, TypeError):
             return {"eligible": False, "status": "UNKNOWN", "reason": "INVALID_HEALTH_TIMESTAMP"}
+        if age < 0:
+            return {"eligible": False, "status": "UNKNOWN", "reason": "FUTURE_HEALTH_TIMESTAMP", "age_seconds": age}
         if age > stale_after_seconds:
             return {"eligible": False, "status": "STALE", "reason": "HEALTH_CHECK_STALE", "age_seconds": age}
         if record.get("status") == "UNHEALTHY":
