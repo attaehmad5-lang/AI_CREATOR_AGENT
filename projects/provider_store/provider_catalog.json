@@ -12,7 +12,11 @@
       "auth_type": "API_TOKEN",
       "connection_type": "API",
       "subscription_required": false,
-      "enabled": true
+      "enabled": true,
+      "allowed_hosts": [
+        "router.huggingface.co",
+        "api-inference.huggingface.co"
+      ]
     },
     {
       "id": "pollinations",
@@ -22,7 +26,10 @@
       "auth_type": "NONE",
       "connection_type": "API",
       "subscription_required": false,
-      "enabled": true
+      "enabled": true,
+      "allowed_hosts": [
+        "image.pollinations.ai"
+      ]
     },
     {
       "id": "openai_image",
@@ -32,7 +39,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.openai.com"
+      ]
     },
     {
       "id": "google_image",
@@ -42,7 +52,11 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "generativelanguage.googleapis.com",
+        "aiplatform.googleapis.com"
+      ]
     },
     {
       "id": "recraft",
@@ -52,7 +66,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "external-api.recraft.ai"
+      ]
     },
     {
       "id": "ideogram",
@@ -62,7 +79,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.ideogram.ai"
+      ]
     },
     {
       "id": "black_forest_labs",
@@ -72,7 +92,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.bfl.ai"
+      ]
     },
     {
       "id": "stability_ai",
@@ -82,7 +105,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.stability.ai"
+      ]
     },
     {
       "id": "replicate",
@@ -92,7 +118,10 @@
       "auth_type": "API_TOKEN",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.replicate.com"
+      ]
     },
     {
       "id": "fal_ai",
@@ -102,7 +131,11 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "queue.fal.run",
+        "fal.run"
+      ]
     },
     {
       "id": "elevenlabs",
@@ -114,7 +147,10 @@
       "subscription_required": true,
       "enabled": false,
       "subscription_url": "https://elevenlabs.io",
-      "official_api_url": "https://elevenlabs.io/docs/api-reference"
+      "official_api_url": "https://elevenlabs.io/docs/api-reference",
+      "allowed_hosts": [
+        "api.elevenlabs.io"
+      ]
     },
     {
       "id": "openai_voice",
@@ -124,7 +160,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.openai.com"
+      ]
     },
     {
       "id": "google_speech",
@@ -134,7 +173,11 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "texttospeech.googleapis.com",
+        "speech.googleapis.com"
+      ]
     },
     {
       "id": "cartesia",
@@ -144,7 +187,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.cartesia.ai"
+      ]
     },
     {
       "id": "playht",
@@ -154,7 +200,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.play.ht"
+      ]
     },
     {
       "id": "deepgram",
@@ -164,7 +213,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.deepgram.com"
+      ]
     },
     {
       "id": "suno",
@@ -194,7 +246,11 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "generativelanguage.googleapis.com",
+        "aiplatform.googleapis.com"
+      ]
     },
     {
       "id": "stability_audio",
@@ -204,7 +260,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.stability.ai"
+      ]
     },
     {
       "id": "google_veo",
@@ -214,7 +273,11 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "generativelanguage.googleapis.com",
+        "aiplatform.googleapis.com"
+      ]
     },
     {
       "id": "openai_sora",
@@ -224,7 +287,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.openai.com"
+      ]
     },
     {
       "id": "runway",
@@ -234,7 +300,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.dev.runwayml.com"
+      ]
     },
     {
       "id": "kling",
@@ -254,7 +323,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.lumalabs.ai"
+      ]
     },
     {
       "id": "pika",
@@ -274,7 +346,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.minimax.io"
+      ]
     },
     {
       "id": "heygen",
@@ -284,7 +359,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.heygen.com"
+      ]
     },
     {
       "id": "synthesia",
@@ -294,7 +372,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.synthesia.io"
+      ]
     },
     {
       "id": "sync_labs",
@@ -304,7 +385,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.sync.so"
+      ]
     },
     {
       "id": "hedra",
@@ -314,7 +398,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.hedra.com"
+      ]
     },
     {
       "id": "whisper",
@@ -324,7 +411,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.openai.com"
+      ]
     },
     {
       "id": "assemblyai",
@@ -334,7 +424,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.assemblyai.com"
+      ]
     },
     {
       "id": "topaz",
@@ -354,7 +447,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.magnific.ai"
+      ]
     },
     {
       "id": "adobe_firefly",
@@ -364,7 +460,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "firefly-api.adobe.io"
+      ]
     }
   ]
 }
