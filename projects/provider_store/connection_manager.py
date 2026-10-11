@@ -978,21 +978,21 @@ class ConnectionManager:
                     "credential_name": token_env,
                 }
             remaining = (expiry - datetime.now(timezone.utc)).total_seconds()
-                if remaining <= 0:
-                    return {
-                        "provider": provider_id,
-                        "status": "CREDENTIALS_EXPIRED",
-                        "credential_present": True,
-                        "credential_name": token_env,
-                    }
-                if remaining <= 300:
-                    return {
-                        "provider": provider_id,
-                        "status": "CREDENTIALS_EXPIRING",
-                        "credential_present": True,
-                        "credential_name": token_env,
-                        "expires_in_seconds": int(remaining),
-                    }
+            if remaining <= 0:
+                return {
+                    "provider": provider_id,
+                    "status": "CREDENTIALS_EXPIRED",
+                    "credential_present": True,
+                    "credential_name": token_env,
+                }
+            if remaining <= 300:
+                return {
+                    "provider": provider_id,
+                    "status": "CREDENTIALS_EXPIRING",
+                    "credential_present": True,
+                    "credential_name": token_env,
+                    "expires_in_seconds": int(remaining),
+                }
         return {
             "provider": provider_id,
             "status": "CREDENTIALS_PRESENT",
