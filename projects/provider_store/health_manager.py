@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import tempfile
 from collections import deque
 from datetime import datetime, timezone
@@ -70,8 +71,13 @@ class ProviderHealthManager:
         if latency_ms is not None:
             event["latency_ms"] = round(float(latency_ms), 2)
         if not success and error_code:
-            # Keep a stable category/code, never arbitrary exception text.
-            event["error_code"] = str(error_code)[:80]
+            # Only store compact machine-readable codes, never arbitrary exception text.
+            candidate_code = str(error_code).strip()
+            event["error_code"] = (
+                candidate_code
+                if re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", candidate_code)
+                else "UNCLASSIFIED_ERROR"
+            )
         history.append(event)
         history = history[-self.history_limit:]
         consecutive_failures = 0 if success else int(record.get("consecutive_failures", 0)) + 1
