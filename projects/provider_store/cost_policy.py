@@ -155,7 +155,7 @@ class ProviderCostPolicy:
             return {"allowed": False, "status": "INVALID_COST_AMOUNT"}
         if not isinstance(paid_usage_approved, bool):
             return {"allowed": False, "status": "INVALID_PAID_APPROVAL_FLAG", "provider": provider["id"]}
-        for flag in ("enabled", "subscription_required"):
+        for flag in ("enabled", "subscription_required", "zero_cost_allowed"):
             if flag in provider and not isinstance(provider[flag], bool):
                 return {"allowed": False, "status": "INVALID_PROVIDER_CONFIGURATION", "provider": provider["id"]}
         if provider.get("enabled") is False:
@@ -165,6 +165,11 @@ class ProviderCostPolicy:
             if provider.get("subscription_required") is True:
                 return {
                     "allowed": False, "status": "COST_ESTIMATE_REQUIRED",
+                    "provider": provider["id"],
+                }
+            if provider.get("zero_cost_allowed") is not True:
+                return {
+                    "allowed": False, "status": "ZERO_COST_NOT_VERIFIED",
                     "provider": provider["id"],
                 }
             return {
