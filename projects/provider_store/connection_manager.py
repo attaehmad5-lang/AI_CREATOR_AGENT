@@ -197,6 +197,32 @@ class ConnectionManager:
                             errors.append(f"providers[{index}].{key} must be a string")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
+                    if "allowed_hosts" in provider:
+                        hosts = provider["allowed_hosts"]
+                        if not isinstance(hosts, list) or not hosts or len(hosts) > 100:
+                            errors.append(f"providers[{index}].allowed_hosts must be a non-empty list of at most 100 hostnames")
+                        elif (
+                            any(
+                                not isinstance(host, str)
+                                or not host
+                                or len(host) > 253
+                                or not re.fullmatch(
+                                    r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?",
+                                    host,
+                                )
+                                or ".." in host
+                                or any(
+                                    not label
+                                    or len(label) > 63
+                                    or label.startswith("-")
+                                    or label.endswith("-")
+                                    for label in host.rstrip(".").split(".")
+                                )
+                                for host in hosts
+                            )
+                            or len({host.casefold().rstrip(".") for host in hosts if isinstance(host, str)}) != len(hosts)
+                        ):
+                            errors.append(f"providers[{index}].allowed_hosts contains invalid or duplicate hostnames")
                     if "subscription_required" in provider and not isinstance(provider["subscription_required"], bool):
                         errors.append(f"providers[{index}].subscription_required must be boolean")
                     for reference_key in ("token_env", "token_expiry_env", "api_key_env", "credential_env"):
