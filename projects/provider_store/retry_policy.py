@@ -81,6 +81,13 @@ class RetryPolicy:
             return RetryDecision(False, attempt if isinstance(attempt, int) else 0, 0.0, "INVALID_ATTEMPT")
         if attempt >= self.max_attempts:
             return RetryDecision(False, attempt, 0.0, "RETRY_LIMIT_REACHED")
+        if not isinstance(idempotent, bool):
+            return RetryDecision(False, attempt, 0.0, "INVALID_IDEMPOTENCY_FLAG")
+        if status_code is not None and (
+            not isinstance(status_code, int) or isinstance(status_code, bool)
+            or status_code < 100 or status_code > 599
+        ):
+            return RetryDecision(False, attempt, 0.0, "INVALID_STATUS_CODE")
         if not idempotent:
             return RetryDecision(False, attempt, 0.0, "NON_IDEMPOTENT_REQUEST")
         if status_code in {401, 403}:
@@ -90,7 +97,17 @@ class RetryPolicy:
         if not retryable_status and not retryable_exception:
             return RetryDecision(False, attempt, 0.0, "NON_RETRYABLE_FAILURE")
         exponential = min(self.max_delay_seconds, self.base_delay_seconds * (2 ** (attempt - 1)))
-        jitter = exponential * self.jitter_fraction * min(1.0, max(0.0, float(self.random_fn())))
+        try:
+            random_value = self.random_fn()
+            if (
+                not isinstance(random_value, (int, float))
+                or isinstance(random_value, bool)
+                or not math.isfinite(random_value)
+            ):
+                return RetryDecision(False, attempt, 0.0, "INVALID_JITTER_SOURCE")
+            jitter = exponential * self.jitter_fraction * min(1.0, max(0.0, float(random_value)))
+        except Exception:
+            return RetryDecision(False, attempt, 0.0, "INVALID_JITTER_SOURCE")
         delay = min(self.max_delay_seconds, exponential + jitter)
         header_delay = self._retry_after_seconds(retry_after)
         if status_code == 429 and header_delay is not None:
