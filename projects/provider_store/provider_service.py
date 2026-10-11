@@ -186,6 +186,26 @@ class ProviderService:
                 "reservations_retained": True,
             }
         if adapter_result["started"] is False:
+            if (
+                adapter_result.get("success") is True
+                or (
+                    self._valid_amount(adapter_result.get("actual_cost"))
+                    and adapter_result.get("actual_cost") > 0
+                )
+                or adapter_result.get("charge_outcome") == "incurred"
+                or adapter_result.get("credit_outcome") == "used"
+                or (
+                    self._valid_amount(adapter_result.get("actual_credit_amount"))
+                    and adapter_result.get("actual_credit_amount") > 0
+                )
+            ):
+                return {
+                    "status": "INCONSISTENT_START_RESULT",
+                    "executed": False,
+                    "provider": provider_id,
+                    "request_id": request_id,
+                    "reservations_retained": True,
+                }
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id
             )
