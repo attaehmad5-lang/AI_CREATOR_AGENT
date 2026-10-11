@@ -31,6 +31,10 @@ class ProviderHTTPConnectivityProbe:
         "elevenlabs": "ELEVENLABS_API_KEY",
         "fal_ai": "FAL_KEY",
     }
+    _DEFAULT_AUTH = {
+        "elevenlabs": ("xi-api-key", ""),
+        "fal_ai": ("Authorization", "Key"),
+    }
 
     def __init__(
         self,
@@ -94,8 +98,11 @@ class ProviderHTTPConnectivityProbe:
             token = self.environ.get(token_env)
             if not isinstance(token, str) or not token.strip():
                 raise PermissionError("provider credential is missing")
-            header_name = provider.get("auth_header_name", "Authorization")
-            auth_scheme = provider.get("auth_scheme", "Bearer")
+            default_header, default_scheme = self._DEFAULT_AUTH.get(
+                str(provider.get("id", "")).casefold(), ("Authorization", "Bearer")
+            )
+            header_name = provider.get("auth_header_name", default_header)
+            auth_scheme = provider.get("auth_scheme", default_scheme)
             if not isinstance(header_name, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,80}", header_name):
                 raise ValueError("provider auth header name is invalid")
             if not isinstance(auth_scheme, str) or (auth_scheme and not re.fullmatch(r"[A-Za-z0-9-]{1,32}", auth_scheme)):
