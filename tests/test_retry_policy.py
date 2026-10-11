@@ -66,7 +66,32 @@ class RetryPolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             RetryPolicy(max_attempts=0)
         with self.assertRaises(ValueError):
+            RetryPolicy(max_attempts=True)
+        with self.assertRaises(ValueError):
+            RetryPolicy(base_delay_seconds=float("nan"))
+        with self.assertRaises(ValueError):
+            RetryPolicy(max_delay_seconds=float("inf"))
+        with self.assertRaises(ValueError):
+            RetryPolicy(jitter_fraction=float("nan"))
+        with self.assertRaises(ValueError):
+            RetryPolicy(random_fn="not-callable")
+        with self.assertRaises(ValueError):
             CircuitBreaker(failure_threshold=0)
+        with self.assertRaises(ValueError):
+            CircuitBreaker(failure_threshold=True)
+        with self.assertRaises(ValueError):
+            CircuitBreaker(cooldown_seconds=float("nan"))
+        with self.assertRaises(ValueError):
+            CircuitBreaker(cooldown_seconds=float("inf"))
+        with self.assertRaises(ValueError):
+            CircuitBreaker(clock="not-callable")
+
+    def test_invalid_attempt_and_non_finite_retry_after_are_safe(self):
+        policy = RetryPolicy(random_fn=lambda: 0)
+        self.assertEqual(policy.decide(attempt=0, status_code=503).reason, "INVALID_ATTEMPT")
+        self.assertEqual(policy.decide(attempt=True, status_code=503).reason, "INVALID_ATTEMPT")
+        self.assertIsNone(policy._retry_after_seconds(float("inf")))
+        self.assertIsNone(policy._retry_after_seconds(float("nan")))
 
 
 if __name__ == "__main__":
