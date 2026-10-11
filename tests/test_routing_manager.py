@@ -117,7 +117,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
     def test_subscription_required_provider_needs_cost_policy_even_for_zero_estimate(self):
         self.connections.register_provider({
             "id": "paid-image", "name": "Paid Image", "category": "image",
-            "auth_type": "API_KEY", "connection_type": "API",
+            "auth_type": "NONE", "connection_type": "API",
             "enabled": True, "subscription_required": True,
         })
         self.connections.verify_connectivity("paid-image", lambda provider, **kwargs: {"ok": True})
