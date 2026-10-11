@@ -100,6 +100,30 @@ class ConnectionManager:
         self._atomic_write_json(self.state_path, self.state)
 
     @staticmethod
+    def _contains_credential_value_field(value: Any) -> bool:
+        """Detect secret-bearing keys recursively while allowing environment references."""
+        safe_reference_keys = {"token_env", "api_key_env", "secret_ref", "credential_env"}
+        forbidden_keys = {
+            "api_key", "apikey", "api_token", "token", "access_token",
+            "refresh_token", "password", "secret", "credential", "credential_value",
+            "private_key", "authorization", "bearer_token",
+        }
+        if isinstance(value, dict):
+            for key, item in value.items():
+                normalized = str(key).casefold().replace("-", "_")
+                if normalized in safe_reference_keys:
+                    continue
+                if normalized in forbidden_keys or any(
+                    marker in normalized for marker in ("access_token", "refresh_token", "api_key", "apikey")
+                ):
+                    return True
+                if ConnectionManager._contains_credential_value_field(item):
+                    return True
+        elif isinstance(value, list):
+            return any(ConnectionManager._contains_credential_value_field(item) for item in value)
+        return False
+
+    @staticmethod
     def validate_catalog_schema(
         catalog: dict[str, Any], *, raise_on_error: bool = False
     ) -> dict[str, Any]:
@@ -134,14 +158,7 @@ class ConnectionManager:
                         and all(isinstance(item, str) for item in provider["capabilities"])
                     ):
                         errors.append(f"providers[{index}].capabilities must be a list of strings")
-                    sensitive_keys = {
-                        str(key).casefold().replace("-", "_")
-                        for key in provider
-                    }
-                    if any(
-                        key in sensitive_keys
-                        for key in ("api_key", "api_token", "access_token", "refresh_token", "password", "secret", "credential_value")
-                    ):
+                    if ConnectionManager._contains_credential_value_field(provider):
                         errors.append(f"providers[{index}] contains a forbidden credential value field")
         result = {"valid": not errors, "errors": errors, "provider_count": len(catalog.get("providers", [])) if isinstance(catalog, dict) and isinstance(catalog.get("providers"), list) else 0}
         if errors and raise_on_error:
@@ -372,8 +389,7 @@ class ConnectionManager:
             return {"status": "INVALID_PROVIDER", "reason": "provider id contains unsupported characters"}
 
         # Metadata may name an environment variable, but must never contain a secret value.
-        forbidden = {"api_key", "apikey", "token", "secret", "password", "credential_value"}
-        if any(str(key).lower().replace("-", "_") in forbidden for key in provider):
+        if self._contains_credential_value_field(provider):
             return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id}
 
         providers = self.list_providers()
