@@ -120,6 +120,11 @@ class ProviderCreditManagerTests(unittest.TestCase):
         )
         self.assertEqual(blocked_refresh["status"], "CREDIT_BALANCE_UPDATED")
         self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 3.0})
+        duplicate = self.manager.reserve(
+            provider_id="image-provider", amount=2.0, request_id="credit-job", unit="USD"
+        )
+        self.assertEqual(duplicate["status"], "ALREADY_COMMITTED")
+        self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 3.0})
 
     def test_credit_refresh_rejects_snapshot_older_than_local_usage(self):
         self.manager.refresh(
