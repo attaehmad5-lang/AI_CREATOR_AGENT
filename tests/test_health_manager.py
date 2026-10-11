@@ -154,6 +154,13 @@ class ProviderHealthManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path)
 
+    def test_active_probe_rejects_invalid_provider_before_calling_probe(self):
+        calls = []
+        result = self.manager.active_probe("", lambda **kwargs: calls.append(True) or True)
+        self.assertEqual(result["status"], "INVALID_PROVIDER")
+        self.assertFalse(result["verified"])
+        self.assertEqual(calls, [])
+
     def test_invalid_input_is_rejected(self):
         self.assertEqual(self.manager.record_result("", success=True)["status"], "INVALID_PROVIDER")
         self.assertEqual(self.manager.record_result("image", success=True, latency_ms=-1)["status"], "INVALID_LATENCY")
