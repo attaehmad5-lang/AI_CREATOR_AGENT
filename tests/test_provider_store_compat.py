@@ -5,6 +5,10 @@ from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.provider_store_manager import ProviderStoreManager
+from projects.provider_store.category_manager import CategoryManager
+from projects.provider_store.advanced.advanced_provider_manager import AdvancedProviderManager
+from projects.provider_store.unified_provider_registry import UnifiedProviderRegistry
+from projects.provider_store.unified_provider_router import UnifiedProviderRouter
 
 
 class ProviderStoreCompatibilityTests(unittest.TestCase):
@@ -33,6 +37,47 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             self.assertTrue(verified["verified"])
             self.assertEqual(store.status()["connected_verified"], 1)
             self.assertEqual(store.catalog["providers"][0]["catalog_status"], "CONNECTED")
+
+    def test_legacy_registry_category_and_advanced_views_share_one_catalog(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = root / "catalog.json"
+            state = root / "state.json"
+            catalog.write_text(json.dumps({
+                "providers": [
+                    {
+                        "id": "image", "name": "Image", "category": "image",
+                        "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                        "status": "CONNECTED",
+                    },
+                    {
+                        "id": "story", "name": "Story", "category": "script_story",
+                        "auth_type": "API_KEY", "connection_type": "API", "enabled": False,
+                        "capabilities": ["story_generation"],
+                    },
+                ]
+            }), encoding="utf-8")
+            state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog, state)
+            store = ProviderStoreManager(connection_manager=manager)
+            registry = UnifiedProviderRegistry(connection_manager=manager)
+            advanced = AdvancedProviderManager(connection_manager=manager)
+            categories = CategoryManager(store=store)
+            self.assertEqual(len(registry.all_providers()), 2)
+            self.assertEqual(registry.status()["advanced_providers"], 1)
+            self.assertEqual([p["id"] for p in advanced.list_providers()], ["story"])
+            self.assertEqual([p["id"] for p in categories.providers_by_category("image")], ["image"])
+
+            router = UnifiedProviderRouter(connection_manager=manager)
+            before = router.route("text_to_image")
+            self.assertEqual(before["status"], "PROVIDERS_FOUND")
+            self.assertEqual(before["available"], [])
+            self.assertEqual(before["unverified"][0]["id"], "image")
+            manager.verify_connectivity("image", lambda provider, **kwargs: {"ok": True})
+            after = router.route("text_to_image")
+            self.assertEqual(after["status"], "ROUTABLE")
+            self.assertFalse(after["route_selected"])
+            self.assertEqual(after["available"][0]["id"], "image")
 
     def test_store_facade_rejects_mixed_manager_and_path_arguments(self):
         with self.assertRaises(ValueError):
