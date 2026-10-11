@@ -22,13 +22,31 @@ class ProviderCostPolicy:
         project_budgets: dict[str, float] | None = None,
     ) -> None:
         self.ledger_path = Path(ledger_path) if ledger_path else None
+        if project_budgets is not None and not isinstance(project_budgets, dict):
+            raise ValueError("project_budgets must be a mapping")
         self.project_budgets = dict(project_budgets or {})
+        for project_id, budget in self.project_budgets.items():
+            if not isinstance(project_id, str) or not project_id.strip() or not self._valid_amount(budget):
+                raise ValueError("project budgets require non-empty project IDs and finite non-negative amounts")
         self.ledger: dict[str, Any] = {"version": "1.0", "projects": {}}
         if self.ledger_path and self.ledger_path.exists():
-            with self.ledger_path.open("r", encoding="utf-8") as stream:
-                loaded = json.load(stream)
+            try:
+                with self.ledger_path.open("r", encoding="utf-8") as stream:
+                    loaded = json.load(stream)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ValueError("Invalid usage ledger JSON") from exc
             if not isinstance(loaded, dict) or not isinstance(loaded.get("projects", {}), dict):
                 raise ValueError("Invalid usage ledger schema")
+            for project_id, project in loaded.get("projects", {}).items():
+                if not isinstance(project_id, str) or not project_id.strip() or not isinstance(project, dict):
+                    raise ValueError("Invalid usage ledger project record")
+                if not self._valid_amount(project.get("actual_spend", 0.0)):
+                    raise ValueError("Invalid usage ledger actual_spend")
+                requests = project.get("requests", {})
+                if not isinstance(requests, dict):
+                    raise ValueError("Invalid usage ledger requests")
+                if any(not isinstance(request_id, str) or not isinstance(record, dict) for request_id, record in requests.items()):
+                    raise ValueError("Invalid usage ledger request record")
             self.ledger = loaded
             self.ledger.setdefault("projects", {})
 
