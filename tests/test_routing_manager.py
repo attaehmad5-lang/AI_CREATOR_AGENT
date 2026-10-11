@@ -93,6 +93,20 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(routed["provider"], "fallback")
         self.assertTrue(routed["health_verified"])
 
+    def test_subscription_required_provider_needs_cost_policy_even_for_zero_estimate(self):
+        self.connections.register_provider({
+            "id": "paid-image", "name": "Paid Image", "category": "image",
+            "auth_type": "API_KEY", "connection_type": "API",
+            "enabled": True, "subscription_required": True,
+        })
+        router = ProviderRoutingManager(self.connections)
+        result = router.route(
+            category="image", project_id="film", estimated_cost=0.0,
+            excluded_providers={"primary", "fallback"},
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["decisions"][0]["status"], "COST_POLICY_REQUIRED")
+
     def test_positive_cost_route_requires_cost_policy_or_verified_credits(self):
         router = ProviderRoutingManager(self.connections)
         result = router.route(
