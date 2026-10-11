@@ -118,6 +118,26 @@ class ProviderCostPolicyTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "INVALID_COST_AMOUNT")
 
+    def test_invalid_project_budgets_are_rejected_at_construction(self):
+        for budgets in ({"documentary": float("nan")}, {"documentary": float("inf")}, {"": 1.0}, []):
+            with self.subTest(budgets=budgets):
+                with self.assertRaises(ValueError):
+                    ProviderCostPolicy(project_budgets=budgets)
+
+    def test_corrupt_usage_ledger_records_are_rejected(self):
+        corrupt_ledgers = (
+            {"projects": {"documentary": {"actual_spend": "unknown", "requests": {}}}},
+            {"projects": {"documentary": {"actual_spend": float("nan"), "requests": {}}}},
+            {"projects": {"documentary": {"actual_spend": 0.0, "requests": []}}},
+            {"projects": {"": {"actual_spend": 0.0, "requests": {}}}},
+        )
+        for index, ledger in enumerate(corrupt_ledgers):
+            with self.subTest(index=index):
+                path = self.ledger.with_name(f"corrupt-{index}.json")
+                path.write_text(json.dumps(ledger), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    ProviderCostPolicy(path)
+
 
 if __name__ == "__main__":
     unittest.main()
