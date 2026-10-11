@@ -4,7 +4,7 @@ This guide describes the current implementation in this branch. It is not a clai
 
 ## Components
 
-- `connection_manager.py` — provider catalog discovery, registration, enabled/disabled state, modality contract checks, credential-presence checks, endpoint policy, and verified connection state.
+- `connection_manager.py` — provider catalog discovery, registration, enabled/disabled state, modality contract checks, credential-presence checks, endpoint policy, and verified connection state. Public catalog views rename legacy `status` to `catalog_status`; only a successful provider-specific probe can set runtime connection state to `CONNECTED`.
 - `routing_manager.py` — priority, free-credit-first, lowest-cost, healthiest-first, and round-robin selection; optional health, cost, credit, and quota managers; explicit fallback behavior.
 - `credit_manager.py` — stores verified free-credit snapshots from an injected provider-specific probe and excludes stale/unknown balances from routing.
 - `cost_policy.py` — paid-approval guard, required project budgets, idempotent usage reconciliation, and estimated-cost reservations.
