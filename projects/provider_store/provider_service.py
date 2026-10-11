@@ -114,6 +114,16 @@ class ProviderService:
             "reason": getattr(decision, "reason", "INVALID_RETRY_RESPONSE"),
         }
 
+    @staticmethod
+    def _valid_amount(value: Any) -> bool:
+        import math
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and value >= 0
+        )
+
     def finalize_started_request(
         self,
         *,
@@ -131,6 +141,10 @@ class ProviderService:
             return {"status": "INVALID_USAGE_RECORD", "finalized": False}
         if not isinstance(success, bool):
             return {"status": "INVALID_EXECUTION_RESULT", "finalized": False}
+        if not self._valid_amount(estimated_cost) or not self._valid_amount(actual_cost):
+            return {"status": "INVALID_COST_AMOUNT", "finalized": False}
+        if latency_ms is not None and not self._valid_amount(latency_ms):
+            return {"status": "INVALID_LATENCY", "finalized": False}
         cost_result: dict[str, Any] | None = None
         quota_result: dict[str, Any] | None = None
         duplicate_finalization = False
