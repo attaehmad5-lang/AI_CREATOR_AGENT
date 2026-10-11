@@ -99,7 +99,29 @@ class ProviderQuotaManager:
             return {"status": "NO_QUOTA_POLICY", "provider": provider_id, "reserved": False}
         with self._transaction():
             existing = self.data["requests"].get(request_id)
+            now = self.clock().astimezone(timezone.utc)
             if existing is not None:
+                if existing.get("status") == "RELEASED" and existing.get("provider_id") != provider_id:
+                    # A released attempt is known not to have started; preserve its
+                    # audit snapshot and permit a new provider attempt under the same
+                    # logical request ID. Started/committed attempts cannot be reused.
+                    history = existing.setdefault("attempt_history", [])
+                    history.append({
+                        "provider_id": existing.get("provider_id"),
+                        "status": "RELEASED",
+                        "created_at": existing.get("created_at"),
+                        "released_at": existing.get("released_at"),
+                    })
+                    existing["provider_id"] = provider_id
+                    existing["status"] = "RESERVED"
+                    existing["created_at"] = now.isoformat()
+                    existing.pop("released_at", None)
+                    self._save()
+                    return {
+                        "status": "RESERVED", "provider": provider_id,
+                        "request_id": request_id, "reserved": True,
+                        "reused_released_attempt": True,
+                    }
                 if existing.get("provider_id") != provider_id:
                     return {"status": "REQUEST_ID_CONFLICT", "request_id": request_id, "reserved": False}
                 existing_status = existing["status"]
@@ -109,7 +131,6 @@ class ProviderQuotaManager:
                     "RELEASED": "ALREADY_RELEASED",
                 }[existing_status]
                 return {"status": status, "request_id": request_id, "reserved": False}
-            now = self.clock().astimezone(timezone.utc)
             for period, limit in self.limits[provider_id].items():
                 count = self._count_in_period(provider_id, period, now)
                 if count >= limit:
