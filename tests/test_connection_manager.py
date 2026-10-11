@@ -152,6 +152,27 @@ class ConnectionManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid provider catalog"):
             ConnectionManager(bad_catalog, self.state_path)
 
+    def test_production_catalog_api_allowlists_are_explicit_and_valid(self):
+        catalog_path = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        providers = catalog["providers"]
+        allowlisted = [provider for provider in providers if "allowed_hosts" in provider]
+        self.assertGreaterEqual(len(allowlisted), 25)
+        for provider in allowlisted:
+            with self.subTest(provider=provider.get("id")):
+                hosts = provider["allowed_hosts"]
+                self.assertIsInstance(hosts, list)
+                self.assertTrue(hosts)
+                self.assertEqual(len(hosts), len(set(hosts)))
+                for host in hosts:
+                    self.assertIsInstance(host, str)
+                    self.assertTrue(host)
+                    self.assertNotIn("://", host)
+                    validation = ConnectionManager.validate_endpoint(
+                        f"https://{host}/health", allowed_hosts={host}
+                    )
+                    self.assertTrue(validation["valid"], validation)
+
     def test_catalog_schema_accepts_existing_registry_shape(self):
         result = ConnectionManager.validate_catalog_schema(self.manager.catalog)
         self.assertTrue(result["valid"], result["errors"])
