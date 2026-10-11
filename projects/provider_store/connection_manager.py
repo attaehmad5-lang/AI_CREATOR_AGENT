@@ -108,6 +108,25 @@ class ConnectionManager:
     def provider_exists(self, provider_id: str) -> bool:
         return self.get_provider(provider_id) is not None
 
+    def get_provider_metadata(self, provider_id: str) -> dict[str, Any] | None:
+        """Return a detached, secret-filtered view of catalog metadata."""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return None
+        safe: dict[str, Any] = {}
+        for key, value in provider.items():
+            normalized = str(key).casefold().replace("-", "_")
+            # Environment-variable/reference names are metadata, not credential values.
+            if normalized in {"token_env", "api_key_env", "secret_ref", "credential_env"}:
+                safe[key] = value
+                continue
+            if any(term in normalized for term in ("password", "secret", "credential", "api_key", "apikey", "access_token", "refresh_token")):
+                continue
+            if normalized == "token":
+                continue
+            safe[key] = value
+        return safe
+
     def set_provider_enabled(
         self, provider_id: str, enabled: bool
     ) -> dict[str, Any]:
