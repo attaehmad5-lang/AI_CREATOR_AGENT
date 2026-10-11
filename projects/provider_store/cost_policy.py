@@ -10,9 +10,12 @@ import math
 import os
 import tempfile
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+from .interprocess_lock import interprocess_file_lock
 
 
 class ProviderCostPolicy:
@@ -31,39 +34,57 @@ class ProviderCostPolicy:
             if not isinstance(project_id, str) or not project_id.strip() or not self._valid_amount(budget):
                 raise ValueError("project budgets require non-empty project IDs and finite non-negative amounts")
         self.ledger: dict[str, Any] = {"version": "1.0", "projects": {}}
-        if self.ledger_path and self.ledger_path.exists():
-            try:
-                with self.ledger_path.open("r", encoding="utf-8") as stream:
-                    loaded = json.load(stream)
-            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                raise ValueError("Invalid usage ledger JSON") from exc
-            if not isinstance(loaded, dict) or not isinstance(loaded.get("projects", {}), dict):
-                raise ValueError("Invalid usage ledger schema")
-            for project_id, project in loaded.get("projects", {}).items():
-                if not isinstance(project_id, str) or not project_id.strip() or not isinstance(project, dict):
-                    raise ValueError("Invalid usage ledger project record")
-                if not self._valid_amount(project.get("actual_spend", 0.0)):
-                    raise ValueError("Invalid usage ledger actual_spend")
-                requests = project.get("requests", {})
-                if not isinstance(requests, dict):
-                    raise ValueError("Invalid usage ledger requests")
-                if any(not isinstance(request_id, str) or not isinstance(record, dict) for request_id, record in requests.items()):
-                    raise ValueError("Invalid usage ledger request record")
-                reservations = project.get("reservations", {})
-                if not isinstance(reservations, dict):
-                    raise ValueError("Invalid usage ledger reservations")
-                if any(
-                    not isinstance(request_id, str)
-                    or not isinstance(record, dict)
-                    or not self._valid_amount(record.get("estimated_cost"))
-                    for request_id, record in reservations.items()
-                ):
-                    raise ValueError("Invalid usage ledger reservation record")
-            self.ledger = loaded
-            self.ledger.setdefault("projects", {})
+        self._reload_ledger()
+
+    def _reload_ledger(self) -> None:
+        """Reload persistent usage state after acquiring the interprocess lock."""
+        if self.ledger_path is None or not self.ledger_path.exists():
+            self.ledger = {"version": "1.0", "projects": {}}
+            return
+        try:
+            with self.ledger_path.open("r", encoding="utf-8") as stream:
+                loaded = json.load(stream)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError("Invalid usage ledger JSON") from exc
+        if not isinstance(loaded, dict) or not isinstance(loaded.get("projects", {}), dict):
+            raise ValueError("Invalid usage ledger schema")
+        for project_id, project in loaded.get("projects", {}).items():
+            if not isinstance(project_id, str) or not project_id.strip() or not isinstance(project, dict):
+                raise ValueError("Invalid usage ledger project record")
+            if not self._valid_amount(project.get("actual_spend", 0.0)):
+                raise ValueError("Invalid usage ledger actual_spend")
+            requests = project.get("requests", {})
+            if not isinstance(requests, dict):
+                raise ValueError("Invalid usage ledger requests")
+            if any(not isinstance(request_id, str) or not isinstance(record, dict) for request_id, record in requests.items()):
+                raise ValueError("Invalid usage ledger request record")
+            reservations = project.get("reservations", {})
+            if not isinstance(reservations, dict):
+                raise ValueError("Invalid usage ledger reservations")
+            if any(
+                not isinstance(request_id, str)
+                or not isinstance(record, dict)
+                or not self._valid_amount(record.get("estimated_cost"))
+                for request_id, record in reservations.items()
+            ):
+                raise ValueError("Invalid usage ledger reservation record")
+        self.ledger = loaded
+        self.ledger.setdefault("projects", {})
+
+    @contextmanager
+    def _transaction(self) -> Iterator[None]:
+        """Serialize ledger operations across threads and processes when persistence is enabled."""
+        with self._lock:
+            if self.ledger_path is None:
+                yield
+                return
+            lock_path = self.ledger_path.with_name(self.ledger_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                self._reload_ledger()
+                yield
 
     @staticmethod
-    def _valid_amount(value: Any) -> bool:
+    def _valid_amount(value: Any):
         return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
 
     def _spent(self, project_id: str) -> float:
@@ -116,83 +137,84 @@ class ProviderCostPolicy:
                 "free_credits_remaining": free_credits_remaining,
             }
 
-        budget = self.project_budgets.get(project_id)
-        if budget is None:
+        with self._transaction():
+            budget = self.project_budgets.get(project_id)
+            if budget is None:
+                return {
+                    "allowed": False, "status": "PROJECT_BUDGET_REQUIRED",
+                    "provider": provider["id"], "estimated_cost": estimated_cost,
+                }
+            if not self._valid_amount(budget):
+                return {"allowed": False, "status": "INVALID_PROJECT_BUDGET", "provider": provider["id"]}
+            remaining = max(0.0, budget - self._spent(project_id) - self._reserved(project_id))
+            if estimated_cost > remaining:
+                return {
+                    "allowed": False, "status": "PROJECT_BUDGET_EXCEEDED",
+                    "provider": provider["id"], "estimated_cost": estimated_cost,
+                    "budget_remaining": remaining,
+                }
+
+            # A paid subscription/credit balance is never inferred to be approved.
+            if not paid_usage_approved:
+                return {
+                    "allowed": False, "status": "PAID_APPROVAL_REQUIRED", "provider": provider["id"],
+                    "estimated_cost": estimated_cost,
+                }
             return {
-                "allowed": False, "status": "PROJECT_BUDGET_REQUIRED",
-                "provider": provider["id"], "estimated_cost": estimated_cost,
-            }
-        if not self._valid_amount(budget):
-            return {"allowed": False, "status": "INVALID_PROJECT_BUDGET", "provider": provider["id"]}
-        remaining = max(0.0, budget - self._spent(project_id) - self._reserved(project_id))
-        if estimated_cost > remaining:
-            return {
-                "allowed": False, "status": "PROJECT_BUDGET_EXCEEDED",
-                "provider": provider["id"], "estimated_cost": estimated_cost,
-                "budget_remaining": remaining,
+                "allowed": True, "status": "ALLOWED_PAID", "provider": provider["id"],
+                "billing_mode": "PAID_APPROVED", "estimated_cost": estimated_cost,
+                "approval_recorded": True,
             }
 
-        # A paid subscription/credit balance is never inferred to be approved.
-        if not paid_usage_approved:
-            return {
-                "allowed": False, "status": "PAID_APPROVAL_REQUIRED", "provider": provider["id"],
-                "estimated_cost": estimated_cost,
-            }
-        return {
-            "allowed": True, "status": "ALLOWED_PAID", "provider": provider["id"],
-            "billing_mode": "PAID_APPROVED", "estimated_cost": estimated_cost,
-            "approval_recorded": True,
-        }
+        @classmethod
+        def _sortable_credit_amount(cls, value: Any) -> float:
+            """Return a safe sort key; the policy validator still rejects invalid input."""
+            return float(value) if cls._valid_amount(value) else 0.0
 
-    @classmethod
-    def _sortable_credit_amount(cls, value: Any) -> float:
-        """Return a safe sort key; the policy validator still rejects invalid input."""
-        return float(value) if cls._valid_amount(value) else 0.0
-
-    def select_provider(
-        self,
-        providers: list[dict[str, Any]],
-        *,
-        project_id: str,
-        estimated_costs: dict[str, float],
-        free_credits: dict[str, float] | None = None,
-        paid_approved_providers: set[str] | None = None,
-    ) -> dict[str, Any]:
-        """Prefer eligible free-credit providers before any explicitly approved paid route."""
-        if not isinstance(providers, list) or not isinstance(estimated_costs, dict):
-            return {"allowed": False, "status": "INVALID_SELECTION_INPUT"}
-        if free_credits is not None and not isinstance(free_credits, dict):
-            return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
-        if paid_approved_providers is not None and not isinstance(paid_approved_providers, (set, frozenset)):
-            return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
-        free_credits = {} if free_credits is None else free_credits
-        paid_approved_providers = set() if paid_approved_providers is None else paid_approved_providers
-        candidates = sorted(
-            (p for p in providers if isinstance(p, dict)),
-            key=lambda p: (
-                0 if self._sortable_credit_amount(free_credits.get(str(p.get("id")), 0)) > 0 else 1,
-                -self._sortable_credit_amount(free_credits.get(str(p.get("id")), 0)),
-                str(p.get("id", "")),
-            ),
-        )
-        decisions = []
-        for provider in candidates:
-            provider_id = str(provider.get("id", ""))
-            estimate = estimated_costs.get(provider_id)
-            if estimate is None:
-                decisions.append({"provider": provider_id, "status": "ESTIMATE_MISSING"})
-                continue
-            decision = self.evaluate_request(
-                provider,
-                project_id=project_id,
-                estimated_cost=estimate,
-                free_credits_remaining=free_credits.get(provider_id, 0.0),
-                paid_usage_approved=provider_id in paid_approved_providers,
+        def select_provider(
+            self,
+            providers: list[dict[str, Any]],
+            *,
+            project_id: str,
+            estimated_costs: dict[str, float],
+            free_credits: dict[str, float] | None = None,
+            paid_approved_providers: set[str] | None = None,
+        ) -> dict[str, Any]:
+            """Prefer eligible free-credit providers before any explicitly approved paid route."""
+            if not isinstance(providers, list) or not isinstance(estimated_costs, dict):
+                return {"allowed": False, "status": "INVALID_SELECTION_INPUT"}
+            if free_credits is not None and not isinstance(free_credits, dict):
+                return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
+            if paid_approved_providers is not None and not isinstance(paid_approved_providers, (set, frozenset)):
+                return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
+            free_credits = {} if free_credits is None else free_credits
+            paid_approved_providers = set() if paid_approved_providers is None else paid_approved_providers
+            candidates = sorted(
+                (p for p in providers if isinstance(p, dict)),
+                key=lambda p: (
+                    0 if self._sortable_credit_amount(free_credits.get(str(p.get("id")), 0)) > 0 else 1,
+                    -self._sortable_credit_amount(free_credits.get(str(p.get("id")), 0)),
+                    str(p.get("id", "")),
+                ),
             )
-            if decision["allowed"]:
-                return {**decision, "selection_order": [d.get("provider") for d in decisions] + [provider_id]}
-            decisions.append({"provider": provider_id, "status": decision["status"]})
-        return {"allowed": False, "status": "NO_POLICY_COMPLIANT_PROVIDER", "decisions": decisions}
+            decisions = []
+            for provider in candidates:
+                provider_id = str(provider.get("id", ""))
+                estimate = estimated_costs.get(provider_id)
+                if estimate is None:
+                    decisions.append({"provider": provider_id, "status": "ESTIMATE_MISSING"})
+                    continue
+                decision = self.evaluate_request(
+                    provider,
+                    project_id=project_id,
+                    estimated_cost=estimate,
+                    free_credits_remaining=free_credits.get(provider_id, 0.0),
+                    paid_usage_approved=provider_id in paid_approved_providers,
+                )
+                if decision["allowed"]:
+                    return {**decision, "selection_order": [d.get("provider") for d in decisions] + [provider_id]}
+                decisions.append({"provider": provider_id, "status": decision["status"]})
+            return {"allowed": False, "status": "NO_POLICY_COMPLIANT_PROVIDER", "decisions": decisions}
 
     def reserve_usage(
         self,
@@ -207,7 +229,7 @@ class ProviderCostPolicy:
             return {"status": "INVALID_USAGE_RECORD", "saved": False}
         if not self._valid_amount(estimated_cost) or estimated_cost <= 0:
             return {"status": "INVALID_COST_AMOUNT", "saved": False}
-        with self._lock:
+        with self._transaction():
             budget = self.project_budgets.get(project_id)
             if budget is None:
                 return {"status": "PROJECT_BUDGET_REQUIRED", "saved": False}
@@ -272,7 +294,7 @@ class ProviderCostPolicy:
             return {"status": "INVALID_USAGE_RECORD", "saved": False}
         if not isinstance(charge_outcome, str) or charge_outcome not in {"not_incurred", "incurred", "unknown"}:
             return {"status": "INVALID_CHARGE_OUTCOME", "saved": False, "request_id": request_id}
-        with self._lock:
+        with self._transaction():
             project = self.ledger["projects"].get(project_id)
             reservations = project.get("reservations", {}) if isinstance(project, dict) else {}
             if not isinstance(reservations, dict) or request_id not in reservations:
@@ -309,7 +331,7 @@ class ProviderCostPolicy:
         request_id: str,
     ) -> dict[str, Any]:
         """Record actual usage idempotently and flag estimate variance/budget breaches."""
-        with self._lock:
+        with self._transaction():
             return self._reconcile_usage_unlocked(
                 project_id=project_id,
                 provider_id=provider_id,
