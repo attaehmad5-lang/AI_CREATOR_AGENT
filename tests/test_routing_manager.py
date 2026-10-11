@@ -32,6 +32,12 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         }), encoding="utf-8")
         self.state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
         self.connections = ConnectionManager(self.catalog_path, self.state_path)
+        for provider_id in ("primary", "fallback", "voice"):
+            verified = self.connections.verify_connectivity(
+                provider_id, lambda provider, **kwargs: {"ok": True}
+            )
+            if verified.get("verified") is not True:
+                raise AssertionError(f"test fixture provider {provider_id} failed stub verification")
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -114,6 +120,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             "auth_type": "API_KEY", "connection_type": "API",
             "enabled": True, "subscription_required": True,
         })
+        self.connections.verify_connectivity("paid-image", lambda provider, **kwargs: {"ok": True})
         router = ProviderRoutingManager(self.connections)
         result = router.route(
             category="image", project_id="film", estimated_cost=0.0,
