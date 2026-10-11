@@ -74,6 +74,12 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             self.validator.validate_file(bad_json, modality="json")["status"],
             "INVALID_JSON",
         )
+        nonstandard_json = self.root / "nonstandard.json"
+        nonstandard_json.write_text('{"amount": NaN}', encoding="utf-8")
+        self.assertEqual(
+            self.validator.validate_file(nonstandard_json, modality="json")["status"],
+            "INVALID_JSON",
+        )
         pdf = self.root / "report.pdf"
         pdf.write_bytes(b"%PDF-1.7\n")
         self.assertEqual(
