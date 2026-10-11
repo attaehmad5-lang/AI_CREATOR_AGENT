@@ -127,7 +127,7 @@ class ProviderHTTPConnectivityProbe:
         if auth_type not in {"NONE", "PUBLIC", "ANONYMOUS"}:
             if auth_type in {"ACCOUNT", "MANUAL", "MANUAL_CONNECT", "OAUTH_BROWSER"}:
                 raise PermissionError("manual account connection is required")
-            token_env = provider.get("token_env") or provider.get("api_key_env") or self._DEFAULT_TOKEN_ENV.get(
+            token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env") or self._DEFAULT_TOKEN_ENV.get(
                 str(provider.get("id", "")).casefold()
             )
             if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
