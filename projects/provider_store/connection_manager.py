@@ -44,7 +44,8 @@ class ConnectionManager:
         self.catalog = self._load_json(self.catalog_path)
         self.validate_catalog_schema(self.catalog, raise_on_error=True)
         self.state = self._load_json(self.state_path, default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}})
-        self.state.setdefault("providers", {})
+        if not isinstance(self.state.get("providers"), dict):
+            raise ValueError("Invalid connection state schema: providers must be an object")
         # Runtime instances are intentionally process-local and never serialized.
         self._loaded_providers: dict[str, Any] = {}
 
@@ -394,11 +395,36 @@ class ConnectionManager:
             "overwritten": existing is not None,
         }
 
+    @staticmethod
+    def _sanitize_public_data(value: Any) -> Any:
+        """Recursively remove credential-like values from data returned to callers."""
+        if isinstance(value, dict):
+            safe: dict[str, Any] = {}
+            safe_reference_keys = {"token_env", "api_key_env", "secret_ref", "credential_env"}
+            secret_fragments = (
+                "password", "secret", "credential", "api_key", "apikey",
+                "access_token", "refresh_token",
+            )
+            for key, item in value.items():
+                normalized = str(key).casefold().replace("-", "_")
+                if normalized in safe_reference_keys:
+                    safe[key] = item
+                elif normalized == "token" or any(part in normalized for part in secret_fragments):
+                    continue
+                else:
+                    safe[key] = ConnectionManager._sanitize_public_data(item)
+            return safe
+        if isinstance(value, list):
+            return [ConnectionManager._sanitize_public_data(item) for item in value]
+        if isinstance(value, tuple):
+            return [ConnectionManager._sanitize_public_data(item) for item in value]
+        return value
+
     def get_state(self, provider_id: str) -> dict[str, Any]:
         item = self.state["providers"].get(provider_id)
         if not isinstance(item, dict):
             return {"status": "UNKNOWN", "verified": False}
-        result = dict(item)
+        result = self._sanitize_public_data(item)
         # Older records may say CONNECTED without any live verification evidence.
         if result.get("status") == "CONNECTED" and result.get("verified") is not True:
             result["reported_status"] = "CONNECTED"
@@ -436,7 +462,7 @@ class ConnectionManager:
         })
         self.state["providers"][provider_id] = record
         self._save()
-        return {"provider": provider_id, **record, "saved": True}
+        return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
 
     @staticmethod
     def validate_endpoint(
