@@ -200,7 +200,8 @@ class ConnectionManager:
                         "ACCOUNT_OR_LOCAL", "API_KEY_OR_ACCOUNT", "API_KEY_OR_SERVICE_ACCOUNT",
                     }
                     connection_types = {
-                        "API", "ACCOUNT_OR_API", "API_OR_ACCOUNT", "LOCAL_OR_ACCOUNT", "MANUAL_CONNECT",
+                        "API", "ACCOUNT_OR_API", "API_OR_ACCOUNT", "LOCAL_OR_ACCOUNT",
+                        "MANUAL_CONNECT", "BROWSER_SESSION", "LOCAL",
                     }
                     auth_type = provider.get("auth_type")
                     if isinstance(auth_type, str) and auth_type.upper() not in auth_types:
