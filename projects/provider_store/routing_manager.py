@@ -198,7 +198,8 @@ class ProviderRoutingManager:
                     decisions.append({"provider": provider_id, "status": "COST_POLICY_FAILED", "error_type": type(exc).__name__})
                     continue
                 if not isinstance(decision, dict) or not decision.get("allowed"):
-                    decisions.append({"provider": provider_id, "status": decision.get("status", "POLICY_REJECTED")})
+                    status = decision.get("status", "POLICY_REJECTED") if isinstance(decision, dict) else "INVALID_POLICY_RESPONSE"
+                    decisions.append({"provider": provider_id, "status": status})
                     continue
                 return {
                     "allowed": True,
