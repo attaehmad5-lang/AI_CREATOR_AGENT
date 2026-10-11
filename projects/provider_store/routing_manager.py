@@ -212,13 +212,35 @@ class ProviderRoutingManager:
             cost = provider["_route_cost"]
             credit = credits.get(provider_id, 0.0)
             billing_mode = None
-            if self.cost_policy is not None:
+            if cost == 0:
+                if self.cost_policy is not None:
+                    try:
+                        decision = self.cost_policy.evaluate_request(
+                            provider,
+                            project_id=project_id,
+                            estimated_cost=cost,
+                            free_credits_remaining=0.0,
+                            paid_usage_approved=provider_id in approvals,
+                        )
+                    except Exception as exc:
+                        decisions.append({"provider": provider_id, "status": "COST_POLICY_FAILED", "error_type": type(exc).__name__})
+                        continue
+                    if not isinstance(decision, dict) or not decision.get("allowed"):
+                        status = decision.get("status", "POLICY_REJECTED") if isinstance(decision, dict) else "INVALID_POLICY_RESPONSE"
+                        decisions.append({"provider": provider_id, "status": status})
+                        continue
+                    billing_mode = decision.get("billing_mode")
+            elif self.credit_manager is not None and credit >= cost:
+                # Only the injected manager's fresh, verified snapshot can authorize
+                # a free-credit route; raw caller-provided balances were rejected above.
+                billing_mode = "FREE_CREDITS"
+            elif self.cost_policy is not None:
                 try:
                     decision = self.cost_policy.evaluate_request(
                         provider,
                         project_id=project_id,
                         estimated_cost=cost,
-                        free_credits_remaining=credit,
+                        free_credits_remaining=0.0,
                         paid_usage_approved=provider_id in approvals,
                     )
                 except Exception as exc:
