@@ -110,6 +110,14 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(router.route(category="", project_id="film")["status"], "INVALID_ROUTE_REQUEST")
         self.assertEqual(router.route(category="image", project_id="film", strategy="MAGIC")["status"], "INVALID_ROUTING_STRATEGY")
         self.assertEqual(
+            router.route(category="image", project_id="film", free_credits={"primary": float("nan")})["status"],
+            "INVALID_FREE_CREDIT_MAP",
+        )
+        self.assertEqual(
+            router.route(category="image", project_id="film", estimated_costs={"primary": float("inf")})["status"],
+            "INVALID_COST_ESTIMATES",
+        )
+        self.assertEqual(
             router.route(category="image", project_id="film", require_health_evidence=True)["status"],
             "HEALTH_DATA_REQUIRED",
         )
