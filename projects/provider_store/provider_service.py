@@ -203,11 +203,16 @@ class ProviderService:
             reported_success = False
             accounting_required = True
         actual_cost = adapter_result.get("actual_cost")
-        if not self._valid_amount(actual_cost):
+        actual_cost_valid = self._valid_amount(actual_cost)
+        if not actual_cost_valid:
             actual_cost = 0.0
             accounting_required = True
         charge_outcome = adapter_result.get("charge_outcome", "unknown")
-        if not isinstance(charge_outcome, str) or charge_outcome not in {"unknown", "incurred", "not_incurred"}:
+        if (
+            not actual_cost_valid
+            or not isinstance(charge_outcome, str)
+            or charge_outcome not in {"unknown", "incurred", "not_incurred"}
+        ):
             charge_outcome = "unknown"
             accounting_required = True
         if actual_cost > 0 and charge_outcome == "not_incurred":
