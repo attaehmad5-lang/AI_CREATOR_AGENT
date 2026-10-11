@@ -776,7 +776,15 @@ class ConnectionManager:
             or timeout_seconds <= 0
         ):
             return {"status": "INVALID_TIMEOUT", "provider": provider_id, "verified": False}
-        configuration_result = self.get_provider_configuration(provider_id)
+        try:
+            configuration_result = self.get_provider_configuration(provider_id)
+        except Exception as exc:
+            return {
+                "status": "STATE_READ_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
         if configuration_result.get("status") not in {"CONFIGURED", "NO_CONFIGURATION"}:
             try:
                 self.set_state(provider_id, "ERROR")
@@ -808,12 +816,23 @@ class ConnectionManager:
                 "provider": provider_id,
                 "verified": False,
             }
-        self.set_state(provider_id, "CONNECTING")
+        try:
+            self.set_state(provider_id, "CONNECTING")
+        except Exception as exc:
+            return {
+                "status": "STATE_SAVE_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
         started = time.monotonic()
         try:
             result = probe(dict(provider), timeout_seconds=float(timeout_seconds))
             if result is not True and not (isinstance(result, dict) and result.get("ok") is True):
-                self.set_state(provider_id, "ERROR")
+                try:
+                    self.set_state(provider_id, "ERROR")
+                except Exception:
+                    return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
                 return {
                     "status": "CONNECTION_FAILED",
                     "provider": provider_id,
@@ -830,7 +849,15 @@ class ConnectionManager:
                 status = "NETWORK_ERROR"
             else:
                 status = "PROBE_FAILED"
-            self.set_state(provider_id, "ERROR")
+            try:
+                self.set_state(provider_id, "ERROR")
+            except Exception:
+                return {
+                    "status": "STATE_SAVE_FAILED",
+                    "provider": provider_id,
+                    "verified": False,
+                    "error_type": type(exc).__name__,
+                }
             return {
                 "status": status,
                 "provider": provider_id,
