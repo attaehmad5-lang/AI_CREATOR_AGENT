@@ -6,6 +6,7 @@ unless a separate provider-specific probe has actually succeeded.
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -448,6 +449,8 @@ class ConnectionManager:
         from ipaddress import ip_address
         from urllib.parse import urlsplit
 
+        if not isinstance(allow_loopback_http, bool):
+            return {"valid": False, "status": "INVALID_LOOPBACK_HTTP_POLICY"}
         if not isinstance(endpoint, str) or not endpoint.strip():
             return {"valid": False, "status": "INVALID_ENDPOINT"}
         try:
@@ -565,7 +568,12 @@ class ConnectionManager:
             return {"status": "DISABLED", "provider": provider_id, "verified": False}
         if not callable(probe):
             return {"status": "INVALID_PROBE", "provider": provider_id, "verified": False}
-        if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
+        if (
+            not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+        ):
             return {"status": "INVALID_TIMEOUT", "provider": provider_id, "verified": False}
         credentials = self.credential_status(provider_id, environ)
         blocked_credential_states = {
