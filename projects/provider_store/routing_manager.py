@@ -234,6 +234,9 @@ class ProviderRoutingManager:
                     "status": "COST_POLICY_REQUIRED",
                 })
                 continue
+            if cost == 0 and provider.get("zero_cost_allowed") is not True:
+                decisions.append({"provider": provider_id, "status": "ZERO_COST_NOT_VERIFIED"})
+                continue
             candidates.append({
                 **provider,
                 "_route_cost": float(cost),
