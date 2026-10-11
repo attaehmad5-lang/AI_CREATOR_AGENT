@@ -148,7 +148,7 @@ class ProviderService:
             return {"status": "INVALID_USAGE_RECORD", "finalized": False}
         if not isinstance(success, bool):
             return {"status": "INVALID_EXECUTION_RESULT", "finalized": False}
-        if charge_outcome not in {"unknown", "incurred", "not_incurred"}:
+        if not isinstance(charge_outcome, str) or charge_outcome not in {"unknown", "incurred", "not_incurred"}:
             return {"status": "INVALID_CHARGE_OUTCOME", "finalized": False}
         if not self._valid_amount(estimated_cost) or not self._valid_amount(actual_cost):
             return {"status": "INVALID_COST_AMOUNT", "finalized": False}
