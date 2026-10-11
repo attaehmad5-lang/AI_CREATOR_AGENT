@@ -156,7 +156,10 @@ class ProviderService:
             return {"status": "INVALID_EXECUTION_RESULT", "finalized": False}
         if not isinstance(charge_outcome, str) or charge_outcome not in {"unknown", "incurred", "not_incurred"}:
             return {"status": "INVALID_CHARGE_OUTCOME", "finalized": False}
-        if billing_mode is not None and billing_mode not in {"ZERO_COST", "FREE_CREDITS", "PAID_APPROVED"}:
+        if billing_mode is not None and (
+            not isinstance(billing_mode, str)
+            or billing_mode not in {"ZERO_COST", "FREE_CREDITS", "PAID_APPROVED"}
+        ):
             return {"status": "INVALID_BILLING_MODE", "finalized": False}
         if not isinstance(credit_outcome, str) or credit_outcome not in {"unknown", "used", "not_used"}:
             return {"status": "INVALID_CREDIT_OUTCOME", "finalized": False}
