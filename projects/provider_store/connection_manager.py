@@ -927,6 +927,8 @@ class ConnectionManager:
         The injected provider-specific probe must validate the live session. The session
         object is held only for this call; it is never copied into catalog/state or logs.
         """
+        import time
+
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER", "provider": provider_id, "verified": False}
         provider = self.get_provider(provider_id)
