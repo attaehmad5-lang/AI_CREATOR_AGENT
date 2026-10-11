@@ -61,10 +61,14 @@ class ProviderQuotaManager:
                 not isinstance(request_id, str)
                 or not isinstance(record, dict)
                 or not isinstance(record.get("provider_id"), str)
-                or record.get("status") not in {"RESERVED", "COMMITTED"}
+                or record.get("status") not in {"RESERVED", "COMMITTED", "RELEASED"}
             ):
                 raise ValueError("invalid quota request record")
             self._parse_timestamp(record.get("created_at"))
+            if record.get("status") == "COMMITTED":
+                self._parse_timestamp(record.get("committed_at"))
+            if record.get("status") == "RELEASED":
+                self._parse_timestamp(record.get("released_at"))
         self.data = loaded
 
     @contextmanager
@@ -98,11 +102,13 @@ class ProviderQuotaManager:
             if existing is not None:
                 if existing.get("provider_id") != provider_id:
                     return {"status": "REQUEST_ID_CONFLICT", "request_id": request_id, "reserved": False}
-                return {
-                    "status": "ALREADY_RESERVED" if existing["status"] == "RESERVED" else "ALREADY_COMMITTED",
-                    "request_id": request_id,
-                    "reserved": False,
-                }
+                existing_status = existing["status"]
+                status = {
+                    "RESERVED": "ALREADY_RESERVED",
+                    "COMMITTED": "ALREADY_COMMITTED",
+                    "RELEASED": "ALREADY_RELEASED",
+                }[existing_status]
+                return {"status": status, "request_id": request_id, "reserved": False}
             now = self.clock().astimezone(timezone.utc)
             for period, limit in self.limits[provider_id].items():
                 count = self._count_in_period(provider_id, period, now)
@@ -150,9 +156,12 @@ class ProviderQuotaManager:
                 return {"status": "REQUEST_PROVIDER_MISMATCH", "released": False}
             if record.get("status") == "COMMITTED":
                 return {"status": "ALREADY_COMMITTED", "released": False}
+            if record.get("status") == "RELEASED":
+                return {"status": "RELEASED", "request_id": request_id, "released": True, "already_released": True}
             if record.get("status") != "RESERVED":
                 return {"status": "INVALID_RESERVATION_STATE", "released": False}
-            del self.data["requests"][request_id]
+            record["status"] = "RELEASED"
+            record["released_at"] = self.clock().astimezone(timezone.utc).isoformat()
             self._save()
             return {"status": "RELEASED", "request_id": request_id, "released": True}
 
@@ -175,7 +184,11 @@ class ProviderQuotaManager:
             start = now.replace(minute=0, second=0, microsecond=0)
         count = 0
         for record in self.data["requests"].values():
-            if not isinstance(record, dict) or record.get("provider_id") != provider_id:
+            if (
+                not isinstance(record, dict)
+                or record.get("provider_id") != provider_id
+                or record.get("status") == "RELEASED"
+            ):
                 continue
             try:
                 created = self._parse_timestamp(record.get("created_at"))
