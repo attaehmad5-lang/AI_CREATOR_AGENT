@@ -9,7 +9,7 @@ from .provider_store_manager import ProviderStoreManager
 
 class ProviderStatusManager:
     VALID_STATUSES = {
-        "UNKNOWN", "DISCONNECTED", "CONNECTING", "CONNECTED", "ERROR", "DISABLED",
+        "UNKNOWN", "DISCONNECTED", "CONNECTING", "CONNECTED", "ERROR", "DISABLED", "STATE_READ_FAILED",
     }
 
     def __init__(
