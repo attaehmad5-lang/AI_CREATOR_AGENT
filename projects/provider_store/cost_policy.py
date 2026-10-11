@@ -84,7 +84,7 @@ class ProviderCostPolicy:
                 yield
 
     @staticmethod
-    def _valid_amount(value: Any):
+    def _valid_amount(value: Any) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
 
     def _spent(self, project_id: str) -> float:
@@ -166,55 +166,55 @@ class ProviderCostPolicy:
                 "approval_recorded": True,
             }
 
-        @classmethod
-        def _sortable_credit_amount(cls, value: Any) -> float:
-            """Return a safe sort key; the policy validator still rejects invalid input."""
-            return float(value) if cls._valid_amount(value) else 0.0
+    @classmethod
+    def _sortable_credit_amount(cls, value: Any) -> float:
+        """Return a safe sort key; the policy validator still rejects invalid input."""
+        return float(value) if cls._valid_amount(value) else 0.0
 
-        def select_provider(
-            self,
-            providers: list[dict[str, Any]],
-            *,
-            project_id: str,
-            estimated_costs: dict[str, float],
-            free_credits: dict[str, float] | None = None,
-            paid_approved_providers: set[str] | None = None,
-        ) -> dict[str, Any]:
-            """Prefer eligible free-credit providers before any explicitly approved paid route."""
-            if not isinstance(providers, list) or not isinstance(estimated_costs, dict):
-                return {"allowed": False, "status": "INVALID_SELECTION_INPUT"}
-            if free_credits is not None and not isinstance(free_credits, dict):
-                return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
-            if paid_approved_providers is not None and not isinstance(paid_approved_providers, (set, frozenset)):
-                return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
-            free_credits = {} if free_credits is None else free_credits
-            paid_approved_providers = set() if paid_approved_providers is None else paid_approved_providers
-            candidates = sorted(
-                (p for p in providers if isinstance(p, dict)),
-                key=lambda p: (
-                    0 if self._sortable_credit_amount(free_credits.get(str(p.get("id")), 0)) > 0 else 1,
-                    -self._sortable_credit_amount(free_credits.get(str(p.get("id")), 0)),
-                    str(p.get("id", "")),
-                ),
+    def select_provider(
+        self,
+        providers: list[dict[str, Any]],
+        *,
+        project_id: str,
+        estimated_costs: dict[str, float],
+        free_credits: dict[str, float] | None = None,
+        paid_approved_providers: set[str] | None = None,
+    ) -> dict[str, Any]:
+        """Prefer eligible free-credit providers before any explicitly approved paid route."""
+        if not isinstance(providers, list) or not isinstance(estimated_costs, dict):
+            return {"allowed": False, "status": "INVALID_SELECTION_INPUT"}
+        if free_credits is not None and not isinstance(free_credits, dict):
+            return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
+        if paid_approved_providers is not None and not isinstance(paid_approved_providers, (set, frozenset)):
+            return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
+        free_credits = {} if free_credits is None else free_credits
+        paid_approved_providers = set() if paid_approved_providers is None else paid_approved_providers
+        candidates = sorted(
+            (p for p in providers if isinstance(p, dict)),
+            key=lambda p: (
+                0 if self._sortable_credit_amount(free_credits.get(str(p.get("id")), 0)) > 0 else 1,
+                -self._sortable_credit_amount(free_credits.get(str(p.get("id")), 0)),
+                str(p.get("id", "")),
+            ),
+        )
+        decisions = []
+        for provider in candidates:
+            provider_id = str(provider.get("id", ""))
+            estimate = estimated_costs.get(provider_id)
+            if estimate is None:
+                decisions.append({"provider": provider_id, "status": "ESTIMATE_MISSING"})
+                continue
+            decision = self.evaluate_request(
+                provider,
+                project_id=project_id,
+                estimated_cost=estimate,
+                free_credits_remaining=free_credits.get(provider_id, 0.0),
+                paid_usage_approved=provider_id in paid_approved_providers,
             )
-            decisions = []
-            for provider in candidates:
-                provider_id = str(provider.get("id", ""))
-                estimate = estimated_costs.get(provider_id)
-                if estimate is None:
-                    decisions.append({"provider": provider_id, "status": "ESTIMATE_MISSING"})
-                    continue
-                decision = self.evaluate_request(
-                    provider,
-                    project_id=project_id,
-                    estimated_cost=estimate,
-                    free_credits_remaining=free_credits.get(provider_id, 0.0),
-                    paid_usage_approved=provider_id in paid_approved_providers,
-                )
-                if decision["allowed"]:
-                    return {**decision, "selection_order": [d.get("provider") for d in decisions] + [provider_id]}
-                decisions.append({"provider": provider_id, "status": decision["status"]})
-            return {"allowed": False, "status": "NO_POLICY_COMPLIANT_PROVIDER", "decisions": decisions}
+            if decision["allowed"]:
+                return {**decision, "selection_order": [d.get("provider") for d in decisions] + [provider_id]}
+            decisions.append({"provider": provider_id, "status": decision["status"]})
+        return {"allowed": False, "status": "NO_POLICY_COMPLIANT_PROVIDER", "decisions": decisions}
 
     def reserve_usage(
         self,
