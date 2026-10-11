@@ -591,18 +591,25 @@ class ConnectionManager:
     def get_state(self, provider_id: str) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "UNKNOWN", "verified": False}
-        with self._state_transaction():
-            item = self.state["providers"].get(provider_id)
-            if not isinstance(item, dict):
-                return {"status": "UNKNOWN", "verified": False}
-            result = self._sanitize_public_data(item)
-            # Older records may say CONNECTED without any live verification evidence.
-            if result.get("status") == "CONNECTED" and result.get("verified") is not True:
-                result["reported_status"] = "CONNECTED"
-                result["status"] = "UNKNOWN"
-                result["verified"] = False
-            # Return a copy so callers cannot mutate internal state without validation.
-            return result
+        try:
+            with self._state_transaction():
+                item = self.state["providers"].get(provider_id)
+                if not isinstance(item, dict):
+                    return {"status": "UNKNOWN", "verified": False}
+                result = self._sanitize_public_data(item)
+                # Older records may say CONNECTED without any live verification evidence.
+                if result.get("status") == "CONNECTED" and result.get("verified") is not True:
+                    result["reported_status"] = "CONNECTED"
+                    result["status"] = "UNKNOWN"
+                    result["verified"] = False
+                # Return a copy so callers cannot mutate internal state without validation.
+                return result
+        except Exception as exc:
+            return {
+                "status": "STATE_READ_FAILED",
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
 
     def set_state(
         self,
