@@ -9,6 +9,9 @@ from projects.provider_store.category_manager import CategoryManager
 from projects.provider_store.advanced.advanced_provider_manager import AdvancedProviderManager
 from projects.provider_store.unified_provider_registry import UnifiedProviderRegistry
 from projects.provider_store.unified_provider_router import UnifiedProviderRouter
+from projects.provider_store.provider_status_manager import ProviderStatusManager
+from projects.provider_store.provider_unlock_manager import ProviderUnlockManager
+from projects.provider_store.unlock_flow_manager import UnlockFlowManager
 
 
 class ProviderStoreCompatibilityTests(unittest.TestCase):
@@ -30,12 +33,29 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             self.assertEqual(len(store.list_providers()), 1)
             self.assertEqual(store.get_provider("test-image")["catalog_status"], "CONNECTED")
             self.assertEqual(store.status()["connected_verified"], 0)
+            status_manager = ProviderStatusManager(connection_manager=connection_manager)
+            unlock_manager = ProviderUnlockManager(connection_manager=connection_manager)
+            unlock_flow = UnlockFlowManager(connection_manager=connection_manager)
+            self.assertEqual(status_manager.get_status("test-image"), "UNKNOWN")
+            self.assertFalse(status_manager.is_available("test-image"))
+            info = unlock_manager.connection_info("test-image")
+            self.assertEqual(info["catalog_status"], "CONNECTED")
+            self.assertEqual(info["status"], "UNKNOWN")
+            self.assertFalse(info["verified"])
+            prepared = unlock_flow.prepare("test-image")
+            self.assertEqual(prepared["catalog_status"], "CONNECTED")
+            self.assertEqual(prepared["current_status"], "UNKNOWN")
+            self.assertFalse(prepared["verified"])
 
             verified = connection_manager.verify_connectivity(
                 "test-image", lambda provider, **kwargs: {"ok": True}
             )
             self.assertTrue(verified["verified"])
             self.assertEqual(store.status()["connected_verified"], 1)
+            self.assertEqual(status_manager.get_status("test-image"), "CONNECTED")
+            self.assertTrue(status_manager.is_available("test-image"))
+            self.assertEqual(unlock_manager.connection_info("test-image")["status"], "CONNECTED")
+            self.assertTrue(unlock_flow.prepare("test-image")["verified"])
             self.assertEqual(store.catalog["providers"][0]["catalog_status"], "CONNECTED")
 
     def test_legacy_registry_category_and_advanced_views_share_one_catalog(self):
