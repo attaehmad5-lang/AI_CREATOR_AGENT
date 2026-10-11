@@ -156,6 +156,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         router.route(category="image", project_id="film", request_id="job-1")
         fallback = router.select_fallback(
             failed_provider="primary",
+            release_reservations=True,
             category="image",
             project_id="film",
             request_id="job-1",
