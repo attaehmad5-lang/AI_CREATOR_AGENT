@@ -25,6 +25,7 @@ class ProviderServiceTests(unittest.TestCase):
             "providers": [{
                 "id": "image", "name": "Image", "category": "image",
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "zero_cost_allowed": True,
             }]
         }), encoding="utf-8")
         self.state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
