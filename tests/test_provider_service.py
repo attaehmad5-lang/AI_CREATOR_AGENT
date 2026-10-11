@@ -284,7 +284,10 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
         self.assertTrue(result["release"]["released"])
-        self.assertNotIn("execute-not-started", self.cost.ledger["projects"]["film"]["reservations"])
+        self.assertEqual(
+            self.cost.ledger["projects"]["film"]["reservations"]["execute-not-started"]["status"],
+            "RELEASED",
+        )
         self.assertEqual(self.quota.data["requests"]["execute-not-started"]["status"], "RELEASED")
         self.assertEqual(self.quota.reserve(provider_id="image", request_id="execute-not-started")["status"], "ALREADY_RELEASED")
 
@@ -423,7 +426,10 @@ class ProviderServiceTests(unittest.TestCase):
             project_id="film", provider_id="image", request_id="job-2"
         )
         self.assertTrue(result["released"])
-        self.assertNotIn("job-2", self.cost.ledger["projects"]["film"]["reservations"])
+        self.assertEqual(
+            self.cost.ledger["projects"]["film"]["reservations"]["job-2"]["status"],
+            "RELEASED",
+        )
         self.assertEqual(self.quota.data["requests"]["job-2"]["status"], "RELEASED")
         self.assertEqual(self.quota.usage(provider_id="image")["hourly"], 0)
 
