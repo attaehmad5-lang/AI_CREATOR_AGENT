@@ -95,7 +95,11 @@ class ProviderOutputValidator:
         if not isinstance(modality, str) or modality.casefold() not in self.EXTENSIONS:
             return {"valid": False, "status": "UNSUPPORTED_MODALITY"}
         normalized_modality = modality.casefold()
-        if not isinstance(path, (str, Path)) or not str(path).strip():
+        if (
+            not isinstance(path, (str, Path))
+            or not str(path).strip()
+            or "\\x00" in str(path)
+        ):
             return {"valid": False, "status": "INVALID_PATH"}
         artifact = Path(path)
         if artifact.is_symlink():
