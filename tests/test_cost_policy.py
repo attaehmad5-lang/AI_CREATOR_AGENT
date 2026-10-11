@@ -131,6 +131,50 @@ class ProviderCostPolicyTests(unittest.TestCase):
         reloaded = ProviderCostPolicy(self.ledger, project_budgets={"documentary": 5.0})
         self.assertAlmostEqual(reloaded.ledger["projects"]["documentary"]["actual_spend"], 1.25)
 
+    def test_budget_reservations_prevent_overcommit_and_are_idempotent(self):
+        first = self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=3.0, request_id="job-1",
+        )
+        duplicate = self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=3.0, request_id="job-1",
+        )
+        over_budget = self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=3.0, request_id="job-2",
+        )
+        self.assertEqual(first["status"], "RESERVED")
+        self.assertEqual(duplicate["status"], "ALREADY_RESERVED")
+        self.assertEqual(over_budget["status"], "PROJECT_BUDGET_EXCEEDED")
+        decision = self.policy.evaluate_request(
+            {"id": "paid", "enabled": True}, project_id="documentary",
+            estimated_cost=3.0, paid_usage_approved=True,
+        )
+        self.assertEqual(decision["status"], "PROJECT_BUDGET_EXCEEDED")
+
+    def test_reconciliation_consumes_reservation_and_release_frees_budget(self):
+        self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=3.0, request_id="job-1",
+        )
+        reconciled = self.policy.reconcile_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=3.0, actual_cost=2.5, request_id="job-1",
+        )
+        self.assertEqual(reconciled["status"], "RECONCILED")
+        self.assertNotIn("job-1", self.policy.ledger["projects"]["documentary"]["reservations"])
+        self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=2.0, request_id="job-2",
+        )
+        released = self.policy.release_reservation(project_id="documentary", request_id="job-2")
+        self.assertEqual(released["status"], "RESERVATION_RELEASED")
+        self.assertEqual(
+            self.policy.release_reservation(project_id="documentary", request_id="job-2")["status"],
+            "RESERVATION_NOT_FOUND",
+        )
+
     def test_actual_cost_overrun_triggers_budget_alert(self):
         result = self.policy.reconcile_usage(
             project_id="documentary", provider_id="paid", estimated_cost=4.0,
