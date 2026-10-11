@@ -197,6 +197,8 @@ class ConnectionManager:
                             errors.append(f"providers[{index}].{key} must be a string")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
+                    if "subscription_required" in provider and not isinstance(provider["subscription_required"], bool):
+                        errors.append(f"providers[{index}].subscription_required must be boolean")
                     for reference_key in ("token_env", "token_expiry_env", "api_key_env", "credential_env"):
                         if reference_key in provider and (
                             not isinstance(provider[reference_key], str)
