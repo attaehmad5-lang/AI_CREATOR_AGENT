@@ -113,6 +113,61 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn("job-2", self.cost.ledger["projects"]["film"]["reservations"])
         self.assertNotIn("job-2", self.quota.data["requests"])
 
+    def test_failed_started_request_retains_cost_reservation_when_charge_is_unknown(self):
+        self.cost.reserve_usage(
+            project_id="film", provider_id="image", estimated_cost=2.0, request_id="job-failed-unknown"
+        )
+        self.quota.reserve(provider_id="image", request_id="job-failed-unknown")
+        result = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="job-failed-unknown",
+            estimated_cost=2.0, actual_cost=0.0, success=False, error_code="TIMEOUT",
+        )
+        self.assertFalse(result["finalized"])
+        self.assertEqual(result["cost"]["status"], "CHARGE_OUTCOME_UNKNOWN")
+        self.assertIn("job-failed-unknown", self.cost.ledger["projects"]["film"]["reservations"])
+        self.assertNotIn("job-failed-unknown", self.cost.ledger["projects"]["film"]["requests"])
+        self.assertEqual(result["quota"]["status"], "COMMITTED")
+        self.assertEqual(self.quota.data["requests"]["job-failed-unknown"]["status"], "COMMITTED")
+
+    def test_failed_started_request_releases_cost_only_with_explicit_no_charge_confirmation(self):
+        self.cost.reserve_usage(
+            project_id="film", provider_id="image", estimated_cost=2.0, request_id="job-failed-free"
+        )
+        self.quota.reserve(provider_id="image", request_id="job-failed-free")
+        result = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="job-failed-free",
+            estimated_cost=2.0, actual_cost=0.0, success=False,
+            error_code="REJECTED_BEFORE_ACCEPTANCE", charge_outcome="not_incurred",
+        )
+        self.assertTrue(result["finalized"])
+        self.assertEqual(result["cost"]["status"], "RESERVATION_RELEASED")
+        self.assertNotIn("job-failed-free", self.cost.ledger["projects"]["film"]["reservations"])
+        # A started request consumes quota even if the provider confirms no monetary charge.
+        self.assertEqual(result["quota"]["status"], "COMMITTED")
+
+    def test_failed_started_request_with_reported_charge_reconciles_cost(self):
+        self.cost.reserve_usage(
+            project_id="film", provider_id="image", estimated_cost=2.0, request_id="job-failed-charged"
+        )
+        self.quota.reserve(provider_id="image", request_id="job-failed-charged")
+        result = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="job-failed-charged",
+            estimated_cost=2.0, actual_cost=0.75, success=False, error_code="OUTPUT_FAILED",
+        )
+        self.assertTrue(result["finalized"])
+        self.assertEqual(result["cost"]["status"], "RECONCILED")
+        self.assertEqual(self.cost.ledger["projects"]["film"]["actual_spend"], 0.75)
+        self.assertNotIn("job-failed-charged", self.cost.ledger["projects"]["film"]["reservations"])
+        self.assertEqual(result["quota"]["status"], "COMMITTED")
+
+    def test_invalid_charge_outcome_fails_closed(self):
+        result = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="job-invalid-charge",
+            estimated_cost=2.0, actual_cost=0.0, success=False, charge_outcome="maybe",
+        )
+        self.assertEqual(result["status"], "INVALID_CHARGE_OUTCOME")
+        self.assertFalse(result["finalized"])
+
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
         self.assertEqual(service.route_request(category="image", project_id="film")["status"], "ROUTING_MANAGER_UNAVAILABLE")
