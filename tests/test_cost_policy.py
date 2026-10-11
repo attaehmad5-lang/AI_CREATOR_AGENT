@@ -212,6 +212,25 @@ class ProviderCostPolicyTests(unittest.TestCase):
             "RESERVATION_NOT_FOUND",
         )
 
+    def test_reconciliation_rejects_reservation_provider_or_estimate_mismatch(self):
+        self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid-a",
+            estimated_cost=2.0, request_id="job-conflict",
+        )
+        wrong_provider = self.policy.reconcile_usage(
+            project_id="documentary", provider_id="paid-b",
+            estimated_cost=2.0, actual_cost=1.0, request_id="job-conflict",
+        )
+        self.assertEqual(wrong_provider["status"], "REQUEST_ID_CONFLICT")
+        wrong_estimate = self.policy.reconcile_usage(
+            project_id="documentary", provider_id="paid-a",
+            estimated_cost=3.0, actual_cost=1.0, request_id="job-conflict",
+        )
+        self.assertEqual(wrong_estimate["status"], "REQUEST_ID_CONFLICT")
+        project = self.policy.ledger["projects"]["documentary"]
+        self.assertIn("job-conflict", project["reservations"])
+        self.assertNotIn("job-conflict", project["requests"])
+
     def test_malformed_charge_outcomes_fail_closed_without_exception(self):
         for value in ([], {}, 1, None):
             with self.subTest(value=value):
