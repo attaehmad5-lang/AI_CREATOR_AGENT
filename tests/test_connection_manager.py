@@ -126,6 +126,26 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(any("credential value" in error for error in result["errors"]))
         self.assertTrue(any("enabled must be boolean" in error for error in result["errors"]))
 
+    def test_catalog_schema_rejects_secret_values_in_environment_reference_fields(self):
+        for field, value in (
+            ("token_env", "secret-token-value"),
+            ("api_key_env", "API_KEY\nINJECTED"),
+            ("token_expiry_env", "TOKEN=private"),
+            ("credential_env", ""),
+        ):
+            with self.subTest(field=field):
+                result = ConnectionManager.validate_catalog_schema({
+                    "providers": [{"id": "provider", field: value}]
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any(field in error for error in result["errors"]))
+
+        valid = ConnectionManager.validate_catalog_schema({
+            "providers": [{"id": "provider", "token_env": "HF_TOKEN",
+                           "token_expiry_env": "HF_TOKEN_EXPIRES"}]
+        })
+        self.assertTrue(valid["valid"], valid["errors"])
+
     def test_constructor_rejects_invalid_catalog_schema(self):
         bad_catalog = self.root / "bad_catalog.json"
         bad_catalog.write_text(json.dumps({"providers": "not-a-list"}), encoding="utf-8")
