@@ -950,7 +950,8 @@ class ConnectionManager:
         if environ is not None and not isinstance(environ, dict):
             return {"provider": provider_id, "status": "INVALID_ENVIRONMENT", "credential_present": False}
         env = os.environ if environ is None else environ
-        present = bool(str(env.get(str(token_env), "")).strip())
+        raw_token = env.get(token_env)
+        present = isinstance(raw_token, str) and bool(raw_token.strip())
         if not present:
             return {
                 "provider": provider_id,
@@ -960,7 +961,8 @@ class ConnectionManager:
             }
         expiry_env = provider.get("token_expiry_env")
         if expiry_env:
-            raw_expiry = str(env.get(str(expiry_env), "")).strip()
+            expiry_value = env.get(expiry_env)
+            raw_expiry = expiry_value.strip() if isinstance(expiry_value, str) else ""
             if not raw_expiry:
                 return {
                     "provider": provider_id,
