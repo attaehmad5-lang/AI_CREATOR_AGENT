@@ -455,6 +455,19 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(state["status"], "ERROR")
         self.assertFalse(state["verified"])
 
+    def test_missing_configured_expiry_evidence_blocks_connectivity_probe(self):
+        self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        called = []
+        result = self.manager.verify_connectivity(
+            "token_image",
+            lambda *args, **kwargs: called.append(True) or {"ok": True},
+            environ={"TEST_PROVIDER_TOKEN": "private-token"},
+        )
+        self.assertEqual(result["status"], "CREDENTIAL_EXPIRY_UNKNOWN")
+        self.assertFalse(result["verified"])
+        self.assertEqual(called, [])
+
     def test_summary_handles_corrupt_status_without_crashing(self):
         self.manager.state["providers"]["token_image"] = {"status": "unexpected"}
         self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
