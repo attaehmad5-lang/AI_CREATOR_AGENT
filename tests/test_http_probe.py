@@ -68,6 +68,24 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         self.assertEqual(opener.calls[0][0].get_header("Authorization"), f"Bearer {secret}")
         self.assertNotIn(secret, repr(result))
 
+    def test_provider_specific_auth_header_defaults_are_supported(self):
+        cases = [
+            ("elevenlabs", "ELEVENLABS_API_KEY", "xi-api-key", "secret-eleven", "secret-eleven"),
+            ("fal_ai", "FAL_KEY", "authorization", "secret-fal", "Key secret-fal"),
+        ]
+        for provider_id, env_name, expected_header, secret, expected_value in cases:
+            with self.subTest(provider=provider_id):
+                opener = _Opener()
+                probe = ProviderHTTPConnectivityProbe(environ={env_name: secret}, opener=opener)
+                result = probe({
+                    "id": provider_id, "auth_type": "API_KEY",
+                    "allowed_hosts": ["api.example.com"],
+                    "configuration": {"endpoint": "https://api.example.com/health"},
+                })
+                self.assertTrue(result["ok"])
+                headers = {key.casefold(): value for key, value in opener.calls[0][0].header_items()}
+                self.assertEqual(headers[expected_header], expected_value)
+
     def test_missing_endpoint_and_unallowlisted_host_fail_before_network(self):
         opener = _Opener()
         probe = ProviderHTTPConnectivityProbe(opener=opener)
