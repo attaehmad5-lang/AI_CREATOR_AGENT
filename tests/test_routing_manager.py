@@ -93,6 +93,21 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(routed["provider"], "fallback")
         self.assertTrue(routed["health_verified"])
 
+    def test_paid_budget_routing_rejects_incompatible_cost_unit(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        router = ProviderRoutingManager(self.connections, cost_policy=policy)
+        result = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            estimated_cost_unit="credits",
+            paid_approved_providers={"primary", "fallback"},
+            request_id="wrong-budget-unit",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(
+            result["decisions"][0]["status"],
+            "COST_UNIT_NOT_SUPPORTED_FOR_BUDGET_POLICY",
+        )
+
     def test_subscription_required_provider_needs_cost_policy_even_for_zero_estimate(self):
         self.connections.register_provider({
             "id": "paid-image", "name": "Paid Image", "category": "image",
