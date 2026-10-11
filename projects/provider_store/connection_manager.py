@@ -195,6 +195,19 @@ class ConnectionManager:
                     for key in ("name", "category", "auth_type", "connection_type"):
                         if key in provider and not isinstance(provider[key], str):
                             errors.append(f"providers[{index}].{key} must be a string")
+                    auth_types = {
+                        "NONE", "API_KEY", "API_TOKEN", "ACCOUNT", "ACCOUNT_OR_API",
+                        "ACCOUNT_OR_LOCAL", "API_KEY_OR_ACCOUNT", "API_KEY_OR_SERVICE_ACCOUNT",
+                    }
+                    connection_types = {
+                        "API", "ACCOUNT_OR_API", "API_OR_ACCOUNT", "LOCAL_OR_ACCOUNT", "MANUAL_CONNECT",
+                    }
+                    auth_type = provider.get("auth_type")
+                    if isinstance(auth_type, str) and auth_type.upper() not in auth_types:
+                        errors.append(f"providers[{index}].auth_type is unsupported")
+                    connection_type = provider.get("connection_type")
+                    if isinstance(connection_type, str) and connection_type.upper() not in connection_types:
+                        errors.append(f"providers[{index}].connection_type is unsupported")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
                     if "allowed_hosts" in provider:
