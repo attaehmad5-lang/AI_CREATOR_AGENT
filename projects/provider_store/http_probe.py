@@ -143,10 +143,22 @@ class ProviderHTTPConnectivityProbe:
             )
             header_name = provider.get("auth_header_name", default_header)
             auth_scheme = provider.get("auth_scheme", default_scheme)
-            if not isinstance(header_name, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,80}", header_name):
-                raise ValueError("provider auth header name is invalid")
-            if not isinstance(auth_scheme, str) or (auth_scheme and not re.fullmatch(r"[A-Za-z0-9-]{1,32}", auth_scheme)):
-                raise ValueError("provider auth scheme is invalid")
+            allowed_auth_headers = {
+                "authorization", "x-api-key", "api-key", "xi-api-key",
+                "x-goog-api-key", "cartesia-api-key", "x-auth-token",
+            }
+            if (
+                not isinstance(header_name, str)
+                or not re.fullmatch(r"[A-Za-z0-9-]{1,80}", header_name)
+                or header_name.casefold() not in allowed_auth_headers
+            ):
+                raise ValueError("provider auth header name is not permitted")
+            allowed_auth_schemes = {"", "bearer", "key", "token", "basic"}
+            if (
+                not isinstance(auth_scheme, str)
+                or auth_scheme.casefold() not in allowed_auth_schemes
+            ):
+                raise ValueError("provider auth scheme is not permitted")
             headers[header_name] = f"{auth_scheme} {token}" if auth_scheme else token
 
         request = Request(endpoint.strip(), headers=headers, method="GET")
