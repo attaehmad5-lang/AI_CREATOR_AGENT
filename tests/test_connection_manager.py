@@ -1012,6 +1012,12 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(
             self.manager.configure_provider(
+                "public_image", endpoint="https://provider.example/api\n.evil"
+            )["status"],
+            "INVALID_ENDPOINT",
+        )
+        self.assertEqual(
+            self.manager.configure_provider(
                 "public_image", endpoint="https://provider.example/api?api_key=secret"
             )["status"],
             "QUERY_PARAMETERS_REJECTED",
