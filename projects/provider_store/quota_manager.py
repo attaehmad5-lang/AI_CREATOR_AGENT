@@ -11,8 +11,6 @@ from typing import Any, Callable
 
 
 class ProviderQuotaManager:
-    PERIOD_SECONDS = {"hourly": 3600, "daily": 86400}
-
     def __init__(
         self,
         state_path: str | os.PathLike[str],
@@ -149,8 +147,10 @@ class ProviderQuotaManager:
     def _count_in_period(self, provider_id: str, period: str, now: datetime) -> int:
         if period == "monthly":
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif period == "daily":
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         else:
-            start = now - timedelta(seconds=self.PERIOD_SECONDS[period])
+            start = now.replace(minute=0, second=0, microsecond=0)
         count = 0
         for record in self.data["requests"].values():
             if not isinstance(record, dict) or record.get("provider_id") != provider_id:
