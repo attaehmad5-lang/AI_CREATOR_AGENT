@@ -140,6 +140,20 @@ class ProviderHealthManagerTests(unittest.TestCase):
             "INVALID_TIMEOUT",
         )
 
+    def test_malformed_persisted_health_state_is_rejected(self):
+        self.path.write_text(
+            '{"providers":{"image":{"status":"HEALTHY","consecutive_failures":"many","history":[]}}}',
+            encoding="utf-8",
+        )
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path)
+        self.path.write_text(
+            '{"providers":{"image":{"status":"HEALTHY","consecutive_failures":0,"history":"not-a-list"}}}',
+            encoding="utf-8",
+        )
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path)
+
     def test_invalid_input_is_rejected(self):
         self.assertEqual(self.manager.record_result("", success=True)["status"], "INVALID_PROVIDER")
         self.assertEqual(self.manager.record_result("image", success=True, latency_ms=-1)["status"], "INVALID_LATENCY")
