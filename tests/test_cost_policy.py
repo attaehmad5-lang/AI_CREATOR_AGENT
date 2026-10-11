@@ -38,6 +38,18 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "VERIFIED_CREDIT_MANAGER_REQUIRED")
 
+    def test_malformed_billing_flags_fail_closed(self):
+        for provider in (
+            {"id": "paid", "enabled": True, "subscription_required": "true"},
+            {"id": "paid", "enabled": "true", "subscription_required": True},
+        ):
+            result = self.policy.evaluate_request(
+                provider, project_id="documentary", estimated_cost=0.0,
+                paid_usage_approved=True,
+            )
+            self.assertFalse(result["allowed"])
+            self.assertEqual(result["status"], "INVALID_PROVIDER_CONFIGURATION")
+
     def test_subscription_required_provider_needs_positive_cost_estimate(self):
         result = self.policy.evaluate_request(
             {"id": "paid", "enabled": True, "subscription_required": True},
