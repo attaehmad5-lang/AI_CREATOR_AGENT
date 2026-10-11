@@ -5,8 +5,8 @@ except ImportError:  # direct script execution compatibility
 
 class ProviderFlow:
 
-    def __init__(self):
-        self.manager = UnlockFlowManager()
+    def __init__(self, manager=None):
+        self.manager = manager or UnlockFlowManager()
 
     def start(self, provider_id):
         return self.manager.prepare(provider_id)
