@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import tempfile
 import threading
 from contextlib import contextmanager
@@ -196,6 +197,21 @@ class ConnectionManager:
                             errors.append(f"providers[{index}].{key} must be a string")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
+                    for reference_key in ("token_env", "token_expiry_env", "api_key_env", "credential_env"):
+                        if reference_key in provider and (
+                            not isinstance(provider[reference_key], str)
+                            or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", provider[reference_key])
+                        ):
+                            errors.append(
+                                f"providers[{index}].{reference_key} must be a valid environment-variable name"
+                            )
+                    if "secret_ref" in provider and (
+                        not isinstance(provider["secret_ref"], str)
+                        or not provider["secret_ref"].strip()
+                        or len(provider["secret_ref"]) > 256
+                        or any(ord(char) < 32 for char in provider["secret_ref"])
+                    ):
+                        errors.append(f"providers[{index}].secret_ref must be a safe non-empty reference")
                     if "capabilities" in provider and not (
                         isinstance(provider["capabilities"], list)
                         and all(isinstance(item, str) for item in provider["capabilities"])
