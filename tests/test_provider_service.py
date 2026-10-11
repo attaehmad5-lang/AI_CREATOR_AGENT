@@ -242,6 +242,11 @@ class ProviderServiceTests(unittest.TestCase):
             estimated_cost=2.0, actual_cost=0.0, success=False, charge_outcome=[],
         )
         self.assertEqual(malformed["status"], "INVALID_CHARGE_OUTCOME")
+        malformed_billing = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="job-malformed-billing",
+            estimated_cost=2.0, actual_cost=0.0, success=False, billing_mode=[],
+        )
+        self.assertEqual(malformed_billing["status"], "INVALID_BILLING_MODE")
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
