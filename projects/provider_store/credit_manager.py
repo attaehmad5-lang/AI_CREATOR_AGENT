@@ -61,6 +61,11 @@ class ProviderCreditManager:
                 or not self._valid_amount(record.get("free_credits_remaining"))
                 or not isinstance(record.get("verified"), bool)
                 or not isinstance(record.get("unit", "credits"), str)
+                or not record.get("unit", "credits").strip()
+                or len(record.get("unit", "credits")) > 32
+                or not isinstance(record.get("source"), str)
+                or not record.get("source", "").strip()
+                or len(record.get("source", "")) > 120
             ):
                 raise ValueError("invalid provider credit snapshot")
             self._parse_timestamp(record.get("observed_at"))
