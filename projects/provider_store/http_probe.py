@@ -106,11 +106,13 @@ class ProviderHTTPConnectivityProbe:
         try:
             response = self.opener.open(request, timeout=float(timeout_seconds))
         except HTTPError as exc:
-            if exc.code in {401, 403}:
+            status_code = exc.code
+            exc.close()
+            if status_code in {401, 403}:
                 raise PermissionError("provider rejected credentials or permissions") from None
-            if 300 <= exc.code < 400:
+            if 300 <= status_code < 400:
                 raise ConnectionError("provider endpoint redirected; redirects are not followed") from None
-            raise ConnectionError(f"provider returned HTTP {exc.code}") from None
+            raise ConnectionError(f"provider returned HTTP {status_code}") from None
         except URLError as exc:
             reason = getattr(exc, "reason", None)
             if isinstance(reason, TimeoutError) or "timeout" in type(reason).__name__.casefold():
