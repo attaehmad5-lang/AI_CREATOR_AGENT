@@ -231,6 +231,8 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 self.assertTrue(result["ok"], result)
                 headers = {key.casefold(): value for key, value in opener.calls[0][0].header_items()}
                 self.assertIn(provider.get("auth_header_name", "Authorization").casefold(), headers)
+                if provider["id"] == "anthropic_claude_script":
+                    self.assertEqual(headers["anthropic-version"], "2023-06-01")
                 self.assertNotIn("catalog-test-secret", repr(result))
 
     def test_http_probe_integrates_with_connection_manager_and_persists_only_status(self):
