@@ -211,6 +211,16 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "INVALID_PROVIDER")
         self.assertFalse(result.get("saved", False))
 
+    def test_catalog_validator_detects_nested_credential_values(self):
+        result = ConnectionManager.validate_catalog_schema({
+            "providers": [{
+                "id": "nested_secret",
+                "metadata": {"auth": {"refresh_token": "must-not-be-here"}},
+            }]
+        })
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("credential value" in error for error in result["errors"]))
+
     def test_register_provider_rejects_secret_values_in_metadata(self):
         provider = {
             "id": "unsafe", "name": "Unsafe", "category": "image",
@@ -220,6 +230,14 @@ class ConnectionManagerTests(unittest.TestCase):
         result = self.manager.register_provider(provider)
         self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
         self.assertFalse(self.manager.provider_exists("unsafe"))
+        nested = {
+            "id": "unsafe_nested", "name": "Unsafe", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API",
+            "metadata": {"credentials": {"token": "never-store-this"}},
+        }
+        nested_result = self.manager.register_provider(nested)
+        self.assertEqual(nested_result["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertFalse(self.manager.provider_exists("unsafe_nested"))
 
     def test_register_provider_rejects_invalid_id(self):
         provider = {
