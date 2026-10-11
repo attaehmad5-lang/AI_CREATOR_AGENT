@@ -35,4 +35,4 @@ python -c "import json; from pathlib import Path; [json.loads(p.read_text(encodi
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Live provider API probes, OAuth/token refresh, complete multimodal adapters, end-to-end generation execution, live provider API probes, OAuth/token refresh, complete multimodal adapters, end-to-end generation execution, provider-specific network failure injection, cross-manager atomic transactions, and individual verification of every item in the canonical feature checklist remain separate requirements.
+Live provider API probes, OAuth/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements.
