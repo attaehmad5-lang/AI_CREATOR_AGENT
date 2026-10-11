@@ -140,10 +140,21 @@ class ProviderServiceTests(unittest.TestCase):
             error_code="REJECTED_BEFORE_ACCEPTANCE", charge_outcome="not_incurred",
         )
         self.assertTrue(result["finalized"])
-        self.assertEqual(result["cost"]["status"], "RESERVATION_RELEASED")
-        self.assertNotIn("job-failed-free", self.cost.ledger["projects"]["film"]["reservations"])
+        self.assertEqual(result["cost"]["status"], "NO_CHARGE_RECORDED")
+        project = self.cost.ledger["projects"]["film"]
+        self.assertNotIn("job-failed-free", project["reservations"])
+        self.assertEqual(project["requests"]["job-failed-free"]["charge_outcome"], "not_incurred")
         # A started request consumes quota even if the provider confirms no monetary charge.
         self.assertEqual(result["quota"]["status"], "COMMITTED")
+        repeated = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="job-failed-free",
+            estimated_cost=2.0, actual_cost=0.0, success=False,
+            error_code="REJECTED_BEFORE_ACCEPTANCE", charge_outcome="not_incurred",
+        )
+        self.assertTrue(repeated["finalized"])
+        self.assertEqual(repeated["cost"]["status"], "DUPLICATE_REQUEST")
+        self.assertEqual(repeated["health"]["status"], "SKIPPED_DUPLICATE_FINALIZATION")
+        self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
     def test_failed_started_request_with_reported_charge_reconciles_cost(self):
         self.cost.reserve_usage(
