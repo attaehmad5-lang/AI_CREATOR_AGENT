@@ -132,6 +132,37 @@ class ConnectionManagerTests(unittest.TestCase):
         results = self.manager.discover_providers(enabled_only=True)
         self.assertEqual([item["id"] for item in results], ["public_image"])
 
+    def test_load_provider_uses_factory_and_keeps_instance_in_memory(self):
+        instance = object()
+        result = self.manager.load_provider("public_image", lambda metadata: instance)
+        self.assertEqual(result["status"], "LOADED")
+        self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
+        self.assertNotIn("public_image", self.manager.state["providers"])
+
+    def test_load_provider_rejects_disabled_provider(self):
+        self.manager.catalog["providers"][0]["enabled"] = False
+        result = self.manager.load_provider("public_image", lambda metadata: object())
+        self.assertEqual(result["status"], "DISABLED")
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_load_provider_does_not_leak_factory_exception_text(self):
+        secret = "private-token-sample"
+        def broken_factory(metadata):
+            raise RuntimeError(secret)
+        result = self.manager.load_provider("public_image", broken_factory)
+        self.assertEqual(result["status"], "LOAD_FAILED")
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(result["error_type"], "RuntimeError")
+
+    def test_load_provider_rejects_missing_factory_and_unknown_provider(self):
+        self.assertEqual(
+            self.manager.load_provider("public_image", None)["status"], "INVALID_FACTORY"
+        )
+        self.assertEqual(
+            self.manager.load_provider("not_registered", lambda metadata: object())["status"],
+            "NOT_FOUND",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
