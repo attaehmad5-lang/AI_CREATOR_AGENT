@@ -135,12 +135,21 @@ class ProviderService:
         success: bool,
         latency_ms: float | None = None,
         error_code: str | None = None,
+        charge_outcome: str = "unknown",
     ) -> dict[str, Any]:
-        """Account for a request that actually started; failed calls may still cost quota/money."""
+        """Account for a started request without assuming ambiguous failures were free.
+
+        charge_outcome is consulted when execution failed with zero reported cost:
+        not_incurred must be an explicit provider-confirmed no-charge outcome;
+        unknown retains the cost reservation; incurred flags missing usage data.
+        Quota is committed for every started request, including failed requests.
+        """
         if not all(isinstance(value, str) and value.strip() for value in (project_id, provider_id, request_id)):
             return {"status": "INVALID_USAGE_RECORD", "finalized": False}
         if not isinstance(success, bool):
             return {"status": "INVALID_EXECUTION_RESULT", "finalized": False}
+        if charge_outcome not in {"unknown", "incurred", "not_incurred"}:
+            return {"status": "INVALID_CHARGE_OUTCOME", "finalized": False}
         if not self._valid_amount(estimated_cost) or not self._valid_amount(actual_cost):
             return {"status": "INVALID_COST_AMOUNT", "finalized": False}
         if latency_ms is not None and not self._valid_amount(latency_ms):
@@ -164,6 +173,35 @@ class ProviderService:
                     cost_result = {"status": "REQUEST_ID_CONFLICT", "saved": False}
                 else:
                     cost_result = {"status": "DUPLICATE_REQUEST", "saved": True}
+            elif not success and actual_cost == 0:
+                # A failed started request with no reported charge is not proof of
+                # a free request. Keep its budget reservation unless the provider
+                # explicitly confirms that no charge was incurred.
+                release = getattr(self.cost_policy, "release_reservation", None)
+                if not callable(release):
+                    cost_result = {"status": "CHARGE_OUTCOME_UNKNOWN", "saved": False}
+                else:
+                    try:
+                        cost_result = release(
+                            project_id=project_id,
+                            request_id=request_id,
+                            provider_id=provider_id,
+                            charge_outcome=charge_outcome,
+                        )
+                        if charge_outcome == "unknown":
+                            cost_result = {
+                                **cost_result,
+                                "status": "CHARGE_OUTCOME_UNKNOWN",
+                                "saved": False,
+                            }
+                        elif charge_outcome == "incurred":
+                            cost_result = {
+                                **cost_result,
+                                "status": "RECONCILIATION_REQUIRED",
+                                "saved": False,
+                            }
+                    except Exception as exc:
+                        cost_result = {"status": "COST_RECONCILIATION_FAILED", "saved": False, "error_type": type(exc).__name__}
             else:
                 try:
                     cost_result = self.cost_policy.reconcile_usage(
