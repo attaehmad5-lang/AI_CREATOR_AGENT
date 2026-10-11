@@ -70,6 +70,9 @@ class ProviderHealthManagerTests(unittest.TestCase):
     def test_invalid_input_is_rejected(self):
         self.assertEqual(self.manager.record_result("", success=True)["status"], "INVALID_PROVIDER")
         self.assertEqual(self.manager.record_result("image", success=True, latency_ms=-1)["status"], "INVALID_LATENCY")
+        self.assertEqual(self.manager.record_result("image", success=True, latency_ms=float("nan"))["status"], "INVALID_LATENCY")
+        self.assertEqual(self.manager.record_result("image", success=True, latency_ms=float("inf"))["status"], "INVALID_LATENCY")
+        self.assertEqual(self.manager.record_result("image", success=True, latency_ms=True)["status"], "INVALID_LATENCY")
 
 
 if __name__ == "__main__":
