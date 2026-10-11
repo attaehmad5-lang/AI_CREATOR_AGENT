@@ -62,6 +62,15 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "TIMEOUT")
         self.assertNotIn("private endpoint and token", repr(result))
 
+    def test_health_history_redacts_unstructured_error_details(self):
+        result = self.manager.record_result(
+            "image", success=False, error_code="token=do-not-log-this"
+        )
+        self.assertTrue(result["saved"])
+        record = self.manager.data["providers"]["image"]
+        self.assertEqual(record["history"][-1]["error_code"], "UNCLASSIFIED_ERROR")
+        self.assertNotIn("do-not-log-this", repr(record))
+
     def test_history_is_bounded(self):
         for i in range(5):
             self.manager.record_result("image", success=(i % 2 == 0))
