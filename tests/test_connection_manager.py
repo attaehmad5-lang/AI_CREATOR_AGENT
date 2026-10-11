@@ -196,6 +196,14 @@ class ConnectionManagerTests(unittest.TestCase):
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
         schema = ConnectionManager.validate_catalog_schema(catalog)
         self.assertTrue(schema["valid"], schema["errors"])
+        master_path = catalog_path.with_name("provider_catalog_master.json")
+        master = json.loads(master_path.read_text(encoding="utf-8"))
+        master_schema = ConnectionManager.validate_catalog_schema(master)
+        self.assertTrue(master_schema["valid"], master_schema["errors"])
+        self.assertEqual(
+            {provider["id"] for provider in catalog["providers"]},
+            {provider["id"] for provider in master["providers"]},
+        )
         providers = catalog["providers"]
         allowlisted = [provider for provider in providers if "allowed_hosts" in provider]
         self.assertGreaterEqual(len(allowlisted), 25)
