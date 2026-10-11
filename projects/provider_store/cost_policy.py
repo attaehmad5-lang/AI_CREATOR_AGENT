@@ -56,18 +56,54 @@ class ProviderCostPolicy:
             requests = project.get("requests", {})
             if not isinstance(requests, dict):
                 raise ValueError("Invalid usage ledger requests")
-            if any(not isinstance(request_id, str) or not isinstance(record, dict) for request_id, record in requests.items()):
+            if any(not isinstance(request_id, str) or not request_id.strip() or not isinstance(record, dict) for request_id, record in requests.items()):
                 raise ValueError("Invalid usage ledger request record")
+            actual_cost_total = 0.0
+            for request_id, record in requests.items():
+                if (
+                    not isinstance(record.get("provider_id"), str) or not record["provider_id"].strip()
+                    or not self._valid_amount(record.get("estimated_cost"))
+                    or not self._valid_amount(record.get("actual_cost"))
+                ):
+                    raise ValueError("Invalid usage ledger request amounts or provider")
+                if "execution_success" in record and not isinstance(record["execution_success"], bool):
+                    raise ValueError("Invalid usage ledger execution outcome")
+                if "charge_outcome" in record and record["charge_outcome"] not in {"unknown", "incurred", "not_incurred"}:
+                    raise ValueError("Invalid usage ledger charge outcome")
+                if record.get("actual_cost", 0.0) > 0 and record.get("charge_outcome") == "not_incurred":
+                    raise ValueError("Inconsistent usage ledger charge outcome")
+                try:
+                    recorded_at = record.get("recorded_at")
+                    if not isinstance(recorded_at, str):
+                        raise ValueError("missing timestamp")
+                    datetime.fromisoformat(recorded_at)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Invalid usage ledger record timestamp") from exc
+                actual_cost_total += float(record["actual_cost"])
+            if not math.isclose(
+                float(project.get("actual_spend", 0.0)), actual_cost_total,
+                rel_tol=0.0, abs_tol=max(1e-6, len(requests) * 1e-6),
+            ):
+                raise ValueError("Usage ledger spend does not match its request records")
             reservations = project.get("reservations", {})
             if not isinstance(reservations, dict):
                 raise ValueError("Invalid usage ledger reservations")
             if any(
-                not isinstance(request_id, str)
+                not isinstance(request_id, str) or not request_id.strip()
                 or not isinstance(record, dict)
+                or not isinstance(record.get("provider_id"), str) or not record["provider_id"].strip()
                 or not self._valid_amount(record.get("estimated_cost"))
                 for request_id, record in reservations.items()
             ):
                 raise ValueError("Invalid usage ledger reservation record")
+            for record in reservations.values():
+                try:
+                    created_at = record.get("created_at")
+                    if not isinstance(created_at, str):
+                        raise ValueError("missing timestamp")
+                    datetime.fromisoformat(created_at)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Invalid usage ledger reservation timestamp") from exc
         self.ledger = loaded
         self.ledger.setdefault("projects", {})
 
