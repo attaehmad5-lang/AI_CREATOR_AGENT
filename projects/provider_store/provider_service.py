@@ -222,7 +222,10 @@ class ProviderService:
             if callable(release):
                 try:
                     results["cost"] = release(
-                        project_id=project_id, request_id=request_id, provider_id=provider_id
+                        project_id=project_id,
+                        request_id=request_id,
+                        provider_id=provider_id,
+                        charge_outcome="not_incurred",
                     )
                 except Exception as exc:
                     results["cost"] = {"status": "COST_RELEASE_FAILED", "error_type": type(exc).__name__}
