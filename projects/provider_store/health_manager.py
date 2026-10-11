@@ -6,6 +6,7 @@ import math
 import os
 import re
 import tempfile
+import threading
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +32,7 @@ class ProviderHealthManager:
         self.state_path = Path(state_path)
         self.history_limit = history_limit
         self.failure_threshold = failure_threshold
+        self._lock = threading.RLock()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         if self.state_path.exists():
             with self.state_path.open("r", encoding="utf-8") as stream:
@@ -60,47 +62,48 @@ class ProviderHealthManager:
             or latency_ms < 0
         ):
             return {"status": "INVALID_LATENCY", "saved": False}
-        providers = self.data["providers"]
-        current = providers.get(provider_id, {})
-        record = dict(current) if isinstance(current, dict) else {}
-        history = list(record.get("history", []))
-        event = {
-            "success": success,
-            "timestamp": self.clock().astimezone(timezone.utc).isoformat(),
-        }
-        if latency_ms is not None:
-            event["latency_ms"] = round(float(latency_ms), 2)
-        if not success and error_code:
-            # Only store compact machine-readable codes, never arbitrary exception text.
-            candidate_code = str(error_code).strip()
-            event["error_code"] = (
-                candidate_code
-                if re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", candidate_code)
-                else "UNCLASSIFIED_ERROR"
-            )
-        history.append(event)
-        history = history[-self.history_limit:]
-        consecutive_failures = 0 if success else int(record.get("consecutive_failures", 0)) + 1
-        if success:
-            status = "HEALTHY"
-        elif consecutive_failures >= self.failure_threshold:
-            status = "UNHEALTHY"
-        else:
-            status = "DEGRADED"
-        record.update({
-            "status": status,
-            "history": history,
-            "consecutive_failures": consecutive_failures,
-            "last_checked_at": event["timestamp"],
-        })
-        if success:
-            record["last_success_at"] = event["timestamp"]
-            record["last_latency_ms"] = event.get("latency_ms")
-        else:
-            record["last_failure_at"] = event["timestamp"]
-        providers[provider_id] = record
-        self._save()
-        return {"provider": provider_id, "status": status, "saved": True, "history_size": len(history)}
+        with self._lock:
+            providers = self.data["providers"]
+            current = providers.get(provider_id, {})
+            record = dict(current) if isinstance(current, dict) else {}
+            history = list(record.get("history", []))
+            event = {
+                "success": success,
+                "timestamp": self.clock().astimezone(timezone.utc).isoformat(),
+            }
+            if latency_ms is not None:
+                event["latency_ms"] = round(float(latency_ms), 2)
+            if not success and error_code:
+                # Only store compact machine-readable codes, never arbitrary exception text.
+                candidate_code = str(error_code).strip()
+                event["error_code"] = (
+                    candidate_code
+                    if re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", candidate_code)
+                    else "UNCLASSIFIED_ERROR"
+                )
+            history.append(event)
+            history = history[-self.history_limit:]
+            consecutive_failures = 0 if success else int(record.get("consecutive_failures", 0)) + 1
+            if success:
+                status = "HEALTHY"
+            elif consecutive_failures >= self.failure_threshold:
+                status = "UNHEALTHY"
+            else:
+                status = "DEGRADED"
+            record.update({
+                "status": status,
+                "history": history,
+                "consecutive_failures": consecutive_failures,
+                "last_checked_at": event["timestamp"],
+            })
+            if success:
+                record["last_success_at"] = event["timestamp"]
+                record["last_latency_ms"] = event.get("latency_ms")
+            else:
+                record["last_failure_at"] = event["timestamp"]
+            providers[provider_id] = record
+            self._save()
+            return {"provider": provider_id, "status": status, "saved": True, "history_size": len(history)}
 
     def active_probe(self, provider_id: str, probe: Any, *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         if not callable(probe):
@@ -148,7 +151,9 @@ class ProviderHealthManager:
             or max_latency_ms < 0
         ):
             return {"eligible": False, "status": "INVALID_HEALTH_POLICY", "reason": "INVALID_LATENCY_LIMIT"}
-        record = self.data["providers"].get(provider_id)
+        with self._lock:
+            current = self.data["providers"].get(provider_id)
+            record = dict(current) if isinstance(current, dict) else None
         if not isinstance(record, dict) or not record.get("last_checked_at"):
             return {"eligible": False, "status": "UNKNOWN", "reason": "NO_HEALTH_EVIDENCE"}
         try:
