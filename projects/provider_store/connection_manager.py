@@ -657,9 +657,11 @@ class ConnectionManager:
         if endpoint is not None:
             allowed_hosts_raw = provider.get("allowed_hosts")
             allowed_hosts = (
-                {item for item in allowed_hosts_raw if isinstance(item, str)}
+                {item for item in allowed_hosts_raw if isinstance(item, str) and item.strip()}
                 if isinstance(allowed_hosts_raw, list) else None
             )
+            if not allowed_hosts:
+                return {"status": "HOST_ALLOWLIST_REQUIRED", "provider": provider_id, "configuration": {}}
             validation = self.validate_endpoint(endpoint, allowed_hosts=allowed_hosts)
             if not validation["valid"]:
                 return {
