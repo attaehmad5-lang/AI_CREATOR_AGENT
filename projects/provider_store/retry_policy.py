@@ -1,6 +1,7 @@
 """Deterministic retry decisions and provider circuit-breaker primitives."""
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,12 +27,22 @@ class RetryPolicy:
         jitter_fraction: float = 0.2,
         random_fn: Callable[[], float] | None = None,
     ) -> None:
-        if max_attempts < 1:
-            raise ValueError("max_attempts must be >= 1")
+        if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or max_attempts < 1:
+            raise ValueError("max_attempts must be a positive integer")
+        numeric_limits = (base_delay_seconds, max_delay_seconds, jitter_fraction)
+        if any(
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+            for value in numeric_limits
+        ):
+            raise ValueError("retry limits must be finite numbers")
         if base_delay_seconds < 0 or max_delay_seconds < base_delay_seconds:
             raise ValueError("invalid backoff limits")
         if not 0 <= jitter_fraction <= 1:
             raise ValueError("jitter_fraction must be between 0 and 1")
+        if random_fn is not None and not callable(random_fn):
+            raise ValueError("random_fn must be callable")
         self.max_attempts = max_attempts
         self.base_delay_seconds = base_delay_seconds
         self.max_delay_seconds = max_delay_seconds
@@ -44,7 +55,7 @@ class RetryPolicy:
             return None
         try:
             seconds = float(value)
-            if seconds >= 0:
+            if math.isfinite(seconds) and seconds >= 0:
                 return seconds
         except (TypeError, ValueError):
             pass
@@ -65,8 +76,8 @@ class RetryPolicy:
         retry_after: str | int | float | None = None,
         idempotent: bool = True,
     ) -> RetryDecision:
-        if attempt < 1:
-            return RetryDecision(False, attempt, 0.0, "INVALID_ATTEMPT")
+        if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
+            return RetryDecision(False, attempt if isinstance(attempt, int) else 0, 0.0, "INVALID_ATTEMPT")
         if attempt >= self.max_attempts:
             return RetryDecision(False, attempt, 0.0, "RETRY_LIMIT_REACHED")
         if not idempotent:
@@ -97,8 +108,17 @@ class CircuitBreaker:
         cooldown_seconds: float = 30.0,
         clock: Callable[[], float] | None = None,
     ) -> None:
-        if failure_threshold < 1 or cooldown_seconds < 0:
-            raise ValueError("invalid circuit breaker configuration")
+        if not isinstance(failure_threshold, int) or isinstance(failure_threshold, bool) or failure_threshold < 1:
+            raise ValueError("failure_threshold must be a positive integer")
+        if (
+            not isinstance(cooldown_seconds, (int, float))
+            or isinstance(cooldown_seconds, bool)
+            or not math.isfinite(cooldown_seconds)
+            or cooldown_seconds < 0
+        ):
+            raise ValueError("cooldown_seconds must be a finite non-negative number")
+        if clock is not None and not callable(clock):
+            raise ValueError("clock must be callable")
         import time
         self.failure_threshold = failure_threshold
         self.cooldown_seconds = cooldown_seconds
