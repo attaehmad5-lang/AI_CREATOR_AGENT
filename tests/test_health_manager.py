@@ -174,6 +174,32 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertEqual(calls, [])
 
+    def test_future_health_evidence_and_malformed_latency_fail_closed(self):
+        future = (self.now[0] + timedelta(seconds=30)).isoformat()
+        self.path.write_text(
+            __import__("json").dumps({
+                "version": "1.0",
+                "providers": {
+                    "image": {
+                        "status": "HEALTHY", "last_checked_at": future,
+                        "last_latency_ms": 10, "history": [],
+                        "consecutive_failures": 0,
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        loaded = ProviderHealthManager(self.path, clock=lambda: self.now[0])
+        result = loaded.is_eligible("image")
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "FUTURE_HEALTH_TIMESTAMP")
+        self.path.write_text(
+            '{"version":"1.0","providers":{"image":{"last_latency_ms":"fast","history":[]}}}',
+            encoding="utf-8",
+        )
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, clock=lambda: self.now[0])
+
     def test_invalid_input_is_rejected(self):
         self.assertEqual(self.manager.record_result("", success=True)["status"], "INVALID_PROVIDER")
         self.assertEqual(self.manager.record_result("image", success=True, latency_ms=-1)["status"], "INVALID_LATENCY")
