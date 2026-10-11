@@ -191,6 +191,40 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.unload_provider("public_image")["status"], "NOT_LOADED")
         self.assertEqual(self.manager.unload_provider("missing")["status"], "NOT_FOUND")
 
+    def test_enable_disable_persists_catalog_flag_without_claiming_connection(self):
+        result = self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(result["status"], "DISABLED")
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
+        self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
+        reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertFalse(reloaded.is_provider_enabled("public_image"))
+        enabled = reloaded.set_provider_enabled("public_image", True)
+        self.assertEqual(enabled["status"], "ENABLED")
+        self.assertTrue(reloaded.is_provider_enabled("public_image"))
+        self.assertIn("no purchase", enabled["note"].lower())
+
+    def test_disabling_unloads_runtime_instance(self):
+        class Closable:
+            def __init__(self):
+                self.closed = False
+            def close(self):
+                self.closed = True
+        instance = Closable()
+        self.manager.load_provider("public_image", lambda metadata: instance)
+        result = self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(result["status"], "DISABLED")
+        self.assertTrue(instance.closed)
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_enabled_flag_rejects_non_boolean_and_unknown_provider(self):
+        self.assertEqual(
+            self.manager.set_provider_enabled("public_image", "yes")["status"],
+            "INVALID_ENABLED_VALUE",
+        )
+        self.assertEqual(
+            self.manager.set_provider_enabled("missing", True)["status"], "NOT_FOUND"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
