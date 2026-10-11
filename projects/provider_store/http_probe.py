@@ -138,6 +138,8 @@ class ProviderHTTPConnectivityProbe:
             token = self.environ.get(token_env)
             if not isinstance(token, str) or not token.strip():
                 raise PermissionError("provider credential is missing")
+            if len(token) > 16384 or any(ord(char) < 32 or ord(char) == 127 for char in token):
+                raise PermissionError("provider credential format is invalid")
             default_header, default_scheme = self._DEFAULT_AUTH.get(
                 str(provider.get("id", "")).casefold(), ("Authorization", "Bearer")
             )
