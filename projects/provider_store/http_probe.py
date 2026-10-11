@@ -1,0 +1,130 @@
+"""Safe generic HTTPS connectivity probe for explicitly configured provider endpoints.
+
+This probe checks transport/authentication reachability only. It does not claim that
+an endpoint supports generation or that a provider has available credits.
+"""
+from __future__ import annotations
+
+import os
+import re
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+from .connection_manager import ConnectionManager
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
+        # Redirect targets are never followed automatically; callers must configure
+        # the final endpoint explicitly and pass the host allowlist again.
+        return None
+
+
+class ProviderHTTPConnectivityProbe:
+    """Perform a bounded HTTPS GET against a validated, explicitly configured endpoint."""
+
+    _DEFAULT_TOKEN_ENV = {
+        "huggingface": "HF_TOKEN",
+        "openai_image": "OPENAI_API_KEY",
+        "openai_voice": "OPENAI_API_KEY",
+        "elevenlabs": "ELEVENLABS_API_KEY",
+        "fal_ai": "FAL_KEY",
+    }
+
+    def __init__(
+        self,
+        *,
+        environ: dict[str, str] | None = None,
+        opener: Any = None,
+        max_response_bytes: int = 4096,
+    ) -> None:
+        if environ is not None and not isinstance(environ, dict):
+            raise ValueError("environ must be a mapping of environment names to values")
+        if (
+            not isinstance(max_response_bytes, int)
+            or isinstance(max_response_bytes, bool)
+            or max_response_bytes < 0
+            or max_response_bytes > 1_000_000
+        ):
+            raise ValueError("max_response_bytes must be an integer between 0 and 1000000")
+        if opener is not None and not callable(getattr(opener, "open", None)):
+            raise ValueError("opener must provide an open method")
+        self.environ = os.environ if environ is None else environ
+        self.opener = opener or build_opener(_RejectRedirects())
+        self.max_response_bytes = max_response_bytes
+
+    def __call__(self, provider: dict[str, Any], *, timeout_seconds: float = 5.0) -> dict[str, Any]:
+        if not isinstance(provider, dict):
+            raise ValueError("provider metadata must be an object")
+        if (
+            not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or timeout_seconds <= 0
+        ):
+            raise ValueError("timeout_seconds must be positive")
+
+        configuration = provider.get("configuration", {})
+        if not isinstance(configuration, dict):
+            raise ValueError("provider configuration is invalid")
+        endpoint = configuration.get("endpoint")
+        if not isinstance(endpoint, str) or not endpoint.strip():
+            raise ValueError("ENDPOINT_NOT_CONFIGURED")
+        allowed_hosts = provider.get("allowed_hosts")
+        validation = ConnectionManager.validate_endpoint(
+            endpoint,
+            allowed_hosts=allowed_hosts if isinstance(allowed_hosts, (list, set, tuple)) else None,
+        )
+        if not validation.get("valid"):
+            raise ValueError(str(validation.get("status", "INVALID_ENDPOINT")))
+
+        headers = {
+            "Accept": "application/json, */*;q=0.8",
+            "User-Agent": "AI_CREATOR_AGENT-ProviderProbe/1.0",
+        }
+        auth_type = str(provider.get("auth_type", "NONE")).upper()
+        if auth_type not in {"NONE", "PUBLIC", "ANONYMOUS"}:
+            if auth_type in {"ACCOUNT", "MANUAL", "MANUAL_CONNECT", "OAUTH_BROWSER"}:
+                raise PermissionError("manual account connection is required")
+            token_env = provider.get("token_env") or provider.get("api_key_env") or self._DEFAULT_TOKEN_ENV.get(
+                str(provider.get("id", "")).casefold()
+            )
+            if not isinstance(token_env, str) or not token_env.strip():
+                raise PermissionError("credential environment reference is not configured")
+            token = self.environ.get(token_env)
+            if not isinstance(token, str) or not token.strip():
+                raise PermissionError("provider credential is missing")
+            header_name = provider.get("auth_header_name", "Authorization")
+            auth_scheme = provider.get("auth_scheme", "Bearer")
+            if not isinstance(header_name, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,80}", header_name):
+                raise ValueError("provider auth header name is invalid")
+            if not isinstance(auth_scheme, str) or (auth_scheme and not re.fullmatch(r"[A-Za-z0-9-]{1,32}", auth_scheme)):
+                raise ValueError("provider auth scheme is invalid")
+            headers[header_name] = f"{auth_scheme} {token}" if auth_scheme else token
+
+        request = Request(endpoint.strip(), headers=headers, method="GET")
+        try:
+            response = self.opener.open(request, timeout=float(timeout_seconds))
+        except HTTPError as exc:
+            if exc.code in {401, 403}:
+                raise PermissionError("provider rejected credentials or permissions") from None
+            if 300 <= exc.code < 400:
+                raise ConnectionError("provider endpoint redirected; redirects are not followed") from None
+            raise ConnectionError(f"provider returned HTTP {exc.code}") from None
+        except URLError as exc:
+            reason = getattr(exc, "reason", None)
+            if isinstance(reason, TimeoutError) or "timeout" in type(reason).__name__.casefold():
+                raise TimeoutError("provider probe timed out") from None
+            raise ConnectionError("provider endpoint is unreachable") from None
+
+        try:
+            status = response.getcode() if callable(getattr(response, "getcode", None)) else getattr(response, "status", None)
+            if not isinstance(status, int) or not 200 <= status < 300:
+                raise ConnectionError("provider did not return a successful HTTP status")
+            # Bound any response read and never return or log response content.
+            response.read(self.max_response_bytes + 1)
+            return {"ok": True, "http_status": status}
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
