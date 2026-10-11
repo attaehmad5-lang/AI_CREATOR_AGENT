@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,6 +19,25 @@ class ProviderHealthManagerTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_concurrent_updates_preserve_health_history_and_failure_count(self):
+        manager = ProviderHealthManager(
+            self.path,
+            history_limit=200,
+            failure_threshold=200,
+            clock=lambda: self.now[0],
+        )
+
+        def record_failure(_):
+            return manager.record_result("image", success=False, error_code="HTTP_503")
+
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            results = list(pool.map(record_failure, range(100)))
+
+        self.assertTrue(all(result["saved"] for result in results))
+        record = manager.data["providers"]["image"]
+        self.assertEqual(len(record["history"]), 100)
+        self.assertEqual(record["consecutive_failures"], 100)
 
     def test_success_and_failure_history_persist(self):
         self.manager.record_result("image", success=True, latency_ms=42)
