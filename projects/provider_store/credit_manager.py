@@ -64,6 +64,10 @@ class ProviderCreditManager:
             ):
                 raise ValueError("invalid provider credit snapshot")
             self._parse_timestamp(record.get("observed_at"))
+            version = record.get("snapshot_version", 1)
+            if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+                raise ValueError("invalid provider credit snapshot version")
+            record.setdefault("snapshot_version", 1)
         for request_id, record in {**loaded["reservations"], **loaded["usage"]}.items():
             if (
                 not isinstance(request_id, str) or not request_id.strip()
@@ -162,8 +166,14 @@ class ProviderCreditManager:
                     "provider": provider_id,
                     "verified": False,
                 }
+            current_snapshot = self.data["providers"].get(provider_id, {})
+            current_version = current_snapshot.get("snapshot_version", 1) if isinstance(current_snapshot, dict) else 1
             for item in self.data["usage"].values():
-                if isinstance(item, dict) and item.get("provider_id") == provider_id:
+                if (
+                    isinstance(item, dict)
+                    and item.get("provider_id") == provider_id
+                    and item.get("snapshot_version", 1) == current_version
+                ):
                     try:
                         committed_at = self._parse_timestamp(item.get("committed_at"))
                     except ValueError:
@@ -174,13 +184,8 @@ class ProviderCreditManager:
                             "provider": provider_id,
                             "verified": False,
                         }
+            record["snapshot_version"] = int(current_version) + 1
             self.data["providers"][provider_id] = record
-            # A fresh official snapshot includes previously completed usage, so old
-            # local debits for this provider can now be discarded.
-            self.data["usage"] = {
-                request_id: item for request_id, item in self.data["usage"].items()
-                if not isinstance(item, dict) or item.get("provider_id") != provider_id
-            }
             self._save()
         return {"status": "CREDIT_BALANCE_UPDATED", "provider": provider_id, "verified": True, "observed_at": record["observed_at"]}
 
@@ -234,10 +239,12 @@ class ProviderCreditManager:
                 if age < 0 or age > self.max_age_seconds:
                     continue
                 amount = float(record["free_credits_remaining"])
+                snapshot_version = record.get("snapshot_version", 1)
                 amount -= sum(
                     float(item["amount"]) for item in self.data["usage"].values()
                     if isinstance(item, dict) and item.get("provider_id") == provider_id
                     and item.get("unit") == record.get("unit")
+                    and item.get("snapshot_version", 1) == snapshot_version
                 )
                 amount -= sum(
                     float(item["amount"]) for item in self.data["reservations"].values()
@@ -287,9 +294,12 @@ class ProviderCreditManager:
                 return {"status": "FUTURE_CREDIT_TIMESTAMP", "reserved": False}
             if age > self.max_age_seconds:
                 return {"status": "CREDIT_BALANCE_STALE", "reserved": False}
+            snapshot_version = snapshot.get("snapshot_version", 1)
             used = sum(
                 float(item["amount"]) for item in self.data["usage"].values()
-                if isinstance(item, dict) and item.get("provider_id") == provider_id and item.get("unit") == unit.strip()
+                if isinstance(item, dict) and item.get("provider_id") == provider_id
+                and item.get("unit") == unit.strip()
+                and item.get("snapshot_version", 1) == snapshot_version
             )
             reserved = sum(
                 float(item["amount"]) for item in self.data["reservations"].values()
@@ -328,6 +338,7 @@ class ProviderCreditManager:
                 "amount": amount,
                 "unit": reservation["unit"],
                 "committed_at": self.clock().astimezone(timezone.utc).isoformat(),
+                "snapshot_version": self.data["providers"].get(reservation["provider_id"], {}).get("snapshot_version", 1),
             }
             self.data["usage"][request_id] = record
             del self.data["reservations"][request_id]
