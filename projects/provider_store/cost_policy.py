@@ -419,6 +419,13 @@ class ProviderCostPolicy:
         if request_id in requests:
             return {"status": "DUPLICATE_REQUEST", "saved": False, "request_id": request_id}
         reservations = project.setdefault("reservations", {})
+        reservation = reservations.get(request_id)
+        if reservation is not None and (
+            not isinstance(reservation, dict)
+            or reservation.get("provider_id") != provider_id
+            or reservation.get("estimated_cost") != float(estimated_cost)
+        ):
+            return {"status": "REQUEST_ID_CONFLICT", "saved": False, "request_id": request_id}
         reservations.pop(request_id, None)
         record = {
             "provider_id": provider_id,
