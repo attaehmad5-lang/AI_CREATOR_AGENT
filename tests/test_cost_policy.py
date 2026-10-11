@@ -227,6 +227,26 @@ class ProviderCostPolicyTests(unittest.TestCase):
             "RESERVATION_NOT_FOUND",
         )
 
+    def test_zero_actual_cost_requires_explicit_no_charge_evidence(self):
+        self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=2.0, request_id="zero-cost-job",
+        )
+        unknown = self.policy.reconcile_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=2.0, actual_cost=0.0, request_id="zero-cost-job",
+        )
+        self.assertEqual(unknown["status"], "CHARGE_OUTCOME_UNKNOWN")
+        self.assertFalse(unknown["saved"])
+        self.assertIn("zero-cost-job", self.policy.ledger["projects"]["documentary"]["reservations"])
+        confirmed = self.policy.reconcile_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=2.0, actual_cost=0.0, request_id="zero-cost-job",
+            charge_outcome="not_incurred",
+        )
+        self.assertEqual(confirmed["status"], "RECONCILED")
+        self.assertEqual(confirmed["actual_spend"], 0.0)
+
     def test_reconciliation_rejects_reservation_provider_or_estimate_mismatch(self):
         self.policy.reserve_usage(
             project_id="documentary", provider_id="paid-a",
