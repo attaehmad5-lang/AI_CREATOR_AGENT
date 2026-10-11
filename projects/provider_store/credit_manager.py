@@ -6,9 +6,12 @@ import math
 import os
 import tempfile
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
+
+from .interprocess_lock import interprocess_file_lock
 
 
 class ProviderCreditManager:
@@ -33,27 +36,42 @@ class ProviderCreditManager:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}}
-        if self.state_path.exists():
-            try:
-                with self.state_path.open("r", encoding="utf-8") as stream:
-                    loaded = json.load(stream)
-            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                raise ValueError("invalid provider credit state JSON") from exc
-            if not isinstance(loaded, dict) or not isinstance(loaded.get("providers"), dict):
-                raise ValueError("invalid provider credit state schema")
-            for provider_id, record in loaded["providers"].items():
-                if (
-                    not isinstance(provider_id, str)
-                    or not isinstance(record, dict)
-                    or not self._valid_amount(record.get("free_credits_remaining"))
-                    or not isinstance(record.get("verified"), bool)
-                ):
-                    raise ValueError("invalid provider credit snapshot")
-                self._parse_timestamp(record.get("observed_at"))
-            self.data = loaded
+        self._reload_state()
+
+    def _reload_state(self) -> None:
+        """Reload current credit snapshots while holding the interprocess lock."""
+        if not self.state_path.exists():
+            self.data = {"version": "1.0", "providers": {}}
+            return
+        try:
+            with self.state_path.open("r", encoding="utf-8") as stream:
+                loaded = json.load(stream)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError("invalid provider credit state JSON") from exc
+        if not isinstance(loaded, dict) or not isinstance(loaded.get("providers"), dict):
+            raise ValueError("invalid provider credit state schema")
+        for provider_id, record in loaded["providers"].items():
+            if (
+                not isinstance(provider_id, str)
+                or not isinstance(record, dict)
+                or not self._valid_amount(record.get("free_credits_remaining"))
+                or not isinstance(record.get("verified"), bool)
+            ):
+                raise ValueError("invalid provider credit snapshot")
+            self._parse_timestamp(record.get("observed_at"))
+        self.data = loaded
+
+    @contextmanager
+    def _transaction(self) -> Iterator[None]:
+        """Serialize credit snapshot reads/writes across threads and processes."""
+        with self._lock:
+            lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                self._reload_state()
+                yield
 
     @staticmethod
-    def _valid_amount(value: Any) -> bool:
+    def _valid_amount(value: Any):
         return (
             isinstance(value, (int, float))
             and not isinstance(value, bool)
@@ -117,7 +135,7 @@ class ProviderCreditManager:
             "verified": True,
             "observed_at": observed.isoformat(),
         }
-        with self._lock:
+        with self._transaction():
             self.data["providers"][provider_id] = record
             self._save()
         return {"status": "CREDIT_BALANCE_UPDATED", "provider": provider_id, "verified": True, "observed_at": record["observed_at"]}
@@ -125,7 +143,9 @@ class ProviderCreditManager:
     def get_balance(self, provider_id: str) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER", "verified": False}
-        record = self.data["providers"].get(provider_id)
+        with self._transaction():
+            current = self.data["providers"].get(provider_id)
+            record = dict(current) if isinstance(current, dict) else None
         if not isinstance(record, dict):
             return {"status": "CREDIT_BALANCE_UNKNOWN", "provider": provider_id, "verified": False}
         if record.get("verified") is not True:
@@ -153,7 +173,7 @@ class ProviderCreditManager:
     def usable_free_credits(self) -> dict[str, float]:
         """Return only fresh verified balances; stale or unknown balances never authorize free routing."""
         result: dict[str, float] = {}
-        with self._lock:
+        with self._transaction():
             provider_ids = list(self.data.get("providers", {}).keys())
         for provider_id in provider_ids:
             balance = self.get_balance(provider_id)
