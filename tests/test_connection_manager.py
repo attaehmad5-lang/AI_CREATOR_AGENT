@@ -638,6 +638,14 @@ class ConnectionManagerTests(unittest.TestCase):
             ConnectionManager.validate_endpoint("https://user:pass@provider.example")["status"],
             "EMBEDDED_CREDENTIALS_REJECTED",
         )
+        self.assertEqual(
+            ConnectionManager.validate_endpoint("https://provider.example/path?token=secret")["status"],
+            "QUERY_PARAMETERS_REJECTED",
+        )
+        self.assertEqual(
+            ConnectionManager.validate_endpoint("https://provider.example/path#fragment")["status"],
+            "FRAGMENT_REJECTED",
+        )
         self.assertTrue(ConnectionManager.validate_endpoint("https://provider.example")["valid"])
 
     def test_endpoint_validation_enforces_allowlist_and_local_http_policy(self):
