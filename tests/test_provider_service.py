@@ -255,7 +255,8 @@ class ProviderServiceTests(unittest.TestCase):
         output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-success",
-            estimated_cost=0.0, adapter=lambda **kwargs: {
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
                 "started": True, "success": True, "actual_cost": 0.0,
                 "charge_outcome": "not_incurred", "output_path": str(output_path),
                 "latency_ms": 5.0,
