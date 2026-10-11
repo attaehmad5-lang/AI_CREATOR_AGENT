@@ -25,6 +25,7 @@ class ProviderRoutingManager:
         *,
         health_manager: Any | None = None,
         cost_policy: Any | None = None,
+        quota_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
     ) -> None:
         if connection_manager is None or not callable(getattr(connection_manager, "discover_providers", None)):
@@ -33,12 +34,15 @@ class ProviderRoutingManager:
             raise ValueError("health_manager must support health eligibility checks")
         if cost_policy is not None and not callable(getattr(cost_policy, "evaluate_request", None)):
             raise ValueError("cost_policy must support request evaluation")
+        if quota_manager is not None and not callable(getattr(quota_manager, "reserve", None)):
+            raise ValueError("quota_manager must support request reservations")
         normalized_strategy = str(default_strategy).upper()
         if normalized_strategy not in self.STRATEGIES:
             raise ValueError("unsupported routing strategy")
         self.connection_manager = connection_manager
         self.health_manager = health_manager
         self.cost_policy = cost_policy
+        self.quota_manager = quota_manager
         self.default_strategy = normalized_strategy
         self._round_robin_counters: dict[str, int] = {}
         self._lock = threading.Lock()
@@ -69,6 +73,7 @@ class ProviderRoutingManager:
         strategy: str | None = None,
         estimated_costs: dict[str, float] | None = None,
         free_credits: dict[str, float] | None = None,
+        request_id: str | None = None,
         paid_approved_providers: set[str] | frozenset[str] | None = None,
         excluded_providers: set[str] | frozenset[str] | None = None,
         require_health_evidence: bool = False,
@@ -109,6 +114,10 @@ class ProviderRoutingManager:
 
         if (selected_strategy == "HEALTHIEST_FIRST" or require_health_evidence) and self.health_manager is None:
             return {"allowed": False, "status": "HEALTH_DATA_REQUIRED"}
+        if self.quota_manager is not None and (
+            not isinstance(request_id, str) or not request_id.strip()
+        ):
+            return {"allowed": False, "status": "QUOTA_REQUEST_ID_REQUIRED"}
 
         try:
             discovered = self.connection_manager.discover_providers(
@@ -185,6 +194,7 @@ class ProviderRoutingManager:
             provider_id = provider["id"]
             cost = provider["_route_cost"]
             credit = credits.get(provider_id, 0.0)
+            billing_mode = None
             if self.cost_policy is not None:
                 try:
                     decision = self.cost_policy.evaluate_request(
@@ -201,18 +211,20 @@ class ProviderRoutingManager:
                     status = decision.get("status", "POLICY_REJECTED") if isinstance(decision, dict) else "INVALID_POLICY_RESPONSE"
                     decisions.append({"provider": provider_id, "status": status})
                     continue
-                return {
-                    "allowed": True,
-                    "status": "ROUTED",
-                    "provider": provider_id,
-                    "category": category.strip(),
-                    "strategy": selected_strategy,
-                    "billing_mode": decision.get("billing_mode"),
-                    "estimated_cost": cost,
-                    "health_verified": self.health_manager is not None,
-                    "prior_decisions": decisions,
-                }
-            return {
+                billing_mode = decision.get("billing_mode")
+
+            if self.quota_manager is not None:
+                try:
+                    quota = self.quota_manager.reserve(provider_id=provider_id, request_id=request_id)
+                except Exception as exc:
+                    decisions.append({"provider": provider_id, "status": "QUOTA_CHECK_FAILED", "error_type": type(exc).__name__})
+                    continue
+                if not isinstance(quota, dict) or quota.get("status") not in {"RESERVED", "ALREADY_RESERVED"}:
+                    status = quota.get("status", "QUOTA_REJECTED") if isinstance(quota, dict) else "INVALID_QUOTA_RESPONSE"
+                    decisions.append({"provider": provider_id, "status": status})
+                    continue
+
+            result = {
                 "allowed": True,
                 "status": "ROUTED",
                 "provider": provider_id,
@@ -222,6 +234,12 @@ class ProviderRoutingManager:
                 "health_verified": self.health_manager is not None,
                 "prior_decisions": decisions,
             }
+            if billing_mode is not None:
+                result["billing_mode"] = billing_mode
+            if self.quota_manager is not None:
+                result["quota_reserved"] = True
+                result["request_id"] = request_id
+            return result
 
         return {
             "allowed": False,
@@ -237,6 +255,15 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_FAILED_PROVIDER"}
         if not isinstance(route_options.get("category"), str) or not isinstance(route_options.get("project_id"), str):
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_AND_PROJECT_REQUIRED"}
+        request_id = route_options.get("request_id")
+        if self.quota_manager is not None and isinstance(request_id, str):
+            records = getattr(self.quota_manager, "data", {}).get("requests", {})
+            record = records.get(request_id) if isinstance(records, dict) else None
+            if isinstance(record, dict) and record.get("provider_id") == failed_provider and record.get("status") == "RESERVED":
+                try:
+                    self.quota_manager.release(request_id=request_id, provider_id=failed_provider)
+                except Exception:
+                    return {"allowed": False, "status": "QUOTA_RELEASE_FAILED", "failed_provider": failed_provider}
         excluded = route_options.get("excluded_providers", frozenset())
         if not isinstance(excluded, (set, frozenset)):
             return {"allowed": False, "status": "INVALID_EXCLUDED_PROVIDER_SET"}
