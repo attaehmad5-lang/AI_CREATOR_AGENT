@@ -153,7 +153,9 @@ class ProviderCreditManager:
     def usable_free_credits(self) -> dict[str, float]:
         """Return only fresh verified balances; stale or unknown balances never authorize free routing."""
         result: dict[str, float] = {}
-        for provider_id in self.data.get("providers", {}):
+        with self._lock:
+            provider_ids = list(self.data.get("providers", {}).keys())
+        for provider_id in provider_ids:
             balance = self.get_balance(provider_id)
             if balance.get("status") == "CREDIT_BALANCE_FRESH" and balance.get("verified") is True:
                 result[provider_id] = float(balance["free_credits_remaining"])
