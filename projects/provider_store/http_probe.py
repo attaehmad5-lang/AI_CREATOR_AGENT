@@ -27,10 +27,36 @@ class ProviderHTTPConnectivityProbe:
 
     _DEFAULT_TOKEN_ENV = {
         "huggingface": "HF_TOKEN",
+        "replicate": "REPLICATE_API_TOKEN",
         "openai_image": "OPENAI_API_KEY",
         "openai_voice": "OPENAI_API_KEY",
-        "elevenlabs": "ELEVENLABS_API_KEY",
+        "openai_sora": "OPENAI_API_KEY",
+        "whisper": "OPENAI_API_KEY",
+        "google_image": "GOOGLE_API_KEY",
+        "google_speech": "GOOGLE_API_KEY",
+        "google_lyria": "GOOGLE_API_KEY",
+        "google_veo": "GOOGLE_API_KEY",
+        "recraft": "RECRAFT_API_KEY",
+        "ideogram": "IDEOGRAM_API_KEY",
+        "black_forest_labs": "BFL_API_KEY",
+        "stability_ai": "STABILITY_API_KEY",
+        "stability_audio": "STABILITY_API_KEY",
         "fal_ai": "FAL_KEY",
+        "elevenlabs": "ELEVENLABS_API_KEY",
+        "cartesia": "CARTESIA_API_KEY",
+        "playht": "PLAYHT_API_KEY",
+        "deepgram": "DEEPGRAM_API_KEY",
+        "runway": "RUNWAY_API_KEY",
+        "kling": "KLING_API_KEY",
+        "luma": "LUMA_API_KEY",
+        "minimax_hailuo": "MINIMAX_API_KEY",
+        "heygen": "HEYGEN_API_KEY",
+        "synthesia": "SYNTHESIA_API_KEY",
+        "sync_labs": "SYNC_LABS_API_KEY",
+        "hedra": "HEDRA_API_KEY",
+        "assemblyai": "ASSEMBLYAI_API_KEY",
+        "magnific": "MAGNIFIC_API_KEY",
+        "adobe_firefly": "ADOBE_FIREFLY_API_KEY",
     }
     _DEFAULT_AUTH = {
         "elevenlabs": ("xi-api-key", ""),
@@ -97,7 +123,7 @@ class ProviderHTTPConnectivityProbe:
             token_env = provider.get("token_env") or provider.get("api_key_env") or self._DEFAULT_TOKEN_ENV.get(
                 str(provider.get("id", "")).casefold()
             )
-            if not isinstance(token_env, str) or not token_env.strip():
+            if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
                 raise PermissionError("credential environment reference is not configured")
             token = self.environ.get(token_env)
             if not isinstance(token, str) or not token.strip():
