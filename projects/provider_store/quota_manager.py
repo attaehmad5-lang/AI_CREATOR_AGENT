@@ -70,7 +70,7 @@ class ProviderQuotaManager:
     @contextmanager
     def _transaction(self) -> Iterator[None]:
         """Serialize mutations across threads and OS processes, refreshing state first."""
-        with self._transaction():
+        with self._lock:
             lock_path = self.state_path.with_name(self.state_path.name + ".lock")
             with interprocess_file_lock(lock_path):
                 self._reload_state()
