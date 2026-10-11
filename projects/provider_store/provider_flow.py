@@ -1,4 +1,4 @@
-from unlock_flow_manager import UnlockFlowManager
+from .unlock_flow_manager import UnlockFlowManager
 
 class ProviderFlow:
 
