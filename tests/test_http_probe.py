@@ -142,7 +142,8 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             "configuration": {"endpoint": "https://api.example.com/health"},
         })
         self.assertTrue(result["ok"])
-        self.assertEqual(opener.calls[0][0].get_header("X-goog-api-key"), secret)
+        headers = {name.casefold(): value for name, value in opener.calls[0][0].header_items()}
+        self.assertEqual(headers.get("x-goog-api-key"), secret)
         self.assertNotIn(secret, repr(result))
 
     def test_api_auth_fails_closed_for_unknown_or_malformed_environment_reference(self):
