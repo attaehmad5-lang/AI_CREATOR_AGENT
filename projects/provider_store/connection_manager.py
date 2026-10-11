@@ -623,10 +623,48 @@ class ConnectionManager:
 
         env = os.environ if environ is None else environ
         present = bool(str(env.get(str(token_env), "")).strip())
+        if not present:
+            return {
+                "provider": provider_id,
+                "status": "CREDENTIALS_MISSING",
+                "credential_present": False,
+                "credential_name": token_env,
+            }
+        expiry_env = provider.get("token_expiry_env")
+        if expiry_env:
+            raw_expiry = str(env.get(str(expiry_env), "")).strip()
+            if raw_expiry:
+                try:
+                    expiry = datetime.fromisoformat(raw_expiry.replace("Z", "+00:00"))
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    return {
+                        "provider": provider_id,
+                        "status": "CREDENTIAL_EXPIRY_INVALID",
+                        "credential_present": True,
+                        "credential_name": token_env,
+                    }
+                remaining = (expiry - datetime.now(timezone.utc)).total_seconds()
+                if remaining <= 0:
+                    return {
+                        "provider": provider_id,
+                        "status": "CREDENTIALS_EXPIRED",
+                        "credential_present": True,
+                        "credential_name": token_env,
+                    }
+                if remaining <= 300:
+                    return {
+                        "provider": provider_id,
+                        "status": "CREDENTIALS_EXPIRING",
+                        "credential_present": True,
+                        "credential_name": token_env,
+                        "expires_in_seconds": int(remaining),
+                    }
         return {
             "provider": provider_id,
-            "status": "CREDENTIALS_PRESENT" if present else "CREDENTIALS_MISSING",
-            "credential_present": present,
+            "status": "CREDENTIALS_PRESENT",
+            "credential_present": True,
             "credential_name": token_env,
         }
 
