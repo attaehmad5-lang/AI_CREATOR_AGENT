@@ -139,6 +139,8 @@ class ConnectionManagerTests(unittest.TestCase):
             ("auth_header_name", "Cookie"),
             ("auth_scheme", "Digest"),
             ("auth_scheme", "Bearer\\r\\nInjected"),
+            ("auth_type", "MAGIC_BYPASS"),
+            ("connection_type", "UNKNOWN_TRANSPORT"),
         ):
             with self.subTest(field=field, value=value):
                 result = ConnectionManager.validate_catalog_schema({
