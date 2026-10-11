@@ -58,6 +58,24 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["health"]["status"], "HEALTHY")
         self.assertEqual(self.connections.get_state("image")["status"], "CONNECTED")
 
+    def test_manual_provider_verification_records_health_without_session_leak(self):
+        registered = self.connections.register_provider({
+            "id": "manual-music", "name": "Manual Music", "category": "music",
+            "auth_type": "ACCOUNT", "connection_type": "BROWSER_SESSION", "enabled": True,
+        })
+        self.assertTrue(registered["saved"])
+        session = {"access_token": "manual-session-private"}
+        result = self.service.verify_manual_provider(
+            "manual-music", session,
+            lambda provider, *, session, timeout_seconds: {"ok": session.get("access_token") == "manual-session-private"},
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["status"], "CONNECTED")
+        self.assertEqual(result["health"]["status"], "HEALTHY")
+        self.assertNotIn("manual-session-private", repr(result))
+        self.assertNotIn("manual-session-private", self.state_path.read_text(encoding="utf-8"))
+        self.assertNotIn("manual-session-private", (self.root / "health.json").read_text(encoding="utf-8"))
+
     def test_failed_verification_updates_health_without_leaking_error_text(self):
         def probe(provider, timeout_seconds):
             raise ConnectionError("private endpoint and token")
