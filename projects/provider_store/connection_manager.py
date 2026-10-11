@@ -756,6 +756,10 @@ class ConnectionManager:
             return {"status": "INVALID_TIMEOUT", "provider": provider_id, "verified": False}
         configuration_result = self.get_provider_configuration(provider_id)
         if configuration_result.get("status") not in {"CONFIGURED", "NO_CONFIGURATION"}:
+            try:
+                self.set_state(provider_id, "ERROR")
+            except Exception:
+                pass
             return {
                 "status": configuration_result.get("status", "INVALID_CONFIGURATION"),
                 "provider": provider_id,
@@ -773,6 +777,10 @@ class ConnectionManager:
             "MANUAL_CONNECTION_REQUIRED",
         }
         if credentials["status"] in blocked_credential_states:
+            try:
+                self.set_state(provider_id, "ERROR")
+            except Exception:
+                pass
             return {
                 "status": credentials["status"],
                 "provider": provider_id,
