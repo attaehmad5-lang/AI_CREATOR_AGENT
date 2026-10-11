@@ -1,10 +1,23 @@
 import json
 import tempfile
 import unittest
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 from projects.provider_store.cost_policy import ProviderCostPolicy
+
+
+def _reserve_cost_in_process(args):
+    ledger_path, request_id = args
+    policy = ProviderCostPolicy(
+        ledger_path, project_budgets={"documentary": 5.0}
+    )
+    return policy.reserve_usage(
+        project_id="documentary",
+        provider_id="paid",
+        estimated_cost=2.0,
+        request_id=request_id,
+    )["status"]
 
 
 class ProviderCostPolicyTests(unittest.TestCase):
@@ -224,6 +237,23 @@ class ProviderCostPolicyTests(unittest.TestCase):
             project_id="documentary", provider_id="paid", estimated_cost=5.0, request_id="next-job"
         )
         self.assertEqual(blocked["status"], "PROJECT_BUDGET_EXCEEDED")
+
+    def test_concurrent_budget_reservations_across_processes_never_overspend(self):
+        ledger_path = self.ledger.with_name("process-ledger.json")
+        args = [
+            (str(ledger_path), f"process-paid-job-{index}")
+            for index in range(20)
+        ]
+        with ProcessPoolExecutor(max_workers=4) as pool:
+            statuses = list(pool.map(_reserve_cost_in_process, args))
+
+        self.assertEqual(statuses.count("RESERVED"), 2)
+        self.assertEqual(statuses.count("PROJECT_BUDGET_EXCEEDED"), 18)
+        loaded = ProviderCostPolicy(
+            ledger_path, project_budgets={"documentary": 5.0}
+        )
+        reserved = loaded.ledger["projects"]["documentary"]["reservations"]
+        self.assertEqual(sum(item["estimated_cost"] for item in reserved.values()), 4.0)
 
     def test_actual_cost_overrun_triggers_budget_alert(self):
         result = self.policy.reconcile_usage(
