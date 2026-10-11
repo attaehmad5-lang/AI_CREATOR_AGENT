@@ -61,6 +61,13 @@ class ProviderHTTPConnectivityProbe:
     _DEFAULT_AUTH = {
         "elevenlabs": ("xi-api-key", ""),
         "fal_ai": ("Authorization", "Key"),
+        "google_image": ("x-goog-api-key", ""),
+        "google_speech": ("x-goog-api-key", ""),
+        "google_lyria": ("x-goog-api-key", ""),
+        "google_veo": ("x-goog-api-key", ""),
+        "cartesia": ("Cartesia-API-Key", ""),
+        "deepgram": ("Authorization", "Token"),
+        "assemblyai": ("Authorization", ""),
     }
 
     def __init__(
