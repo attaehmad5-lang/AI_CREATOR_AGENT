@@ -333,6 +333,27 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotEqual(rejected["status"], "CONNECTED")
         self.assertEqual(called, [])
 
+    def test_persisted_secret_bearing_configuration_is_rejected_before_probe(self):
+        self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        self.manager.state["providers"]["public_image"] = {
+            "status": "CONNECTED", "verified": True,
+            "configuration": {
+                "endpoint": "https://api.example.com/health",
+                "api_key": "never-store-this",
+            },
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+        called = []
+        result = self.manager.verify_connectivity(
+            "public_image",
+            lambda provider, **kwargs: called.append(True) or {"ok": True},
+        )
+        self.assertEqual(result["status"], "SENSITIVE_CONFIGURATION_REJECTED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(called, [])
+        self.assertNotIn("never-store-this", repr(result))
+
     def test_persisted_endpoint_without_allowlist_is_rejected_before_probe(self):
         self.manager.state["providers"]["public_image"] = {
             "status": "CONNECTED", "verified": True,
