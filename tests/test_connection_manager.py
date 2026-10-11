@@ -276,6 +276,9 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "CREDENTIALS_PRESENT")
         self.assertTrue(result["credential_present"])
         self.assertNotIn(secret, repr(result))
+        non_string = self.manager.credential_status("token_image", {"TEST_PROVIDER_TOKEN": None})
+        self.assertEqual(non_string["status"], "CREDENTIALS_MISSING")
+        self.assertFalse(non_string["credential_present"])
 
     def test_public_provider_needs_no_credential(self):
         result = self.manager.credential_status("public_image", {})
