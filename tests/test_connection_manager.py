@@ -392,6 +392,18 @@ class ConnectionManagerTests(unittest.TestCase):
             )["status"],
             "INVALID_TIMEOUT",
         )
+        self.assertEqual(
+            self.manager.verify_connectivity(
+                "public_image", lambda *a, **k: True, timeout_seconds=float("nan")
+            )["status"],
+            "INVALID_TIMEOUT",
+        )
+        self.assertEqual(
+            self.manager.verify_connectivity(
+                "public_image", lambda *a, **k: True, timeout_seconds=float("inf")
+            )["status"],
+            "INVALID_TIMEOUT",
+        )
         self.manager.set_provider_enabled("public_image", False)
         self.assertEqual(
             self.manager.verify_connectivity("public_image", lambda *a, **k: True)["status"],
@@ -436,6 +448,12 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertTrue(local["valid"])
         self.assertFalse(local["tls_verification_required"])
+        self.assertEqual(
+            ConnectionManager.validate_endpoint(
+                "http://127.0.0.1:8000", allow_loopback_http="yes"
+            )["status"],
+            "INVALID_LOOPBACK_HTTP_POLICY",
+        )
 
     def test_provider_model_configuration_is_persisted_without_credentials(self):
         result = self.manager.configure_provider("public_image", model="test-model-v1")
