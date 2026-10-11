@@ -155,10 +155,14 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         router = ProviderRoutingManager(
             self.connections, cost_policy=policy, credit_manager=credits
         )
-        result = router.route(category="image", project_id="film", estimated_cost=1.0)
+        result = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            request_id="verified-free-credit-job",
+        )
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "fallback")
         self.assertEqual(result["billing_mode"], "FREE_CREDITS")
+        self.assertTrue(result["credit_reserved"])
 
     def test_credit_balance_with_incompatible_unit_cannot_authorize_route(self):
         credits = ProviderCreditManager(self.root / "credits-units.json")
@@ -180,7 +184,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
         matching_unit = router.route(
             category="image", project_id="film", estimated_cost=1.0,
-            estimated_cost_unit="credits",
+            estimated_cost_unit="credits", request_id="matching-credit-job",
         )
         self.assertTrue(matching_unit["allowed"])
         self.assertEqual(matching_unit["provider"], "fallback")
