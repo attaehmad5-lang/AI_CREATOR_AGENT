@@ -115,12 +115,14 @@ class ProviderRoutingManager:
         if self.credit_manager is not None:
             try:
                 credits = self.credit_manager.usable_free_credits(unit=estimated_cost_unit.strip())
+                all_unit_credits = self.credit_manager.usable_free_credits()
             except Exception as exc:
                 return {"allowed": False, "status": "CREDIT_BALANCE_LOOKUP_FAILED", "error_type": type(exc).__name__}
-            if not isinstance(credits, dict):
+            if not isinstance(credits, dict) or not isinstance(all_unit_credits, dict):
                 return {"allowed": False, "status": "INVALID_VERIFIED_CREDIT_MAP"}
         else:
             credits = {} if free_credits is None else free_credits
+            all_unit_credits = {}
         approvals = set() if paid_approved_providers is None else paid_approved_providers
         excluded = set() if excluded_providers is None else excluded_providers
         if any(not isinstance(key, str) or not self._valid_amount(value) for key, value in estimates.items()):
@@ -188,7 +190,10 @@ class ProviderRoutingManager:
                 continue
             credit = credits.get(provider_id, 0.0)
             credit_sort = float(credit) if self._valid_amount(credit) else 0.0
-            if cost == 0 and self.credit_manager is not None and credit_sort > 0:
+            if cost == 0 and self.credit_manager is not None and (
+                credit_sort > 0 or self._valid_amount(all_unit_credits.get(provider_id, 0.0))
+                and all_unit_credits.get(provider_id, 0.0) > 0
+            ):
                 decisions.append({
                     "provider": provider_id,
                     "status": "ESTIMATED_COST_REQUIRED_FOR_CREDIT_PROVIDER",
