@@ -183,6 +183,8 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_production_catalog_api_allowlists_are_explicit_and_valid(self):
         catalog_path = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        schema = ConnectionManager.validate_catalog_schema(catalog)
+        self.assertTrue(schema["valid"], schema["errors"])
         providers = catalog["providers"]
         allowlisted = [provider for provider in providers if "allowed_hosts" in provider]
         self.assertGreaterEqual(len(allowlisted), 25)
