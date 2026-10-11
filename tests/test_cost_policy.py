@@ -149,6 +149,12 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertEqual(first["status"], "RECONCILED")
         self.assertAlmostEqual(first["variance"], 0.25)
         self.assertEqual(duplicate["status"], "DUPLICATE_REQUEST")
+        conflict = self.policy.reconcile_usage(
+            project_id="documentary", provider_id="paid", estimated_cost=1.0,
+            actual_cost=1.5, request_id="request-1",
+        )
+        self.assertEqual(conflict["status"], "REQUEST_ID_CONFLICT")
+        self.assertFalse(conflict["saved"])
         reloaded = ProviderCostPolicy(self.ledger, project_budgets={"documentary": 5.0})
         self.assertAlmostEqual(reloaded.ledger["projects"]["documentary"]["actual_spend"], 1.25)
 
