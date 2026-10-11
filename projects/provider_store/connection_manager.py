@@ -643,6 +643,8 @@ class ConnectionManager:
             return {"valid": False, "status": "INVALID_ENDPOINT"}
         if parsed.scheme not in {"https", "http"} or not hostname:
             return {"valid": False, "status": "HTTPS_REQUIRED"}
+        if port == 0:
+            return {"valid": False, "status": "INVALID_PORT"}
         if parsed.username is not None or parsed.password is not None:
             return {"valid": False, "status": "EMBEDDED_CREDENTIALS_REJECTED"}
         if parsed.query:
