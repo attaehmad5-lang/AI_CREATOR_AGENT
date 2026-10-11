@@ -159,7 +159,7 @@ class ProviderQuotaManager:
                 created = self._parse_timestamp(record.get("created_at"))
             except ValueError:
                 continue
-            if start < created <= now:
+            if start <= created <= now:
                 count += 1
         return count
 
