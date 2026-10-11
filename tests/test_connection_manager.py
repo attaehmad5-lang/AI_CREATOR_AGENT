@@ -392,6 +392,24 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertEqual(called, [])
 
+    def test_connectivity_fails_closed_when_state_cannot_be_read_or_saved(self):
+        self.state_path.write_text("{invalid-json", encoding="utf-8")
+        called = []
+        result = self.manager.verify_connectivity(
+            "public_image", lambda provider, **kwargs: called.append(True) or {"ok": True}
+        )
+        self.assertEqual(result["status"], "STATE_READ_FAILED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(called, [])
+
+        self.state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        def corrupt_state_during_probe(provider, **kwargs):
+            self.state_path.write_text("{invalid-json", encoding="utf-8")
+            return {"ok": True}
+        result = self.manager.verify_connectivity("public_image", corrupt_state_during_probe)
+        self.assertEqual(result["status"], "STATE_SAVE_FAILED")
+        self.assertFalse(result["verified"])
+
     def test_connectivity_never_probes_with_expired_credentials(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
