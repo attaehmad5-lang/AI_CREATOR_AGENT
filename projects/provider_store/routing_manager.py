@@ -188,8 +188,12 @@ class ProviderRoutingManager:
                 continue
             credit = credits.get(provider_id, 0.0)
             credit_sort = float(credit) if self._valid_amount(credit) else 0.0
-            if cost > 0 and self.cost_policy is None and not (
-                self.credit_manager is not None and credit_sort >= cost
+            if self.cost_policy is None and (
+                provider.get("subscription_required") is True
+                or (
+                    cost > 0
+                    and not (self.credit_manager is not None and credit_sort >= cost)
+                )
             ):
                 decisions.append({
                     "provider": provider_id,
