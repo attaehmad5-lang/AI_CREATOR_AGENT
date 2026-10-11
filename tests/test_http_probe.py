@@ -132,6 +132,41 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             })
         self.assertTrue(error.closed)
 
+    def test_google_provider_uses_header_auth_and_known_environment_reference(self):
+        secret = "google-key-private"
+        opener = _Opener()
+        probe = ProviderHTTPConnectivityProbe(environ={"GOOGLE_API_KEY": secret}, opener=opener)
+        result = probe({
+            "id": "google_image", "auth_type": "API_KEY",
+            "allowed_hosts": ["api.example.com"],
+            "configuration": {"endpoint": "https://api.example.com/health"},
+        })
+        self.assertTrue(result["ok"])
+        self.assertEqual(opener.calls[0][0].get_header("X-goog-api-key"), secret)
+        self.assertNotIn(secret, repr(result))
+
+    def test_api_auth_fails_closed_for_unknown_or_malformed_environment_reference(self):
+        opener = _Opener()
+        probe = ProviderHTTPConnectivityProbe(environ={"HF_TOKEN": "private"}, opener=opener)
+        provider = {
+            "id": "custom", "auth_type": "API_KEY", "token_env": "HF_TOKEN\\nEVIL",
+            "allowed_hosts": ["api.example.com"],
+            "configuration": {"endpoint": "https://api.example.com/health"},
+        }
+        with self.assertRaises(PermissionError):
+            probe(provider)
+        self.assertEqual(opener.calls, [])
+
+    def test_host_allowlist_is_required_even_for_public_https_hosts(self):
+        opener = _Opener()
+        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        with self.assertRaises(ValueError):
+            probe({
+                "id": "public", "auth_type": "NONE",
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertEqual(opener.calls, [])
+
     def test_manual_account_auth_is_not_faked_by_http_probe(self):
         opener = _Opener()
         probe = ProviderHTTPConnectivityProbe(opener=opener)
