@@ -178,6 +178,13 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         result = router.route(category="image", project_id="film", estimated_cost=1.0)
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        matching_unit = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            estimated_cost_unit="credits",
+        )
+        self.assertTrue(matching_unit["allowed"])
+        self.assertEqual(matching_unit["provider"], "fallback")
+        self.assertEqual(matching_unit["billing_mode"], "FREE_CREDITS")
 
     def test_routing_rejects_unverified_credit_overrides(self):
         credits = ProviderCreditManager(self.root / "credits.json")
