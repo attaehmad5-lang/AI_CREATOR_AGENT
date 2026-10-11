@@ -97,7 +97,7 @@ class ProviderOutputValidator:
                         raise ValueError(f"non-standard JSON constant: {token}")
                     try:
                         json.load(stream, parse_constant=reject_nonstandard_constant)
-                    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                    except (json.JSONDecodeError, UnicodeDecodeError, ValueError, RecursionError):
                         return {"valid": False, "status": "INVALID_JSON"}
                     mime = "application/json"
             digest = hashlib.sha256()
