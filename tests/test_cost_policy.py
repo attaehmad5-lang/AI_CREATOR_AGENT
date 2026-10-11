@@ -40,6 +40,33 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["billing_mode"], "PAID_APPROVED")
 
+    def test_paid_usage_requires_a_configured_budget(self):
+        policy = ProviderCostPolicy()
+        result = policy.evaluate_request(
+            {"id": "paid", "enabled": True},
+            project_id="unbudgeted",
+            estimated_cost=0.5,
+            paid_usage_approved=True,
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "PROJECT_BUDGET_REQUIRED")
+
+    def test_paid_approval_and_provider_enabled_flags_must_be_boolean(self):
+        invalid_approval = self.policy.evaluate_request(
+            {"id": "paid", "enabled": True},
+            project_id="documentary",
+            estimated_cost=0.5,
+            paid_usage_approved="yes",
+        )
+        self.assertEqual(invalid_approval["status"], "INVALID_PAID_APPROVAL_FLAG")
+        invalid_enabled = self.policy.evaluate_request(
+            {"id": "paid", "enabled": "false"},
+            project_id="documentary",
+            estimated_cost=0.5,
+            paid_usage_approved=True,
+        )
+        self.assertEqual(invalid_enabled["status"], "INVALID_PROVIDER_CONFIGURATION")
+
     def test_project_budget_is_hard_stop(self):
         result = self.policy.evaluate_request(
             {"id": "paid", "enabled": True}, project_id="documentary",
