@@ -297,12 +297,15 @@ class ProviderCostPolicy:
         provider_id: str,
         estimated_cost: float,
         request_id: str,
+        success: bool = False,
     ) -> dict[str, Any]:
         """Persist a terminal, idempotent record when the provider confirms no charge."""
         if not all(isinstance(v, str) and v.strip() for v in (project_id, provider_id, request_id)):
             return {"status": "INVALID_USAGE_RECORD", "saved": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "saved": False}
+        if not isinstance(success, bool):
+            return {"status": "INVALID_EXECUTION_RESULT", "saved": False}
         with self._transaction():
             project = self.ledger["projects"].setdefault(
                 project_id, {"actual_spend": 0.0, "requests": {}, "reservations": {}}
@@ -315,7 +318,7 @@ class ProviderCostPolicy:
                     and existing.get("provider_id") == provider_id
                     and existing.get("estimated_cost") == float(estimated_cost)
                     and existing.get("actual_cost") == 0.0
-                    and existing.get("execution_success") is False
+                    and existing.get("execution_success") is success
                     and existing.get("charge_outcome") == "not_incurred"
                 ):
                     return {"status": "DUPLICATE_REQUEST", "saved": True, "request_id": request_id}
@@ -334,7 +337,7 @@ class ProviderCostPolicy:
                 "estimated_cost": float(estimated_cost),
                 "actual_cost": 0.0,
                 "variance": round(-float(estimated_cost), 6),
-                "execution_success": False,
+                "execution_success": success,
                 "charge_outcome": "not_incurred",
                 "recorded_at": datetime.now(timezone.utc).isoformat(),
             }
