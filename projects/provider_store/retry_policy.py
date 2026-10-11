@@ -94,7 +94,8 @@ class RetryPolicy:
         delay = min(self.max_delay_seconds, exponential + jitter)
         header_delay = self._retry_after_seconds(retry_after)
         if status_code == 429 and header_delay is not None:
-            delay = max(delay, header_delay)
+            # Never let an untrusted Retry-After value bypass the configured backoff cap.
+            delay = min(self.max_delay_seconds, max(delay, header_delay))
             reason = "RATE_LIMIT_RETRY_AFTER" if header_delay else "RATE_LIMIT_BACKOFF"
         else:
             reason = "TRANSIENT_HTTP_FAILURE" if retryable_status else "TRANSIENT_NETWORK_FAILURE"
