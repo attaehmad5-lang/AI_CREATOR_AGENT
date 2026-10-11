@@ -82,6 +82,25 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(self.cost.ledger["projects"]["film"]["actual_spend"], 1.5)
         self.assertEqual(self.quota.data["requests"]["job-1"]["status"], "COMMITTED")
 
+    def test_finalization_is_idempotent_and_invalid_amounts_fail_closed(self):
+        self.cost.reserve_usage(
+            project_id="film", provider_id="image", estimated_cost=2.0, request_id="job-repeat"
+        )
+        self.quota.reserve(provider_id="image", request_id="job-repeat")
+        kwargs = dict(
+            project_id="film", provider_id="image", request_id="job-repeat",
+            estimated_cost=2.0, actual_cost=1.5, success=True, latency_ms=10,
+        )
+        first = self.service.finalize_started_request(**kwargs)
+        second = self.service.finalize_started_request(**kwargs)
+        self.assertTrue(first["finalized"])
+        self.assertTrue(second["finalized"])
+        self.assertEqual(second["cost"]["status"], "DUPLICATE_REQUEST")
+        self.assertEqual(second["health"]["status"], "SKIPPED_DUPLICATE_FINALIZATION")
+        self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
+        invalid = self.service.finalize_started_request(**{**kwargs, "actual_cost": float("nan")})
+        self.assertEqual(invalid["status"], "INVALID_COST_AMOUNT")
+
     def test_unstarted_request_releases_reservations_only_when_explicitly_called(self):
         self.cost.reserve_usage(
             project_id="film", provider_id="image", estimated_cost=2.0, request_id="job-2"
