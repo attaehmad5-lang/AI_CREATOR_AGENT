@@ -125,6 +125,11 @@ class ProviderCostPolicy:
             return {"allowed": False, "status": "PROVIDER_DISABLED", "provider": provider["id"]}
 
         if estimated_cost == 0:
+            if provider.get("subscription_required") is True:
+                return {
+                    "allowed": False, "status": "COST_ESTIMATE_REQUIRED",
+                    "provider": provider["id"],
+                }
             return {
                 "allowed": True, "status": "ALLOWED_ZERO_COST", "provider": provider["id"],
                 "billing_mode": "ZERO_COST", "estimated_cost": 0.0,
