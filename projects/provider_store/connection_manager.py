@@ -43,6 +43,8 @@ class ConnectionManager:
         self.catalog = self._load_json(self.catalog_path)
         self.state = self._load_json(self.state_path, default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}})
         self.state.setdefault("providers", {})
+        # Runtime instances are intentionally process-local and never serialized.
+        self._loaded_providers: dict[str, Any] = {}
 
     @staticmethod
     def _default_catalog() -> Path:
@@ -105,6 +107,36 @@ class ConnectionManager:
 
     def provider_exists(self, provider_id: str) -> bool:
         return self.get_provider(provider_id) is not None
+
+    def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
+        """Instantiate a provider through an injected factory, without dynamic imports."""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "loaded": False}
+        if provider.get("enabled") is False:
+            return {"status": "DISABLED", "provider": provider_id, "loaded": False}
+        if provider_id in self._loaded_providers:
+            return {"status": "ALREADY_LOADED", "provider": provider_id, "loaded": True}
+        if not callable(factory):
+            return {"status": "INVALID_FACTORY", "provider": provider_id, "loaded": False}
+        try:
+            instance = factory(provider)
+        except Exception as exc:
+            # Never return raw exception text: it may contain endpoints or credentials.
+            return {
+                "status": "LOAD_FAILED",
+                "provider": provider_id,
+                "error_type": type(exc).__name__,
+                "loaded": False,
+            }
+        if instance is None:
+            return {"status": "LOAD_FAILED", "provider": provider_id, "loaded": False}
+        self._loaded_providers[provider_id] = instance
+        return {"status": "LOADED", "provider": provider_id, "loaded": True}
+
+    def get_loaded_provider(self, provider_id: str) -> Any | None:
+        """Return a process-local instance; callers must not persist or log it."""
+        return self._loaded_providers.get(provider_id)
 
     def discover_providers(
         self,
