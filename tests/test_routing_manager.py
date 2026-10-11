@@ -7,6 +7,7 @@ from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
+from projects.provider_store.quota_manager import ProviderQuotaManager
 
 
 class ProviderRoutingManagerTests(unittest.TestCase):
@@ -104,6 +105,44 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "fallback")
         self.assertEqual(result["billing_mode"], "FREE_CREDITS")
+
+    def test_quota_manager_blocks_over_limit_provider_and_uses_fallback(self):
+        quota = ProviderQuotaManager(
+            self.root / "quotas.json",
+            limits={"primary": {"hourly": 1}, "fallback": {"hourly": 1}},
+        )
+        router = ProviderRoutingManager(self.connections, quota_manager=quota)
+        first = router.route(category="image", project_id="film", request_id="job-1")
+        second = router.route(category="image", project_id="film", request_id="job-2")
+        self.assertEqual(first["provider"], "primary")
+        self.assertTrue(first["quota_reserved"])
+        self.assertEqual(second["provider"], "fallback")
+        self.assertTrue(second["quota_reserved"])
+
+    def test_fallback_releases_failed_provider_quota_reservation(self):
+        quota = ProviderQuotaManager(
+            self.root / "quotas.json",
+            limits={"primary": {"hourly": 2}, "fallback": {"hourly": 2}},
+        )
+        router = ProviderRoutingManager(self.connections, quota_manager=quota)
+        router.route(category="image", project_id="film", request_id="job-1")
+        fallback = router.select_fallback(
+            failed_provider="primary",
+            category="image",
+            project_id="film",
+            request_id="job-1",
+        )
+        self.assertTrue(fallback["allowed"])
+        self.assertEqual(fallback["provider"], "fallback")
+        self.assertEqual(quota.data["requests"]["job-1"]["provider_id"], "fallback")
+
+    def test_quota_enabled_routing_requires_request_id(self):
+        quota = ProviderQuotaManager(
+            self.root / "quotas.json", limits={"primary": {"daily": 2}}
+        )
+        router = ProviderRoutingManager(self.connections, quota_manager=quota)
+        result = router.route(category="image", project_id="film")
+        self.assertEqual(result["status"], "QUOTA_REQUEST_ID_REQUIRED")
 
     def test_invalid_route_inputs_and_missing_health_evidence_fail_closed(self):
         router = ProviderRoutingManager(self.connections)
