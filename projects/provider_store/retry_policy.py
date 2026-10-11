@@ -122,7 +122,8 @@ class CircuitBreaker:
         self.opened_at = None
 
     def record_failure(self) -> str:
+        was_half_open = self.state == "HALF_OPEN"
         self.failures += 1
-        if self.failures >= self.failure_threshold and self.opened_at is None:
+        if was_half_open or (self.failures >= self.failure_threshold and self.opened_at is None):
             self.opened_at = self.clock()
         return self.state
