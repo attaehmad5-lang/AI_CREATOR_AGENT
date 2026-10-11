@@ -313,7 +313,10 @@
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "allowed_hosts": [
+        "api.klingai.com"
+      ]
     },
     {
       "id": "luma",
