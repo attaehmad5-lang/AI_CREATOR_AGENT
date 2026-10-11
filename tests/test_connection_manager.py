@@ -75,6 +75,16 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["saved"])
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
 
+    def test_public_state_setter_cannot_mint_verified_connection(self):
+        for state in ("CONNECTED", "READY"):
+            with self.subTest(state=state):
+                result = self.manager.set_state("public_image", state, verified=True)
+                self.assertEqual(result["status"], "VERIFICATION_REQUIRED")
+                self.assertFalse(result["saved"])
+                current = self.manager.get_state("public_image")
+                self.assertEqual(current["status"], "UNKNOWN")
+                self.assertFalse(current["verified"])
+
     def test_state_is_persisted_atomically_and_reloadable(self):
         result = self.manager.set_state("public_image", "READY")
         self.assertTrue(result["saved"])
