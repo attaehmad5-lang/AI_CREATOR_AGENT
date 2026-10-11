@@ -195,7 +195,17 @@ class ProviderHealthManager:
             self.record_result(provider_id, success=False, error_code=code)
             return {"provider": provider_id, "status": code, "verified": False, "error_type": type(exc).__name__}
         latency = (__import__("time").monotonic() - started) * 1000
-        self.record_result(provider_id, success=True, latency_ms=latency)
+        try:
+            recorded = self.record_result(provider_id, success=True, latency_ms=latency)
+        except Exception as exc:
+            return {
+                "provider": provider_id,
+                "status": "HEALTH_RECORD_FAILED",
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(recorded, dict) or recorded.get("saved") is not True:
+            return {"provider": provider_id, "status": "HEALTH_RECORD_FAILED", "verified": False}
         return {"provider": provider_id, "status": "HEALTHY", "verified": True, "latency_ms": round(latency, 2)}
 
     def is_eligible(
