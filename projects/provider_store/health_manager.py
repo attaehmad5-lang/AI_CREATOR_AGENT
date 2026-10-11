@@ -7,10 +7,13 @@ import os
 import re
 import tempfile
 import threading
+from contextlib import contextmanager
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
+
+from .interprocess_lock import interprocess_file_lock
 
 
 class ProviderHealthManager:
@@ -34,14 +37,32 @@ class ProviderHealthManager:
         self.failure_threshold = failure_threshold
         self._lock = threading.RLock()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
-        if self.state_path.exists():
-            with self.state_path.open("r", encoding="utf-8") as stream:
-                self.data = json.load(stream)
-            if not isinstance(self.data, dict) or not isinstance(self.data.get("providers", {}), dict):
-                raise ValueError("Invalid provider health state")
-            self.data.setdefault("providers", {})
-        else:
+        self.data: dict[str, Any] = {"version": "1.0", "providers": {}}
+        self._reload_state()
+
+    def _reload_state(self) -> None:
+        """Reload the latest valid state while holding the interprocess lock."""
+        if not self.state_path.exists():
             self.data = {"version": "1.0", "providers": {}}
+            return
+        try:
+            with self.state_path.open("r", encoding="utf-8") as stream:
+                loaded = json.load(stream)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError("Invalid provider health state JSON") from exc
+        if not isinstance(loaded, dict) or not isinstance(loaded.get("providers", {}), dict):
+            raise ValueError("Invalid provider health state")
+        loaded.setdefault("providers", {})
+        self.data = loaded
+
+    @contextmanager
+    def _transaction(self) -> Iterator[None]:
+        """Serialize health history updates across threads and processes."""
+        with self._lock:
+            lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                self._reload_state()
+                yield
 
     def record_result(
         self,
@@ -62,7 +83,7 @@ class ProviderHealthManager:
             or latency_ms < 0
         ):
             return {"status": "INVALID_LATENCY", "saved": False}
-        with self._lock:
+        with self._transaction():
             providers = self.data["providers"]
             current = providers.get(provider_id, {})
             record = dict(current) if isinstance(current, dict) else {}
@@ -151,7 +172,7 @@ class ProviderHealthManager:
             or max_latency_ms < 0
         ):
             return {"eligible": False, "status": "INVALID_HEALTH_POLICY", "reason": "INVALID_LATENCY_LIMIT"}
-        with self._lock:
+        with self._transaction():
             current = self.data["providers"].get(provider_id)
             record = dict(current) if isinstance(current, dict) else None
         if not isinstance(record, dict) or not record.get("last_checked_at"):
