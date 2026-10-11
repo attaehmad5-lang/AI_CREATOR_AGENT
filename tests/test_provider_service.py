@@ -252,7 +252,7 @@ class ProviderServiceTests(unittest.TestCase):
             cost_policy=self.cost, quota_manager=self.quota,
         )
         output_path = self.root / "generated.png"
-        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-success",
             estimated_cost=0.0, adapter=lambda **kwargs: {
@@ -284,7 +284,7 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
         self.assertTrue(result["release"]["released"])
         self.assertNotIn("execute-not-started", self.cost.ledger["projects"]["film"]["reservations"])
-        self.assertEqual(self.quota.data["requests"]["execute-not-started"]["status"], "RELEASED")
+        self.assertNotIn("execute-not-started", self.quota.data["requests"])
 
     def test_execute_routed_request_rejects_contradictory_not_started_result(self):
         router = ProviderRoutingManager(
@@ -340,7 +340,7 @@ class ProviderServiceTests(unittest.TestCase):
             output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
         )
         output_path = self.root / "cost-report.png"
-        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-invalid-cost",
             estimated_cost=1.0, paid_approved_providers={"image"},
