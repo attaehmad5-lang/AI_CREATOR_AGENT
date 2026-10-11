@@ -73,6 +73,10 @@ class ProviderCostPolicy:
             return {"allowed": False, "status": "INVALID_PROJECT"}
         if not self._valid_amount(estimated_cost) or not self._valid_amount(free_credits_remaining):
             return {"allowed": False, "status": "INVALID_COST_AMOUNT"}
+        if not isinstance(paid_usage_approved, bool):
+            return {"allowed": False, "status": "INVALID_PAID_APPROVAL_FLAG", "provider": provider["id"]}
+        if "enabled" in provider and not isinstance(provider["enabled"], bool):
+            return {"allowed": False, "status": "INVALID_PROVIDER_CONFIGURATION", "provider": provider["id"]}
         if provider.get("enabled") is False:
             return {"allowed": False, "status": "PROVIDER_DISABLED", "provider": provider["id"]}
 
@@ -90,16 +94,20 @@ class ProviderCostPolicy:
             }
 
         budget = self.project_budgets.get(project_id)
-        if budget is not None:
-            if not self._valid_amount(budget):
-                return {"allowed": False, "status": "INVALID_PROJECT_BUDGET", "provider": provider["id"]}
-            remaining = max(0.0, budget - self._spent(project_id))
-            if estimated_cost > remaining:
-                return {
-                    "allowed": False, "status": "PROJECT_BUDGET_EXCEEDED",
-                    "provider": provider["id"], "estimated_cost": estimated_cost,
-                    "budget_remaining": remaining,
-                }
+        if budget is None:
+            return {
+                "allowed": False, "status": "PROJECT_BUDGET_REQUIRED",
+                "provider": provider["id"], "estimated_cost": estimated_cost,
+            }
+        if not self._valid_amount(budget):
+            return {"allowed": False, "status": "INVALID_PROJECT_BUDGET", "provider": provider["id"]}
+        remaining = max(0.0, budget - self._spent(project_id))
+        if estimated_cost > remaining:
+            return {
+                "allowed": False, "status": "PROJECT_BUDGET_EXCEEDED",
+                "provider": provider["id"], "estimated_cost": estimated_cost,
+                "budget_remaining": remaining,
+            }
 
         # A paid subscription/credit balance is never inferred to be approved.
         if not paid_usage_approved:
