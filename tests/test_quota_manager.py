@@ -64,6 +64,14 @@ class ProviderQuotaManagerTests(unittest.TestCase):
         self.assertEqual(loaded.usage(provider_id="image")["hourly"], 0)
         self.assertEqual(loaded.usage(provider_id="image")["daily"], 1)
 
+    def test_daily_and_monthly_quotas_reset_at_utc_calendar_boundaries(self):
+        self.now[0] = datetime(2026, 10, 31, 23, 59, tzinfo=timezone.utc)
+        self.manager.reserve(provider_id="image", request_id="before-midnight")
+        self.now[0] = datetime(2026, 11, 1, 0, 1, tzinfo=timezone.utc)
+        self.assertEqual(self.manager.usage(provider_id="image")["daily"], 0)
+        self.assertEqual(self.manager.usage(provider_id="image")["monthly"], 0)
+        self.assertEqual(self.manager.usage(provider_id="image")["hourly"], 0)
+
     def test_release_cannot_remove_committed_usage(self):
         self.manager.reserve(provider_id="image", request_id="job-1")
         self.manager.commit(request_id="job-1")
