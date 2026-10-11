@@ -21,13 +21,13 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.catalog_path.write_text(json.dumps({
             "providers": [
                 {"id": "primary", "name": "Primary", "category": "image", "auth_type": "NONE",
-                 "connection_type": "API", "enabled": True, "priority": 1, "capabilities": ["image"]},
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True, "priority": 1, "capabilities": ["image"]},
                 {"id": "fallback", "name": "Fallback", "category": "image", "auth_type": "NONE",
-                 "connection_type": "API", "enabled": True, "priority": 2, "capabilities": ["image"]},
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True, "priority": 2, "capabilities": ["image"]},
                 {"id": "disabled", "name": "Disabled", "category": "image", "auth_type": "NONE",
                  "connection_type": "API", "enabled": False, "priority": 0, "capabilities": ["image"]},
                 {"id": "voice", "name": "Voice", "category": "voice", "auth_type": "NONE",
-                 "connection_type": "API", "enabled": True, "priority": 1, "capabilities": ["voice"]},
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True, "priority": 1, "capabilities": ["voice"]},
             ]
         }), encoding="utf-8")
         self.state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
