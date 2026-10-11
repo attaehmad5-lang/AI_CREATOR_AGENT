@@ -44,6 +44,19 @@ class RetryPolicyTests(unittest.TestCase):
         self.assertFalse(result.retry)
         self.assertEqual(result.reason, "NON_IDEMPOTENT_REQUEST")
 
+    def test_invalid_jitter_source_and_status_metadata_fail_closed(self):
+        for source in (lambda: float("nan"), lambda: float("inf"), lambda: "bad", lambda: 1 / 0):
+            result = RetryPolicy(random_fn=source).decide(attempt=1, status_code=503)
+            self.assertFalse(result.retry)
+            self.assertEqual(result.reason, "INVALID_JITTER_SOURCE")
+        policy = RetryPolicy(random_fn=lambda: 0)
+        self.assertEqual(policy.decide(attempt=1, status_code=float("nan")).reason, "INVALID_STATUS_CODE")
+        self.assertEqual(policy.decide(attempt=1, status_code=True).reason, "INVALID_STATUS_CODE")
+        self.assertEqual(
+            policy.decide(attempt=1, status_code=503, idempotent="yes").reason,
+            "INVALID_IDEMPOTENCY_FLAG",
+        )
+
     def test_retry_after_http_date_is_parsed(self):
         value = RetryPolicy._retry_after_seconds("Thu, 01 Jan 1970 00:00:00 GMT")
         self.assertEqual(value, 0)
