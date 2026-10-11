@@ -97,6 +97,31 @@ class ConnectionManagerTests(unittest.TestCase):
         result = self.manager.credential_status("public_image", {})
         self.assertEqual(result["status"], "NO_CREDENTIAL_REQUIRED")
 
+    def test_credential_expiry_detection_never_exposes_token(self):
+        self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
+        secret = "do-not-print-this-token"
+        expired = self.manager.credential_status(
+            "token_image",
+            {"TEST_PROVIDER_TOKEN": secret, "TEST_PROVIDER_TOKEN_EXPIRES": "2000-01-01T00:00:00Z"},
+        )
+        self.assertEqual(expired["status"], "CREDENTIALS_EXPIRED")
+        self.assertNotIn(secret, repr(expired))
+        invalid = self.manager.credential_status(
+            "token_image",
+            {"TEST_PROVIDER_TOKEN": secret, "TEST_PROVIDER_TOKEN_EXPIRES": "not-a-date"},
+        )
+        self.assertEqual(invalid["status"], "CREDENTIAL_EXPIRY_INVALID")
+
+    def test_credential_expiring_soon_is_flagged(self):
+        from datetime import datetime, timedelta, timezone
+        self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
+        soon = (datetime.now(timezone.utc) + timedelta(seconds=120)).isoformat()
+        result = self.manager.credential_status(
+            "token_image",
+            {"TEST_PROVIDER_TOKEN": "secret-value", "TEST_PROVIDER_TOKEN_EXPIRES": soon},
+        )
+        self.assertEqual(result["status"], "CREDENTIALS_EXPIRING")
+
     def test_summary_handles_corrupt_status_without_crashing(self):
         self.manager.state["providers"]["token_image"] = {"status": "unexpected"}
         self.assertEqual(self.manager.summary()["UNKNOWN"], 1)
