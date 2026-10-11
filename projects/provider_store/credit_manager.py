@@ -168,7 +168,7 @@ class ProviderCreditManager:
                         committed_at = self._parse_timestamp(item.get("committed_at"))
                     except ValueError:
                         return {"status": "INVALID_LOCAL_USAGE_TIMESTAMP", "provider": provider_id, "verified": False}
-                    if observed < committed_at:
+                    if observed <= committed_at:
                         return {
                             "status": "CREDIT_SNAPSHOT_PREDATES_LOCAL_USAGE",
                             "provider": provider_id,
