@@ -206,6 +206,33 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             })
         self.assertEqual(opener.calls, [])
 
+    def test_catalog_api_authentication_metadata_is_accepted_for_every_allowlisted_provider(self):
+        catalog_path = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        providers = [
+            provider for provider in catalog["providers"]
+            if provider.get("auth_type") in {"API_KEY", "API_TOKEN"} and provider.get("allowed_hosts")
+        ]
+        env_names = {
+            provider["token_env"] for provider in providers
+            if isinstance(provider.get("token_env"), str)
+        }
+        environment = {name: "catalog-test-secret" for name in env_names}
+        self.assertGreaterEqual(len(providers), 25)
+        for provider in providers:
+            with self.subTest(provider=provider["id"]):
+                opener = _Opener()
+                probe = ProviderHTTPConnectivityProbe(environ=environment, opener=opener)
+                metadata = dict(provider)
+                metadata["configuration"] = {
+                    "endpoint": f"https://{provider['allowed_hosts'][0]}/health"
+                }
+                result = probe(metadata)
+                self.assertTrue(result["ok"], result)
+                headers = {key.casefold(): value for key, value in opener.calls[0][0].header_items()}
+                self.assertIn(provider.get("auth_header_name", "Authorization").casefold(), headers)
+                self.assertNotIn("catalog-test-secret", repr(result))
+
     def test_http_probe_integrates_with_connection_manager_and_persists_only_status(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
