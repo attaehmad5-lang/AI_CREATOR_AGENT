@@ -278,6 +278,24 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotEqual(rejected["status"], "CONNECTED")
         self.assertEqual(called, [])
 
+    def test_persisted_endpoint_without_allowlist_is_rejected_before_probe(self):
+        self.manager.state["providers"]["public_image"] = {
+            "status": "CONNECTED", "verified": True,
+            "configuration": {"endpoint": "https://api.example.com/health"},
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+        called = []
+        result = self.manager.verify_connectivity(
+            "public_image",
+            lambda provider, **kwargs: called.append(True) or {"ok": True},
+        )
+        self.assertEqual(result["status"], "HOST_ALLOWLIST_REQUIRED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(called, [])
+        state = self.manager.get_state("public_image")
+        self.assertEqual(state["status"], "ERROR")
+        self.assertFalse(state["verified"])
+
     def test_connectivity_never_probes_with_expired_credentials(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
