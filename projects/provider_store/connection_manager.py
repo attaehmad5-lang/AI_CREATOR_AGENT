@@ -106,6 +106,39 @@ class ConnectionManager:
     def provider_exists(self, provider_id: str) -> bool:
         return self.get_provider(provider_id) is not None
 
+    def discover_providers(
+        self,
+        *,
+        category: str | None = None,
+        capability: str | None = None,
+        enabled_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Discover catalog entries by modality/capability without probing providers."""
+        wanted_category = category.strip().casefold() if category else None
+        wanted_capability = capability.strip().casefold() if capability else None
+        discovered: list[dict[str, Any]] = []
+        for provider in self.list_providers():
+            if wanted_category and str(provider.get("category", "")).casefold() != wanted_category:
+                continue
+            if enabled_only and provider.get("enabled") is not True:
+                continue
+            if wanted_capability:
+                raw_capabilities = provider.get("capabilities", [])
+                if isinstance(raw_capabilities, str):
+                    capabilities = [raw_capabilities]
+                elif isinstance(raw_capabilities, list):
+                    capabilities = [str(item) for item in raw_capabilities]
+                else:
+                    capabilities = []
+                # Category is also a discoverable modality for simple legacy catalog entries.
+                supported = {item.casefold() for item in capabilities}
+                if provider.get("category"):
+                    supported.add(str(provider["category"]).casefold())
+                if wanted_capability not in supported:
+                    continue
+            discovered.append(dict(provider))
+        return discovered
+
     def register_provider(
         self, provider: dict[str, Any], *, overwrite: bool = False
     ) -> dict[str, Any]:
