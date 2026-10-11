@@ -1,10 +1,29 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from projects.provider_store.credit_manager import ProviderCreditManager
+
+
+def _refresh_credit_in_process(args):
+    state_path, index = args
+    fixed_now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+    manager = ProviderCreditManager(
+        state_path, clock=lambda: fixed_now
+    )
+    result = manager.refresh(
+        f"provider-{index}",
+        lambda _: {
+            "verified": True,
+            "free_credits_remaining": float(index + 1),
+            "source": "official-account-api",
+            "unit": "credits",
+        },
+    )
+    return result["status"]
 
 
 class ProviderCreditManagerTests(unittest.TestCase):
@@ -35,6 +54,18 @@ class ProviderCreditManagerTests(unittest.TestCase):
             self.path, max_age_seconds=300, clock=lambda: self.now[0]
         )
         self.assertEqual(loaded.get_balance("image-provider")["status"], "CREDIT_BALANCE_FRESH")
+
+    def test_concurrent_credit_refreshes_across_processes_preserve_all_snapshots(self):
+        args = [(str(self.path), index) for index in range(20)]
+        with ProcessPoolExecutor(max_workers=4) as pool:
+            statuses = list(pool.map(_refresh_credit_in_process, args))
+
+        self.assertEqual(statuses.count("CREDIT_BALANCE_UPDATED"), 20)
+        loaded = ProviderCreditManager(
+            self.path, clock=lambda: self.now[0]
+        )
+        self.assertEqual(len(loaded.data["providers"]), 20)
+        self.assertEqual(len(loaded.usable_free_credits()), 20)
 
     def test_stale_or_unverified_balances_never_authorize_free_routing(self):
         self.manager.refresh(
