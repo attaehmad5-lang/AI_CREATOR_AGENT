@@ -150,6 +150,25 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             ProviderHTTPConnectivityProbe(environ=[])
         with self.assertRaises(ValueError):
             ProviderHTTPConnectivityProbe(opener=object())
+        probe = ProviderHTTPConnectivityProbe(opener=_Opener())
+        provider = {
+            "id": "p", "auth_type": "NONE", "allowed_hosts": ["api.example.com"],
+            "configuration": {"endpoint": "https://api.example.com/health"},
+        }
+        with self.assertRaises(ValueError):
+            probe(provider, timeout_seconds=float("nan"))
+        with self.assertRaises(ValueError):
+            probe(provider, timeout_seconds=float("inf"))
+
+    def test_missing_host_allowlist_is_rejected_before_network(self):
+        opener = _Opener()
+        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        with self.assertRaisesRegex(ValueError, "HOST_ALLOWLIST_REQUIRED"):
+            probe({
+                "id": "p", "auth_type": "NONE",
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertEqual(opener.calls, [])
 
 
 if __name__ == "__main__":
