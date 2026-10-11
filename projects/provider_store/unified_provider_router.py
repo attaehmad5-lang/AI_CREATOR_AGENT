@@ -62,7 +62,7 @@ class UnifiedProviderRouter:
         unverified = []
         for provider in matches:
             provider_id = provider.get("id")
-            if provider.get("enabled") is not True or provider.get("subscription_required") is True:
+            if provider.get("enabled") is not True:
                 locked.append(provider)
                 continue
             try:
