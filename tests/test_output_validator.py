@@ -122,7 +122,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderOutputValidator(max_json_depth=0)
         self.assertEqual(
-            ProviderOutputValidator().validate_file("bad\\x00path.txt", modality="text")["status"],
+            ProviderOutputValidator().validate_file("bad\x00path.txt", modality="text")["status"],
             "INVALID_PATH",
         )
 
