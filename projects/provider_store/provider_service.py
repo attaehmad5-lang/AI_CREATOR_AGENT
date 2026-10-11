@@ -224,6 +224,12 @@ class ProviderService:
                         duplicate_finalization = True
                 except Exception as exc:
                     cost_result = {"status": "COST_RECONCILIATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if (
+            isinstance(cost_result, dict)
+            and cost_result.get("status") == "DUPLICATE_REQUEST"
+            and cost_result.get("saved") is True
+        ):
+            duplicate_finalization = True
         if self.quota_manager is not None:
             try:
                 quota_result = self.quota_manager.commit(request_id=request_id)
