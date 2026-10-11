@@ -146,6 +146,13 @@ class ConnectionManagerTests(unittest.TestCase):
         })
         self.assertTrue(valid["valid"], valid["errors"])
 
+    def test_catalog_schema_requires_boolean_subscription_flag(self):
+        result = ConnectionManager.validate_catalog_schema({
+            "providers": [{"id": "paid", "subscription_required": "true"}]
+        })
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("subscription_required must be boolean" in error for error in result["errors"]))
+
     def test_constructor_rejects_invalid_catalog_schema(self):
         bad_catalog = self.root / "bad_catalog.json"
         bad_catalog.write_text(json.dumps({"providers": "not-a-list"}), encoding="utf-8")
