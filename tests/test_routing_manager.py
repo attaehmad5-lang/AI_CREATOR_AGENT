@@ -123,16 +123,15 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "UNVERIFIED_FREE_CREDIT_INPUT_REJECTED")
 
-    def test_cost_policy_selects_free_credit_provider_before_paid_fallback(self):
+    def test_cost_policy_rejects_unverified_free_credit_map(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
         result = router.route(
             category="image", project_id="film", estimated_cost=1.0,
             free_credits={"fallback": 2.0},
         )
-        self.assertTrue(result["allowed"])
-        self.assertEqual(result["provider"], "fallback")
-        self.assertEqual(result["billing_mode"], "FREE_CREDITS")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "VERIFIED_CREDIT_MANAGER_REQUIRED")
 
     def test_quota_manager_blocks_over_limit_provider_and_uses_fallback(self):
         quota = ProviderQuotaManager(
