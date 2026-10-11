@@ -441,6 +441,21 @@ class ProviderRoutingManager:
                             )
                         except Exception:
                             return {"allowed": False, "status": "COST_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
+        if self.credit_manager is not None and isinstance(old_request_id, str):
+            raw_data = getattr(self.credit_manager, "data", {})
+            reservations = raw_data.get("reservations", {}) if isinstance(raw_data, dict) else {}
+            record = reservations.get(old_request_id) if isinstance(reservations, dict) else None
+            if isinstance(record, dict) and record.get("provider_id") == failed_provider:
+                has_old_reservation = True
+                if release_reservations:
+                    release_credit = getattr(self.credit_manager, "release", None)
+                    if callable(release_credit):
+                        try:
+                            released = release_credit(request_id=old_request_id, provider_id=failed_provider)
+                        except Exception:
+                            return {"allowed": False, "status": "CREDIT_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
+                        if not isinstance(released, dict) or released.get("status") not in {"RELEASED", "RESERVATION_NOT_FOUND"}:
+                            return {"allowed": False, "status": "CREDIT_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
         if self.quota_manager is not None and isinstance(old_request_id, str):
             raw_data = getattr(self.quota_manager, "data", {})
             records = raw_data.get("requests", {}) if isinstance(raw_data, dict) else {}
