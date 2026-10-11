@@ -281,6 +281,15 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_connectivity_never_probes_with_expired_credentials(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        connected = self.manager.verify_connectivity(
+            "token_image",
+            lambda provider, **kwargs: {"ok": True},
+            environ={
+                "TEST_PROVIDER_TOKEN": "private-token",
+                "TEST_PROVIDER_TOKEN_EXPIRES": "2099-01-01T00:00:00Z",
+            },
+        )
+        self.assertEqual(connected["status"], "CONNECTED")
         called = []
         result = self.manager.verify_connectivity(
             "token_image",
@@ -292,6 +301,9 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "CREDENTIALS_EXPIRED")
         self.assertEqual(called, [])
+        state = self.manager.get_state("token_image")
+        self.assertEqual(state["status"], "ERROR")
+        self.assertFalse(state["verified"])
 
     def test_summary_handles_corrupt_status_without_crashing(self):
         self.manager.state["providers"]["token_image"] = {"status": "unexpected"}
