@@ -383,6 +383,52 @@ class ConnectionManager:
         self._save()
         return {"provider": provider_id, **record, "saved": True}
 
+    @staticmethod
+    def validate_endpoint(
+        endpoint: str,
+        *,
+        allowed_hosts: set[str] | None = None,
+        allow_loopback_http: bool = False,
+    ) -> dict[str, Any]:
+        """Validate provider endpoint transport and host policy before any network request."""
+        from ipaddress import ip_address
+        from urllib.parse import urlsplit
+
+        if not isinstance(endpoint, str) or not endpoint.strip():
+            return {"valid": False, "status": "INVALID_ENDPOINT"}
+        try:
+            parsed = urlsplit(endpoint.strip())
+            hostname = parsed.hostname
+            port = parsed.port
+        except ValueError:
+            return {"valid": False, "status": "INVALID_ENDPOINT"}
+        if parsed.scheme not in {"https", "http"} or not hostname:
+            return {"valid": False, "status": "HTTPS_REQUIRED"}
+        if parsed.username is not None or parsed.password is not None:
+            return {"valid": False, "status": "EMBEDDED_CREDENTIALS_REJECTED"}
+        if parsed.fragment:
+            return {"valid": False, "status": "FRAGMENT_REJECTED"}
+        normalized_host = hostname.casefold().rstrip(".")
+        is_loopback = normalized_host == "localhost"
+        try:
+            is_loopback = is_loopback or ip_address(normalized_host).is_loopback
+        except ValueError:
+            pass
+        if parsed.scheme == "http" and not (allow_loopback_http and is_loopback):
+            return {"valid": False, "status": "HTTPS_REQUIRED"}
+        if allowed_hosts is not None:
+            normalized_allowed = {str(host).casefold().rstrip(".") for host in allowed_hosts}
+            if normalized_host not in normalized_allowed:
+                return {"valid": False, "status": "HOST_NOT_ALLOWLISTED"}
+        return {
+            "valid": True,
+            "status": "VALID",
+            "scheme": parsed.scheme,
+            "hostname": normalized_host,
+            "port": port,
+            "tls_verification_required": parsed.scheme == "https",
+        }
+
     def verify_connectivity(
         self,
         provider_id: str,
