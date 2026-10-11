@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from projects.provider_store.cost_policy import ProviderCostPolicy
@@ -152,6 +153,19 @@ class ProviderCostPolicyTests(unittest.TestCase):
             estimated_cost=3.0, paid_usage_approved=True,
         )
         self.assertEqual(decision["status"], "PROJECT_BUDGET_EXCEEDED")
+
+    def test_concurrent_reservations_cannot_overcommit_project_budget(self):
+        def reserve(index):
+            return self.policy.reserve_usage(
+                project_id="documentary",
+                provider_id="paid",
+                estimated_cost=2.0,
+                request_id=f"concurrent-{index}",
+            )
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(reserve, range(8)))
+        self.assertEqual(sum(result["status"] == "RESERVED" for result in results), 2)
+        self.assertEqual(sum(result["status"] == "PROJECT_BUDGET_EXCEEDED" for result in results), 6)
 
     def test_reconciliation_consumes_reservation_and_release_frees_budget(self):
         self.policy.reserve_usage(
