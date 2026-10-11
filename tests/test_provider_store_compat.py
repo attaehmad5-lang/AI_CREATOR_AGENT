@@ -55,6 +55,8 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             )
             self.assertTrue(verified["verified"])
             self.assertEqual(store.status()["connected_verified"], 1)
+            self.assertEqual(flow.available_providers()[0]["status"], "CONNECTED")
+            self.assertTrue(flow.available_providers()[0]["verified"])
             self.assertEqual(status_manager.get_status("test-image"), "CONNECTED")
             self.assertTrue(status_manager.is_available("test-image"))
             self.assertEqual(unlock_manager.connection_info("test-image")["status"], "CONNECTED")
