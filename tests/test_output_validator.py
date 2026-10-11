@@ -87,6 +87,14 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             "application/pdf",
         )
 
+    def test_deeply_nested_json_is_rejected_without_crashing(self):
+        validator = ProviderOutputValidator(max_size_bytes=10000)
+        path = self.root / "deep.json"
+        path.write_text("[" * 1500 + "0" + "]" * 1500, encoding="utf-8")
+        result = validator.validate_file(path, modality="json")
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "INVALID_JSON")
+
     def test_symlinks_and_unsupported_modalities_fail_closed(self):
         source = self.root / "source.txt"
         source.write_text("safe", encoding="utf-8")
