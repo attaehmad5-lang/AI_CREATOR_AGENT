@@ -207,6 +207,7 @@ class ConnectionManagerTests(unittest.TestCase):
             "status": "READY", "configuration": {"model": "local-test"},
             "last_success_at": "2026-01-01T00:00:00+00:00",
         }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
         self.manager.set_state("public_image", "ERROR")
         state = self.manager.get_state("public_image")
         self.assertEqual(state["configuration"]["model"], "local-test")
@@ -227,6 +228,7 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def test_credential_expiry_detection_never_exposes_token(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         secret = "do-not-print-this-token"
         expired = self.manager.credential_status(
             "token_image",
@@ -243,6 +245,7 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_credential_expiring_soon_is_flagged(self):
         from datetime import datetime, timedelta, timezone
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         soon = (datetime.now(timezone.utc) + timedelta(seconds=120)).isoformat()
         result = self.manager.credential_status(
             "token_image",
@@ -252,6 +255,7 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def test_connectivity_never_probes_with_expired_credentials(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         called = []
         result = self.manager.verify_connectivity(
             "token_image",
@@ -266,10 +270,12 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def test_summary_handles_corrupt_status_without_crashing(self):
         self.manager.state["providers"]["token_image"] = {"status": "unexpected"}
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
         self.assertEqual(self.manager.summary()["UNKNOWN"], 1)
 
     def test_legacy_connected_state_is_not_treated_as_verified(self):
         self.manager.state["providers"]["token_image"] = {"status": "CONNECTED"}
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
         state = self.manager.get_state("token_image")
         self.assertEqual(state["status"], "UNKNOWN")
         self.assertEqual(state["reported_status"], "CONNECTED")
@@ -341,11 +347,13 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def test_discovery_filters_by_capability(self):
         self.manager.catalog["providers"][0]["capabilities"] = ["generate", "edit"]
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         results = self.manager.discover_providers(capability="EDIT")
         self.assertEqual([item["id"] for item in results], ["public_image"])
 
     def test_discovery_enabled_only_excludes_unspecified_and_disabled(self):
         self.manager.catalog["providers"][0]["enabled"] = True
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         results = self.manager.discover_providers(enabled_only=True)
         self.assertEqual([item["id"] for item in results], ["public_image"])
 
@@ -361,6 +369,7 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def test_load_provider_rejects_disabled_provider(self):
         self.manager.catalog["providers"][0]["enabled"] = False
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         result = self.manager.load_provider("public_image", lambda metadata: object())
         self.assertEqual(result["status"], "DISABLED")
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
@@ -401,6 +410,7 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def test_provider_contract_handles_unknown_modality_explicitly(self):
         self.manager.catalog["providers"][0]["category"] = "quantum"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         result = self.manager.validate_provider_contract("public_image", object())
         self.assertEqual(result["status"], "UNSUPPORTED_MODALITY")
 
@@ -476,6 +486,7 @@ class ConnectionManagerTests(unittest.TestCase):
         self.manager.catalog["providers"][0]["official_api_url"] = "https://example.invalid"
         self.manager.catalog["providers"][0]["token_env"] = "PUBLIC_IMAGE_TOKEN"
         self.manager.catalog["providers"][0]["access_token"] = "must-not-appear"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         metadata = self.manager.get_provider_metadata("public_image")
         self.assertEqual(metadata["official_api_url"], "https://example.invalid")
         self.assertEqual(metadata["token_env"], "PUBLIC_IMAGE_TOKEN")
