@@ -1,4 +1,7 @@
-from .unlock_flow_manager import UnlockFlowManager
+try:
+    from .unlock_flow_manager import UnlockFlowManager
+except ImportError:  # direct script execution compatibility
+    from unlock_flow_manager import UnlockFlowManager
 
 class ProviderFlow:
 
