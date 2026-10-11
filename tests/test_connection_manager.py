@@ -745,6 +745,19 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(loaded["status"], "CONTRACT_VIOLATION")
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
 
+    def test_provider_contract_fails_closed_when_method_attribute_raises(self):
+        class BrokenProvider:
+            @property
+            def generate_image(self):
+                raise RuntimeError("private provider details")
+
+        instance = BrokenProvider()
+        contract = self.manager.validate_provider_contract("public_image", instance)
+        self.assertEqual(contract["status"], "CONTRACT_VIOLATION")
+        loaded = self.manager.load_provider("public_image", lambda metadata: instance)
+        self.assertEqual(loaded["status"], "CONTRACT_VIOLATION")
+        self.assertNotIn("private provider details", repr(loaded))
+
     def test_provider_contract_handles_unknown_modality_explicitly(self):
         self.manager.catalog["providers"][0]["category"] = "quantum"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
