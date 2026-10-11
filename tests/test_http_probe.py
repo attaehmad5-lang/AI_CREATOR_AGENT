@@ -213,6 +213,18 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             probe(provider, timeout_seconds=float("inf"))
 
+    def test_secret_cannot_be_sent_in_arbitrary_http_headers(self):
+        opener = _Opener()
+        probe = ProviderHTTPConnectivityProbe(environ={"HF_TOKEN": "private"}, opener=opener)
+        with self.assertRaisesRegex(ValueError, "header name is not permitted"):
+            probe({
+                "id": "huggingface", "auth_type": "API_TOKEN",
+                "token_env": "HF_TOKEN", "auth_header_name": "Host",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertEqual(opener.calls, [])
+
     def test_null_authentication_type_is_rejected(self):
         opener = _Opener()
         probe = ProviderHTTPConnectivityProbe(opener=opener)
