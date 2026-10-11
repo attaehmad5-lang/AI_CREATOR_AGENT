@@ -128,12 +128,13 @@ class ProviderCreditManagerTests(unittest.TestCase):
                 "unit": "USD", "source": "official-account-api",
             },
         )
+        stale_observation = self.now[0].isoformat()
         self.manager.reserve(
             provider_id="image-provider", amount=2.0, request_id="old-snapshot-job", unit="USD"
         )
+        self.now[0] += timedelta(seconds=5)
         self.manager.commit(request_id="old-snapshot-job")
-        stale_observation = self.now[0].isoformat()
-        self.now[0] += timedelta(seconds=10)
+        self.now[0] += timedelta(seconds=5)
         result = self.manager.refresh(
             "image-provider",
             lambda _: {
