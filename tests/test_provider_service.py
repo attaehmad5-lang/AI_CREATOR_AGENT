@@ -307,6 +307,29 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(self.quota.data["requests"]["execute-unknown"]["status"], "RESERVED")
         self.assertNotIn("secret endpoint details", repr(result))
 
+    def test_execute_routed_request_keeps_reservations_on_invalid_cost_report(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
+        )
+        output_path = self.root / "cost-report.png"
+        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="execute-invalid-cost",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": float("nan"),
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_ACCOUNTING_REQUIRED")
+        self.assertIn("execute-invalid-cost", self.cost.ledger["projects"]["film"]["reservations"])
+        self.assertEqual(self.quota.data["requests"]["execute-invalid-cost"]["status"], "COMMITTED")
+
     def test_execute_routed_request_rejects_invalid_output_but_accounts_for_started_call(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
