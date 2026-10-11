@@ -381,10 +381,16 @@ class ConnectionManager:
                 "valid": False,
                 "contract_version": "1.0",
             }
+        def has_callable(name: str) -> bool:
+            try:
+                return callable(getattr(instance, name, None))
+            except Exception:
+                return False
+
         missing = [
             " or ".join(alternatives)
             for alternatives in requirements
-            if not any(callable(getattr(instance, name, None)) for name in alternatives)
+            if not any(has_callable(name) for name in alternatives)
         ]
         return {
             "status": "VALID" if not missing else "CONTRACT_VIOLATION",
