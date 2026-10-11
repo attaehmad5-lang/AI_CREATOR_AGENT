@@ -133,24 +133,45 @@ class ProviderService:
             return {"status": "INVALID_EXECUTION_RESULT", "finalized": False}
         cost_result: dict[str, Any] | None = None
         quota_result: dict[str, Any] | None = None
+        duplicate_finalization = False
         if self.cost_policy is not None:
-            try:
-                cost_result = self.cost_policy.reconcile_usage(
-                    project_id=project_id,
-                    provider_id=provider_id,
-                    estimated_cost=estimated_cost,
-                    actual_cost=actual_cost,
-                    request_id=request_id,
-                )
-            except Exception as exc:
-                cost_result = {"status": "COST_RECONCILIATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+            ledger = getattr(self.cost_policy, "ledger", {})
+            projects = ledger.get("projects", {}) if isinstance(ledger, dict) else {}
+            project = projects.get(project_id, {}) if isinstance(projects, dict) else {}
+            requests = project.get("requests", {}) if isinstance(project, dict) else {}
+            existing = requests.get(request_id) if isinstance(requests, dict) else None
+            if isinstance(existing, dict):
+                duplicate_finalization = True
+                if (
+                    existing.get("provider_id") != provider_id
+                    or existing.get("estimated_cost") != float(estimated_cost)
+                    or existing.get("actual_cost") != float(actual_cost)
+                ):
+                    cost_result = {"status": "REQUEST_ID_CONFLICT", "saved": False}
+                else:
+                    cost_result = {"status": "DUPLICATE_REQUEST", "saved": True}
+            else:
+                try:
+                    cost_result = self.cost_policy.reconcile_usage(
+                        project_id=project_id,
+                        provider_id=provider_id,
+                        estimated_cost=estimated_cost,
+                        actual_cost=actual_cost,
+                        request_id=request_id,
+                    )
+                except Exception as exc:
+                    cost_result = {"status": "COST_RECONCILIATION_FAILED", "saved": False, "error_type": type(exc).__name__}
         if self.quota_manager is not None:
             try:
                 quota_result = self.quota_manager.commit(request_id=request_id)
+                if isinstance(quota_result, dict) and quota_result.get("status") == "ALREADY_COMMITTED":
+                    duplicate_finalization = True
             except Exception as exc:
                 quota_result = {"status": "QUOTA_COMMIT_FAILED", "committed": False, "error_type": type(exc).__name__}
         health_result: dict[str, Any] | None = None
-        if self.health_manager is not None:
+        if self.health_manager is not None and duplicate_finalization:
+            health_result = {"status": "SKIPPED_DUPLICATE_FINALIZATION", "saved": True}
+        elif self.health_manager is not None:
             try:
                 health_result = self.health_manager.record_result(
                     provider_id,
@@ -180,6 +201,8 @@ class ProviderService:
         if not all(isinstance(value, str) and value.strip() for value in (project_id, provider_id, request_id)):
             return {"status": "INVALID_USAGE_RECORD", "released": False}
         results: dict[str, Any] = {}
+        if self.cost_policy is None and self.quota_manager is None:
+            return {"status": "RESERVATION_MANAGERS_UNAVAILABLE", "released": False}
         if self.cost_policy is not None:
             release = getattr(self.cost_policy, "release_reservation", None)
             if callable(release):
