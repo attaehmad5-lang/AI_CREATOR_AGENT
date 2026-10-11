@@ -67,6 +67,22 @@ class ProviderHealthManagerTests(unittest.TestCase):
             self.manager.record_result("image", success=(i % 2 == 0))
         self.assertEqual(len(self.manager.data["providers"]["image"]["history"]), 3)
 
+    def test_invalid_manager_configuration_and_probe_timeout_are_rejected(self):
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, history_limit=True)
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, failure_threshold=1.5)
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, clock="not-callable")
+        self.assertEqual(
+            self.manager.active_probe("image", lambda **kwargs: True, timeout_seconds=float("nan"))["status"],
+            "INVALID_TIMEOUT",
+        )
+        self.assertEqual(
+            self.manager.active_probe("image", lambda **kwargs: True, timeout_seconds=float("inf"))["status"],
+            "INVALID_TIMEOUT",
+        )
+
     def test_invalid_input_is_rejected(self):
         self.assertEqual(self.manager.record_result("", success=True)["status"], "INVALID_PROVIDER")
         self.assertEqual(self.manager.record_result("image", success=True, latency_ms=-1)["status"], "INVALID_LATENCY")
