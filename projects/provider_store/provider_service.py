@@ -169,6 +169,7 @@ class ProviderService:
                     existing.get("provider_id") != provider_id
                     or existing.get("estimated_cost") != float(estimated_cost)
                     or existing.get("actual_cost") != float(actual_cost)
+                    or existing.get("execution_success", success) != success
                 ):
                     cost_result = {"status": "REQUEST_ID_CONFLICT", "saved": False}
                 else:
@@ -213,7 +214,14 @@ class ProviderService:
                         estimated_cost=estimated_cost,
                         actual_cost=actual_cost,
                         request_id=request_id,
+                        success=success,
                     )
+                    if (
+                        isinstance(cost_result, dict)
+                        and cost_result.get("status") == "DUPLICATE_REQUEST"
+                        and cost_result.get("saved") is True
+                    ):
+                        duplicate_finalization = True
                 except Exception as exc:
                     cost_result = {"status": "COST_RECONCILIATION_FAILED", "saved": False, "error_type": type(exc).__name__}
         if self.quota_manager is not None:
