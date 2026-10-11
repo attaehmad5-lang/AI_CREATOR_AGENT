@@ -76,6 +76,7 @@ class ProviderRoutingManager:
         capability: str | None = None,
         strategy: str | None = None,
         estimated_costs: dict[str, float] | None = None,
+        estimated_cost_unit: str = "USD",
         free_credits: dict[str, float] | None = None,
         request_id: str | None = None,
         paid_approved_providers: set[str] | frozenset[str] | None = None,
@@ -94,6 +95,8 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_ROUTING_STRATEGY"}
         if estimated_costs is not None and not isinstance(estimated_costs, dict):
             return {"allowed": False, "status": "INVALID_COST_ESTIMATES"}
+        if not isinstance(estimated_cost_unit, str) or not estimated_cost_unit.strip() or len(estimated_cost_unit) > 32:
+            return {"allowed": False, "status": "INVALID_COST_UNIT"}
         if free_credits is not None and not isinstance(free_credits, dict):
             return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
         if self.credit_manager is not None and free_credits is not None:
@@ -111,7 +114,7 @@ class ProviderRoutingManager:
         estimates = {} if estimated_costs is None else estimated_costs
         if self.credit_manager is not None:
             try:
-                credits = self.credit_manager.usable_free_credits()
+                credits = self.credit_manager.usable_free_credits(unit=estimated_cost_unit.strip())
             except Exception as exc:
                 return {"allowed": False, "status": "CREDIT_BALANCE_LOOKUP_FAILED", "error_type": type(exc).__name__}
             if not isinstance(credits, dict):
@@ -311,6 +314,7 @@ class ProviderRoutingManager:
                 "category": category.strip(),
                 "strategy": selected_strategy,
                 "estimated_cost": cost,
+                "estimated_cost_unit": estimated_cost_unit.strip(),
                 "health_verified": self.health_manager is not None,
                 "prior_decisions": decisions,
             }
