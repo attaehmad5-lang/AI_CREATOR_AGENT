@@ -130,11 +130,12 @@ class ProviderCostPolicy:
                 "billing_mode": "ZERO_COST", "estimated_cost": 0.0,
             }
 
-        if free_credits_remaining >= estimated_cost:
+        if free_credits_remaining > 0:
+            # A numeric balance supplied by a caller is not proof of account credit.
+            # Verified credit snapshots are consumed by ProviderRoutingManager.
             return {
-                "allowed": True, "status": "ALLOWED_FREE_CREDITS", "provider": provider["id"],
-                "billing_mode": "FREE_CREDITS", "estimated_cost": estimated_cost,
-                "free_credits_remaining": free_credits_remaining,
+                "allowed": False, "status": "VERIFIED_CREDIT_MANAGER_REQUIRED",
+                "provider": provider["id"],
             }
 
         with self._transaction():
@@ -185,6 +186,13 @@ class ProviderCostPolicy:
             return {"allowed": False, "status": "INVALID_SELECTION_INPUT"}
         if free_credits is not None and not isinstance(free_credits, dict):
             return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
+        if free_credits is not None and any(
+            not isinstance(key, str) or not self._valid_amount(value)
+            for key, value in free_credits.items()
+        ):
+            return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
+        if free_credits is not None and any(value > 0 for value in free_credits.values()):
+            return {"allowed": False, "status": "VERIFIED_CREDIT_MANAGER_REQUIRED"}
         if paid_approved_providers is not None and not isinstance(paid_approved_providers, (set, frozenset)):
             return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
         free_credits = {} if free_credits is None else free_credits
