@@ -139,7 +139,7 @@ class ConnectionManager:
     @staticmethod
     def _contains_credential_value_field(value: Any) -> bool:
         """Detect secret-bearing keys recursively while allowing environment references."""
-        safe_reference_keys = {"token_env", "api_key_env", "secret_ref", "credential_env"}
+        safe_reference_keys = {"token_env", "token_expiry_env", "api_key_env", "secret_ref", "credential_env"}
         forbidden_keys = {
             "api_key", "apikey", "api_token", "token", "access_token",
             "refresh_token", "password", "secret", "credential", "credential_value",
@@ -243,7 +243,7 @@ class ConnectionManager:
         for key, value in provider.items():
             normalized = str(key).casefold().replace("-", "_")
             # Environment-variable/reference names are metadata, not credential values.
-            if normalized in {"token_env", "api_key_env", "secret_ref", "credential_env"}:
+            if normalized in {"token_env", "token_expiry_env", "api_key_env", "secret_ref", "credential_env"}:
                 safe[key] = value
                 continue
             if any(term in normalized for term in ("password", "secret", "credential", "api_key", "apikey", "access_token", "refresh_token")):
@@ -481,7 +481,7 @@ class ConnectionManager:
         """Recursively remove credential-like values from data returned to callers."""
         if isinstance(value, dict):
             safe: dict[str, Any] = {}
-            safe_reference_keys = {"token_env", "api_key_env", "secret_ref", "credential_env"}
+            safe_reference_keys = {"token_env", "token_expiry_env", "api_key_env", "secret_ref", "credential_env"}
             secret_fragments = (
                 "password", "secret", "credential", "api_key", "apikey",
                 "access_token", "refresh_token", "token", "authorization",
