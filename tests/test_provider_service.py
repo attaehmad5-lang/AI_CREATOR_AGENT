@@ -242,6 +242,94 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
+    def test_execute_routed_request_validates_output_and_finalizes_usage(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        output_path = self.root / "generated.png"
+        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="execute-success",
+            estimated_cost=0.0, adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 5.0,
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertTrue(result["output"]["valid"])
+        self.assertTrue(result["finalization"]["finalized"])
+        self.assertEqual(result["provider"], "image")
+
+    def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="execute-not-started",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=lambda **kwargs: {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
+        self.assertTrue(result["release"]["released"])
+        self.assertNotIn("execute-not-started", self.cost.ledger["projects"]["film"]["reservations"])
+        self.assertEqual(self.quota.data["requests"]["execute-not-started"]["status"], "RELEASED")
+
+    def test_execute_routed_request_retains_reservations_after_ambiguous_adapter_error(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        def adapter(**kwargs):
+            raise TimeoutError("secret endpoint details")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="execute-unknown",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=adapter, modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
+        self.assertTrue(result["reservations_retained"])
+        self.assertIn("execute-unknown", self.cost.ledger["projects"]["film"]["reservations"])
+        self.assertEqual(self.quota.data["requests"]["execute-unknown"]["status"], "RESERVED")
+        self.assertNotIn("secret endpoint details", repr(result))
+
+    def test_execute_routed_request_rejects_invalid_output_but_accounts_for_started_call(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
+        )
+        output_path = self.root / "not-image.png"
+        output_path.write_text("not an image", encoding="utf-8")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="execute-bad-output",
+            estimated_cost=0.0, adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "OUTPUT_VALIDATION_FAILED")
+        self.assertFalse(result["output"]["valid"])
+        self.assertTrue(result["finalization"]["finalized"])
+        self.assertEqual(self.quota.data["requests"]["execute-bad-output"]["status"], "COMMITTED")
+
     def test_unstarted_request_releases_reservations_only_when_explicitly_called(self):
         self.cost.reserve_usage(
             project_id="film", provider_id="image", estimated_cost=2.0, request_id="job-2"
