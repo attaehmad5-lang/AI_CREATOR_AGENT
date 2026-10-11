@@ -345,6 +345,21 @@ class ProviderCostPolicyTests(unittest.TestCase):
             {"projects": {"documentary": {"actual_spend": float("nan"), "requests": {}}}},
             {"projects": {"documentary": {"actual_spend": 0.0, "requests": []}}},
             {"projects": {"": {"actual_spend": 0.0, "requests": {}}}},
+            {"projects": {"documentary": {
+                "actual_spend": 0.0,
+                "requests": {"job": {
+                    "provider_id": "paid", "estimated_cost": 1.0, "actual_cost": 3.0,
+                    "recorded_at": "2026-10-11T00:00:00+00:00",
+                }},
+            }}},
+            {"projects": {"documentary": {
+                "actual_spend": 2.0,
+                "requests": {"job": {
+                    "provider_id": "paid", "estimated_cost": 1.0, "actual_cost": 1.0,
+                    "recorded_at": "2026-10-11T00:00:00+00:00",
+                    "charge_outcome": "invalid",
+                }},
+            }}},
         )
         for index, ledger in enumerate(corrupt_ledgers):
             with self.subTest(index=index):
