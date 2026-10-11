@@ -167,6 +167,17 @@ class ConnectionManagerTests(unittest.TestCase):
         })
         self.assertTrue(valid["valid"], valid["errors"])
 
+    def test_catalog_schema_rejects_literal_secret_in_secret_reference(self):
+        result = ConnectionManager.validate_catalog_schema({
+            "providers": [{"id": "provider", "secret_ref": "token=private-value"}]
+        })
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("secret_ref must be a safe" in error for error in result["errors"]))
+        valid = ConnectionManager.validate_catalog_schema({
+            "providers": [{"id": "provider", "secret_ref": "vault://provider/access-token"}]
+        })
+        self.assertTrue(valid["valid"], valid["errors"])
+
     def test_catalog_schema_requires_boolean_subscription_flag(self):
         result = ConnectionManager.validate_catalog_schema({
             "providers": [{"id": "paid", "subscription_required": "true"}]
