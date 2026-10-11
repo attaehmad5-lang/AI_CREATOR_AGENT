@@ -1,7 +1,7 @@
 import json
 import tempfile
 import unittest
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -24,6 +24,18 @@ def _refresh_credit_in_process(args):
         },
     )
     return result["status"]
+
+
+def _reserve_credit_in_process(args):
+    state_path, index = args
+    fixed_now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+    manager = ProviderCreditManager(state_path, clock=lambda: fixed_now)
+    return manager.reserve(
+        provider_id="shared-provider",
+        amount=2.0,
+        request_id=f"credit-job-{index}",
+        unit="USD",
+    )["status"]
 
 
 class ProviderCreditManagerTests(unittest.TestCase):
@@ -66,6 +78,68 @@ class ProviderCreditManagerTests(unittest.TestCase):
         )
         self.assertEqual(len(loaded.data["providers"]), 20)
         self.assertEqual(len(loaded.usable_free_credits()), 20)
+
+    def test_credit_reservations_prevent_concurrent_overspend_across_processes(self):
+        self.manager.refresh(
+            "shared-provider",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 5.0,
+                "unit": "USD", "source": "official-account-api",
+            },
+        )
+        args = [(str(self.path), index) for index in range(12)]
+        with ProcessPoolExecutor(max_workers=4) as pool:
+            statuses = list(pool.map(_reserve_credit_in_process, args))
+        self.assertEqual(statuses.count("RESERVED"), 2)
+        self.assertEqual(statuses.count("INSUFFICIENT_FREE_CREDITS"), 10)
+        self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"shared-provider": 1.0})
+
+    def test_committed_credit_usage_is_counted_until_a_new_snapshot(self):
+        self.manager.refresh(
+            "image-provider",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 5.0,
+                "unit": "USD", "source": "official-account-api",
+            },
+        )
+        self.assertEqual(
+            self.manager.reserve(
+                provider_id="image-provider", amount=2.0, request_id="credit-job", unit="USD"
+            )["status"],
+            "RESERVED",
+        )
+        self.assertEqual(self.manager.commit(request_id="credit-job")["status"], "COMMITTED")
+        self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 3.0})
+        blocked_refresh = self.manager.refresh(
+            "image-provider",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 3.0,
+                "unit": "USD", "source": "official-account-api",
+            },
+        )
+        self.assertEqual(blocked_refresh["status"], "CREDIT_BALANCE_UPDATED")
+        self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 3.0})
+
+    def test_credit_refresh_is_blocked_while_reservation_is_in_flight(self):
+        self.manager.refresh(
+            "image-provider",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 5.0,
+                "unit": "USD", "source": "official-account-api",
+            },
+        )
+        self.manager.reserve(
+            provider_id="image-provider", amount=2.0, request_id="pending-credit-job", unit="USD"
+        )
+        result = self.manager.refresh(
+            "image-provider",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 4.0,
+                "unit": "USD", "source": "official-account-api",
+            },
+        )
+        self.assertEqual(result["status"], "CREDIT_RESERVATIONS_IN_FLIGHT")
+        self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 3.0})
 
     def test_stale_or_unverified_balances_never_authorize_free_routing(self):
         self.manager.refresh(
