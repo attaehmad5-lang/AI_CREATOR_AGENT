@@ -354,6 +354,17 @@ class ConnectionManagerTests(unittest.TestCase):
         missing = manager.credential_status("google_image", {})
         self.assertEqual(missing["status"], "CREDENTIALS_MISSING")
 
+    def test_connectivity_fails_closed_when_state_json_is_corrupt(self):
+        self.state_path.write_text("{corrupt-json", encoding="utf-8")
+        called = []
+        result = self.manager.verify_connectivity(
+            "public_image",
+            lambda provider, **kwargs: called.append(True) or {"ok": True},
+        )
+        self.assertEqual(result["status"], "STATE_READ_FAILED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(called, [])
+
     def test_connectivity_never_probes_with_expired_credentials(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
