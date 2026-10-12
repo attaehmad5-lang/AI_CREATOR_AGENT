@@ -84,7 +84,15 @@ class PollinationsBalanceProbe:
                 raise PermissionError("Pollinations balance access was rejected; verify token and account scope") from None
             if 300 <= status < 400:
                 raise ConnectionError("Pollinations balance endpoint redirected; redirects are not followed") from None
-            raise ConnectionError(f"Pollinations balance endpoint returned HTTP {status}") from None
+            retry_after = None
+            raw_retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            if (
+                isinstance(raw_retry_after, str)
+                and len(raw_retry_after) <= 128
+                and not any(ord(char) < 32 or ord(char) == 127 for char in raw_retry_after)
+            ):
+                retry_after = raw_retry_after
+            raise ProviderHTTPStatusError(status, retry_after) from None
         except URLError as exc:
             reason = getattr(exc, "reason", None)
             if isinstance(reason, TimeoutError) or "timeout" in type(reason).__name__.casefold():
