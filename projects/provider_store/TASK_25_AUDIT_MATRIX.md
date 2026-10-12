@@ -2,7 +2,7 @@
 
 **Overall status: IN PROGRESS.** PR #1 was merged before Task #25 was complete. Follow-up hardening is isolated in draft PR #7; do not merge it without explicit user approval.
 
-The exact canonical feature names, original baseline markers and item-by-item evidence are maintained in [\`TASK25_CANONICAL_138_ITEM_LEDGER.md\`](TASK25_CANONICAL_138_ITEM_LEDGER.md). This summary preserves the original A–P headings and ranges; it does not replace the detailed ledger.
+The exact canonical feature names, original baseline markers and item-by-item evidence are maintained in the [canonical 138-item verification ledger](TASK25_CANONICAL_138_ITEM_LEDGER.md). This summary preserves the original A–P headings and ranges; it does not replace the detailed ledger.
 
 ## Latest code verification
 
