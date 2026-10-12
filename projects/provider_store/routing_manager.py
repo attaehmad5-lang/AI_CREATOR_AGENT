@@ -127,6 +127,8 @@ class ProviderRoutingManager:
         project_id: str,
         estimated_cost: float = 0.0,
         capability: str | None = None,
+        model: str | None = None,
+        model_version: str | None = None,
         strategy: str | None = None,
         estimated_costs: dict[str, float] | None = None,
         estimated_cost_unit: str = "USD",
@@ -148,6 +150,19 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_ROUTING_STRATEGY"}
         if estimated_costs is not None and not isinstance(estimated_costs, dict):
             return {"allowed": False, "status": "INVALID_COST_ESTIMATES"}
+        if model is not None and (
+            not isinstance(model, str) or not model.strip() or len(model) > 200
+            or any(term in model.casefold() for term in ("api_key=", "token=", "password=", "secret="))
+        ):
+            return {"allowed": False, "status": "INVALID_MODEL"}
+        if model_version is not None and (
+            model is None
+            or not isinstance(model_version, str)
+            or not model_version.strip()
+            or len(model_version) > 100
+            or any(term in model_version.casefold() for term in ("api_key=", "token=", "password=", "secret="))
+        ):
+            return {"allowed": False, "status": "INVALID_MODEL_VERSION"}
         if not isinstance(estimated_cost_unit, str) or not estimated_cost_unit.strip() or len(estimated_cost_unit) > 32:
             return {"allowed": False, "status": "INVALID_COST_UNIT"}
         if free_credits is not None and not isinstance(free_credits, dict):
@@ -208,6 +223,34 @@ class ProviderRoutingManager:
             }
         if not isinstance(discovered, list):
             return {"allowed": False, "status": "PROVIDER_DISCOVERY_FAILED", "reason": "INVALID_DISCOVERY_RESULT"}
+        decisions: list[dict[str, Any]] = []
+        if model is not None:
+            model_candidates: list[dict[str, Any]] = []
+            for item in discovered:
+                if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                    continue
+                try:
+                    configuration_result = self.connection_manager.get_provider_configuration(item["id"])
+                except Exception as exc:
+                    decisions.append({"provider": item["id"], "status": "MODEL_CONFIGURATION_LOOKUP_FAILED", "error_type": type(exc).__name__})
+                    continue
+                if not isinstance(configuration_result, dict) or configuration_result.get("status") not in {"CONFIGURED", "NO_CONFIGURATION"}:
+                    decisions.append({"provider": item["id"], "status": "MODEL_CONFIGURATION_INVALID"})
+                    continue
+                configuration = configuration_result.get("configuration", {})
+                configured_model = configuration.get("model") if isinstance(configuration, dict) else None
+                configured_version = configuration.get("model_version") if isinstance(configuration, dict) else None
+                if not isinstance(configured_model, str) or configured_model.casefold() != model.strip().casefold():
+                    decisions.append({"provider": item["id"], "status": "MODEL_NOT_CONFIGURED_OR_MISMATCHED"})
+                    continue
+                if model_version is not None and (
+                    not isinstance(configured_version, str)
+                    or configured_version.casefold() != model_version.strip().casefold()
+                ):
+                    decisions.append({"provider": item["id"], "status": "MODEL_VERSION_MISMATCH"})
+                    continue
+                model_candidates.append(item)
+            discovered = model_candidates
         if selected_strategy == "PRIMARY_ONLY":
             # Freeze the primary choice before connection, health, cost, credit, or
             # quota filtering. A rejected primary must not turn the fallback into
@@ -218,7 +261,6 @@ class ProviderRoutingManager:
             )[:1]
 
         candidates: list[dict[str, Any]] = []
-        decisions: list[dict[str, Any]] = []
         for provider in discovered:
             if not isinstance(provider, dict):
                 continue
