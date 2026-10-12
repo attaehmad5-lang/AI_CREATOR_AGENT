@@ -146,6 +146,7 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                 capabilities = provider.get("capabilities")
                 self.assertIsInstance(capabilities, list)
                 self.assertTrue(capabilities)
+                self.assertTrue(provider.get("official_api_url", "").startswith("https://"))
                 self.assertEqual(len(capabilities), len(set(capabilities)))
                 self.assertTrue(all(
                     isinstance(item, str) and item == item.casefold() and item.strip()
