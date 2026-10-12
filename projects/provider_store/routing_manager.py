@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import math
 import threading
+
+from .safe_numbers import finite_number
 from typing import Any
 
 
@@ -59,19 +61,14 @@ class ProviderRoutingManager:
 
     @staticmethod
     def _valid_amount(value: Any) -> bool:
-        return (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(value)
-            and value >= 0
-        )
+        return finite_number(value, minimum=0) is not None
 
     @staticmethod
     def _priority(provider: dict[str, Any]) -> tuple[float, str]:
-        value = provider.get("priority", 1000)
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
-            value = 1000
-        return float(value), str(provider.get("id", ""))
+        value = finite_number(provider.get("priority", 1000))
+        if value is None:
+            value = 1000.0
+        return value, str(provider.get("id", ""))
 
     def _cleanup_new_reservations(
         self,
