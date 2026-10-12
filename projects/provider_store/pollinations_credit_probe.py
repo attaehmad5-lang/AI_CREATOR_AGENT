@@ -1,8 +1,9 @@
-"""Pollinations account-balance probe for verified free-credit routing.
+"""Read-only Pollinations account-balance probe.
 
-Uses the official non-generation account balance endpoint. A user-authorized,
-unexpired access token must be supplied in memory; this module never persists,
-prints, or returns the token. It does not call any generation endpoint.
+The endpoint reports a remaining pollen budget that may combine tier, pack, and
+crypto balances. It does NOT identify which portion is free, so this result must
+never be passed to ProviderCreditManager or treated as free-credit authorization.
+A user-authorized, unexpired access token is supplied in memory only.
 """
 from __future__ import annotations
 
@@ -113,8 +114,9 @@ class PollinationsBalanceProbe:
                 raise ValueError("Pollinations balance response contains an invalid balance")
             return {
                 "verified": True,
-                "free_credits_remaining": float(balance),
+                "balance": float(balance),
                 "unit": "pollen",
+                "balance_type": "remaining_account_budget",
                 "source": "pollinations.account.balance",
             }
         finally:
