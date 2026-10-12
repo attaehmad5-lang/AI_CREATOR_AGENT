@@ -13,6 +13,17 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         self.assertEqual(primary.get("version"), master.get("version"))
         self.assertEqual(primary.get("providers"), master.get("providers"))
 
+    def test_schema_rejects_enabled_api_provider_without_allowlist(self):
+        result = ConnectionManager.validate_catalog_schema({
+            "providers": [{
+                "id": "unsafe_api", "name": "Unsafe API",
+                "category": "image", "auth_type": "NONE",
+                "connection_type": "API", "enabled": True,
+            }]
+        })
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("allowed_hosts is required" in error for error in result["errors"]))
+
     def test_enabled_api_providers_have_explicit_host_allowlists(self):
         root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
         catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
