@@ -200,6 +200,33 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                     result = manager.validate_provider_contract(provider["id"], adapter)
                     self.assertTrue(result["valid"], result)
 
+    def test_supported_model_metadata_requires_unique_safe_ids_and_versions(self):
+        provider = {
+            "id": "model_provider", "name": "Model Provider",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "API", "enabled": False,
+            "subscription_required": False,
+            "supported_models": [{"id": "publisher/model-v1", "versions": ["1.0", "1.1"]}],
+        }
+        valid = ConnectionManager.validate_catalog_schema({
+            "version": "3.0", "providers": [provider],
+        })
+        self.assertTrue(valid["valid"], valid["errors"])
+        invalid_records = (
+            [{"id": "../unsafe", "versions": ["1.0"]}],
+            [{"id": "model", "versions": ["1.0", "1.0"]}],
+            [{"id": "model"}, {"id": "MODEL"}],
+            ["model"],
+        )
+        for records in invalid_records:
+            with self.subTest(records=records):
+                candidate = json.loads(json.dumps(provider))
+                candidate["supported_models"] = records
+                result = ConnectionManager.validate_catalog_schema({
+                    "version": "3.0", "providers": [candidate],
+                })
+                self.assertFalse(result["valid"])
+
     def test_capability_identifiers_must_be_bounded_unique_and_normalized(self):
         base = {
             "version": "3.0",
