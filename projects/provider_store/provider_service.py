@@ -83,6 +83,42 @@ class ProviderService:
             "health": health,
         }
 
+    def verify_http_provider(
+        self,
+        provider_id: str,
+        *,
+        timeout_seconds: float = 5.0,
+        environ: dict[str, str] | None = None,
+        opener: Any = None,
+        max_response_bytes: int = 4096,
+    ) -> dict[str, Any]:
+        """Verify a configured allowlisted HTTPS endpoint using the built-in safe probe.
+
+        This checks reachability and authentication only; it does not certify model
+        support, account credits, generation quality, or provider-specific capabilities.
+        """
+        try:
+            from .http_probe import ProviderHTTPConnectivityProbe
+
+            probe = ProviderHTTPConnectivityProbe(
+                environ=environ,
+                opener=opener,
+                max_response_bytes=max_response_bytes,
+            )
+        except Exception as exc:
+            return {
+                "status": "HTTP_PROBE_CONFIGURATION_INVALID",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        return self.verify_provider(
+            provider_id,
+            probe,
+            timeout_seconds=timeout_seconds,
+            environ=environ,
+        )
+
     def verify_manual_provider(
         self,
         provider_id: str,
