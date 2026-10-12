@@ -68,6 +68,26 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertEqual(len(record["history"]), 20)
         self.assertEqual(record["consecutive_failures"], 20)
 
+    def test_request_id_makes_health_recording_idempotent_and_conflict_safe(self):
+        first = self.manager.record_result(
+            "image", success=True, latency_ms=20, request_id="job-health-1"
+        )
+        duplicate = ProviderHealthManager(
+            self.path, history_limit=3, failure_threshold=2,
+            clock=lambda: self.now[0],
+        ).record_result(
+            "image", success=True, latency_ms=99, request_id="job-health-1"
+        )
+        conflict = self.manager.record_result(
+            "image", success=False, error_code="HTTP_503", request_id="job-health-1"
+        )
+        self.assertTrue(first["saved"])
+        self.assertTrue(duplicate["saved"])
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(conflict["status"], "HEALTH_EVENT_ID_CONFLICT")
+        self.assertFalse(conflict["saved"])
+        self.assertEqual(len(self.manager.data["providers"]["image"]["history"]), 1)
+
     def test_success_and_failure_history_persist(self):
         self.manager.record_result("image", success=True, latency_ms=42)
         self.manager.record_result("image", success=False, error_code="HTTP_503")
