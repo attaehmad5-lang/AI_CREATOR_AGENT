@@ -14,6 +14,20 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         self.assertEqual(primary.get("version"), master.get("version"))
         self.assertEqual(primary.get("providers"), master.get("providers"))
 
+    def test_catalog_rejects_paid_subscription_marked_as_zero_cost(self):
+        result = ConnectionManager.validate_catalog_schema({
+            "version": "3.0",
+            "providers": [{
+                "id": "contradictory_cost", "name": "Contradictory Cost",
+                "category": "image", "auth_type": "API_KEY",
+                "connection_type": "API", "enabled": False,
+                "allowed_hosts": ["api.example.com"],
+                "subscription_required": True, "zero_cost_allowed": True,
+            }],
+        })
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("cannot require a subscription" in error for error in result["errors"]))
+
     def test_schema_rejects_enabled_api_provider_without_allowlist(self):
         result = ConnectionManager.validate_catalog_schema({
             "version": "3.0",
