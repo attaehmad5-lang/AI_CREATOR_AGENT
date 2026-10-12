@@ -119,6 +119,56 @@ class ProviderService:
             environ=environ,
         )
 
+    def verify_oauth_provider(
+        self,
+        provider_id: str,
+        oauth_manager: Any,
+        *,
+        timeout_seconds: float = 5.0,
+        environ: dict[str, str] | None = None,
+        opener: Any = None,
+        max_response_bytes: int = 4096,
+    ) -> dict[str, Any]:
+        """Verify a provider using an access token held only by an OAuth manager in memory.
+
+        The access token is passed to the probe through an ephemeral environment mapping;
+        it is never written to connection state, health history, or this result.
+        Token refresh is explicit: call the OAuth manager's refresh method only when the
+        provider supports it and the user-authorized session allows it.
+        """
+        if not callable(getattr(oauth_manager, "get_access_token", None)):
+            return {"status": "OAUTH_MANAGER_INVALID", "provider": provider_id, "verified": False}
+        provider = self.connection_manager.get_provider(provider_id)
+        if not isinstance(provider, dict):
+            return {"status": "NOT_FOUND", "provider": provider_id, "verified": False}
+        token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env")
+        if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
+            return {"status": "OAUTH_TOKEN_ENV_REFERENCE_INVALID", "provider": provider_id, "verified": False}
+        try:
+            access_token = oauth_manager.get_access_token(provider_id)
+        except Exception as exc:
+            return {
+                "status": "OAUTH_TOKEN_LOOKUP_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(access_token, str) or not access_token.strip() or len(access_token) > 16384 or any(
+            ord(char) < 32 or ord(char) == 127 for char in access_token
+        ):
+            return {"status": "OAUTH_ACCESS_TOKEN_UNAVAILABLE", "provider": provider_id, "verified": False}
+        if environ is not None and not isinstance(environ, dict):
+            return {"status": "INVALID_ENVIRONMENT", "provider": provider_id, "verified": False}
+        ephemeral_environment = dict(environ or {})
+        ephemeral_environment[token_env] = access_token
+        return self.verify_http_provider(
+            provider_id,
+            timeout_seconds=timeout_seconds,
+            environ=ephemeral_environment,
+            opener=opener,
+            max_response_bytes=max_response_bytes,
+        )
+
     def verify_manual_provider(
         self,
         provider_id: str,
