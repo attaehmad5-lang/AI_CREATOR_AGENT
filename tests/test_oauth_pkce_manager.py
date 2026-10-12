@@ -66,6 +66,7 @@ class ProviderOAuthPKCEManagerTests(unittest.TestCase):
             "token_url": self.token_url,
             "client_id_env": "PROVIDER_APP_CLIENT_ID",
             "redirect_uri": self.redirect_uri,
+            "allowed_redirect_uris": [self.redirect_uri],
             "allowed_hosts": self.allowed_hosts,
             "scopes": ["usage", "profile"],
         }
