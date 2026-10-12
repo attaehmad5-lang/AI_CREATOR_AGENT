@@ -613,6 +613,23 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(self.quota.data["requests"]["job-2"]["status"], "RELEASED")
         self.assertEqual(self.quota.usage(provider_id="image")["daily"], 0)
 
+    def test_unstarted_release_fails_closed_when_configured_manager_has_no_release_method(self):
+        self.cost.release_reservation = None
+        self.quota.release = None
+        credits = ProviderCreditManager(self.root / "missing-release-credits.json")
+        credits.release = None
+        self.service.credit_manager = credits
+
+        result = self.service.release_unstarted_request(
+            project_id="film", provider_id="image", request_id="missing-release-methods"
+        )
+
+        self.assertFalse(result["released"])
+        self.assertEqual(result["status"], "RELEASE_PARTIAL")
+        self.assertEqual(result["cost"]["status"], "COST_RELEASE_MANAGER_UNAVAILABLE")
+        self.assertEqual(result["quota"]["status"], "QUOTA_RELEASE_MANAGER_UNAVAILABLE")
+        self.assertEqual(result["credits"]["status"], "CREDIT_RELEASE_MANAGER_UNAVAILABLE")
+
     def test_failed_started_request_retains_cost_reservation_when_charge_is_unknown(self):
         self.cost.reserve_usage(
             project_id="film", provider_id="image", estimated_cost=2.0, request_id="job-failed-unknown"
