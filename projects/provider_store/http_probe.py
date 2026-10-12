@@ -130,7 +130,8 @@ class ProviderHTTPConnectivityProbe:
         configuration = provider.get("configuration", {})
         if not isinstance(configuration, dict):
             raise ValueError("provider configuration is invalid")
-        endpoint = configuration.get("endpoint")
+        # Prefer a dedicated non-billable authentication/health endpoint when configured.
+        endpoint = configuration.get("probe_endpoint") or configuration.get("endpoint")
         if not isinstance(endpoint, str) or not endpoint.strip():
             raise ValueError("ENDPOINT_NOT_CONFIGURED")
         allowed_hosts = provider.get("allowed_hosts")
