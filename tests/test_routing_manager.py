@@ -402,6 +402,25 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         reservations = policy.ledger["projects"]["film"]["reservations"]
         self.assertNotIn("paid-job", reservations)
 
+    def test_already_reserved_quota_rolls_back_new_cost_reservation(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        quota = ProviderQuotaManager(
+            self.root / "quota-already-reserved.json",
+            limits={"primary": {"hourly": 2}, "fallback": {"hourly": 2}},
+        )
+        quota.reserve(provider_id="primary", request_id="paid-job")
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=policy, quota_manager=quota
+        )
+        result = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary"}, request_id="paid-job",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "REQUEST_ALREADY_RESERVED")
+        self.assertNotIn("paid-job", policy.ledger["projects"]["film"]["reservations"])
+        self.assertEqual(result["reservation_cleanup"], [{"manager": "cost", "released": True}])
+
     def test_quota_rejection_does_not_release_preexisting_cost_reservation(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
         quota = ProviderQuotaManager(
