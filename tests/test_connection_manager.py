@@ -453,6 +453,18 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(public_config["status"], "SENSITIVE_CONFIGURATION_REJECTED")
         self.assertEqual(public_config["configuration"], {})
 
+        self.manager.state["providers"]["public_image"]["configuration"] = {
+            "unrecognized_field": "unexpected value",
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+        invalid = self.manager.configure_provider("public_image", model="safe-model")
+        self.assertEqual(invalid["status"], "INVALID_CONFIGURATION")
+        self.assertFalse(invalid["saved"])
+        self.assertEqual(
+            self.manager.get_provider_configuration("public_image")["status"],
+            "INVALID_CONFIGURATION",
+        )
+
     def test_configured_endpoint_and_model_are_passed_to_probe(self):
         self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
