@@ -471,7 +471,7 @@ class ConnectionManagerTests(unittest.TestCase):
         missing = manager.credential_status("google_image", {})
         self.assertEqual(missing["status"], "CREDENTIALS_MISSING")
         env_names = (
-            "HF_TOKEN", "REPLICATE_API_TOKEN", "OPENAI_API_KEY", "GOOGLE_API_KEY",
+            "HF_TOKEN", "POLLINATIONS_API_KEY", "REPLICATE_API_TOKEN", "OPENAI_API_KEY", "GOOGLE_API_KEY",
             "RECRAFT_API_KEY", "IDEOGRAM_API_KEY", "BFL_API_KEY", "STABILITY_API_KEY",
             "FAL_KEY", "ELEVENLABS_API_KEY", "CARTESIA_API_KEY", "PLAYHT_API_KEY",
             "DEEPGRAM_API_KEY", "RUNWAY_API_KEY", "KLING_API_KEY", "LUMA_API_KEY",
