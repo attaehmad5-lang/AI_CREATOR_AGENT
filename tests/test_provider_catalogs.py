@@ -98,7 +98,10 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                     "version": "3.0", "providers": [incomplete],
                 })
                 self.assertFalse(result["valid"])
-                self.assertTrue(any(field in error and "required" in error for error in result["errors"]))
+                expected_fragment = "non-empty list" if field == "capabilities" else "required"
+                self.assertTrue(
+                    any(field in error and expected_fragment in error for error in result["errors"])
+                )
 
     def test_enabled_v3_provider_requires_official_docs_and_capabilities(self):
         base = {
