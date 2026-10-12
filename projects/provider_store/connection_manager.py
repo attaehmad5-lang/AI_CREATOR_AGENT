@@ -1009,7 +1009,9 @@ class ConnectionManager:
                 ord(char) < 32 or ord(char) == 127 for char in retry_after
             ):
                 retry_after = None
-            if http_status == 429:
+            if http_status in {401, 403}:
+                status = "AUTHENTICATION_OR_PERMISSION_FAILED"
+            elif http_status == 429:
                 status = "RATE_LIMITED"
             elif http_status is not None and 500 <= http_status <= 599:
                 status = "PROVIDER_UNAVAILABLE"
