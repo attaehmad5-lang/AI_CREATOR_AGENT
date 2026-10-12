@@ -74,12 +74,13 @@ class ProviderJSONBalanceProbe:
             raise ValueError("INVALID_AUTH_HEADER")
         if not isinstance(auth_scheme, str) or auth_scheme.casefold() not in self._ALLOWED_SCHEMES:
             raise ValueError("INVALID_AUTH_SCHEME")
-        if (
-            not isinstance(timeout_seconds, (int, float))
-            or isinstance(timeout_seconds, bool)
-            or not math.isfinite(timeout_seconds)
-            or timeout_seconds <= 0
-        ):
+        if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool):
+            raise ValueError("INVALID_TIMEOUT")
+        try:
+            timeout_value = float(timeout_seconds)
+        except (OverflowError, TypeError, ValueError):
+            raise ValueError("INVALID_TIMEOUT") from None
+        if not math.isfinite(timeout_value) or timeout_value <= 0:
             raise ValueError("INVALID_TIMEOUT")
         if (
             not isinstance(max_response_bytes, int)
@@ -103,7 +104,7 @@ class ProviderJSONBalanceProbe:
         self.source = source.strip()
         self.auth_header_name = auth_header_name
         self.auth_scheme = auth_scheme
-        self.timeout_seconds = float(timeout_seconds)
+        self.timeout_seconds = timeout_value
         self.max_response_bytes = max_response_bytes
         self.environ = os.environ if environ is None else environ
         self.opener = opener or build_opener(_RejectRedirects())
@@ -157,18 +158,19 @@ class ProviderJSONBalanceProbe:
             if not isinstance(data, dict) or self.balance_field not in data:
                 return {"status": "BALANCE_FIELD_MISSING", "provider": provider_id, "verified": False}
             amount = data[self.balance_field]
-            if (
-                not isinstance(amount, (int, float))
-                or isinstance(amount, bool)
-                or not math.isfinite(amount)
-                or amount < 0
-            ):
+            if not isinstance(amount, (int, float)) or isinstance(amount, bool):
+                return {"status": "BALANCE_AMOUNT_INVALID", "provider": provider_id, "verified": False}
+            try:
+                numeric_amount = float(amount)
+            except (OverflowError, TypeError, ValueError):
+                return {"status": "BALANCE_AMOUNT_INVALID", "provider": provider_id, "verified": False}
+            if not math.isfinite(numeric_amount) or numeric_amount < 0:
                 return {"status": "BALANCE_AMOUNT_INVALID", "provider": provider_id, "verified": False}
             return {
                 "status": "BALANCE_VERIFIED",
                 "provider": provider_id,
                 "verified": True,
-                "free_credits_remaining": float(amount),
+                "free_credits_remaining": numeric_amount,
                 "unit": self.unit,
                 "source": self.source,
             }
