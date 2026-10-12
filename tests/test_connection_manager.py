@@ -726,6 +726,24 @@ class ConnectionManagerTests(unittest.TestCase):
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertEqual(reloaded.get_provider("local_image")["name"], "Local Image")
 
+    def test_register_provider_rejects_invalid_schema_before_persisting(self):
+        base = {
+            "name": "Invalid Provider", "category": "image",
+            "connection_type": "API", "enabled": True,
+            "allowed_hosts": ["api.example.com"],
+        }
+        invalid_auth = self.manager.register_provider({
+            "id": "invalid_auth", **base, "auth_type": "MAGIC_AUTH",
+        })
+        self.assertEqual(invalid_auth["status"], "INVALID_PROVIDER_METADATA")
+        self.assertFalse(self.manager.provider_exists("invalid_auth"))
+
+        invalid_flag = self.manager.register_provider({
+            "id": "invalid_flag", **base, "auth_type": "NONE", "enabled": "true",
+        })
+        self.assertEqual(invalid_flag["status"], "INVALID_PROVIDER_METADATA")
+        self.assertFalse(self.manager.provider_exists("invalid_flag"))
+
     def test_register_provider_rejects_duplicate_without_overwrite(self):
         provider = {
             "id": "token_image", "name": "Replacement", "category": "image",
