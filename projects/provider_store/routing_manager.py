@@ -389,10 +389,38 @@ class ProviderRoutingManager:
                     decisions.append({"provider": provider_id, "status": "QUOTA_CHECK_FAILED", "error_type": type(exc).__name__})
                     continue
                 if isinstance(quota, dict) and quota.get("status") == "ALREADY_RESERVED":
+                    cleanup = []
+                    if cost_reservation_created:
+                        try:
+                            released = self.cost_policy.release_reservation(
+                                project_id=project_id,
+                                request_id=request_id,
+                                provider_id=provider_id,
+                                charge_outcome="not_incurred",
+                            )
+                            cleanup.append({
+                                "manager": "cost",
+                                "released": isinstance(released, dict) and released.get("released") is True,
+                            })
+                        except Exception:
+                            cleanup.append({"manager": "cost", "released": False, "status": "CLEANUP_FAILED"})
+                    if credit_reservation_created:
+                        try:
+                            released = self.credit_manager.release(
+                                request_id=request_id, provider_id=provider_id
+                            )
+                            cleanup.append({
+                                "manager": "credit",
+                                "released": isinstance(released, dict) and released.get("released") is True,
+                            })
+                        except Exception:
+                            cleanup.append({"manager": "credit", "released": False, "status": "CLEANUP_FAILED"})
                     return {
                         "allowed": False, "status": "REQUEST_ALREADY_RESERVED",
                         "provider": provider_id, "request_id": request_id,
-                        "reservations_retained": True, "decisions": decisions,
+                        "reservations_retained": True,
+                        "reservation_cleanup": cleanup,
+                        "decisions": decisions,
                     }
                 if not isinstance(quota, dict) or quota.get("status") != "RESERVED":
                     if cost_reservation_created:
