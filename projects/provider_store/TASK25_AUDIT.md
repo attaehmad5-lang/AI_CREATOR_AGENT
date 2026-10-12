@@ -1,17 +1,17 @@
 # Task #25 — Provider Connection Manager Verification Audit
 
 **Branch:** `task-25-provider-connection-manager`  
-**Pull request:** #1 (draft; not approved for merge)  
+**Pull request:** #1 (merged; follow-up work requires a new branch/PR)  
 **Audit status:** In progress — do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
-GitHub Actions run [#38278998978](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38278998978) completed successfully on Python 3.13:
+GitHub Actions run [#38280619566](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280619566) completed successfully on Python 3.13:
 
-- Ubuntu: 275 tests passed, 0 failures.
-- Windows: 275 tests passed, 0 failures.
+- 292 tests passed, 0 failures (confirmed in the run log).
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
+- PR #1 has already been merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
@@ -50,4 +50,4 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 ## Completion gate
 
-Do not mark this task complete, mark all 138 items PASS, or merge PR #1 until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and the user approves any merge.
+Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and platform/runtime constraints are tested. PR #1 is already merged; that merge is not a completion signal.
