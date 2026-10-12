@@ -1122,8 +1122,11 @@ class ConnectionManagerTests(unittest.TestCase):
         refreshed = reloaded.get_provider_configuration("public_image")["configuration"]
         self.assertEqual(refreshed["model"], "test-model-v2")
         self.assertNotIn("model_version", refreshed)
+        empty_state_path = self.root / "empty-model-state.json"
+        empty_state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        empty_state_manager = ConnectionManager(self.catalog_path, empty_state_path)
         self.assertEqual(
-            reloaded.configure_provider("public_image", model_version="orphan-version")["status"],
+            empty_state_manager.configure_provider("public_image", model_version="orphan-version")["status"],
             "MODEL_REQUIRED_FOR_VERSION",
         )
         self.assertEqual(
