@@ -278,6 +278,35 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             })
         self.assertEqual(opener.calls, [])
 
+    def test_rate_limit_and_redirect_errors_do_not_follow_or_leak_details(self):
+        for status in (302, 429, 500):
+            error = HTTPError(
+                "https://api.example.com/health", status, "Provider error",
+                {}, None,
+            )
+            opener = _Opener(error=error)
+            probe = ProviderHTTPConnectivityProbe(opener=opener)
+            with self.assertRaises(ConnectionError) as caught:
+                probe({
+                    "id": "public_provider", "auth_type": "NONE",
+                    "allowed_hosts": ["api.example.com"],
+                    "configuration": {"endpoint": "https://api.example.com/health"},
+                })
+            self.assertNotIn("https://", str(caught.exception))
+            self.assertEqual(len(opener.calls), 1)
+
+    def test_timeout_is_reported_without_credentials_or_network_details(self):
+        from urllib.error import URLError
+        opener = _Opener(error=URLError(TimeoutError("private timeout detail")))
+        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        with self.assertRaises(TimeoutError) as caught:
+            probe({
+                "id": "public_provider", "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertNotIn("private timeout detail", str(caught.exception))
+
     def test_invalid_probe_configuration_is_rejected(self):
         with self.assertRaises(ValueError):
             ProviderHTTPConnectivityProbe(max_response_bytes=-1)
