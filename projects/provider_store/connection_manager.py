@@ -238,8 +238,14 @@ class ConnectionManager:
                             or len({host.casefold().rstrip(".") for host in hosts if isinstance(host, str)}) != len(hosts)
                         ):
                             errors.append(f"providers[{index}].allowed_hosts contains invalid or duplicate hostnames")
+                    version = catalog.get("version", "0") if isinstance(catalog, dict) else "0"
+                    try:
+                        catalog_major_version = int(str(version).split(".", 1)[0])
+                    except (TypeError, ValueError):
+                        catalog_major_version = 0
                     if (
-                        provider.get("enabled") is True
+                        catalog_major_version >= 3
+                        and provider.get("enabled") is True
                         and isinstance(connection_type, str)
                         and connection_type.upper() == "API"
                         and not provider.get("allowed_hosts")
