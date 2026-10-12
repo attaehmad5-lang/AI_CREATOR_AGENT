@@ -211,6 +211,19 @@ class ConnectionManagerTests(unittest.TestCase):
                 self.assertFalse(result["valid"])
                 self.assertTrue(any("official_api_url must be a safe HTTPS URL" in error for error in result["errors"]))
 
+    def test_catalog_schema_rejects_invalid_deprecation_flag_and_enabled_deprecated_provider(self):
+        invalid_flag = ConnectionManager.validate_catalog_schema({
+            "providers": [{"id": "provider", "deprecated": "true"}]
+        })
+        self.assertFalse(invalid_flag["valid"])
+        self.assertTrue(any("deprecated must be boolean" in error for error in invalid_flag["errors"]))
+
+        invalid_enabled = ConnectionManager.validate_catalog_schema({
+            "providers": [{"id": "provider", "deprecated": True, "enabled": True}]
+        })
+        self.assertFalse(invalid_enabled["valid"])
+        self.assertTrue(any("deprecated and cannot be enabled" in error for error in invalid_enabled["errors"]))
+
     def test_catalog_schema_requires_boolean_subscription_flag(self):
         result = ConnectionManager.validate_catalog_schema({
             "providers": [{"id": "paid", "subscription_required": "true"}]
@@ -1020,6 +1033,14 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "DISABLED")
         self.assertTrue(instance.closed)
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_deprecated_provider_cannot_be_reenabled(self):
+        self.manager.catalog["providers"][0]["deprecated"] = True
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        result = self.manager.set_provider_enabled("public_image", True)
+        self.assertEqual(result["status"], "PROVIDER_DEPRECATED")
+        self.assertFalse(result["saved"])
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
 
     def test_enabled_flag_rejects_non_boolean_and_unknown_provider(self):
         self.assertEqual(
