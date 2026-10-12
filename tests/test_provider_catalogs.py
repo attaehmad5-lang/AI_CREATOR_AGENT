@@ -125,6 +125,17 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                     provider.get("id"),
                 )
 
+    def test_huggingface_account_auth_host_is_allowlisted(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        provider = next(item for item in catalog["providers"] if item["id"] == "huggingface")
+        self.assertIn("huggingface.co", provider["allowed_hosts"])
+        endpoint = ConnectionManager.validate_endpoint(
+            "https://huggingface.co/api/whoami-v2",
+            allowed_hosts=set(provider["allowed_hosts"]),
+        )
+        self.assertTrue(endpoint["valid"], endpoint)
+
     def test_pollinations_uses_current_documented_api_auth_and_host(self):
         root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
         catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
