@@ -17,7 +17,7 @@ This guide describes the current implementation in this branch. It is not a clai
 - `health_manager.py` — bounded provider health history, staleness/latency checks, eligibility, and a bounded persisted request-ID ledger so repeated finalization cannot append duplicate health events or silently reuse an ID for a conflicting result.
 - `retry_policy.py` — bounded backoff decisions that consume validated HTTP status / `Retry-After` metadata from typed provider errors, plus a concurrency-safe circuit breaker with half-open probe-slot recovery when an attempt is cancelled.
 - `output_validator.py` — bounded file reads, file-mutation detection during validation, file size/extension/signature/basic-content checks, JSON depth limits, and SHA-256 for supported artifacts.
-- `provider_service.py` — integration facade for API/OAuth/manual connection verification, health recording, routing, output checks, retry decisions, and usage finalization. `verify_http_provider()` wires the built-in allowlisted HTTPS probe into connection-state and health recording; `verify_oauth_provider()` passes an OAuth manager's unexpired access token through an ephemeral environment mapping without persisting it. Configure `probe_endpoint` separately from `endpoint` to verify an auth-protected, non-billable account endpoint without replacing the generation endpoint.
+- `provider_service.py` — integration facade for API/OAuth/manual connection verification, health recording, routing, output checks, retry decisions, and usage finalization. `verify_http_provider()` wires the built-in allowlisted HTTPS probe into connection-state and health recording; `verify_oauth_provider()` passes an OAuth manager's unexpired access token through an ephemeral environment mapping without persisting it; `verify_pollinations_account()` verifies Pollinations via its read-only balance endpoint and returns the account budget only in the transient result. Configure `probe_endpoint` separately from `endpoint` to verify an auth-protected, non-billable account endpoint without replacing the generation endpoint.
 - `provider_catalog.json` and `provider_catalog_master.json` — one synchronized 54-provider registry, including the 18 advanced-provider records. Catalog v3 requires complete provider identity fields and explicit `enabled` / `subscription_required` booleans; provider IDs and documentation/subscription links are validated before acceptance. The master catalog is the fallback copy, and the older v2 backup remains archival.
 - Legacy store, category, advanced, unlock, status, and unified-registry/router facades now read the central catalog. Discovery facades distinguish catalog labels from live verified state; actual policy-aware execution still belongs to `ProviderRoutingManager`.
 
@@ -64,13 +64,20 @@ Live provider API/account probes, provider-specific OAuth registration/token-ref
 After the user has completed OAuth and `OAuthPKCEManager.get_access_token("pollinations")` returns an unexpired token, the application can read the provider's remaining pollen budget without making a generation request:
 
 ```python
-from projects.provider_store.pollinations_credit_probe import PollinationsBalanceProbe
+from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.oauth_pkce_manager import OAuthPKCEManager
+from projects.provider_store.provider_service import ProviderService
 
+connections = ConnectionManager()
+health = ProviderHealthManager()
+service = ProviderService(connections, health_manager=health)
 oauth = OAuthPKCEManager()
-probe = PollinationsBalanceProbe(lambda: oauth.get_access_token("pollinations"))
-account_budget = probe("pollinations")
-print({"verified": account_budget["verified"], "balance": account_budget["balance"], "unit": account_budget["unit"]})
+result = service.verify_pollinations_account(oauth)
+if result.get("verified"):
+    print(result["account_balance"])  # balance only; never print or persist the token
+else:
+    print({"status": result.get("status"), "verified": False})
 ```
 
 The OAuth client must request the provider's documented balance/usage permission. A missing token, insufficient scope, expired/revoked token, malformed response, timeout, or HTTP error fails closed; no balance is guessed. This endpoint reports remaining pollen account budget, not a verified free-credit amount or USD value. Its balance may combine tier, pack, and crypto balances, so it must never authorize free-credit routing or bypass explicit paid approval and project-budget checks. Keep the result separate from `ProviderCreditManager`, which only accepts verified balances known to represent eligible free credits.
