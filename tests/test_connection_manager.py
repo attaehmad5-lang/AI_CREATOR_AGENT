@@ -828,6 +828,14 @@ class ConnectionManagerTests(unittest.TestCase):
         nested_result = self.manager.register_provider(nested)
         self.assertEqual(nested_result["status"], "SENSITIVE_METADATA_REJECTED")
         self.assertFalse(self.manager.provider_exists("unsafe_nested"))
+        nested_tuple = {
+            "id": "unsafe_tuple", "name": "Unsafe", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API",
+            "metadata": ("safe", {"api_key": "never-store-this"}),
+        }
+        tuple_result = self.manager.register_provider(nested_tuple)
+        self.assertEqual(tuple_result["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertFalse(self.manager.provider_exists("unsafe_tuple"))
 
     def test_register_provider_rejects_invalid_id(self):
         provider = {
