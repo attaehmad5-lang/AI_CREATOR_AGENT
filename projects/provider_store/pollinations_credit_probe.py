@@ -59,7 +59,16 @@ class PollinationsBalanceProbe:
         self.timeout_seconds = float(timeout_seconds)
         self.max_response_bytes = max_response_bytes
 
-    def __call__(self, provider_id: str) -> dict[str, Any]:
+    def __call__(self, provider_id: str, *, timeout_seconds: float | None = None) -> dict[str, Any]:
+        effective_timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
+        if (
+            not isinstance(effective_timeout, (int, float))
+            or isinstance(effective_timeout, bool)
+            or not math.isfinite(effective_timeout)
+            or effective_timeout <= 0
+            or effective_timeout > 60
+        ):
+            raise ValueError("timeout_seconds must be finite and between 0 and 60")
         if provider_id != "pollinations":
             raise ValueError("unsupported credit provider")
         token = self.token_provider()
@@ -78,7 +87,7 @@ class PollinationsBalanceProbe:
             method="GET",
         )
         try:
-            response = self.opener.open(request, timeout=self.timeout_seconds)
+            response = self.opener.open(request, timeout=float(effective_timeout))
         except HTTPError as exc:
             status = exc.code
             exc.close()
