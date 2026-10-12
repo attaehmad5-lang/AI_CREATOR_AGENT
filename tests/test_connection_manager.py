@@ -1107,11 +1107,28 @@ class ConnectionManagerTests(unittest.TestCase):
         )
 
     def test_provider_model_configuration_is_persisted_without_credentials(self):
-        result = self.manager.configure_provider("public_image", model="test-model-v1")
+        result = self.manager.configure_provider(
+            "public_image", model="test-model-v1", model_version="2026-01"
+        )
         self.assertEqual(result["status"], "CONFIGURED")
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        configuration = reloaded.get_provider_configuration("public_image")["configuration"]
+        self.assertEqual(configuration["model"], "test-model-v1")
+        self.assertEqual(configuration["model_version"], "2026-01")
+        self.assertNotIn("secret", json.dumps(configuration).casefold())
+
+        changed = reloaded.configure_provider("public_image", model="test-model-v2")
+        self.assertEqual(changed["status"], "CONFIGURED")
+        refreshed = reloaded.get_provider_configuration("public_image")["configuration"]
+        self.assertEqual(refreshed["model"], "test-model-v2")
+        self.assertNotIn("model_version", refreshed)
         self.assertEqual(
-            reloaded.get_state("public_image")["configuration"]["model"], "test-model-v1"
+            reloaded.configure_provider("public_image", model_version="orphan-version")["status"],
+            "MODEL_REQUIRED_FOR_VERSION",
+        )
+        self.assertEqual(
+            reloaded.configure_provider("public_image", model_version="token=secret")["status"],
+            "SENSITIVE_CONFIGURATION_REJECTED",
         )
 
     def test_provider_endpoint_configuration_rejects_unsafe_or_secret_urls(self):
