@@ -462,7 +462,28 @@ class ProviderService:
         quota_result: dict[str, Any] | None = None
         credit_result: dict[str, Any] | None = None
         duplicate_finalization = False
-        if self.cost_policy is not None:
+        atomic_finalize = (
+            getattr(self.cost_policy, "finalize_usage", None)
+            if self.cost_policy is not None else None
+        )
+        if callable(atomic_finalize):
+            try:
+                cost_result = atomic_finalize(
+                    project_id=project_id,
+                    provider_id=provider_id,
+                    estimated_cost=estimated_cost,
+                    actual_cost=actual_cost,
+                    request_id=request_id,
+                    success=success,
+                    charge_outcome=charge_outcome,
+                )
+            except Exception as exc:
+                cost_result = {
+                    "status": "COST_RECONCILIATION_FAILED",
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
+        if self.cost_policy is not None and not callable(atomic_finalize):
             ledger = getattr(self.cost_policy, "ledger", {})
             projects = ledger.get("projects", {}) if isinstance(ledger, dict) else {}
             project = projects.get(project_id, {}) if isinstance(projects, dict) else {}
