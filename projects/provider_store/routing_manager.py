@@ -253,6 +253,13 @@ class ProviderRoutingManager:
                 raw_health = raw_providers.get(provider_id, {}) if isinstance(raw_providers, dict) else {}
                 if isinstance(raw_health, dict):
                     health_record = raw_health
+            if selected_strategy == "LOWEST_COST" and provider_id not in estimates:
+                return {
+                    "allowed": False,
+                    "status": "PROVIDER_SPECIFIC_COST_ESTIMATES_REQUIRED",
+                    "provider": provider_id,
+                    "decisions": decisions,
+                }
             cost = estimates.get(provider_id, estimated_cost)
             if not self._valid_amount(cost):
                 decisions.append({"provider": provider_id, "status": "INVALID_COST_AMOUNT"})
