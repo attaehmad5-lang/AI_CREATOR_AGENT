@@ -296,7 +296,14 @@ class ProviderOAuthPKCEManager:
             timeout_seconds,
         )
         if result.get("status") != "OK":
-            return {"status": result.get("status", "OAUTH_TOKEN_REQUEST_FAILED"), "provider": provider_id}
+            failure = {
+                "status": result.get("status", "OAUTH_TOKEN_REQUEST_FAILED"),
+                "provider": provider_id,
+            }
+            http_status = result.get("http_status")
+            if isinstance(http_status, int) and not isinstance(http_status, bool) and 100 <= http_status <= 599:
+                failure["http_status"] = http_status
+            return failure
         return self._install_tokens(provider_id, pending, result["data"])
 
     def refresh(self, provider_id: str, *, timeout_seconds: float = 10.0) -> dict[str, Any]:
@@ -316,7 +323,14 @@ class ProviderOAuthPKCEManager:
             timeout_seconds,
         )
         if result.get("status") != "OK":
-            return {"status": result.get("status", "OAUTH_TOKEN_REQUEST_FAILED"), "provider": provider_id}
+            failure = {
+                "status": result.get("status", "OAUTH_TOKEN_REQUEST_FAILED"),
+                "provider": provider_id,
+            }
+            http_status = result.get("http_status")
+            if isinstance(http_status, int) and not isinstance(http_status, bool) and 100 <= http_status <= 599:
+                failure["http_status"] = http_status
+            return failure
         pending = {
             "token_url": record["token_url"],
             "allowed_hosts": record["allowed_hosts"],
