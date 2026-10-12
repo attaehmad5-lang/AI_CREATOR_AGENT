@@ -28,6 +28,21 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("cannot require a subscription" in error for error in result["errors"]))
 
+    def test_catalog_rejects_unsafe_provider_ids(self):
+        for provider_id in ("../escape", "provider name", "provider/id", "x" * 101):
+            with self.subTest(provider_id=provider_id):
+                result = ConnectionManager.validate_catalog_schema({
+                    "version": "3.0",
+                    "providers": [{
+                        "id": provider_id, "name": "Provider",
+                        "category": "image", "auth_type": "NONE",
+                        "connection_type": "API", "enabled": False,
+                        "subscription_required": False,
+                    }],
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("id contains invalid characters" in error for error in result["errors"]))
+
     def test_catalog_rejects_malformed_versions_instead_of_downgrading_schema(self):
         for version in ("3.invalid", "", True, None, {"major": 3}):
             with self.subTest(version=version):
