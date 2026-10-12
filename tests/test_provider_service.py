@@ -113,6 +113,23 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn(secret, self.state_path.read_text(encoding="utf-8"))
         self.assertEqual(self.connections.get_state("pollinations")["status"], "CONNECTED")
 
+    def test_pollinations_account_verification_rejects_catalog_auth_mismatch(self):
+        provider = {
+            "id": "pollinations", "name": "Pollinations", "category": "image",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "api_key_env": "POLLINATIONS_API_KEY",
+            "allowed_hosts": ["gen.pollinations.ai"],
+        }
+
+        class OAuthStub:
+            def get_access_token(self, provider_id):
+                raise AssertionError("OAuth token must not be requested for mismatched catalog auth")
+
+        with patch.object(self.connections, "get_provider", return_value=provider):
+            result = self.service.verify_pollinations_account(OAuthStub())
+        self.assertEqual(result["status"], "POLLINATIONS_AUTH_MODE_UNSUPPORTED")
+        self.assertFalse(result["verified"])
+
     def test_builtin_http_provider_verification_updates_connection_and_health(self):
         class Response:
             status = 200
