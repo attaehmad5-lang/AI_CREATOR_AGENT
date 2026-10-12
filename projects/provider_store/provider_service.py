@@ -733,6 +733,7 @@ class ProviderService:
             and (
                 item.get("status") == "RESERVATION_NOT_FOUND"
                 or item.get("released") is True
+                or item.get("saved") is True
             )
             for item in results.values()
         )
