@@ -113,6 +113,50 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["provider"], "fallback")
         self.assertEqual(result["failed_provider"], "primary")
 
+    def test_model_and_version_aware_routing_uses_declared_compatibility(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        for provider in catalog["providers"]:
+            if provider["id"] == "primary":
+                provider["supported_models"] = [{"id": "flux", "versions": ["1.0", "1.1"]}]
+            elif provider["id"] == "fallback":
+                provider["supported_models"] = [{"id": "sdxl", "versions": ["2.0"]}]
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        router = ProviderRoutingManager(self.connections)
+        routed = router.route(
+            category="image", project_id="film", model="sdxl", model_version="2.0"
+        )
+        self.assertTrue(routed["allowed"])
+        self.assertEqual(routed["provider"], "fallback")
+        self.assertEqual(routed["model"], "sdxl")
+        self.assertEqual(routed["model_version"], "2.0")
+
+        unsupported_version = router.route(
+            category="image", project_id="film", model="sdxl", model_version="3.0"
+        )
+        self.assertFalse(unsupported_version["allowed"])
+        self.assertIn(
+            "MODEL_VERSION_NOT_SUPPORTED",
+            [decision["status"] for decision in unsupported_version["decisions"]],
+        )
+
+    def test_model_routing_fails_closed_without_declared_model_metadata(self):
+        result = ProviderRoutingManager(self.connections).route(
+            category="image", project_id="film", model="undeclared-model"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertEqual(
+            [decision["status"] for decision in result["decisions"]],
+            ["MODEL_METADATA_UNVERIFIED", "MODEL_METADATA_UNVERIFIED"],
+        )
+
+    def test_model_version_requires_a_model_id(self):
+        result = ProviderRoutingManager(self.connections).route(
+            category="image", project_id="film", model_version="1.0"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "INVALID_MODEL_VERSION")
+
     def test_free_credit_and_lowest_cost_strategies(self):
         router = ProviderRoutingManager(self.connections)
         free_first = router.route(
