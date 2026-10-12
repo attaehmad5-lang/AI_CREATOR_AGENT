@@ -96,6 +96,7 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
             ({"totalBalance": -1}, "BALANCE_AMOUNT_INVALID"),
             ({"totalBalance": float("nan")}, "BALANCE_AMOUNT_INVALID"),
             ({"totalBalance": "5.0"}, "BALANCE_AMOUNT_INVALID"),
+            ({"totalBalance": 10**1000}, "BALANCE_AMOUNT_INVALID"),
         ]
         for payload, expected in cases:
             with self.subTest(payload=repr(payload)):
@@ -114,6 +115,8 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
             self.make_probe(balance_field_is_available_credits=False)
         with self.assertRaisesRegex(ValueError, "INVALID_AUTH_HEADER"):
             self.make_probe(auth_header_name="Host")
+        with self.assertRaisesRegex(ValueError, "INVALID_TIMEOUT"):
+            self.make_probe(timeout_seconds=10**1000)
 
     def test_oversized_and_invalid_json_responses_are_rejected_and_closed(self):
         for payload, expected in [
