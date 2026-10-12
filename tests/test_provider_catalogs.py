@@ -28,6 +28,28 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("cannot require a subscription" in error for error in result["errors"]))
 
+    def test_catalog_rejects_unsafe_provider_links(self):
+        for url in (
+            "javascript:alert(1)",
+            "http://provider.example.com",
+            "https://user:password@provider.example.com/docs",
+            "https://provider.example.com:99999/docs",
+            "https://provider.example.com/\nmalicious",
+        ):
+            with self.subTest(url=url):
+                result = ConnectionManager.validate_catalog_schema({
+                    "version": "3.0",
+                    "providers": [{
+                        "id": "provider", "name": "Provider",
+                        "category": "image", "auth_type": "NONE",
+                        "connection_type": "API", "enabled": False,
+                        "subscription_required": False,
+                        "official_api_url": url,
+                    }],
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("safe HTTPS URL" in error for error in result["errors"]))
+
     def test_catalog_rejects_unsafe_provider_ids(self):
         for provider_id in ("../escape", "provider name", "provider/id", "x" * 101):
             with self.subTest(provider_id=provider_id):
