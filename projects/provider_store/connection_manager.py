@@ -338,11 +338,22 @@ class ConnectionManager:
                         )
                     ):
                         errors.append(f"providers[{index}].secret_ref must be a safe non-empty reference")
-                    if "capabilities" in provider and not (
-                        isinstance(provider["capabilities"], list)
-                        and all(isinstance(item, str) for item in provider["capabilities"])
-                    ):
-                        errors.append(f"providers[{index}].capabilities must be a list of strings")
+                    if "capabilities" in provider:
+                        capabilities = provider["capabilities"]
+                        if (
+                            not isinstance(capabilities, list)
+                            or len(capabilities) > 100
+                            or any(
+                                not isinstance(item, str)
+                                or not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", item)
+                                for item in capabilities
+                            )
+                            or len({item.casefold() for item in capabilities if isinstance(item, str)}) != len(capabilities)
+                        ):
+                            errors.append(
+                                f"providers[{index}].capabilities must contain unique lowercase identifiers "
+                                "of at most 80 characters (maximum 100)"
+                            )
                     if ConnectionManager._contains_credential_value_field(provider):
                         errors.append(f"providers[{index}] contains a forbidden credential value field")
         result = {"valid": not errors, "errors": errors, "provider_count": len(catalog.get("providers", [])) if isinstance(catalog, dict) and isinstance(catalog.get("providers"), list) else 0}
