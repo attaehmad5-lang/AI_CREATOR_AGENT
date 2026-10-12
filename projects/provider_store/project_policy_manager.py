@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import copy
 import json
-import math
 import os
 import re
 import tempfile
@@ -37,7 +36,7 @@ class ProviderProjectPolicyManager:
         self.lock_path = self.path.with_name(self.path.name + ".lock")
         self._lock = threading.RLock()
         with interprocess_file_lock(self.lock_path):
-            self.data = self._load()
+            self.data = self._load(self.path)
         self._validate_document(self.data)
 
     @staticmethod
