@@ -1,6 +1,9 @@
 import json
+import stat
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 
 from projects.provider_store.output_validator import ProviderOutputValidator
@@ -86,6 +89,22 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             self.validator.validate_file(pdf, modality="document")["mime_type"],
             "application/pdf",
         )
+
+    def test_file_growth_during_validation_is_detected(self):
+        path = self.root / "changing.png"
+        signature = b"\\x89PNG\\r\\n\\x1a\\n"
+        path.write_bytes(signature + b"extra bytes")
+        actual = path.stat()
+        fake_stat = SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o600,
+            st_size=len(signature),
+            st_dev=actual.st_dev,
+            st_ino=actual.st_ino,
+        )
+        with patch("projects.provider_store.output_validator.os.fstat", return_value=fake_stat):
+            result = self.validator.validate_file(path, modality="image")
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "OUTPUT_CHANGED_DURING_VALIDATION")
 
     def test_deeply_nested_json_is_rejected_without_crashing(self):
         validator = ProviderOutputValidator(max_size_bytes=10000)
