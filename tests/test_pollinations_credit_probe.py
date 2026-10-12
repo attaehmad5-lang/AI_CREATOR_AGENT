@@ -6,6 +6,7 @@ from urllib.error import HTTPError, URLError
 
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.pollinations_credit_probe import PollinationsBalanceProbe
+from projects.provider_store.retry_policy import RetryPolicy
 
 
 class _Response:
@@ -114,12 +115,21 @@ class PollinationsBalanceProbeTests(unittest.TestCase):
 
     def test_non_auth_http_errors_are_safe_and_non_retryable_details_are_not_leaked(self):
         opener = _Opener(error=HTTPError(
-            "https://gen.pollinations.ai/account/balance", 429, "Too Many Requests", {}, None
+            "https://gen.pollinations.ai/account/balance", 429, "Too Many Requests",
+            {"Retry-After": "3"}, None
         ))
         probe = self._provider("secret-token", opener)
         with self.assertRaisesRegex(ConnectionError, "HTTP 429") as caught:
             probe("pollinations")
         self.assertNotIn("secret-token", str(caught.exception))
+        self.assertEqual(caught.exception.status_code, 429)
+        self.assertEqual(caught.exception.retry_after, "3")
+        decision = RetryPolicy(
+            max_attempts=3, base_delay_seconds=0, max_delay_seconds=10,
+            jitter_fraction=0,
+        ).decide(attempt=1, exception=caught.exception)
+        self.assertTrue(decision.retry)
+        self.assertEqual(decision.delay_seconds, 3.0)
 
     def test_redirects_are_rejected(self):
         opener = _Opener(error=HTTPError(
