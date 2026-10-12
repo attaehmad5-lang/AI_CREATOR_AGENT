@@ -1,12 +1,12 @@
 # Task #25 — A–P Verification Matrix
 
-**Status: IN PROGRESS. Do not merge or mark complete.**
+**Status: IN PROGRESS. PR #1 has been merged, but Task #25 is not complete. Continuation PR #4 remains draft; do not merge it without explicit user approval.**
 
 This matrix preserves the canonical feature-ID ranges and group names. It is an evidence tracker, not a replacement for the user's exact 138-item checklist. A group is not complete merely because a supporting module or test exists; every original item still requires individual verification.
 
 ## Latest confirmed verification
 
-GitHub Actions run [#38280285131](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280285131) passed on Ubuntu and Windows with Python 3.13: **291 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation also passed. Compilation and provider JSON catalog validation passed. Newer runs may be in progress; use Actions for the latest result.
+GitHub Actions run [#38291285381](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38291285381) passed on Ubuntu and Windows with Python 3.13: **294 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation also passed. The historical failed run remains visible for audit; its failures were fixed and the corrected code was verified by this successful run.
 
 | Group / IDs | Canonical group | Current evidence | Status | Remaining verification |
 |---|---|---|---|---|
