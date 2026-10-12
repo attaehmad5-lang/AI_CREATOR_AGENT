@@ -73,6 +73,52 @@ class ProviderRoutingManager:
             value = 1000
         return float(value), str(provider.get("id", ""))
 
+    def _cleanup_new_reservations(
+        self,
+        *,
+        project_id: str,
+        provider_id: str,
+        request_id: str,
+        cost_created: bool,
+        credit_created: bool,
+    ) -> list[dict[str, Any]]:
+        """Compensate only reservations created by this routing attempt."""
+        results: list[dict[str, Any]] = []
+        if cost_created:
+            try:
+                result = self.cost_policy.release_reservation(
+                    project_id=project_id,
+                    request_id=request_id,
+                    provider_id=provider_id,
+                    charge_outcome="not_incurred",
+                )
+                released = (
+                    isinstance(result, dict)
+                    and result.get("status") == "RESERVATION_RELEASED"
+                    and result.get("saved") is True
+                )
+                results.append({
+                    "manager": "cost",
+                    "released": released,
+                    **({} if released else {"status": result.get("status", "CLEANUP_FAILED") if isinstance(result, dict) else "INVALID_CLEANUP_RESPONSE"}),
+                })
+            except Exception as exc:
+                results.append({"manager": "cost", "released": False, "status": "CLEANUP_FAILED", "error_type": type(exc).__name__})
+        if credit_created:
+            try:
+                result = self.credit_manager.release(
+                    request_id=request_id, provider_id=provider_id
+                )
+                released = isinstance(result, dict) and result.get("released") is True
+                results.append({
+                    "manager": "credit",
+                    "released": released,
+                    **({} if released else {"status": result.get("status", "CLEANUP_FAILED") if isinstance(result, dict) else "INVALID_CLEANUP_RESPONSE"}),
+                })
+            except Exception as exc:
+                results.append({"manager": "credit", "released": False, "status": "CLEANUP_FAILED", "error_type": type(exc).__name__})
+        return results
+
     def route(
         self,
         *,
@@ -377,46 +423,35 @@ class ProviderRoutingManager:
                 try:
                     quota = self.quota_manager.reserve(provider_id=provider_id, request_id=request_id)
                 except Exception as exc:
-                    if cost_reservation_created:
-                        self.cost_policy.release_reservation(
-                            project_id=project_id,
-                            request_id=request_id,
-                            provider_id=provider_id,
-                            charge_outcome="not_incurred",
-                        )
-                    if credit_reservation_created:
-                        self.credit_manager.release(request_id=request_id, provider_id=provider_id)
-                    decisions.append({"provider": provider_id, "status": "QUOTA_CHECK_FAILED", "error_type": type(exc).__name__})
+                    cleanup = self._cleanup_new_reservations(
+                        project_id=project_id, provider_id=provider_id, request_id=request_id,
+                        cost_created=cost_reservation_created,
+                        credit_created=credit_reservation_created,
+                    )
+                    if any(item.get("released") is not True for item in cleanup):
+                        return {
+                            "allowed": False, "status": "RESERVATION_CLEANUP_FAILED",
+                            "provider": provider_id, "request_id": request_id,
+                            "reservation_cleanup": cleanup, "decisions": decisions,
+                        }
+                    decisions.append({
+                        "provider": provider_id, "status": "QUOTA_CHECK_FAILED",
+                        "error_type": type(exc).__name__, "reservation_cleanup": cleanup,
+                    })
                     continue
                 if isinstance(quota, dict) and quota.get("status") == "ALREADY_RESERVED":
-                    cleanup = []
-                    if cost_reservation_created:
-                        try:
-                            released = self.cost_policy.release_reservation(
-                                project_id=project_id,
-                                request_id=request_id,
-                                provider_id=provider_id,
-                                charge_outcome="not_incurred",
-                            )
-                            cleanup.append({
-                                "manager": "cost",
-                                "released": isinstance(released, dict)
-                                and released.get("status") == "RESERVATION_RELEASED"
-                                and released.get("saved") is True,
-                            })
-                        except Exception:
-                            cleanup.append({"manager": "cost", "released": False, "status": "CLEANUP_FAILED"})
-                    if credit_reservation_created:
-                        try:
-                            released = self.credit_manager.release(
-                                request_id=request_id, provider_id=provider_id
-                            )
-                            cleanup.append({
-                                "manager": "credit",
-                                "released": isinstance(released, dict) and released.get("released") is True,
-                            })
-                        except Exception:
-                            cleanup.append({"manager": "credit", "released": False, "status": "CLEANUP_FAILED"})
+                    cleanup = self._cleanup_new_reservations(
+                        project_id=project_id, provider_id=provider_id, request_id=request_id,
+                        cost_created=cost_reservation_created,
+                        credit_created=credit_reservation_created,
+                    )
+                    if any(item.get("released") is not True for item in cleanup):
+                        return {
+                            "allowed": False, "status": "RESERVATION_CLEANUP_FAILED",
+                            "provider": provider_id, "request_id": request_id,
+                            "reservations_retained": True,
+                            "reservation_cleanup": cleanup, "decisions": decisions,
+                        }
                     return {
                         "allowed": False, "status": "REQUEST_ALREADY_RESERVED",
                         "provider": provider_id, "request_id": request_id,
@@ -425,17 +460,19 @@ class ProviderRoutingManager:
                         "decisions": decisions,
                     }
                 if not isinstance(quota, dict) or quota.get("status") != "RESERVED":
-                    if cost_reservation_created:
-                        self.cost_policy.release_reservation(
-                            project_id=project_id,
-                            request_id=request_id,
-                            provider_id=provider_id,
-                            charge_outcome="not_incurred",
-                        )
-                    if credit_reservation_created:
-                        self.credit_manager.release(request_id=request_id, provider_id=provider_id)
+                    cleanup = self._cleanup_new_reservations(
+                        project_id=project_id, provider_id=provider_id, request_id=request_id,
+                        cost_created=cost_reservation_created,
+                        credit_created=credit_reservation_created,
+                    )
+                    if any(item.get("released") is not True for item in cleanup):
+                        return {
+                            "allowed": False, "status": "RESERVATION_CLEANUP_FAILED",
+                            "provider": provider_id, "request_id": request_id,
+                            "reservation_cleanup": cleanup, "decisions": decisions,
+                        }
                     status = quota.get("status", "QUOTA_REJECTED") if isinstance(quota, dict) else "INVALID_QUOTA_RESPONSE"
-                    decisions.append({"provider": provider_id, "status": status})
+                    decisions.append({"provider": provider_id, "status": status, "reservation_cleanup": cleanup})
                     continue
 
             result = {
