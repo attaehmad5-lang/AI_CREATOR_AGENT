@@ -1,5 +1,6 @@
 import json
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
@@ -119,6 +120,28 @@ class ProviderOAuthPKCEManagerTests(unittest.TestCase):
         self.assertEqual(first["status"], "OAUTH_CONNECTED")
         second = self.manager.exchange_code("provider", state=begun["state"], code="code")
         self.assertEqual(second["status"], "OAUTH_STATE_NOT_FOUND")
+
+    def test_concurrent_code_exchange_consumes_state_once(self):
+        opener = _Opener(_Response({
+            "access_token": "single-use-access", "token_type": "Bearer",
+            "expires_in": 3600,
+        }))
+        manager = ProviderOAuthPKCEManager(
+            environ=self.environ, opener=opener, clock=lambda: self.now[0]
+        )
+        begun = self.begin(manager)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(
+                lambda _: manager.exchange_code(
+                    "provider", state=begun["state"], code="single-use-code"
+                ),
+                range(2),
+            ))
+        self.assertEqual(
+            sorted(result["status"] for result in results),
+            ["OAUTH_CONNECTED", "OAUTH_STATE_NOT_FOUND"],
+        )
+        self.assertEqual(len(opener.calls), 1)
 
     def test_expired_authorization_state_is_rejected(self):
         manager = ProviderOAuthPKCEManager(
