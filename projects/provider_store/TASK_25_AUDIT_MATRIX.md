@@ -6,7 +6,7 @@ This matrix preserves the canonical feature-ID ranges and group names. It is an 
 
 ## Latest confirmed verification
 
-GitHub Actions run [#38280285131](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280285131) passed on Ubuntu and Windows with Python 3.13: **291 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation also passed. Compilation and provider JSON catalog validation passed. Newer runs may be in progress; use Actions for the latest result.
+GitHub Actions run [#38280619566](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280619566) passed on Ubuntu and Windows with Python 3.13: **292 tests passed on each platform, 0 failures**. Provider module/test compilation and provider JSON catalog validation also passed. Historical failed runs remain visible for audit; the latest run is green.
 
 | Group / IDs | Canonical group | Current evidence | Status | Remaining verification |
 |---|---|---|---|---|
