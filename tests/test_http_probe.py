@@ -152,6 +152,41 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             self.assertFalse(result["verified"])
             self.assertEqual(manager.get_state("probe_provider")["status"], "ERROR")
 
+    def test_authentication_http_status_is_preserved_for_non_retryable_decisions(self):
+        from projects.provider_store.retry_policy import RetryPolicy
+
+        for status_code in (401, 403):
+            with self.subTest(status_code=status_code), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                catalog_path = root / "catalog.json"
+                state_path = root / "state.json"
+                catalog_path.write_text(json.dumps({"providers": [{
+                    "id": "probe_provider", "name": "Probe Provider",
+                    "category": "image", "auth_type": "NONE",
+                    "connection_type": "API", "enabled": True,
+                    "allowed_hosts": ["api.example.com"],
+                }]}), encoding="utf-8")
+                state_path.write_text(json.dumps({
+                    "version": "1.0", "policy": "USER_CONTROLLED", "providers": {},
+                }), encoding="utf-8")
+                manager = ConnectionManager(catalog_path, state_path)
+                manager.configure_provider(
+                    "probe_provider", endpoint="https://api.example.com/health"
+                )
+                error = HTTPError(
+                    "https://api.example.com/health", status_code, "Unauthorized",
+                    {}, None,
+                )
+                result = manager.verify_connectivity(
+                    "probe_provider",
+                    ProviderHTTPConnectivityProbe(opener=_Opener(error=error)),
+                )
+                self.assertEqual(result["status"], "AUTHENTICATION_OR_PERMISSION_FAILED")
+                self.assertEqual(result["http_status"], status_code)
+                retry = RetryPolicy().decide(attempt=1, status_code=result["http_status"])
+                self.assertFalse(retry.retry)
+                self.assertEqual(retry.reason, "AUTHORIZATION_FAILURE")
+
     def test_missing_endpoint_and_unallowlisted_host_fail_before_network(self):
         opener = _Opener()
         probe = ProviderHTTPConnectivityProbe(opener=opener)
