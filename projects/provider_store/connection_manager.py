@@ -463,8 +463,15 @@ class ConnectionManager:
             "translation": (("translate",),),
             "dubbing": (("dub",),),
             "image_editing": (("edit_image",),),
+            "advanced_image_editing": (("edit_image",),),
             "upscaling": (("upscale_image",),),
+            "advanced_upscaling": (("upscale_image", "upscale_video"),),
             "lipsync": (("generate_lipsync",),),
+            "script_story": (("generate_text",),),
+            "advanced_transcription": (("transcribe",),),
+            "advanced_audio": (("generate_audio", "generate_speech", "generate_music"),),
+            "video_editing": (("edit_video",),),
+            "advanced_video_editing": (("edit_video",),),
         }
         requirements = contracts.get(category)
         if requirements is None:
