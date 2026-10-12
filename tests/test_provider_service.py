@@ -59,6 +59,66 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["health"]["status"], "HEALTHY")
         self.assertEqual(self.connections.get_state("image")["status"], "CONNECTED")
 
+    def test_builtin_http_provider_verification_updates_connection_and_health(self):
+        class Response:
+            status = 200
+            closed = False
+
+            def getcode(self):
+                return self.status
+
+            def read(self, size=-1):
+                return b'{"ok": true}'[:size]
+
+            def close(self):
+                self.closed = True
+
+        class Opener:
+            def __init__(self):
+                self.response = Response()
+                self.calls = []
+
+            def open(self, request, timeout):
+                self.calls.append((request, timeout))
+                return self.response
+
+        catalog = self.root / "http-providers.json"
+        state = self.root / "http-connections.json"
+        catalog.write_text(json.dumps({"providers": [{
+            "id": "huggingface", "name": "Hugging Face", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API", "enabled": True,
+            "token_env": "HF_TOKEN", "allowed_hosts": ["api.example.com"],
+        }]}), encoding="utf-8")
+        state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        manager = ConnectionManager(catalog, state)
+        self.assertTrue(manager.configure_provider(
+            "huggingface", endpoint="https://api.example.com/health"
+        )["saved"])
+        health = ProviderHealthManager(self.root / "http-health.json")
+        service = ProviderService(manager, health_manager=health)
+        opener = Opener()
+        result = service.verify_http_provider(
+            "huggingface", environ={"HF_TOKEN": "do-not-persist"},
+            opener=opener, timeout_seconds=1.5,
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["status"], "CONNECTED")
+        self.assertEqual(result["health"]["status"], "HEALTH_RECORDED")
+        self.assertEqual(opener.calls[0][1], 1.5)
+        self.assertEqual(
+            opener.calls[0][0].get_header("Authorization"), "Bearer do-not-persist"
+        )
+        self.assertTrue(opener.response.closed)
+        self.assertNotIn("do-not-persist", state.read_text(encoding="utf-8"))
+        self.assertNotIn("do-not-persist", repr(result))
+
+    def test_builtin_http_verification_rejects_invalid_probe_configuration(self):
+        result = self.service.verify_http_provider(
+            "image", max_response_bytes=-1
+        )
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "HTTP_PROBE_CONFIGURATION_INVALID")
+
     def test_manual_provider_verification_records_health_without_session_leak(self):
         registered = self.connections.register_provider({
             "id": "manual-music", "name": "Manual Music", "category": "music",
