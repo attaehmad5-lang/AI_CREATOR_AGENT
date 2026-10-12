@@ -384,6 +384,34 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                     self.assertEqual(headers["anthropic-version"], "2023-06-01")
                 self.assertNotIn("catalog-test-secret", repr(result))
 
+    def test_connection_manager_does_not_verify_public_endpoint_as_credentialed_connection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = root / "catalog.json"
+            state = root / "state.json"
+            catalog.write_text(json.dumps({
+                "providers": [{
+                    "id": "huggingface", "name": "Hugging Face", "category": "image",
+                    "auth_type": "API_TOKEN", "connection_type": "API", "enabled": True,
+                    "token_env": "HF_TOKEN", "allowed_hosts": ["api.example.com"],
+                }]
+            }), encoding="utf-8")
+            state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog, state)
+            manager.configure_provider(
+                "huggingface", endpoint="https://api.example.com/v1/models"
+            )
+            opener = _Opener()
+            result = manager.verify_connectivity(
+                "huggingface",
+                ProviderHTTPConnectivityProbe(environ={"HF_TOKEN": "private"}, opener=opener),
+                environ={"HF_TOKEN": "private"},
+            )
+            self.assertEqual(result["status"], "AUTHENTICATION_VERIFICATION_REQUIRED")
+            self.assertFalse(result["verified"])
+            self.assertEqual(opener.calls, [])
+            self.assertEqual(manager.get_state("huggingface")["status"], "ERROR")
+
     def test_http_probe_integrates_with_connection_manager_and_persists_only_status(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
