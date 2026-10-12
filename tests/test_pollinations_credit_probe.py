@@ -57,8 +57,9 @@ class PollinationsBalanceProbeTests(unittest.TestCase):
         self.assertEqual(timeout, 5.0)
         self.assertEqual(result, {
             "verified": True,
-            "free_credits_remaining": 12.5,
+            "balance": 12.5,
             "unit": "pollen",
+            "balance_type": "remaining_account_budget",
             "source": "pollinations.account.balance",
         })
         self.assertNotIn(secret, repr(result))
@@ -80,7 +81,10 @@ class PollinationsBalanceProbeTests(unittest.TestCase):
             self.assertEqual(manager.usable_free_credits(unit="pollen"), {})
             self.assertEqual(len(opener.calls), 2)
             self.assertTrue(all("/account/balance" in call[0].full_url for call in opener.calls))
-            self.assertNotIn("ephemeral-token", (Path(directory) / "credits.json").read_text())
+            persisted = Path(directory) / "credits.json"
+            if persisted.exists():
+                self.assertNotIn("ephemeral-token", persisted.read_text())
+            self.assertNotIn("pollinations", manager.data["providers"])
 
     def test_missing_or_invalid_user_authorized_token_fails_before_network(self):
         opener = _Opener()
