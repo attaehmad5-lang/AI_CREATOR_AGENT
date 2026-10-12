@@ -998,7 +998,24 @@ class ConnectionManager:
                 }
         except Exception as exc:
             name = type(exc).__name__.casefold()
-            if isinstance(exc, TimeoutError) or "timeout" in name:
+            http_status = getattr(exc, "status_code", None)
+            retry_after = getattr(exc, "retry_after", None)
+            if (
+                not isinstance(http_status, int) or isinstance(http_status, bool)
+                or not 100 <= http_status <= 599
+            ):
+                http_status = None
+            if not isinstance(retry_after, str) or len(retry_after) > 128 or any(
+                ord(char) < 32 or ord(char) == 127 for char in retry_after
+            ):
+                retry_after = None
+            if http_status == 429:
+                status = "RATE_LIMITED"
+            elif http_status is not None and 500 <= http_status <= 599:
+                status = "PROVIDER_UNAVAILABLE"
+            elif http_status is not None and 400 <= http_status <= 499:
+                status = "PROVIDER_HTTP_ERROR"
+            elif isinstance(exc, TimeoutError) or "timeout" in name:
                 status = "TIMEOUT"
             elif isinstance(exc, PermissionError) or any(
                 term in name for term in ("auth", "unauthorized", "forbidden")
@@ -1015,11 +1032,16 @@ class ConnectionManager:
                     "status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False,
                     "error_type": type(exc).__name__,
                 }
-            return {
+            result = {
                 "status": status, "provider": provider_id, "verified": False,
                 "error_type": type(exc).__name__,
                 "latency_ms": round((time.monotonic() - started) * 1000, 2),
             }
+            if http_status is not None:
+                result["http_status"] = http_status
+            if retry_after is not None:
+                result["retry_after"] = retry_after
+            return result
 
         try:
             saved = self._mark_connected_after_probe(provider_id)
