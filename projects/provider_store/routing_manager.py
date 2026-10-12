@@ -13,6 +13,7 @@ from typing import Any
 class ProviderRoutingManager:
     STRATEGIES = {
         "PRIMARY_THEN_FALLBACK",
+        "PRIMARY_ONLY",
         "FREE_CREDITS_FIRST",
         "LOWEST_COST",
         "HEALTHIEST_FIRST",
@@ -305,6 +306,11 @@ class ProviderRoutingManager:
         else:
             candidates.sort(key=self._priority)
 
+        # PRIMARY_ONLY means one highest-priority eligible candidate only; a policy
+        # rejection must not silently fall through to another provider.
+        if selected_strategy == "PRIMARY_ONLY":
+            candidates = candidates[:1]
+
         for provider in candidates:
             provider_id = provider["id"]
             cost = provider["_route_cost"]
@@ -527,6 +533,11 @@ class ProviderRoutingManager:
         """
         if not isinstance(failed_provider, str) or not failed_provider.strip():
             return {"allowed": False, "status": "INVALID_FAILED_PROVIDER"}
+        fallback_strategy = route_options.get("strategy", self.default_strategy)
+        if not isinstance(fallback_strategy, str) or fallback_strategy.upper() not in self.STRATEGIES:
+            return {"allowed": False, "status": "INVALID_ROUTING_STRATEGY"}
+        if fallback_strategy.upper() == "PRIMARY_ONLY":
+            return {"allowed": False, "status": "PRIMARY_ONLY_FALLBACK_DISABLED"}
         if not isinstance(release_reservations, bool):
             return {"allowed": False, "status": "INVALID_RESERVATION_RELEASE_POLICY"}
         if not isinstance(route_options.get("category"), str) or not isinstance(route_options.get("project_id"), str):
