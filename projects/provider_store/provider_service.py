@@ -475,6 +475,7 @@ class ProviderService:
                     or existing.get("estimated_cost") != float(estimated_cost)
                     or existing.get("actual_cost") != float(actual_cost)
                     or existing.get("execution_success", success) != success
+                    or existing.get("charge_outcome", "unknown") != charge_outcome
                 ):
                     cost_result = {"status": "REQUEST_ID_CONFLICT", "saved": False}
                 else:
@@ -521,6 +522,7 @@ class ProviderService:
                         actual_cost=actual_cost,
                         request_id=request_id,
                         success=success,
+                        charge_outcome=charge_outcome,
                     )
                     if (
                         isinstance(cost_result, dict)
