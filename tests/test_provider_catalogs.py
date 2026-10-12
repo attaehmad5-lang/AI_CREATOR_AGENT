@@ -38,6 +38,34 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                     provider.get("id"),
                 )
 
+    def test_capability_identifiers_must_be_bounded_unique_and_normalized(self):
+        base = {
+            "version": "3.0",
+            "providers": [{
+                "id": "capability_test", "name": "Capability Test",
+                "category": "image", "auth_type": "NONE",
+                "connection_type": "API", "enabled": False,
+            }],
+        }
+        for capabilities in (
+            [""],
+            ["Image-Generation"],
+            ["image_generation", "image_generation"],
+            ["image_generation", "IMAGE_GENERATION"],
+            ["x" * 81],
+            ["capability_" + str(index) for index in range(101)],
+        ):
+            with self.subTest(capabilities=capabilities):
+                candidate = json.loads(json.dumps(base))
+                candidate["providers"][0]["capabilities"] = capabilities
+                result = ConnectionManager.validate_catalog_schema(candidate)
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("capabilities must contain unique" in error for error in result["errors"]))
+
+        valid = json.loads(json.dumps(base))
+        valid["providers"][0]["capabilities"] = ["image_generation", "inpainting_v2"]
+        self.assertTrue(ConnectionManager.validate_catalog_schema(valid)["valid"])
+
     def test_all_provider_catalog_json_files_pass_schema_validation(self):
         root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
         catalogs = []
