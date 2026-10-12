@@ -160,6 +160,14 @@ class ProviderHealthManagerTests(unittest.TestCase):
             self.manager.active_probe("image", lambda **kwargs: True, timeout_seconds=float("inf"))["status"],
             "INVALID_TIMEOUT",
         )
+        self.assertEqual(
+            self.manager.active_probe("image", lambda **kwargs: True, timeout_seconds=10**1000)["status"],
+            "INVALID_TIMEOUT",
+        )
+        self.assertEqual(
+            self.manager.record_result("image", success=True, latency_ms=10**1000)["status"],
+            "INVALID_LATENCY",
+        )
 
     def test_malformed_persisted_health_state_is_rejected(self):
         self.path.write_text(
