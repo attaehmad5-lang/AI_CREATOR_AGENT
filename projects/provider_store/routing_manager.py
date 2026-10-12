@@ -392,32 +392,37 @@ class ProviderRoutingManager:
                 credit_reservation_created = True
             if billing_mode == "PAID_APPROVED" and self.cost_policy is not None:
                 reserve_cost = getattr(self.cost_policy, "reserve_usage", None)
-                if callable(reserve_cost):
-                    if not isinstance(request_id, str) or not request_id.strip():
-                        decisions.append({"provider": provider_id, "status": "COST_RESERVATION_REQUEST_ID_REQUIRED"})
-                        continue
-                    try:
-                        cost_reservation = reserve_cost(
-                            project_id=project_id,
-                            provider_id=provider_id,
-                            estimated_cost=cost,
-                            request_id=request_id,
-                        )
-                    except Exception as exc:
-                        decisions.append({"provider": provider_id, "status": "COST_RESERVATION_FAILED", "error_type": type(exc).__name__})
-                        continue
-                    if isinstance(cost_reservation, dict) and cost_reservation.get("status") == "ALREADY_RESERVED":
-                        return {
-                            "allowed": False, "status": "REQUEST_ALREADY_RESERVED",
-                            "provider": provider_id, "request_id": request_id,
-                            "decisions": decisions,
-                        }
-                    if not isinstance(cost_reservation, dict) or cost_reservation.get("status") != "RESERVED":
-                        status = cost_reservation.get("status", "COST_RESERVATION_REJECTED") if isinstance(cost_reservation, dict) else "INVALID_COST_RESERVATION_RESPONSE"
-                        decisions.append({"provider": provider_id, "status": status})
-                        continue
-                    cost_reserved = True
-                    cost_reservation_created = True
+                if not callable(reserve_cost):
+                    decisions.append({
+                        "provider": provider_id,
+                        "status": "COST_RESERVATION_MANAGER_UNAVAILABLE",
+                    })
+                    continue
+                if not isinstance(request_id, str) or not request_id.strip():
+                    decisions.append({"provider": provider_id, "status": "COST_RESERVATION_REQUEST_ID_REQUIRED"})
+                    continue
+                try:
+                    cost_reservation = reserve_cost(
+                        project_id=project_id,
+                        provider_id=provider_id,
+                        estimated_cost=cost,
+                        request_id=request_id,
+                    )
+                except Exception as exc:
+                    decisions.append({"provider": provider_id, "status": "COST_RESERVATION_FAILED", "error_type": type(exc).__name__})
+                    continue
+                if isinstance(cost_reservation, dict) and cost_reservation.get("status") == "ALREADY_RESERVED":
+                    return {
+                        "allowed": False, "status": "REQUEST_ALREADY_RESERVED",
+                        "provider": provider_id, "request_id": request_id,
+                        "decisions": decisions,
+                    }
+                if not isinstance(cost_reservation, dict) or cost_reservation.get("status") != "RESERVED":
+                    status = cost_reservation.get("status", "COST_RESERVATION_REJECTED") if isinstance(cost_reservation, dict) else "INVALID_COST_RESERVATION_RESPONSE"
+                    decisions.append({"provider": provider_id, "status": status})
+                    continue
+                cost_reserved = True
+                cost_reservation_created = True
 
             if self.quota_manager is not None:
                 try:
