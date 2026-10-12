@@ -13,6 +13,8 @@ from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .http_probe import ProviderHTTPStatusError
+
 
 class _RejectRedirects(HTTPRedirectHandler):
     def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
