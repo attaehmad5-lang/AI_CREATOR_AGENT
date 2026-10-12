@@ -28,6 +28,26 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("cannot require a subscription" in error for error in result["errors"]))
 
+    def test_v3_catalog_requires_complete_provider_identity_and_billing_flags(self):
+        valid_provider = {
+            "id": "complete", "name": "Complete Provider",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "API", "enabled": False,
+            "subscription_required": False,
+        }
+        self.assertTrue(ConnectionManager.validate_catalog_schema({
+            "version": "3.0", "providers": [valid_provider],
+        })["valid"])
+        for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required"):
+            with self.subTest(field=field):
+                incomplete = dict(valid_provider)
+                incomplete.pop(field)
+                result = ConnectionManager.validate_catalog_schema({
+                    "version": "3.0", "providers": [incomplete],
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any(field in error and "required" in error for error in result["errors"]))
+
     def test_schema_rejects_enabled_api_provider_without_allowlist(self):
         result = ConnectionManager.validate_catalog_schema({
             "version": "3.0",
@@ -85,6 +105,7 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                 "id": "capability_test", "name": "Capability Test",
                 "category": "image", "auth_type": "NONE",
                 "connection_type": "API", "enabled": False,
+                "subscription_required": False,
             }],
         }
         for capabilities in (
