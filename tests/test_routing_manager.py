@@ -10,6 +10,7 @@ from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.credit_manager import ProviderCreditManager
+from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
 
 
 class ProviderRoutingManagerTests(unittest.TestCase):
@@ -156,6 +157,43 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "INVALID_MODEL_VERSION")
+
+    def test_project_policy_restricts_provider_and_disables_fallback(self):
+        policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        saved = policies.set_policy("film", {
+            "allowed_providers": ["fallback"],
+            "automatic_fallback": False,
+        })
+        self.assertTrue(saved["saved"])
+        router = ProviderRoutingManager(self.connections, project_policy_manager=policies)
+        result = router.route(category="image", project_id="film")
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertFalse(result["automatic_fallback"])
+
+    def test_project_policy_requires_configuration_and_enforces_cost_limit(self):
+        policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        router = ProviderRoutingManager(self.connections, project_policy_manager=policies)
+        missing = router.route(category="image", project_id="unconfigured-project")
+        self.assertFalse(missing["allowed"])
+        self.assertEqual(missing["status"], "PROJECT_POLICY_REQUIRED")
+        policies.set_policy("film", {
+            "allowed_providers": ["primary"],
+            "max_estimated_cost": 1.0,
+        })
+        too_expensive = router.route(
+            category="image", project_id="film", estimated_cost=2.0,
+        )
+        self.assertFalse(too_expensive["allowed"])
+        self.assertEqual(too_expensive["status"], "PROJECT_COST_LIMIT_EXCEEDED")
+
+    def test_project_policy_can_require_health_evidence(self):
+        policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        policies.set_policy("film", {"require_health_evidence": True})
+        router = ProviderRoutingManager(self.connections, project_policy_manager=policies)
+        result = router.route(category="image", project_id="film")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "HEALTH_DATA_REQUIRED")
 
     def test_free_credit_and_lowest_cost_strategies(self):
         router = ProviderRoutingManager(self.connections)
