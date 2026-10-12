@@ -58,6 +58,8 @@ class ProviderOAuthPKCEManager:
         self._pending: dict[str, dict[str, Any]] = {}
         self._tokens: dict[str, dict[str, Any]] = {}
         self._refreshing: set[str] = set()
+        # Invalidate token exchanges already in flight when a user clears a provider.
+        self._generation: dict[str, int] = {}
 
     @staticmethod
     def _safe_provider_id(provider_id: Any) -> bool:
@@ -164,6 +166,7 @@ class ProviderOAuthPKCEManager:
         with self._lock:
             self._pending[state] = {
                 "provider_id": provider_id,
+                "generation": self._generation.get(provider_id, 0),
                 "client_id": client_id,
                 "redirect_uri": redirect_uri,
                 "token_url": token_url,
@@ -263,8 +266,12 @@ class ProviderOAuthPKCEManager:
         if not isinstance(raw_scope, str) or len(raw_scope) > 2000 or any(ord(char) < 32 for char in raw_scope):
             return {"status": "OAUTH_SCOPE_INVALID", "provider": provider_id}
         with self._lock:
+            expected_generation = pending.get("generation", self._generation.get(provider_id, 0))
+            if expected_generation != self._generation.get(provider_id, 0):
+                return {"status": "OAUTH_SESSION_CLEARED", "provider": provider_id}
             self._tokens[provider_id] = {
                 "access_token": access_token,
+                "generation": expected_generation,
                 "refresh_token": refresh_token,
                 "token_type": "Bearer",
                 "expires_at": now + float(expires_in),
@@ -358,6 +365,7 @@ class ProviderOAuthPKCEManager:
                 "allowed_hosts": record["allowed_hosts"],
                 "client_id": record["client_id"],
                 "scope": record.get("scope", ""),
+                "generation": record.get("generation", self._generation.get(provider_id, 0)),
             }
             data = dict(result["data"])
             data.setdefault("refresh_token", refresh_token)
@@ -412,4 +420,5 @@ class ProviderOAuthPKCEManager:
                 if record.get("provider_id") != provider_id
             }
             existed = self._tokens.pop(provider_id, None) is not None
+            self._generation[provider_id] = self._generation.get(provider_id, 0) + 1
             return {"status": "CLEARED" if existed else "NOT_CONNECTED", "provider": provider_id}
