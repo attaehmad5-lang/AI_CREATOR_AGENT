@@ -2,9 +2,22 @@
 from __future__ import annotations
 
 import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+
+
+def atomic_replace_with_retry(source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> None:
+    """Retry transient Windows sharing violations during same-directory atomic replacement."""
+    for attempt in range(8):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == 7:
+                raise
+            time.sleep(min(0.01 * (2 ** attempt), 0.15))
 
 
 @contextmanager
