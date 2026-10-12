@@ -6,12 +6,12 @@
 
 ## Latest automated verification
 
-GitHub Actions run [#38303553407](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38303553407) completed successfully on Python 3.13:
+GitHub Actions code-verification run [#38303808174](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38303808174) completed successfully on Python 3.13:
 
-- Ubuntu: 302 tests passed, 0 failures.
-- Windows: 302 tests passed, 0 failures.
+- Ubuntu: 303 tests passed, 0 failures.
+- Windows: 303 tests passed, 0 failures.
 - Provider module/test compilation and provider JSON catalog validation passed on both platforms.
-- Follow-up work is isolated in draft PR #7; PR #1 is already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
+- The only changes after that code-verification run are audit/documentation updates. Follow-up work is isolated in draft PR #7; PR #1 is already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
@@ -20,7 +20,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | Canonical section | Scope range | Current evidence | Audit disposition |
 |---|---:|---|---|
 | A — Provider Registry & Lifecycle | 1–8 | Versioned 54-provider catalog, schema validation, registration and enabled/disabled lifecycle, catalog recovery, catalog compatibility tests | Foundation implemented; item-by-item audit pending |
-| B — Credentials & Connection | 9–16 | Environment-reference validation, secret redaction, expiry checks, configured endpoint/model checks, verified state gating, manual-session verification hooks, bounded HTTPS probe; enabled catalog entries now have official API documentation URLs | Foundation implemented; provider-specific live verification pending |
+| B — Credentials & Connection | 9–16 | Environment-reference validation, secret redaction, expiry checks, configured endpoint/model checks, verified state gating, manual-session verification hooks, bounded HTTPS probe, and explicit Hugging Face authenticated-account probe host | Foundation implemented; provider-specific live verification pending |
 | C — Provider Modalities | 17–24 | Catalog categories/capabilities and modality contract validation | Catalog/contract evidence only; actual provider adapters and live modality checks pending |
 | D — Routing & Fallback | 25–32 | Priority, free-credit-first, lowest-cost, healthiest-first and round-robin selection; verified-connection gating; fallback reservations | Foundation implemented; real generation-path integration pending |
 | E — Retry & Failure Handling | 33–40 | Bounded backoff, status/Retry-After handling, idempotency checks, circuit breaker and probe-slot recovery | Unit-tested foundation; provider-specific failure injection pending |
