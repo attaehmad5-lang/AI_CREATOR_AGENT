@@ -120,6 +120,38 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             self.assertTrue(manager.get_state("probe_provider")["verified"])
             self.assertTrue(response.closed)
 
+    def test_rate_limit_metadata_reaches_connection_manager_safely(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            catalog_path = root / "catalog.json"
+            state_path = root / "state.json"
+            catalog_path.write_text(json.dumps({"providers": [{
+                "id": "probe_provider", "name": "Probe Provider",
+                "category": "image", "auth_type": "NONE",
+                "connection_type": "API", "enabled": True,
+                "allowed_hosts": ["api.example.com"],
+            }]}), encoding="utf-8")
+            state_path.write_text(json.dumps({
+                "version": "1.0", "policy": "USER_CONTROLLED", "providers": {},
+            }), encoding="utf-8")
+            manager = ConnectionManager(catalog_path, state_path)
+            manager.configure_provider(
+                "probe_provider", endpoint="https://api.example.com/health"
+            )
+            error = HTTPError(
+                "https://api.example.com/health", 429, "Too Many Requests",
+                {"Retry-After": "5"}, None,
+            )
+            result = manager.verify_connectivity(
+                "probe_provider",
+                ProviderHTTPConnectivityProbe(opener=_Opener(error=error)),
+            )
+            self.assertEqual(result["status"], "RATE_LIMITED")
+            self.assertEqual(result["http_status"], 429)
+            self.assertEqual(result["retry_after"], "5")
+            self.assertFalse(result["verified"])
+            self.assertEqual(manager.get_state("probe_provider")["status"], "ERROR")
+
     def test_missing_endpoint_and_unallowlisted_host_fail_before_network(self):
         opener = _Opener()
         probe = ProviderHTTPConnectivityProbe(opener=opener)
