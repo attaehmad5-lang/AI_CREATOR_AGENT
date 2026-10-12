@@ -62,6 +62,35 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "primary")
 
+    def test_model_and_version_aware_routing_requires_exact_configured_match(self):
+        self.assertEqual(
+            self.connections.configure_provider("primary", model="image-alpha", model_version="v1")["status"],
+            "CONFIGURED",
+        )
+        self.assertEqual(
+            self.connections.configure_provider("fallback", model="image-beta", model_version="v2")["status"],
+            "CONFIGURED",
+        )
+        router = ProviderRoutingManager(self.connections)
+        selected = router.route(
+            category="image", project_id="film", model="image-beta", model_version="v2"
+        )
+        self.assertTrue(selected["allowed"])
+        self.assertEqual(selected["provider"], "fallback")
+        self.assertEqual(selected["model"], "image-beta")
+        self.assertEqual(selected["model_version"], "v2")
+
+        mismatch = router.route(
+            category="image", project_id="film", model="image-alpha", model_version="v2"
+        )
+        self.assertFalse(mismatch["allowed"])
+        self.assertEqual(mismatch["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertTrue(any(item["status"] == "MODEL_VERSION_MISMATCH" for item in mismatch["decisions"]))
+        self.assertEqual(
+            router.route(category="image", project_id="film", model_version="v2")["status"],
+            "INVALID_MODEL_VERSION",
+        )
+
     def test_capability_based_routing_selects_only_matching_provider(self):
         catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
         catalog["providers"].append({
