@@ -18,7 +18,7 @@ class ProviderProjectPolicyManagerTests(unittest.TestCase):
 
     def test_policy_round_trips_and_survives_reinitialization(self):
         result = self.manager.set_policy("film-project", {
-            "allowed_providers": ["huggingface", "pollinations"],
+            "allowed_providers": ["huggingface", "replicate"],
             "denied_providers": ["pollinations"],
             "allowed_capabilities": ["image_generation"],
             "allowed_models": ["publisher/model-v1"],
