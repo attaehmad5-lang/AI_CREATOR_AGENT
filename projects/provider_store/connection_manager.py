@@ -888,9 +888,10 @@ class ConnectionManager:
         *,
         model: str | None = None,
         endpoint: str | None = None,
+        probe_endpoint: str | None = None,
         authentication_required: bool | None = None,
     ) -> dict[str, Any]:
-        """Persist non-secret endpoint/model settings after endpoint safety checks.
+        """Persist non-secret generation/probe endpoints and model settings.
 
         Set authentication_required=True only when the configured endpoint is
         documented to require and validate the provider credential.
@@ -933,6 +934,25 @@ class ConnectionManager:
                     "saved": False,
                 }
             configuration["endpoint"] = endpoint.strip()
+        if probe_endpoint is not None:
+            allowed_hosts_raw = provider.get("allowed_hosts")
+            allowed_hosts = (
+                {item for item in allowed_hosts_raw if isinstance(item, str) and item.strip()}
+                if isinstance(allowed_hosts_raw, list) else None
+            )
+            validation = self.validate_endpoint(probe_endpoint, allowed_hosts=allowed_hosts)
+            if not validation["valid"]:
+                return {
+                    "status": validation["status"],
+                    "provider": provider_id,
+                    "saved": False,
+                }
+            from urllib.parse import urlsplit
+            if urlsplit(probe_endpoint).query:
+                return {"status": "QUERY_PARAMETERS_REJECTED", "provider": provider_id, "saved": False}
+            if not allowed_hosts:
+                return {"status": "HOST_ALLOWLIST_REQUIRED", "provider": provider_id, "saved": False}
+            configuration["probe_endpoint"] = probe_endpoint.strip()
         if not configuration:
             return {"status": "NO_CONFIGURATION", "provider": provider_id, "saved": False}
         with self._state_transaction():
@@ -990,6 +1010,18 @@ class ConnectionManager:
             if not allowed_hosts:
                 return {"status": "HOST_ALLOWLIST_REQUIRED", "provider": provider_id, "configuration": {}}
             validation = self.validate_endpoint(endpoint, allowed_hosts=allowed_hosts)
+            if not validation["valid"]:
+                return {"status": validation["status"], "provider": provider_id, "configuration": {}}
+        probe_endpoint = configuration.get("probe_endpoint")
+        if probe_endpoint is not None:
+            allowed_hosts_raw = provider.get("allowed_hosts")
+            allowed_hosts = (
+                {item for item in allowed_hosts_raw if isinstance(item, str) and item.strip()}
+                if isinstance(allowed_hosts_raw, list) else None
+            )
+            if not allowed_hosts:
+                return {"status": "HOST_ALLOWLIST_REQUIRED", "provider": provider_id, "configuration": {}}
+            validation = self.validate_endpoint(probe_endpoint, allowed_hosts=allowed_hosts)
             if not validation["valid"]:
                 return {"status": validation["status"], "provider": provider_id, "configuration": {}}
         return {
