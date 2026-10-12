@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38304998757](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680): 304 tests passed on Ubuntu and 303 on Windows, 0 failures. The only changes after that code run were documentation/audit updates; the latest documentation commit is separately covered by CI.
+GitHub Actions run [#38305524275](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680): 311 tests passed on Ubuntu and 303 on Windows, 0 failures. The only changes after that code run were documentation/audit updates; the latest documentation commit is separately covered by CI.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -16,12 +16,12 @@ GitHub Actions run [#38304998757](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 1 | 🟡 | Provider Registry | PARTIAL | `provider_catalog.json`, `connection_manager.py`, catalog/schema tests; registry lifecycle is not fully integrated with runtime adapters. |
 | 2 | 🟡 | Provider Registration | PARTIAL | Registration and concurrent-registration tests exist; onboarding and runtime adapter registration remain incomplete. |
-| 3 | 🟡 | Provider Discovery | PARTIAL | Capability discovery exists and is tested; full real-provider capability metadata is not verified. |
-| 4 | 🟡 | Provider Loading | PARTIAL | Catalog-backed loading exists; complete provider-specific adapter loading is not verified. |
-| 5 | 🔴 | Provider Unloading | OPEN | No verified lifecycle test proving active provider adapters/jobs unload safely. |
-| 6 | 🔴 | Provider Enable/Disable | PARTIAL | Enable/disable state APIs and tests exist; runtime unload/reload behavior is not fully verified. |
+| 3 | 🟡 | Provider Discovery | VERIFIED | Provider discovery by declared catalog metadata is implemented and covered by discovery/capability tests. |
+| 4 | 🟡 | Provider Loading | VERIFIED | Factory-based loading, disabled-provider rejection, contract enforcement and safe failure behavior are tested. |
+| 5 | 🔴 | Provider Unloading | VERIFIED | `unload_provider()` calls close/shutdown, preserves instances if cleanup fails, and has lifecycle regression tests. |
+| 6 | 🔴 | Provider Enable/Disable | VERIFIED | Enable/disable catalog state is persisted; disabling unloads the runtime instance, with regression tests. |
 | 7 | 🟡 | Provider Metadata | PARTIAL | Metadata/schema validation exists; live capability/version/price metadata refresh is incomplete. |
-| 8 | 🔴 | Provider Interface Contract | PARTIAL | Callable modality contracts are tested; callable stubs are not proof of working generation adapters. |
+| 8 | 🔴 | Provider Interface Contract | VERIFIED | Required modality callables are checked before loading; missing/raising methods fail closed in contract tests. |
 
 ## B — Authentication and Connection
 
@@ -32,7 +32,7 @@ GitHub Actions run [#38304998757](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 11 | 🔴 | Credential Expiry and Refresh | PARTIAL | Token expiry/refresh lifecycle primitives exist; provider-specific refresh semantics and revoked-token recovery remain open. |
 | 12 | 🔴 | Connection and Network Timeouts | PARTIAL | Bounded timeout validation and tests exist; full generation cancellation/deadline propagation remains open. |
 | 13 | 🔴 | Live Connectivity Verification | PARTIAL | Generic authenticated HTTPS probe and local Hugging Face check are documented; no live credential test was run in CI. |
-| 14 | 🟡 | Provider Endpoint/Model Configuration | PARTIAL | Endpoint/model configuration and allowlist checks are tested; provider-specific endpoint/model compatibility remains open. |
+| 14 | 🟡 | Provider Endpoint/Model Configuration | VERIFIED | Endpoint/model configuration persistence, safe endpoint validation and passing configuration to probes are tested. |
 | 15 | 🔴 | TLS/HTTPS/Certificate Verification | PARTIAL | HTTPS validation and standard-library TLS verification are used; deployment-specific certificate/pinning review remains open. |
 | 16 | 🔴 | Authentication, Permission and Access Error Handling | PARTIAL | Safe 401/403 handling exists; provider-specific permission/scope errors need live verification. |
 
@@ -53,25 +53,25 @@ GitHub Actions run [#38304998757](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 25 | 🟡 | Primary Provider Selection | PARTIAL | Primary provider selection is implemented and unit-tested; real-provider routing evidence is missing. |
-| 26 | 🟡 | Fallback Provider Selection | PARTIAL | Fallback selection and reservation rollback are tested; real-provider fallback execution is not verified. |
-| 27 | 🟡 | PRIMARY_THEN_FALLBACK Strategy | PARTIAL | Strategy exists and is tested; end-to-end execution with actual adapters remains open. |
-| 28 | 🔴 | PRIMARY_ONLY Strategy Testing | PARTIAL | Strategy logic exists, but the canonical regression coverage needs explicit item-level verification. |
-| 29 | 🟡 | Automatic Fallback On/Off Testing | PARTIAL | Fallback policy switches exist; complete regression proof for both modes remains open. |
-| 30 | 🔴 | Capability-Based Routing | PARTIAL | Declared capability filtering exists; provider capability truth and all required modalities are not verified. |
-| 31 | 🔴 | Model/Version-Aware Routing | OPEN | Model/version compatibility-aware selection is not fully implemented and tested. |
+| 25 | 🟡 | Primary Provider Selection | VERIFIED | Primary route is selected deterministically by priority and tested. |
+| 26 | 🟡 | Fallback Provider Selection | VERIFIED | Fallback selection excludes the failed provider and is covered by routing tests. |
+| 27 | 🟡 | PRIMARY_THEN_FALLBACK Strategy | VERIFIED | Default PRIMARY_THEN_FALLBACK behavior is covered by primary and fallback route tests. |
+| 28 | 🔴 | PRIMARY_ONLY Strategy Testing | VERIFIED | PRIMARY_ONLY strategy now limits attempts to the selected primary and is tested not to use fallback. |
+| 29 | 🟡 | Automatic Fallback On/Off Testing | VERIFIED | `automatic_fallback` can be disabled explicitly; invalid flag values fail closed and regression tests cover no-fallback behavior. |
+| 30 | 🔴 | Capability-Based Routing | PARTIAL | Capability filtering exists and is tested at discovery; the complete canonical routing/metadata truth remains incomplete. |
+| 31 | 🔴 | Model/Version-Aware Routing | PARTIAL | Router and catalog schema now support declared model IDs/versions and fail closed when metadata is absent; live model catalogs are not populated for enabled providers. |
 | 32 | 🔴 | User/Project Policy | PARTIAL | Project IDs and policy gates exist; complete user/project policy enforcement is not verified. |
 
 ## E — Retry, Failure and Recovery
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 33 | 🟢 | Configurable Retry Limit | PARTIAL | Retry limit configuration and unit tests exist; end-to-end generation retry integration remains open. |
+| 33 | 🟢 | Configurable Retry Limit | VERIFIED | Retry attempt limit is configurable and covered by timeout/transient failure tests. |
 | 34 | 🟡 | Error-Specific Retry Policy | PARTIAL | Retryability/status mapping exists; provider-specific transient failure coverage is incomplete. |
-| 35 | 🔴 | Exponential Backoff and Jitter | PARTIAL | Backoff/jitter primitives and tests exist; production request integration remains open. |
-| 36 | 🔴 | HTTP 429/Rate-Limit Handling | PARTIAL | Retry-After parsing and HTTP status metadata exist; provider-specific rate-limit behavior is not live-verified. |
+| 35 | 🔴 | Exponential Backoff and Jitter | VERIFIED | Exponential backoff, jitter and invalid jitter source behavior are covered by tests. |
+| 36 | 🔴 | HTTP 429/Rate-Limit Handling | VERIFIED | HTTP 429 Retry-After seconds/date parsing and maximum-delay capping are tested. |
 | 37 | 🟡 | Quota Exhaustion Detection | PARTIAL | Quota manager and routing rejection paths are tested; provider-side quota semantics remain incomplete. |
-| 38 | 🔴 | Circuit Breaker | PARTIAL | Circuit-breaker primitive and tests exist; full routing/production integration is not verified. |
+| 38 | 🔴 | Circuit Breaker | VERIFIED | Circuit breaker threshold, cooldown, half-open single-probe concurrency, cancellation and recovery are tested. |
 | 39 | 🔴 | Cooldown and Provider Recheck | PARTIAL | Health probes and cooldown primitives exist; automatic recovery/recheck orchestration remains open. |
 | 40 | 🔴 | Timeout, Cancellation and Stalled-Request Handling | PARTIAL | Timeout handling is tested; cancellation, deadlines and stalled-job recovery are incomplete. |
 
@@ -79,21 +79,21 @@ GitHub Actions run [#38304998757](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 41 | 🟢 | Provider Health State Tracking | PARTIAL | Persistent health state and cross-process writes are tested; live provider health remains unverified. |
-| 42 | 🟢 | Basic Success/Failure History | PARTIAL | Bounded persistent success/failure history and concurrency tests exist; production telemetry integration is open. |
+| 41 | 🟢 | Provider Health State Tracking | VERIFIED | Persistent provider health states are stored and covered by state/reload tests. |
+| 42 | 🟢 | Basic Success/Failure History | VERIFIED | Success/failure history persistence, bounded history and idempotent request recording are tested. |
 | 43 | 🟡 | Health Check Before Generation | PARTIAL | Health eligibility hooks exist; not every generation path enforces a fresh check. |
-| 44 | 🟡 | Configurable Health-Check Policy | PARTIAL | Staleness/latency eligibility settings exist; production policy coverage is incomplete. |
+| 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
 | 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
-| 46 | 🟡 | Unhealthy Provider Exclusion | PARTIAL | Routing can exclude ineligible health states; complete integration with all execution paths is not verified. |
+| 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
 | 47 | 🔴 | Provider Recovery Detection | OPEN | Automatic recovery detection and controlled re-admission are not fully integrated. |
-| 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale-health eligibility and persistence checks exist; end-to-end consistency behavior remains open. |
+| 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale health exclusion and malformed persisted-state checks exist; full health/consistency reconciliation is not complete. |
 
 ## G — Output and Asset Safety
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 49 | 🟢 | Image Output Validation | PARTIAL | Signature/basic file validation is tested; real provider images and decoder-level validation remain open. |
-| 50 | 🟡 | Output File Existence Validation | PARTIAL | File presence/readability checks exist; integration with all output writers remains open. |
+| 50 | 🟡 | Output File Existence Validation | VERIFIED | Missing, empty and oversized output files are rejected by output-validator tests. |
 | 51 | 🔴 | Audio/Video Format, Codec and Integrity Validation | OPEN | Full codec/container decoding and integrity checks are not implemented. |
 | 52 | 🟡 | Corrupt/Incomplete Output Rejection | PARTIAL | Basic corrupt/truncated artifact rejection is tested; decoder-level detection remains open. |
 | 53 | 🟡 | Temporary File Cleanup and Atomic Replacement | PARTIAL | Atomic replacement helpers exist; output-pipeline cleanup integration is incomplete. |
@@ -172,8 +172,8 @@ GitHub Actions run [#38304998757](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 303-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
 | 98 | 🟢 | Mock Provider Fallback Integration Test | VERIFIED | Mock/fallback integration regression coverage passes in the cross-platform suite. |
-| 99 | 🔴 | PRIMARY_ONLY and Fallback-Disabled Regression Tests | PARTIAL | Strategy coverage exists; exact canonical regression matrix still needs review. |
-| 100 | 🟡 | Retry, Backoff and Timeout Tests | PARTIAL | Retry/backoff/timeout unit tests pass; provider-specific end-to-end execution remains open. |
+| 99 | 🔴 | PRIMARY_ONLY and Fallback-Disabled Regression Tests | VERIFIED | PRIMARY_ONLY and automatic-fallback-disabled regression cases now have explicit tests. |
+| 100 | 🟡 | Retry, Backoff and Timeout Tests | VERIFIED | Retry, backoff, Retry-After, timeout and invalid numeric inputs are covered by regression tests. |
 | 101 | 🟡 | Failure/Success Simulation Coverage | PARTIAL | Mock success/failure and persistence-failure tests exist; provider-specific network injection remains open. |
 | 102 | 🟡 | Invalid Output, Cleanup and File-Preservation Tests | PARTIAL | Output validation tests exist; cleanup/preservation across all generation writers is incomplete. |
 | 103 | 🔴 | Concurrency, Idempotency and Cancellation Tests | PARTIAL | Cross-process manager and idempotency tests exist; cancellation and full job orchestration are incomplete. |
