@@ -12,7 +12,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from .connection_manager import ConnectionManager
+from .connection_manager import ConnectionManager, ProviderAuthenticationVerificationRequired
 
 
 class ProviderHTTPAuthError(PermissionError):
@@ -155,7 +155,12 @@ class ProviderHTTPConnectivityProbe:
         if not isinstance(raw_auth_type, str) or not raw_auth_type.strip():
             raise ValueError("INVALID_AUTH_TYPE")
         auth_type = raw_auth_type.strip().upper()
-        if auth_type not in {"NONE", "PUBLIC", "ANONYMOUS"}:
+        credentialed_auth = auth_type not in {"NONE", "PUBLIC", "ANONYMOUS"}
+        if credentialed_auth and configuration.get("authentication_required") is not True:
+            raise ProviderAuthenticationVerificationRequired(
+                "configure a documented endpoint that validates provider authentication"
+            )
+        if credentialed_auth:
             if auth_type in {"ACCOUNT", "MANUAL", "MANUAL_CONNECT", "OAUTH_BROWSER"}:
                 raise PermissionError("manual account connection is required")
             token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env") or self._DEFAULT_TOKEN_ENV.get(
@@ -225,7 +230,11 @@ class ProviderHTTPConnectivityProbe:
                 raise ConnectionError("provider did not return a successful HTTP status")
             # Bound any response read and never return or log response content.
             response.read(self.max_response_bytes + 1)
-            return {"ok": True, "http_status": status}
+            return {
+                "ok": True,
+                "http_status": status,
+                "authentication_verified": credentialed_auth,
+            }
         finally:
             close = getattr(response, "close", None)
             if callable(close):
