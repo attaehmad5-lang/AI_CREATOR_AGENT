@@ -332,6 +332,92 @@ class ProviderCostPolicy:
                 "budget_remaining": round(remaining - float(estimated_cost), 6),
             }
 
+    def finalize_usage(
+        self,
+        *,
+        project_id: str,
+        provider_id: str,
+        estimated_cost: float,
+        actual_cost: float,
+        request_id: str,
+        success: bool,
+        charge_outcome: str = "unknown",
+    ) -> dict[str, Any]:
+        """Atomically finalize a request, including explicit no-charge confirmation.
+
+        This method reloads and checks the idempotency key inside one ledger
+        transaction so a stale in-memory snapshot cannot accept a conflicting replay.
+        """
+        if not all(isinstance(v, str) and v.strip() for v in (project_id, provider_id, request_id)):
+            return {"status": "INVALID_USAGE_RECORD", "saved": False}
+        if not self._valid_amount(estimated_cost) or not self._valid_amount(actual_cost):
+            return {"status": "INVALID_COST_AMOUNT", "saved": False}
+        if not isinstance(success, bool):
+            return {"status": "INVALID_EXECUTION_RESULT", "saved": False}
+        if not isinstance(charge_outcome, str) or charge_outcome not in {"unknown", "incurred", "not_incurred"}:
+            return {"status": "INVALID_CHARGE_OUTCOME", "saved": False}
+        if actual_cost > 0 and charge_outcome == "not_incurred":
+            return {"status": "INCONSISTENT_CHARGE_OUTCOME", "saved": False}
+
+        with self._transaction():
+            project = self.ledger["projects"].get(project_id)
+            requests = project.get("requests", {}) if isinstance(project, dict) else {}
+            existing = requests.get(request_id) if isinstance(requests, dict) else None
+            if existing is not None:
+                same_request = (
+                    isinstance(existing, dict)
+                    and existing.get("provider_id") == provider_id
+                    and existing.get("estimated_cost") == float(estimated_cost)
+                    and existing.get("actual_cost") == float(actual_cost)
+                    and existing.get("execution_success", success) is success
+                    and existing.get("charge_outcome", "unknown") == charge_outcome
+                )
+                return {
+                    "status": "DUPLICATE_REQUEST" if same_request else "REQUEST_ID_CONFLICT",
+                    "saved": bool(same_request),
+                    "request_id": request_id,
+                }
+
+            if estimated_cost > 0 and actual_cost == 0:
+                if charge_outcome == "unknown":
+                    return {"status": "CHARGE_OUTCOME_UNKNOWN", "saved": False, "request_id": request_id}
+                if charge_outcome == "incurred":
+                    return {"status": "RECONCILIATION_REQUIRED", "saved": False, "request_id": request_id}
+                project = self.ledger["projects"].setdefault(
+                    project_id, {"actual_spend": 0.0, "requests": {}, "reservations": {}}
+                )
+                reservations = project.setdefault("reservations", {})
+                reservation = reservations.get(request_id)
+                if reservation is not None and (
+                    not isinstance(reservation, dict)
+                    or reservation.get("provider_id") != provider_id
+                    or reservation.get("estimated_cost") != float(estimated_cost)
+                ):
+                    return {"status": "REQUEST_ID_CONFLICT", "saved": False, "request_id": request_id}
+                reservations.pop(request_id, None)
+                project.setdefault("requests", {})[request_id] = {
+                    "provider_id": provider_id,
+                    "estimated_cost": float(estimated_cost),
+                    "actual_cost": 0.0,
+                    "variance": round(-float(estimated_cost), 6),
+                    "execution_success": success,
+                    "charge_outcome": "not_incurred",
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
+                }
+                if self.ledger_path:
+                    self._save()
+                return {"status": "NO_CHARGE_RECORDED", "saved": True, "request_id": request_id}
+
+            return self._reconcile_usage_unlocked(
+                project_id=project_id,
+                provider_id=provider_id,
+                estimated_cost=estimated_cost,
+                actual_cost=actual_cost,
+                request_id=request_id,
+                success=success,
+                charge_outcome=charge_outcome,
+            )
+
     def record_no_charge(
         self,
         *,
