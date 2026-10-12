@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from .interprocess_lock import interprocess_file_lock
+from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 
 MODULE_DIR = Path(__file__).resolve().parent
@@ -140,7 +140,7 @@ class ConnectionManager:
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temp_name, path)
+            atomic_replace_with_retry(temp_name, path)
         except Exception:
             try:
                 os.unlink(temp_name)
