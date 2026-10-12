@@ -199,6 +199,25 @@ class ConnectionManager:
                 yield
 
     @staticmethod
+    def _is_safe_reference_value(key: str, value: Any) -> bool:
+        """Validate secret references so secret-like field names cannot hide raw values."""
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value) > 256
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        ):
+            return False
+        if key in {"token_env", "token_expiry_env", "api_key_env", "credential_env"}:
+            return bool(re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", value))
+        if key == "secret_ref":
+            return bool(re.fullmatch(
+                r"(?:env://[A-Z][A-Z0-9_]{0,79}|vault://[A-Za-z0-9._/-]{1,220}|keyring://[A-Za-z0-9._/-]{1,220})",
+                value,
+            )) and not any(part == ".." for part in value.split("/"))
+        return False
+
+    @staticmethod
     def _contains_credential_value_field(value: Any) -> bool:
         """Detect secret-bearing keys recursively while allowing environment references."""
         safe_reference_keys = {"token_env", "token_expiry_env", "api_key_env", "secret_ref", "credential_env"}
@@ -211,6 +230,8 @@ class ConnectionManager:
             for key, item in value.items():
                 normalized = str(key).casefold().replace("-", "_")
                 if normalized in safe_reference_keys:
+                    if not ConnectionManager._is_safe_reference_value(normalized, item):
+                        return True
                     continue
                 if normalized in forbidden_keys or any(
                     marker in normalized
@@ -396,17 +417,12 @@ class ConnectionManager:
                             errors.append(
                                 f"providers[{index}].{reference_key} must be a valid environment-variable name"
                             )
-                    if "secret_ref" in provider and (
-                        not isinstance(provider["secret_ref"], str)
-                        or not provider["secret_ref"].strip()
-                        or len(provider["secret_ref"]) > 256
-                        or any(ord(char) < 32 for char in provider["secret_ref"])
-                        or any(
-                            marker in provider["secret_ref"].casefold()
-                            for marker in ("token=", "api_key=", "password=", "secret=", "bearer ")
-                        )
+                    if "secret_ref" in provider and not ConnectionManager._is_safe_reference_value(
+                        "secret_ref", provider["secret_ref"]
                     ):
-                        errors.append(f"providers[{index}].secret_ref must be a safe non-empty reference")
+                        errors.append(
+                            f"providers[{index}].secret_ref must use env://, vault://, or keyring:// reference syntax"
+                        )
                     if "capabilities" in provider:
                         capabilities = provider["capabilities"]
                         if (
@@ -726,7 +742,8 @@ class ConnectionManager:
             for key, item in value.items():
                 normalized = str(key).casefold().replace("-", "_")
                 if normalized in safe_reference_keys:
-                    safe[key] = item
+                    if ConnectionManager._is_safe_reference_value(normalized, item):
+                        safe[key] = item
                 elif normalized == "token" or any(part in normalized for part in secret_fragments):
                     continue
                 else:
