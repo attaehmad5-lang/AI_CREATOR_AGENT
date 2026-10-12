@@ -113,6 +113,64 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn("do-not-persist", state.read_text(encoding="utf-8"))
         self.assertNotIn("do-not-persist", repr(result))
 
+    def test_oauth_access_token_verifies_connection_without_persisting_token(self):
+        class Response:
+            status = 200
+            closed = False
+            def getcode(self):
+                return self.status
+            def read(self, size=-1):
+                return b'{"ok": true}'[:size]
+            def close(self):
+                self.closed = True
+
+        class Opener:
+            def __init__(self):
+                self.response = Response()
+                self.calls = []
+            def open(self, request, timeout):
+                self.calls.append((request, timeout))
+                return self.response
+
+        class OAuthStub:
+            def get_access_token(self, provider_id):
+                return "oauth-access-secret"
+
+        catalog = self.root / "oauth-providers.json"
+        state = self.root / "oauth-connections.json"
+        health_path = self.root / "oauth-health.json"
+        catalog.write_text(json.dumps({"providers": [{
+            "id": "oauth_image", "name": "OAuth Image", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API", "enabled": True,
+            "token_env": "OAUTH_ACCESS_TOKEN", "allowed_hosts": ["api.example.com"],
+        }]}), encoding="utf-8")
+        state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        manager = ConnectionManager(catalog, state)
+        configured = manager.configure_provider(
+            "oauth_image", endpoint="https://api.example.com/health",
+            authentication_required=True,
+        )
+        self.assertTrue(configured["saved"])
+        health = ProviderHealthManager(health_path)
+        service = ProviderService(manager, health_manager=health)
+        opener = Opener()
+        result = service.verify_oauth_provider("oauth_image", OAuthStub(), opener=opener)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["status"], "CONNECTED")
+        self.assertEqual(opener.calls[0][0].get_header("Authorization"), "Bearer oauth-access-secret")
+        self.assertTrue(opener.response.closed)
+        self.assertNotIn("oauth-access-secret", state.read_text(encoding="utf-8"))
+        self.assertNotIn("oauth-access-secret", health_path.read_text(encoding="utf-8"))
+        self.assertNotIn("oauth-access-secret", repr(result))
+
+    def test_oauth_verification_fails_closed_without_unexpired_access_token(self):
+        class OAuthStub:
+            def get_access_token(self, provider_id):
+                return None
+        result = self.service.verify_oauth_provider("image", OAuthStub())
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "OAUTH_TOKEN_ENV_REFERENCE_INVALID")
+
     def test_builtin_http_verification_rejects_invalid_probe_configuration(self):
         result = self.service.verify_http_provider(
             "image", max_response_bytes=-1
