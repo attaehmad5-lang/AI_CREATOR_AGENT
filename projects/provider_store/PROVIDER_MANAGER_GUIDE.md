@@ -70,7 +70,7 @@ from projects.provider_store.oauth_pkce_manager import OAuthPKCEManager
 oauth = OAuthPKCEManager()
 probe = PollinationsBalanceProbe(lambda: oauth.get_access_token("pollinations"))
 account_budget = probe("pollinations")
-print({key: value for key, value in account_budget.items() if key != "access_token"})
+print({"verified": account_budget["verified"], "balance": account_budget["balance"], "unit": account_budget["unit"]})
 ```
 
 The OAuth client must request the provider's documented balance/usage permission. A missing token, insufficient scope, expired/revoked token, malformed response, timeout, or HTTP error fails closed; no balance is guessed. This endpoint reports remaining pollen account budget, not a verified free-credit amount or USD value. Its balance may combine tier, pack, and crypto balances, so it must never authorize free-credit routing or bypass explicit paid approval and project-budget checks. Keep the result separate from `ProviderCreditManager`, which only accepts verified balances known to represent eligible free credits.
