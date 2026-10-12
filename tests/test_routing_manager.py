@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
@@ -420,6 +421,52 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "REQUEST_ALREADY_RESERVED")
         self.assertNotIn("paid-job", policy.ledger["projects"]["film"]["reservations"])
         self.assertEqual(result["reservation_cleanup"], [{"manager": "cost", "released": True}])
+
+    def test_already_reserved_quota_rolls_back_new_credit_reservation(self):
+        credits = ProviderCreditManager(self.root / "credits-already-reserved.json")
+        credits.refresh(
+            "primary",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 5.0,
+                "unit": "USD", "source": "official-account-api",
+            },
+        )
+        quota = ProviderQuotaManager(
+            self.root / "quota-credit-already-reserved.json",
+            limits={"primary": {"hourly": 2}},
+        )
+        quota.reserve(provider_id="primary", request_id="free-job")
+        router = ProviderRoutingManager(
+            self.connections, quota_manager=quota, credit_manager=credits
+        )
+        result = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            request_id="free-job",
+        )
+        self.assertEqual(result["status"], "REQUEST_ALREADY_RESERVED")
+        self.assertNotIn("free-job", credits.data["reservations"])
+        self.assertEqual(credits.usable_free_credits(unit="USD"), {"primary": 5.0})
+        self.assertEqual(result["reservation_cleanup"], [{"manager": "credit", "released": True}])
+
+    def test_reservation_cleanup_failure_stops_routing(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        quota = ProviderQuotaManager(
+            self.root / "quota-cleanup-failure.json",
+            limits={"primary": {"hourly": 2}},
+        )
+        quota.reserve(provider_id="primary", request_id="paid-job")
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=policy, quota_manager=quota
+        )
+        with patch.object(policy, "release_reservation", side_effect=OSError("storage unavailable")):
+            result = router.route(
+                category="image", project_id="film", estimated_cost=1.0,
+                paid_approved_providers={"primary"}, request_id="paid-job",
+            )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "RESERVATION_CLEANUP_FAILED")
+        self.assertEqual(result["reservation_cleanup"][0]["status"], "CLEANUP_FAILED")
+        self.assertIn("paid-job", policy.ledger["projects"]["film"]["reservations"])
 
     def test_quota_rejection_does_not_release_preexisting_cost_reservation(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
