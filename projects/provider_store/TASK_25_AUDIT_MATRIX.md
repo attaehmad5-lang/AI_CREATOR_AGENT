@@ -6,14 +6,14 @@ The exact canonical feature names, original baseline markers and item-by-item ev
 
 ## Latest code verification
 
-GitHub Actions code-verification run [#38304998757](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680) completed successfully on Python 3.13: **304 tests passed on Ubuntu and 303 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. Later changes update only audit documentation; the final documentation commit is also being checked by CI.
+GitHub Actions code-verification run [#38305524275](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680) completed successfully on Python 3.13: **311 tests passed on Ubuntu and 303 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. Later changes update only audit documentation; the final documentation commit is also being checked by CI.
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
 | A / 1–8 | Basic Provider Management | PARTIAL | Registry, registration, discovery and schema tests exist; full unload/adapter lifecycle is incomplete. |
 | B / 9–16 | Authentication and Connection | PARTIAL | Credential references, OAuth PKCE helper, endpoint/model config, and bounded HTTPS probes exist; provider-specific live auth and scopes are not verified. |
 | C / 17–24 | Multimodal Provider Support | PARTIAL | Image providers and modality contracts are cataloged; real adapters and end-to-end tests for all modalities remain open. |
-| D / 25–32 | Routing and Selection | PARTIAL | Primary/fallback, credit/cost/health filtering and routing tests exist; model/version-aware and complete project-policy routing remain open. |
+| D / 25–32 | Routing and Selection | PARTIAL | Primary/fallback, PRIMARY_ONLY, automatic-fallback on/off, credit/cost/health and declared model/version routing are tested; enabled providers still lack verified live model catalogs and complete project-policy routing remains open. |
 | E / 33–40 | Retry, Failure and Recovery | PARTIAL | Retry/backoff, Retry-After and circuit-breaker primitives are tested; cancellation/stalled-job recovery and provider-specific failure injection remain open. |
 | F / 41–48 | Health and Reliability | PARTIAL | Persistent health history, active-probe hooks and stale-health checks exist; live probes and automatic recovery/re-admission remain open. |
 | G / 49–56 | Output and Asset Safety | PARTIAL | Basic output/file validation and atomic helpers exist; full media decoding, codec constraints, malware scanning and asset lineage remain open. |
