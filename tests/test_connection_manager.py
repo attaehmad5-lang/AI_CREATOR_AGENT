@@ -1,7 +1,8 @@
 import json
 import tempfile
+import threading
 import unittest
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
@@ -935,6 +936,48 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "DISABLED")
         self.assertTrue(instance.closed)
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_concurrent_disable_waits_for_inflight_load_then_unloads_instance(self):
+        factory_entered = threading.Event()
+        release_factory = threading.Event()
+        disable_started = threading.Event()
+
+        class BlockingImageProvider:
+            def __init__(self):
+                self.closed = False
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+            def close(self):
+                self.closed = True
+
+        instance = BlockingImageProvider()
+
+        def factory(metadata):
+            factory_entered.set()
+            if not release_factory.wait(timeout=3):
+                raise TimeoutError("test factory release timed out")
+            return instance
+
+        def disable_provider():
+            disable_started.set()
+            return self.manager.set_provider_enabled("public_image", False)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            load_future = pool.submit(self.manager.load_provider, "public_image", factory)
+            self.assertTrue(factory_entered.wait(timeout=2))
+            disable_future = pool.submit(disable_provider)
+            self.assertTrue(disable_started.wait(timeout=2))
+            release_factory.set()
+            loaded = load_future.result(timeout=3)
+            disabled = disable_future.result(timeout=3)
+
+        self.assertEqual(loaded["status"], "LOADED")
+        self.assertEqual(disabled["status"], "DISABLED")
+        self.assertTrue(instance.closed)
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
 
     def test_enabled_flag_rejects_non_boolean_and_unknown_provider(self):
         self.assertEqual(
