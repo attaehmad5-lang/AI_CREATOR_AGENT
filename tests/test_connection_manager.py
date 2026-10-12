@@ -436,6 +436,23 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "INVALID_AUTHENTICATION_POLICY")
         self.assertFalse(result["saved"])
 
+    def test_configure_provider_does_not_echo_or_merge_existing_secret_fields(self):
+        self.manager.state["providers"]["public_image"] = {
+            "status": "READY",
+            "verified": False,
+            "configuration": {"api_key": "never-echo-this-secret"},
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+
+        result = self.manager.configure_provider("public_image", model="safe-model")
+
+        self.assertEqual(result["status"], "SENSITIVE_CONFIGURATION_REJECTED")
+        self.assertFalse(result["saved"])
+        self.assertNotIn("never-echo-this-secret", repr(result))
+        public_config = self.manager.get_provider_configuration("public_image")
+        self.assertEqual(public_config["status"], "SENSITIVE_CONFIGURATION_REJECTED")
+        self.assertEqual(public_config["configuration"], {})
+
     def test_configured_endpoint_and_model_are_passed_to_probe(self):
         self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
