@@ -181,6 +181,19 @@ class ProviderHealthManagerTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path)
+        self.path.write_text(
+            json.dumps({
+                "providers": {
+                    "image": {
+                        "status": "HEALTHY", "consecutive_failures": 0, "history": [],
+                        "request_events": {"bad request id": {"success": True, "error_code": None}},
+                    }
+                }
+            }),
+            encoding="utf-8",
+        )
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path)
 
     def test_active_probe_fails_closed_when_health_state_cannot_be_saved(self):
         self.path.write_text("{invalid-json", encoding="utf-8")
