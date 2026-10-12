@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
+from .safe_numbers import finite_number
 
 
 class ProviderHealthManager:
@@ -99,12 +100,7 @@ class ProviderHealthManager:
                     raise ValueError("Invalid provider health history event")
                 self._parse_timestamp(event.get("timestamp"))
                 latency = event.get("latency_ms")
-                if latency is not None and (
-                    not isinstance(latency, (int, float))
-                    or isinstance(latency, bool)
-                    or not math.isfinite(latency)
-                    or latency < 0
-                ):
+                if latency is not None and finite_number(latency, minimum=0) is None:
                     raise ValueError("Invalid provider health latency")
                 error_code = event.get("error_code")
                 if error_code is not None and (
@@ -116,12 +112,7 @@ class ProviderHealthManager:
                 if timestamp_key in record:
                     self._parse_timestamp(record[timestamp_key])
             latency = record.get("last_latency_ms")
-            if latency is not None and (
-                not isinstance(latency, (int, float))
-                or isinstance(latency, bool)
-                or not math.isfinite(latency)
-                or latency < 0
-            ):
+            if latency is not None and finite_number(latency, minimum=0) is None:
                 raise ValueError("Invalid provider last health latency")
         self.data = loaded
 
@@ -152,13 +143,11 @@ class ProviderHealthManager:
             or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", request_id)
         ):
             return {"status": "INVALID_REQUEST_ID", "saved": False}
-        if latency_ms is not None and (
-            not isinstance(latency_ms, (int, float))
-            or isinstance(latency_ms, bool)
-            or not math.isfinite(latency_ms)
-            or latency_ms < 0
-        ):
+        latency_value = None if latency_ms is None else finite_number(latency_ms, minimum=0)
+        if latency_ms is not None and latency_value is None:
             return {"status": "INVALID_LATENCY", "saved": False}
+        if latency_value is not None:
+            latency_ms = latency_value
         with self._transaction():
             providers = self.data["providers"]
             current = providers.get(provider_id, {})
@@ -240,16 +229,12 @@ class ProviderHealthManager:
             return {"provider": provider_id, "status": "INVALID_PROVIDER", "verified": False}
         if not callable(probe):
             return {"provider": provider_id, "status": "INVALID_PROBE", "verified": False}
-        if (
-            not isinstance(timeout_seconds, (int, float))
-            or isinstance(timeout_seconds, bool)
-            or not math.isfinite(timeout_seconds)
-            or timeout_seconds <= 0
-        ):
+        timeout_value = finite_number(timeout_seconds, minimum=0)
+        if timeout_value is None or timeout_value <= 0:
             return {"provider": provider_id, "status": "INVALID_TIMEOUT", "verified": False}
         started = __import__("time").monotonic()
         try:
-            result = probe(timeout_seconds=float(timeout_seconds))
+            result = probe(timeout_seconds=timeout_value)
         except Exception as exc:
             name = type(exc).__name__.casefold()
             code = "TIMEOUT" if isinstance(exc, TimeoutError) or "timeout" in name else "NETWORK_ERROR"
@@ -299,20 +284,15 @@ class ProviderHealthManager:
         stale_after_seconds: float = 300.0,
         max_latency_ms: float | None = None,
     ) -> dict[str, Any]:
-        if (
-            not isinstance(stale_after_seconds, (int, float))
-            or isinstance(stale_after_seconds, bool)
-            or not math.isfinite(stale_after_seconds)
-            or stale_after_seconds < 0
-        ):
+        stale_limit = finite_number(stale_after_seconds, minimum=0)
+        if stale_limit is None:
             return {"eligible": False, "status": "INVALID_HEALTH_POLICY", "reason": "INVALID_STALE_LIMIT"}
-        if max_latency_ms is not None and (
-            not isinstance(max_latency_ms, (int, float))
-            or isinstance(max_latency_ms, bool)
-            or not math.isfinite(max_latency_ms)
-            or max_latency_ms < 0
-        ):
+        stale_after_seconds = stale_limit
+        latency_limit = None if max_latency_ms is None else finite_number(max_latency_ms, minimum=0)
+        if max_latency_ms is not None and latency_limit is None:
             return {"eligible": False, "status": "INVALID_HEALTH_POLICY", "reason": "INVALID_LATENCY_LIMIT"}
+        if latency_limit is not None:
+            max_latency_ms = latency_limit
         with self._transaction():
             current = self.data["providers"].get(provider_id)
             record = dict(current) if isinstance(current, dict) else None
