@@ -1,8 +1,11 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from urllib.error import HTTPError
 
 from projects.provider_store.account_balance_probe import ProviderJSONBalanceProbe
+from projects.provider_store.credit_manager import ProviderCreditManager
 
 
 class _Response:
@@ -69,6 +72,14 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
         self.assertNotIn("private-token", repr(result))
         self.assertNotIn("do-not-return", repr(result))
         self.assertTrue(opener.response.closed)
+
+    def test_verified_balance_probe_integrates_with_credit_manager(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = ProviderCreditManager(Path(temporary) / "credits.json")
+            probe = self.make_probe(_Opener(_Response({"totalBalance": 3.5})), unit="POLLEN")
+            result = manager.refresh("pollinations", probe)
+            self.assertEqual(result["status"], "CREDIT_BALANCE_UPDATED")
+            self.assertEqual(manager.usable_free_credits(unit="POLLEN"), {"pollinations": 3.5})
 
     def test_missing_credentials_fail_before_network(self):
         opener = _Opener()
