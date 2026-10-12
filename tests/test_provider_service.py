@@ -147,7 +147,8 @@ class ProviderServiceTests(unittest.TestCase):
         state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
         manager = ConnectionManager(catalog, state)
         configured = manager.configure_provider(
-            "oauth_image", endpoint="https://api.example.com/health",
+            "oauth_image", endpoint="https://api.example.com/generate",
+            probe_endpoint="https://api.example.com/health",
             authentication_required=True,
         )
         self.assertTrue(configured["saved"])
@@ -158,6 +159,8 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["verified"])
         self.assertEqual(result["status"], "CONNECTED")
         self.assertEqual(opener.calls[0][0].get_header("Authorization"), "Bearer oauth-access-secret")
+        self.assertEqual(opener.calls[0][0].full_url, "https://api.example.com/health")
+        self.assertEqual(manager.get_provider_configuration("oauth_image")["configuration"]["endpoint"], "https://api.example.com/generate")
         self.assertTrue(opener.response.closed)
         self.assertNotIn("oauth-access-secret", state.read_text(encoding="utf-8"))
         self.assertNotIn("oauth-access-secret", health_path.read_text(encoding="utf-8"))
