@@ -59,6 +59,24 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "ZERO_COST_NOT_VERIFIED")
 
+    def test_catalog_pollinations_cannot_bypass_verified_free_cost_policy(self):
+        from pathlib import Path
+        catalog_path = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        provider = next(item for item in catalog["providers"] if item["id"] == "pollinations")
+        zero = self.policy.evaluate_request(
+            provider, project_id="documentary", estimated_cost=0.0,
+            paid_usage_approved=False,
+        )
+        self.assertFalse(zero["allowed"])
+        self.assertEqual(zero["status"], "ZERO_COST_NOT_VERIFIED")
+        paid = self.policy.evaluate_request(
+            provider, project_id="documentary", estimated_cost=0.25,
+            paid_usage_approved=False,
+        )
+        self.assertFalse(paid["allowed"])
+        self.assertEqual(paid["status"], "PAID_APPROVAL_REQUIRED")
+
     def test_subscription_required_provider_needs_positive_cost_estimate(self):
         result = self.policy.evaluate_request(
             {"id": "paid", "enabled": True, "subscription_required": True},
