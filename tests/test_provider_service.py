@@ -103,7 +103,7 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertTrue(result["verified"])
         self.assertEqual(result["status"], "CONNECTED")
-        self.assertEqual(result["health"]["status"], "HEALTH_RECORDED")
+        self.assertEqual(result["health"]["status"], "HEALTHY")
         self.assertEqual(opener.calls[0][1], 1.5)
         self.assertEqual(
             opener.calls[0][0].get_header("Authorization"), "Bearer do-not-persist"
