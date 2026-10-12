@@ -168,6 +168,8 @@ class ProviderServiceTests(unittest.TestCase):
             def get_access_token(self, provider_id):
                 return None
         class ConnectionStub:
+            def verify_connectivity(self, *args, **kwargs):
+                raise AssertionError("HTTP verification must not run without a valid OAuth token")
             def get_provider(self, provider_id):
                 return {"id": provider_id, "token_env": "OAUTH_ACCESS_TOKEN"}
             def verify_connectivity(self, provider_id, probe, **kwargs):
