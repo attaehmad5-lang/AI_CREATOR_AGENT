@@ -230,11 +230,10 @@ class ProviderHTTPConnectivityProbe:
                 raise ConnectionError("provider did not return a successful HTTP status")
             # Bound any response read and never return or log response content.
             response.read(self.max_response_bytes + 1)
-            return {
-                "ok": True,
-                "http_status": status,
-                "authentication_verified": credentialed_auth,
-            }
+            result = {"ok": True, "http_status": status}
+            if credentialed_auth:
+                result["authentication_verified"] = True
+            return result
         finally:
             close = getattr(response, "close", None)
             if callable(close):
