@@ -368,11 +368,21 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(restored["restored"])
         self.assertEqual(json.loads(self.catalog_path.read_text(encoding="utf-8")), master)
 
+        valid_target = {
+            "version": "3.0",
+            "providers": [{
+                "id": "keep_me", "name": "Keep Me", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "allowed_hosts": ["keep.example.com"],
+            }],
+        }
+        self.catalog_path.write_text(json.dumps(valid_target), encoding="utf-8")
         no_op = ConnectionManager.restore_catalog_from_master(
             self.catalog_path, master_path
         )
         self.assertEqual(no_op["status"], "TARGET_CATALOG_VALID")
         self.assertFalse(no_op["restored"])
+        self.assertEqual(json.loads(self.catalog_path.read_text(encoding="utf-8")), valid_target)
 
     def test_catalog_recovery_fails_closed_when_master_is_invalid(self):
         master_path = self.root / "invalid_master.json"
