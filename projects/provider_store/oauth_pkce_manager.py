@@ -58,6 +58,7 @@ class ProviderOAuthPKCEManager:
         self._pending: dict[str, dict[str, Any]] = {}
         self._tokens: dict[str, dict[str, Any]] = {}
         self._refreshing: set[str] = set()
+        self._exchanging: set[str] = set()
         # Invalidate token exchanges already in flight when a user clears a provider.
         self._generation: dict[str, int] = {}
 
@@ -306,34 +307,42 @@ class ProviderOAuthPKCEManager:
             pending = self._pending.get(state)
             if not isinstance(pending, dict) or pending.get("provider_id") != provider_id:
                 return {"status": "OAUTH_STATE_NOT_FOUND", "provider": provider_id}
+            if provider_id in self._exchanging:
+                return {"status": "OAUTH_EXCHANGE_IN_PROGRESS", "provider": provider_id}
+            try:
+                now = float(self.clock())
+            except Exception:
+                return {"status": "CLOCK_INVALID", "provider": provider_id}
+            if not math.isfinite(now) or now >= pending["expires_at"]:
+                self._pending.pop(state, None)
+                return {"status": "OAUTH_STATE_EXPIRED", "provider": provider_id}
             self._pending.pop(state, None)
+            self._exchanging.add(provider_id)
         try:
-            now = float(self.clock())
-        except Exception:
-            return {"status": "CLOCK_INVALID", "provider": provider_id}
-        if not math.isfinite(now) or now >= pending["expires_at"]:
-            return {"status": "OAUTH_STATE_EXPIRED", "provider": provider_id}
-        result = self._post_form(
-            pending["token_url"], pending["allowed_hosts"],
-            {
-                "grant_type": "authorization_code",
-                "code": code,
-                "client_id": pending["client_id"],
-                "redirect_uri": pending["redirect_uri"],
-                "code_verifier": pending["verifier"],
-            },
-            timeout_seconds,
-        )
-        if result.get("status") != "OK":
-            failure = {
-                "status": result.get("status", "OAUTH_TOKEN_REQUEST_FAILED"),
-                "provider": provider_id,
-            }
-            http_status = result.get("http_status")
-            if isinstance(http_status, int) and not isinstance(http_status, bool) and 100 <= http_status <= 599:
-                failure["http_status"] = http_status
-            return failure
-        return self._install_tokens(provider_id, pending, result["data"])
+            result = self._post_form(
+                pending["token_url"], pending["allowed_hosts"],
+                {
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "client_id": pending["client_id"],
+                    "redirect_uri": pending["redirect_uri"],
+                    "code_verifier": pending["verifier"],
+                },
+                timeout_seconds,
+            )
+            if result.get("status") != "OK":
+                failure = {
+                    "status": result.get("status", "OAUTH_TOKEN_REQUEST_FAILED"),
+                    "provider": provider_id,
+                }
+                http_status = result.get("http_status")
+                if isinstance(http_status, int) and not isinstance(http_status, bool) and 100 <= http_status <= 599:
+                    failure["http_status"] = http_status
+                return failure
+            return self._install_tokens(provider_id, pending, result["data"])
+        finally:
+            with self._lock:
+                self._exchanging.discard(provider_id)
 
     def refresh(self, provider_id: str, *, timeout_seconds: float = 10.0) -> dict[str, Any]:
         with self._lock:
@@ -419,8 +428,8 @@ class ProviderOAuthPKCEManager:
 
     def clear(self, provider_id: str) -> dict[str, Any]:
         with self._lock:
-            if provider_id in self._refreshing:
-                return {"status": "REFRESH_IN_PROGRESS", "provider": provider_id}
+            if provider_id in self._refreshing or provider_id in self._exchanging:
+                return {"status": "CONNECTION_OPERATION_IN_PROGRESS", "provider": provider_id}
             self._pending = {
                 state: record for state, record in self._pending.items()
                 if record.get("provider_id") != provider_id
