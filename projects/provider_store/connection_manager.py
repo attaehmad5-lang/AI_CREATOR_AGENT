@@ -250,6 +250,14 @@ class ConnectionManager:
                     provider_id = provider.get("id")
                     if not isinstance(provider_id, str) or not provider_id.strip():
                         errors.append(f"providers[{index}].id must be a non-empty string")
+                    elif (
+                        len(provider_id) > 100
+                        or any(
+                            char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+                            for char in provider_id
+                        )
+                    ):
+                        errors.append(f"providers[{index}].id contains invalid characters or exceeds 100 characters")
                     elif provider_id in seen:
                         errors.append(f"duplicate provider id: {provider_id}")
                     else:
