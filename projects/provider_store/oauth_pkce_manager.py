@@ -101,6 +101,31 @@ class ProviderOAuthPKCEManager:
             and all(0x21 <= ord(char) <= 0x7E for char in value)
         )
 
+    def begin_pollinations_authorization(
+        self,
+        *,
+        redirect_uri: str,
+        allowed_redirect_uris: list[str] | tuple[str, ...] | set[str],
+        scopes: str | list[str] | tuple[str, ...] = ("profile", "usage"),
+        client_id_env: str = "POLLINATIONS_APP_KEY",
+    ) -> dict[str, Any]:
+        """Start Pollinations' documented user-consent PKCE flow.
+
+        The App Key must be created in the user's Pollinations dashboard and the exact
+        redirect URI must be registered on that App Key. The returned URL contains no
+        user access token; the authorization code is exchanged server-side/in-process.
+        """
+        return self.begin_authorization(
+            "pollinations",
+            authorization_url="https://enter.pollinations.ai/authorize",
+            token_url="https://enter.pollinations.ai/api/oauth/token",
+            client_id_env=client_id_env,
+            redirect_uri=redirect_uri,
+            allowed_redirect_uris=allowed_redirect_uris,
+            allowed_hosts=["enter.pollinations.ai"],
+            scopes=scopes,
+        )
+
     def begin_authorization(
         self,
         provider_id: str,
