@@ -7,10 +7,10 @@
 
 ## Latest automated verification
 
-GitHub Actions run [#38291285381](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38291285381) completed successfully on Python 3.13:
+GitHub Actions run [#38292543403](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38292543403) completed successfully on Python 3.13:
 
-- Ubuntu: 294 tests passed, 0 failures.
-- Windows: 294 tests passed, 0 failures.
+- Ubuntu: 298 tests passed, 0 failures.
+- Windows: 298 tests passed, 0 failures.
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
 
@@ -28,7 +28,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | F — Provider Health | 41–48 | Persisted health history, latency/staleness checks, eligibility and active probe recording | Foundation implemented; live provider health evidence pending |
 | G — Output Validation | 49–56 | Size/signature/basic-content checks, bounded reads, mutation detection, JSON nesting limits and SHA-256 | Basic validation implemented; full media decoding, malware scanning and semantic QA pending |
 | H — Cost, Credits & Budgets | 57–64 | Paid-approval guard, configured budgets, serialized reservations, usage reconciliation, verified credit snapshots and unit compatibility; Pollinations no longer claims zero-cost access and requires its API key reference | Local policy/ledger tested; provider account balance adapters pending |
-| I — Security & Privacy | 65–72 | Secret-safe catalog/state, endpoint allowlists, HTTPS-only probe, redirect rejection, bounded response reads, atomic replacement and interprocess locks | Implemented safeguards; threat-model and deployment review pending |
+| I — Security & Privacy | 65–72 | Secret-safe catalog/state, strict environment/vault/keyring reference syntax, tuple-aware recursive secret detection, documentation-URL query/fragment rejection, endpoint allowlists, HTTPS-only probe, redirect rejection, bounded reads, atomic replacement and interprocess locks | Safeguards unit-tested; threat-model and deployment review pending |
 | J — Jobs & Execution | 73–80 | Request reservation/finalization integration and idempotency tests in the provider service | Provider-request lifecycle foundation; full end-to-end generation jobs pending |
 | K — Performance & Observability | 81–88 | Health/latency history, bounded histories, concurrency tests and structured safe statuses | Partial evidence; production metrics/telemetry and load benchmarks pending |
 | L — Configuration & Recovery | 89–96 | Validated endpoint/model configuration, atomic writes, catalog backup validation and explicit restore path | Foundation implemented; mobile/Pydroid and crash-recovery verification pending |
