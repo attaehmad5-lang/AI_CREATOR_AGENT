@@ -655,7 +655,7 @@ class ConnectionManagerTests(unittest.TestCase):
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         connected = self.manager.verify_connectivity(
             "token_image",
-            lambda provider, **kwargs: {"ok": True},
+            lambda provider, **kwargs: {"ok": True, "authentication_verified": True},
             environ={
                 "TEST_PROVIDER_TOKEN": "private-token",
                 "TEST_PROVIDER_TOKEN_EXPIRES": "2099-01-01T00:00:00Z",
@@ -673,6 +673,20 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "CREDENTIALS_EXPIRED")
         self.assertEqual(called, [])
+        state = self.manager.get_state("token_image")
+        self.assertEqual(state["status"], "ERROR")
+        self.assertFalse(state["verified"])
+
+    def test_credentialed_probe_cannot_mark_connected_without_authentication_evidence(self):
+        called = []
+        result = self.manager.verify_connectivity(
+            "token_image",
+            lambda provider, **kwargs: called.append(True) or {"ok": True},
+            environ={"TEST_PROVIDER_TOKEN": "private-token"},
+        )
+        self.assertEqual(result["status"], "AUTHENTICATION_VERIFICATION_REQUIRED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(called, [True])
         state = self.manager.get_state("token_image")
         self.assertEqual(state["status"], "ERROR")
         self.assertFalse(state["verified"])
