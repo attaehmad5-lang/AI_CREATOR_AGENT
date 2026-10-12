@@ -264,6 +264,19 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(any("official_api_url is required" in error for error in manual["errors"]))
         self.assertTrue(any("capabilities must be non-empty" in error for error in manual["errors"]))
 
+        hybrid = ConnectionManager.validate_catalog_schema({
+            "version": "3.0",
+            "providers": [{
+                "id": "hybrid", "name": "Hybrid", "category": "image",
+                "auth_type": "ACCOUNT_OR_API", "connection_type": "API_OR_ACCOUNT",
+                "enabled": True, "subscription_required": True,
+                "official_api_url": "https://docs.example.com/api",
+                "capabilities": ["image_generation"],
+            }],
+        })
+        self.assertFalse(hybrid["valid"])
+        self.assertTrue(any("allowed_hosts is required" in error for error in hybrid["errors"]))
+
     def test_production_catalog_api_allowlists_are_explicit_and_valid(self):
         catalog_path = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
