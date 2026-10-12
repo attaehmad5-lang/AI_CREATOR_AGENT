@@ -506,6 +506,14 @@ class ConnectionManager:
             updated[index]["enabled"] = enabled
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation["valid"]:
+                return {
+                    "status": "INVALID_PROVIDER_METADATA",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation["errors"],
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
         if not enabled and provider_id in self._loaded_providers:
