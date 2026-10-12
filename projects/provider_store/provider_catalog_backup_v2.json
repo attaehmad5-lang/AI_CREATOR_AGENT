@@ -73,7 +73,6 @@
       "connection_type": "MANUAL_CONNECT",
       "subscription_required": true,
       "subscription_url": "https://suno.com/",
-      "official_api_url": "",
       "module": null,
       "enabled": false,
       "credits_status": "UNKNOWN"
@@ -111,7 +110,6 @@
       "connection_type": "API",
       "subscription_required": true,
       "subscription_url": "https://klingai.com/",
-      "official_api_url": "",
       "module": null,
       "enabled": false,
       "credits_status": "UNKNOWN"
