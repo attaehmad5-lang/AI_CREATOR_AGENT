@@ -20,13 +20,13 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | Canonical section | Scope range | Current evidence | Audit disposition |
 |---|---:|---|---|
 | A — Provider Registry & Lifecycle | 1–8 | Versioned 54-provider catalog, schema validation, registration and enabled/disabled lifecycle, catalog recovery, catalog compatibility tests | Foundation implemented; item-by-item audit pending |
-| B — Credentials & Connection | 9–16 | Environment-reference validation, secret redaction, expiry checks, configured endpoint/model checks, verified state gating, manual-session verification hooks, bounded HTTPS probe | Foundation implemented; provider-specific live verification pending |
+| B — Credentials & Connection | 9–16 | Environment-reference validation, secret redaction, expiry checks, configured endpoint/model checks, verified state gating, manual-session verification hooks, bounded HTTPS probe; enabled catalog entries now have official API documentation URLs | Foundation implemented; provider-specific live verification pending |
 | C — Provider Modalities | 17–24 | Catalog categories/capabilities and modality contract validation | Catalog/contract evidence only; actual provider adapters and live modality checks pending |
 | D — Routing & Fallback | 25–32 | Priority, free-credit-first, lowest-cost, healthiest-first and round-robin selection; verified-connection gating; fallback reservations | Foundation implemented; real generation-path integration pending |
 | E — Retry & Failure Handling | 33–40 | Bounded backoff, status/Retry-After handling, idempotency checks, circuit breaker and probe-slot recovery | Unit-tested foundation; provider-specific failure injection pending |
 | F — Provider Health | 41–48 | Persisted health history, latency/staleness checks, eligibility and active probe recording | Foundation implemented; live provider health evidence pending |
 | G — Output Validation | 49–56 | Size/signature/basic-content checks, bounded reads, mutation detection, JSON nesting limits and SHA-256 | Basic validation implemented; full media decoding, malware scanning and semantic QA pending |
-| H — Cost, Credits & Budgets | 57–64 | Paid-approval guard, configured budgets, serialized reservations, usage reconciliation, verified credit snapshots and unit compatibility | Local policy/ledger tested; provider account balance adapters pending |
+| H — Cost, Credits & Budgets | 57–64 | Paid-approval guard, configured budgets, serialized reservations, usage reconciliation, verified credit snapshots and unit compatibility; Pollinations no longer claims zero-cost access and requires its API key reference | Local policy/ledger tested; provider account balance adapters pending |
 | I — Security & Privacy | 65–72 | Secret-safe catalog/state, endpoint allowlists, HTTPS-only probe, redirect rejection, bounded response reads, atomic replacement and interprocess locks | Implemented safeguards; threat-model and deployment review pending |
 | J — Jobs & Execution | 73–80 | Request reservation/finalization integration and idempotency tests in the provider service | Provider-request lifecycle foundation; full end-to-end generation jobs pending |
 | K — Performance & Observability | 81–88 | Health/latency history, bounded histories, concurrency tests and structured safe statuses | Partial evidence; production metrics/telemetry and load benchmarks pending |
@@ -45,7 +45,8 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 5. Add full image/audio/video decoding, malware scanning, and semantic output checks where required.
 6. Review deployment persistence: the JSON/OS-lock design protects cooperating local processes but is not one atomic transaction across manager files, devices, or containers with incompatible lock semantics. Evaluate SQLite/transactional storage for production multi-worker use.
 7. Verify Android/Pydroid compatibility separately; GitHub Ubuntu/Windows CI does not establish mobile-runtime compatibility.
-8. Inspect catalog capability claims and endpoint allowlists against authoritative provider documentation. Catalog labels alone never count as live verification.
+8. Enabled providers now have explicit basic capability metadata and official documentation URLs. Disabled catalog entries still need their fine-grained capabilities and official links checked against authoritative documentation before enabling. Catalog labels alone never count as live verification.
+9. Pollinations' catalog entry follows its current [official API documentation](https://gen.pollinations.ai/docs): bearer API key reference, `gen.pollinations.ai` allowlist, and no assumed zero-cost access. Free-credit use still requires a trusted account-balance probe; paid usage still requires a positive estimate, project budget, and explicit approval.
 
 ## Completion gate
 
