@@ -104,6 +104,7 @@ class ProviderOAuthPKCEManager:
         token_url: str,
         client_id_env: str,
         redirect_uri: str,
+        allowed_redirect_uris: list[str] | tuple[str, ...] | set[str],
         allowed_hosts: list[str] | tuple[str, ...] | set[str],
         scopes: str | list[str] | tuple[str, ...] = "",
     ) -> dict[str, Any]:
@@ -111,7 +112,13 @@ class ProviderOAuthPKCEManager:
             return {"status": "INVALID_PROVIDER", "provider": provider_id}
         if not self._valid_endpoint(authorization_url, allowed_hosts) or not self._valid_endpoint(token_url, allowed_hosts):
             return {"status": "UNSAFE_OAUTH_ENDPOINT", "provider": provider_id}
-        if not self._valid_redirect_uri(redirect_uri):
+        if (
+            not isinstance(allowed_redirect_uris, (list, tuple, set, frozenset))
+            or not allowed_redirect_uris
+            or any(not self._valid_redirect_uri(item) for item in allowed_redirect_uris)
+            or not self._valid_redirect_uri(redirect_uri)
+            or redirect_uri not in allowed_redirect_uris
+        ):
             return {"status": "INVALID_REDIRECT_URI", "provider": provider_id}
         if not isinstance(client_id_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", client_id_env):
             return {"status": "INVALID_CLIENT_ID_REFERENCE", "provider": provider_id}
