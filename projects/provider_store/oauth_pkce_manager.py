@@ -12,6 +12,7 @@ import json
 import math
 import re
 import secrets
+import threading
 import time
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
@@ -53,8 +54,10 @@ class ProviderOAuthPKCEManager:
         self.clock = clock or time.time
         self.state_ttl_seconds = state_ttl_seconds
         self.max_response_bytes = max_response_bytes
+        self._lock = threading.RLock()
         self._pending: dict[str, dict[str, Any]] = {}
         self._tokens: dict[str, dict[str, Any]] = {}
+        self._refreshing: set[str] = set()
 
     @staticmethod
     def _safe_provider_id(provider_id: Any) -> bool:
@@ -150,21 +153,22 @@ class ProviderOAuthPKCEManager:
         if scope_text:
             query["scope"] = scope_text
         url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), ""))
-        self._pending[state] = {
-            "provider_id": provider_id,
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "token_url": token_url,
-            "allowed_hosts": list(allowed_hosts),
-            "verifier": verifier,
-            "scope": scope_text,
-            "expires_at": now + self.state_ttl_seconds,
-        }
-        # Expired states are discarded opportunistically; no background task is needed.
-        self._pending = {
-            key: value for key, value in self._pending.items()
-            if value.get("expires_at", 0) > now
-        }
+        with self._lock:
+            self._pending[state] = {
+                "provider_id": provider_id,
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "token_url": token_url,
+                "allowed_hosts": list(allowed_hosts),
+                "verifier": verifier,
+                "scope": scope_text,
+                "expires_at": now + self.state_ttl_seconds,
+            }
+            # Expired states are discarded opportunistically; no background task is needed.
+            self._pending = {
+                key: value for key, value in self._pending.items()
+                if value.get("expires_at", 0) > now
+            }
         return {
             "status": "AUTHORIZATION_REQUIRED",
             "provider": provider_id,
@@ -274,10 +278,11 @@ class ProviderOAuthPKCEManager:
             return {"status": "INVALID_OAUTH_STATE", "provider": provider_id}
         if not isinstance(code, str) or not code.strip() or len(code) > 4096 or any(ord(char) < 32 or ord(char) == 127 for char in code):
             return {"status": "INVALID_AUTHORIZATION_CODE", "provider": provider_id}
-        pending = self._pending.get(state)
-        if not isinstance(pending, dict) or pending.get("provider_id") != provider_id:
-            return {"status": "OAUTH_STATE_NOT_FOUND", "provider": provider_id}
-        self._pending.pop(state, None)
+        with self._lock:
+            pending = self._pending.get(state)
+            if not isinstance(pending, dict) or pending.get("provider_id") != provider_id:
+                return {"status": "OAUTH_STATE_NOT_FOUND", "provider": provider_id}
+            self._pending.pop(state, None)
         try:
             now = float(self.clock())
         except Exception:
