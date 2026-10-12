@@ -187,6 +187,25 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertFalse(too_expensive["allowed"])
         self.assertEqual(too_expensive["status"], "PROJECT_COST_LIMIT_EXCEEDED")
 
+    def test_project_policy_restricts_models_and_capabilities(self):
+        policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        policies.set_policy("film", {"allowed_models": ["sdxl"]})
+        router = ProviderRoutingManager(self.connections, project_policy_manager=policies)
+        model_denied = router.route(
+            category="image", project_id="film", model="flux"
+        )
+        self.assertFalse(model_denied["allowed"])
+        self.assertEqual(model_denied["status"], "PROJECT_MODEL_NOT_ALLOWED")
+
+        policies.set_policy("film", {"allowed_capabilities": ["voice_generation"]})
+        capability_denied = router.route(category="image", project_id="film")
+        self.assertFalse(capability_denied["allowed"])
+        self.assertEqual(capability_denied["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertTrue(all(
+            decision["status"] == "PROJECT_CAPABILITY_NOT_ALLOWED"
+            for decision in capability_denied["decisions"]
+        ))
+
     def test_project_policy_can_require_health_evidence(self):
         policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
         policies.set_policy("film", {"require_health_evidence": True})
