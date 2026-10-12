@@ -992,8 +992,45 @@ class ConnectionManager:
             state = self.state["providers"].get(provider_id, {})
             record = dict(state) if isinstance(state, dict) else {}
             current = record.get("configuration", {})
-            merged = dict(current) if isinstance(current, dict) else {}
+            if not isinstance(current, dict):
+                return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "saved": False}
+            if self._contains_credential_value_field(current):
+                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
+            merged = dict(current)
             merged.update(configuration)
+            if self._contains_credential_value_field(merged):
+                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
+            existing_authentication_policy = merged.get("authentication_required")
+            if existing_authentication_policy is not None and not isinstance(existing_authentication_policy, bool):
+                return {"status": "INVALID_AUTHENTICATION_POLICY", "provider": provider_id, "saved": False}
+            existing_model = merged.get("model")
+            if existing_model is not None and (
+                not isinstance(existing_model, str) or not existing_model.strip() or len(existing_model) > 200
+            ):
+                return {"status": "INVALID_MODEL", "provider": provider_id, "saved": False}
+            if isinstance(existing_model, str) and any(
+                marker in existing_model.casefold()
+                for marker in ("api_key=", "token=", "password=", "secret=", "bearer ")
+            ):
+                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
+            allowed_hosts_raw = provider.get("allowed_hosts")
+            allowed_hosts = (
+                {item for item in allowed_hosts_raw if isinstance(item, str) and item.strip()}
+                if isinstance(allowed_hosts_raw, list) else None
+            )
+            for endpoint_key in ("endpoint", "probe_endpoint"):
+                existing_endpoint = merged.get(endpoint_key)
+                if existing_endpoint is None:
+                    continue
+                if not allowed_hosts:
+                    return {"status": "HOST_ALLOWLIST_REQUIRED", "provider": provider_id, "saved": False}
+                endpoint_validation = self.validate_endpoint(existing_endpoint, allowed_hosts=allowed_hosts)
+                if not endpoint_validation["valid"]:
+                    return {
+                        "status": endpoint_validation["status"],
+                        "provider": provider_id,
+                        "saved": False,
+                    }
             record["configuration"] = merged
             record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
             self.state["providers"][provider_id] = record
