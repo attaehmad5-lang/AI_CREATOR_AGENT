@@ -9,7 +9,7 @@ class ProviderCatalogValidationTests(unittest.TestCase):
     def test_all_provider_catalog_json_files_pass_schema_validation(self):
         root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
         catalogs = []
-        for path in sorted(root.glob("*.json")):
+        for path in sorted(root.rglob("*.json")):
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict) and isinstance(data.get("providers"), list):
                 catalogs.append(path)
