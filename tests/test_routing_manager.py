@@ -69,6 +69,41 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["provider"], "primary")
         self.assertFalse(result["health_verified"])
 
+    def test_primary_only_never_uses_fallback_when_primary_is_unavailable(self):
+        router = ProviderRoutingManager(self.connections)
+        self.connections.set_state("primary", "READY")
+        result = router.route(
+            category="image", project_id="film", strategy="PRIMARY_ONLY"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertEqual(
+            [decision["provider"] for decision in result["decisions"]],
+            ["primary"],
+        )
+        self.assertFalse(result["automatic_fallback"])
+
+    def test_automatic_fallback_can_be_disabled_without_changing_primary_strategy(self):
+        router = ProviderRoutingManager(self.connections)
+        self.connections.set_state("primary", "READY")
+        result = router.route(
+            category="image", project_id="film", automatic_fallback=False
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertEqual(
+            [decision["provider"] for decision in result["decisions"]],
+            ["primary"],
+        )
+        self.assertFalse(result["automatic_fallback"])
+
+    def test_automatic_fallback_policy_requires_boolean(self):
+        result = ProviderRoutingManager(self.connections).route(
+            category="image", project_id="film", automatic_fallback="false"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "INVALID_FALLBACK_POLICY")
+
     def test_fallback_excludes_failed_provider(self):
         router = ProviderRoutingManager(self.connections)
         result = router.select_fallback(
