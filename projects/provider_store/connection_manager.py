@@ -299,6 +299,18 @@ class ConnectionManager:
                         catalog_major_version = int(str(version).split(".", 1)[0])
                     except (TypeError, ValueError):
                         catalog_major_version = 0
+                    if catalog_major_version >= 3:
+                        for required_field in ("id", "name", "category", "auth_type", "connection_type"):
+                            value = provider.get(required_field)
+                            if not isinstance(value, str) or not value.strip():
+                                errors.append(
+                                    f"providers[{index}].{required_field} is required and must be non-empty"
+                                )
+                        for required_flag in ("enabled", "subscription_required"):
+                            if not isinstance(provider.get(required_flag), bool):
+                                errors.append(
+                                    f"providers[{index}].{required_flag} is required and must be boolean"
+                                )
                     if (
                         catalog_major_version >= 3
                         and provider.get("enabled") is True
