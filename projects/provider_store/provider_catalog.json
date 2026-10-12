@@ -17,7 +17,10 @@
         "router.huggingface.co",
         "api-inference.huggingface.co"
       ],
-      "token_env": "HF_TOKEN"
+      "token_env": "HF_TOKEN",
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "pollinations",
@@ -31,7 +34,10 @@
       "allowed_hosts": [
         "image.pollinations.ai"
       ],
-      "zero_cost_allowed": true
+      "zero_cost_allowed": true,
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "openai_image",
