@@ -384,6 +384,8 @@ class ConnectionManager:
                                 or not parsed_url.hostname
                                 or parsed_url.username is not None
                                 or parsed_url.password is not None
+                                or parsed_url.query
+                                or parsed_url.fragment
                             ):
                                 errors.append(
                                     f"providers[{index}].{url_field} must be a safe HTTPS URL without embedded credentials"
