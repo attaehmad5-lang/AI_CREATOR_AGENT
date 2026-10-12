@@ -39,6 +39,25 @@ class RetryPolicyTests(unittest.TestCase):
         self.assertTrue(policy.decide(attempt=1, exception=TimeoutError()).retry)
         self.assertEqual(policy.decide(attempt=2, exception=TimeoutError()).reason, "RETRY_LIMIT_REACHED")
 
+    def test_http_status_and_retry_after_are_read_from_exception(self):
+        class AuthenticationFailure(PermissionError):
+            status_code = 401
+
+        class RateLimitFailure(ConnectionError):
+            status_code = 429
+            retry_after = "5"
+
+        auth = RetryPolicy().decide(attempt=1, exception=AuthenticationFailure("private"))
+        self.assertFalse(auth.retry)
+        self.assertEqual(auth.reason, "AUTHORIZATION_FAILURE")
+
+        limited = RetryPolicy(max_delay_seconds=10).decide(
+            attempt=1, exception=RateLimitFailure("private")
+        )
+        self.assertTrue(limited.retry)
+        self.assertEqual(limited.reason, "RATE_LIMIT_RETRY_AFTER")
+        self.assertGreaterEqual(limited.delay_seconds, 5.0)
+
     def test_non_idempotent_request_is_not_retried(self):
         result = RetryPolicy().decide(attempt=1, status_code=503, idempotent=False)
         self.assertFalse(result.retry)
