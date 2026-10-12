@@ -15,6 +15,7 @@ class ProviderCatalogValidationTests(unittest.TestCase):
 
     def test_schema_rejects_enabled_api_provider_without_allowlist(self):
         result = ConnectionManager.validate_catalog_schema({
+            "version": "3.0",
             "providers": [{
                 "id": "unsafe_api", "name": "Unsafe API",
                 "category": "image", "auth_type": "NONE",
