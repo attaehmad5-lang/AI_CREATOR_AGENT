@@ -11,12 +11,13 @@ This guide describes the current implementation in this branch. It is not a clai
   - `begin_pollinations_authorization()` uses Pollinations' documented `enter.pollinations.ai/authorize` and `/api/oauth/token` endpoints, requires a registered exact redirect URI, reads the publishable App Key from `POLLINATIONS_APP_KEY`, and requests `profile usage`. Pollinations does not issue refresh tokens, so its session requires re-authorization after expiry.
 - `routing_manager.py` — priority, free-credit-first, lowest-cost, healthiest-first, and round-robin selection; requires a verified runtime connection by default (catalog labels alone are not evidence), with an explicit catalog-only planning option; optional health, cost, credit, and quota managers; duplicate request reservations fail closed; explicit fallback behavior.
 - `credit_manager.py` — stores verified free-credit snapshots from an injected provider-specific probe, filters by compatible units, and atomically reserves/commits/releases local credit usage to prevent concurrent overspend.
+- `pollinations_credit_probe.py` — provider-specific, read-only `GET https://gen.pollinations.ai/account/balance` adapter. It requires an unexpired user-authorized token supplied in memory, uses a bounded HTTPS request with no redirects, validates a finite non-negative `balance`, and returns a `pollen`-unit account-budget record. It never calls generation endpoints or persists/returns the token. **Do not pass this result to `ProviderCreditManager` or treat it as free credits:** the provider balance may combine tier, pack, and crypto balances and does not distinguish free from paid funds. The token must carry the required account-balance permission; live-account verification still requires user-authorized credentials.
 - `cost_policy.py` — paid-approval guard, required project budgets, idempotent usage reconciliation, estimated-cost reservations, and `finalize_usage()` which atomically validates charge outcomes and idempotency keys against the reloaded ledger before committing usage.
 - `quota_manager.py` — hourly/daily/monthly UTC quota windows and request reserve/commit/release.
 - `health_manager.py` — bounded provider health history, staleness/latency checks, eligibility, and a bounded persisted request-ID ledger so repeated finalization cannot append duplicate health events or silently reuse an ID for a conflicting result.
 - `retry_policy.py` — bounded backoff decisions that consume validated HTTP status / `Retry-After` metadata from typed provider errors, plus a concurrency-safe circuit breaker with half-open probe-slot recovery when an attempt is cancelled.
 - `output_validator.py` — bounded file reads, file-mutation detection during validation, file size/extension/signature/basic-content checks, JSON depth limits, and SHA-256 for supported artifacts.
-- `provider_service.py` — integration facade for API/OAuth/manual connection verification, health recording, routing, output checks, retry decisions, and usage finalization. `verify_http_provider()` wires the built-in allowlisted HTTPS probe into connection-state and health recording; `verify_oauth_provider()` passes an OAuth manager's unexpired access token through an ephemeral environment mapping without persisting it. Configure `probe_endpoint` separately from `endpoint` to verify an auth-protected, non-billable account endpoint without replacing the generation endpoint.
+- `provider_service.py` — integration facade for API/OAuth/manual connection verification, health recording, routing, output checks, retry decisions, and usage finalization. `verify_http_provider()` wires the built-in allowlisted HTTPS probe into connection-state and health recording; `verify_oauth_provider()` passes an OAuth manager's unexpired access token through an ephemeral environment mapping without persisting it; `verify_pollinations_account()` verifies Pollinations via its read-only balance endpoint and returns the account budget only in the transient result. Configure `probe_endpoint` separately from `endpoint` to verify an auth-protected, non-billable account endpoint without replacing the generation endpoint.
 - `provider_catalog.json` and `provider_catalog_master.json` — one synchronized 54-provider registry, including the 18 advanced-provider records. Catalog v3 requires complete provider identity fields and explicit `enabled` / `subscription_required` booleans; provider IDs and documentation/subscription links are validated before acceptance. The master catalog is the fallback copy, and the older v2 backup remains archival.
 - Legacy store, category, advanced, unlock, status, and unified-registry/router facades now read the central catalog. Discovery facades distinguish catalog labels from live verified state; actual policy-aware execution still belongs to `ProviderRoutingManager`.
 
@@ -57,3 +58,26 @@ python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+## Pollinations account balance (read-only)
+
+After the user has completed OAuth and `OAuthPKCEManager.get_access_token("pollinations")` returns an unexpired token, the application can read the provider's remaining pollen budget without making a generation request:
+
+```python
+from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.health_manager import ProviderHealthManager
+from projects.provider_store.oauth_pkce_manager import OAuthPKCEManager
+from projects.provider_store.provider_service import ProviderService
+
+connections = ConnectionManager()
+health = ProviderHealthManager()
+service = ProviderService(connections, health_manager=health)
+oauth = OAuthPKCEManager()
+result = service.verify_pollinations_account(oauth)
+if result.get("verified"):
+    print(result["account_balance"])  # balance only; never print or persist the token
+else:
+    print({"status": result.get("status"), "verified": False})
+```
+
+The OAuth client must request the provider's documented balance/usage permission. A missing token, insufficient scope, expired/revoked token, malformed response, timeout, or HTTP error fails closed; no balance is guessed. This endpoint reports remaining pollen account budget, not a verified free-credit amount or USD value. Its balance may combine tier, pack, and crypto balances, so it must never authorize free-credit routing or bypass explicit paid approval and project-budget checks. Keep the result separate from `ProviderCreditManager`, which only accepts verified balances known to represent eligible free credits.

@@ -887,6 +887,7 @@ class ConnectionManager:
         provider_id: str,
         *,
         model: str | None = None,
+        model_version: str | None = None,
         endpoint: str | None = None,
         probe_endpoint: str | None = None,
         authentication_required: bool | None = None,
@@ -910,6 +911,12 @@ class ConnectionManager:
             if any(term in model.casefold() for term in ("api_key=", "token=", "password=", "secret=")):
                 return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
             configuration["model"] = model.strip()
+        if model_version is not None:
+            if not isinstance(model_version, str) or not model_version.strip() or len(model_version) > 100:
+                return {"status": "INVALID_MODEL_VERSION", "provider": provider_id, "saved": False}
+            if any(term in model_version.casefold() for term in ("api_key=", "token=", "password=", "secret=")):
+                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
+            configuration["model_version"] = model_version.strip()
         if endpoint is not None:
             allowed_hosts_raw = provider.get("allowed_hosts")
             allowed_hosts = (
@@ -960,7 +967,12 @@ class ConnectionManager:
             record = dict(state) if isinstance(state, dict) else {}
             current = record.get("configuration", {})
             merged = dict(current) if isinstance(current, dict) else {}
+            if "model_version" in configuration and "model" not in configuration and not isinstance(merged.get("model"), str):
+                return {"status": "MODEL_REQUIRED_FOR_VERSION", "provider": provider_id, "saved": False}
+            previous_model = merged.get("model")
             merged.update(configuration)
+            if "model" in configuration and "model_version" not in configuration and previous_model != configuration["model"]:
+                merged.pop("model_version", None)
             record["configuration"] = merged
             record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
             self.state["providers"][provider_id] = record
@@ -995,6 +1007,11 @@ class ConnectionManager:
             not isinstance(model, str) or not model.strip() or len(model) > 200
         ):
             return {"status": "INVALID_MODEL", "provider": provider_id, "configuration": {}}
+        model_version = configuration.get("model_version")
+        if model_version is not None and (
+            not isinstance(model_version, str) or not model_version.strip() or len(model_version) > 100
+        ):
+            return {"status": "INVALID_MODEL_VERSION", "provider": provider_id, "configuration": {}}
         if isinstance(model, str) and any(
             marker in model.casefold()
             for marker in ("api_key=", "token=", "password=", "secret=", "bearer ")

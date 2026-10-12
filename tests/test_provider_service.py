@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.cost_policy import ProviderCostPolicy
@@ -49,8 +50,109 @@ class ProviderServiceTests(unittest.TestCase):
             quota_manager=self.quota,
         )
 
+    def _make_fallback_service(self):
+        catalog_path = self.root / "fallback-providers.json"
+        state_path = self.root / "fallback-connections.json"
+        providers = {
+            "providers": [
+                {"id": "primary", "name": "Primary", "category": "image", "auth_type": "NONE",
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                 "priority": 1, "capabilities": ["image"]},
+                {"id": "fallback", "name": "Fallback", "category": "image", "auth_type": "NONE",
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                 "priority": 2, "capabilities": ["image"]},
+            ]
+        }
+        catalog_path.write_text(json.dumps(providers), encoding="utf-8")
+        state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        connections = ConnectionManager(catalog_path, state_path)
+        health = ProviderHealthManager(self.root / "fallback-health.json")
+        for provider_id in ("primary", "fallback"):
+            verified = connections.verify_connectivity(
+                provider_id, lambda provider, **kwargs: {"ok": True}
+            )
+            if verified.get("verified") is not True:
+                raise AssertionError(f"{provider_id} fixture verification failed")
+            health.record_result(provider_id, success=True, latency_ms=1.0)
+        cost = ProviderCostPolicy(self.root / "fallback-cost.json", project_budgets={"film": 10.0})
+        quota = ProviderQuotaManager(
+            self.root / "fallback-quota.json",
+            limits={"primary": {"daily": 10}, "fallback": {"daily": 10}},
+        )
+        validator = ProviderOutputValidator()
+        router = ProviderRoutingManager(
+            connections, health_manager=health, cost_policy=cost, quota_manager=quota
+        )
+        service = ProviderService(
+            connections, routing_manager=router, health_manager=health,
+            output_validator=validator, cost_policy=cost, quota_manager=quota,
+        )
+        return service, quota
+
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_automatic_fallback_is_opt_in_and_requires_confirmed_not_started(self):
+        service, quota = self._make_fallback_service()
+        output_path = self.root / "fallback-output.txt"
+        calls = []
+
+        def adapter(*, provider_id, request_id):
+            calls.append((provider_id, request_id))
+            if provider_id == "primary":
+                return {"started": False, "success": False}
+            output_path.write_text("verified fallback output", encoding="utf-8")
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+            }
+
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="job-primary",
+            estimated_cost=0.0, adapter=adapter, modality="text",
+            output_path=str(output_path), automatic_fallback=True,
+            fallback_request_id="job-fallback",
+        )
+        self.assertEqual(result["status"], "AUTOMATIC_FALLBACK_COMPLETED")
+        self.assertEqual(calls, [("primary", "job-primary"), ("fallback", "job-fallback")])
+        self.assertTrue(result["primary_attempt"]["release"]["released"])
+        self.assertTrue(result["fallback_attempt"]["executed"])
+        self.assertEqual(quota.data["requests"]["job-fallback"]["provider_id"], "fallback")
+
+    def test_automatic_fallback_never_retries_ambiguous_provider_exception(self):
+        service, _ = self._make_fallback_service()
+        calls = []
+
+        def adapter(*, provider_id, request_id):
+            calls.append((provider_id, request_id))
+            raise TimeoutError("private transport detail")
+
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="job-ambiguous",
+            estimated_cost=0.0, adapter=adapter, modality="text",
+            automatic_fallback=True, fallback_request_id="job-ambiguous-fallback",
+        )
+        self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
+        self.assertTrue(result["reservations_retained"])
+        self.assertEqual(calls, [("primary", "job-ambiguous")])
+
+    def test_automatic_fallback_is_disabled_for_primary_only_strategy(self):
+        service, _ = self._make_fallback_service()
+        calls = []
+
+        def adapter(*, provider_id, request_id):
+            calls.append((provider_id, request_id))
+            return {"started": False, "success": False}
+
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="job-primary-only",
+            estimated_cost=0.0, adapter=adapter, modality="text",
+            automatic_fallback=True, fallback_request_id="job-primary-only-fallback",
+            strategy="PRIMARY_ONLY",
+        )
+        self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
+        self.assertEqual(result["fallback_status"], "PRIMARY_ONLY_FALLBACK_DISABLED")
+        self.assertEqual(calls, [("primary", "job-primary-only")])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
@@ -58,6 +160,76 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["connection"]["status"], "CONNECTED")
         self.assertEqual(result["health"]["status"], "HEALTHY")
         self.assertEqual(self.connections.get_state("image")["status"], "CONNECTED")
+
+    def test_pollinations_account_verification_uses_oauth_without_persisting_token_or_free_credit(self):
+        secret = "temporary-pollinations-oauth-token"
+        provider = {
+            "id": "pollinations", "name": "Pollinations", "category": "image",
+            "auth_type": "API_KEY", "connection_type": "API", "enabled": True,
+            "api_key_env": "POLLINATIONS_API_KEY",
+            "allowed_hosts": ["gen.pollinations.ai"],
+        }
+
+        class OAuthStub:
+            def get_access_token(self, provider_id):
+                self.asserted_provider = provider_id
+                return secret
+
+        class Response:
+            status = 200
+            closed = False
+
+            def getcode(self):
+                return self.status
+
+            def read(self, size=-1):
+                return b'{"balance": 4.25}'[:size]
+
+            def close(self):
+                self.closed = True
+
+        class Opener:
+            def __init__(self):
+                self.response = Response()
+                self.calls = []
+
+            def open(self, request, timeout):
+                self.calls.append((request, timeout))
+                return self.response
+
+        opener = Opener()
+        with patch.object(self.connections, "get_provider", return_value=provider):
+            result = self.service.verify_pollinations_account(
+                OAuthStub(), opener=opener, timeout_seconds=2.0
+            )
+
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["connection"]["status"], "CONNECTED")
+        self.assertEqual(result["account_balance"]["balance"], 4.25)
+        self.assertEqual(result["account_balance"]["unit"], "pollen")
+        self.assertEqual(opener.calls[0][0].full_url, "https://gen.pollinations.ai/account/balance")
+        self.assertEqual(opener.calls[0][1], 2.0)
+        self.assertTrue(opener.response.closed)
+        self.assertNotIn(secret, repr(result))
+        self.assertNotIn(secret, self.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(self.connections.get_state("pollinations")["status"], "CONNECTED")
+
+    def test_pollinations_account_verification_rejects_catalog_auth_mismatch(self):
+        provider = {
+            "id": "pollinations", "name": "Pollinations", "category": "image",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "api_key_env": "POLLINATIONS_API_KEY",
+            "allowed_hosts": ["gen.pollinations.ai"],
+        }
+
+        class OAuthStub:
+            def get_access_token(self, provider_id):
+                raise AssertionError("OAuth token must not be requested for mismatched catalog auth")
+
+        with patch.object(self.connections, "get_provider", return_value=provider):
+            result = self.service.verify_pollinations_account(OAuthStub())
+        self.assertEqual(result["status"], "POLLINATIONS_AUTH_MODE_UNSUPPORTED")
+        self.assertFalse(result["verified"])
 
     def test_builtin_http_provider_verification_updates_connection_and_health(self):
         class Response:

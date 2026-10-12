@@ -83,6 +83,89 @@ class ProviderService:
             "health": health,
         }
 
+    def verify_pollinations_account(
+        self,
+        oauth_manager: Any,
+        *,
+        timeout_seconds: float = 5.0,
+        opener: Any = None,
+        max_response_bytes: int = 16_384,
+    ) -> dict[str, Any]:
+        """Verify Pollinations access using its read-only account-balance endpoint.
+
+        The unexpired OAuth token is kept in memory and passed only to the
+        credential-presence check and the balance probe. The returned pollen budget
+        is informational and is never registered as free credits or persisted.
+        """
+        provider_id = "pollinations"
+        if not callable(getattr(oauth_manager, "get_access_token", None)):
+            return {"status": "OAUTH_MANAGER_INVALID", "provider": provider_id, "verified": False}
+        try:
+            provider = self.connection_manager.get_provider(provider_id)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_LOOKUP_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(provider, dict):
+            return {"status": "NOT_FOUND", "provider": provider_id, "verified": False}
+        if provider.get("auth_type") != "API_KEY":
+            return {"status": "POLLINATIONS_AUTH_MODE_UNSUPPORTED", "provider": provider_id, "verified": False}
+        token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env")
+        if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
+            return {"status": "OAUTH_TOKEN_ENV_REFERENCE_INVALID", "provider": provider_id, "verified": False}
+        try:
+            access_token = oauth_manager.get_access_token(provider_id)
+        except Exception as exc:
+            return {
+                "status": "OAUTH_TOKEN_LOOKUP_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(access_token, str) or not access_token.strip():
+            return {"status": "OAUTH_ACCESS_TOKEN_UNAVAILABLE", "provider": provider_id, "verified": False}
+        try:
+            from .pollinations_credit_probe import PollinationsBalanceProbe
+
+            balance_probe = PollinationsBalanceProbe(
+                lambda: access_token,
+                opener=opener,
+                timeout_seconds=timeout_seconds,
+                max_response_bytes=max_response_bytes,
+            )
+        except Exception as exc:
+            return {
+                "status": "BALANCE_PROBE_CONFIGURATION_INVALID",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        observed: dict[str, Any] = {}
+
+        def probe(_provider: dict[str, Any], *, timeout_seconds: float = 5.0) -> dict[str, Any]:
+            account = balance_probe(provider_id, timeout_seconds=timeout_seconds)
+            observed.update(account)
+            return {"ok": True}
+
+        # Ephemeral mapping only: the token is never added to os.environ or persisted state.
+        result = self.verify_provider(
+            provider_id,
+            probe,
+            timeout_seconds=timeout_seconds,
+            environ={token_env: access_token},
+        )
+        if result.get("verified") is True and observed.get("verified") is True:
+            result["account_balance"] = {
+                "balance": observed["balance"],
+                "unit": observed["unit"],
+                "balance_type": observed["balance_type"],
+                "source": observed["source"],
+            }
+        return result
+
     def verify_http_provider(
         self,
         provider_id: str,
@@ -254,13 +337,18 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        automatic_fallback: bool = False,
+        fallback_request_id: str | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
-        """Route and invoke one adapter attempt, validate output, then account safely.
+        """Route and invoke an adapter, validating output and accounting safely.
 
-        This method deliberately does not auto-retry: after an adapter exception, it
-        may be impossible to know whether a paid/credit-consuming request started.
+        Optional automatic fallback is limited to an explicit adapter result
+        `started=False` with successfully released reservations. Ambiguous exceptions,
+        possibly billed requests, and PRIMARY_ONLY routing never trigger fallback.
+        A distinct fallback_request_id is required for idempotency.
         """
+
         if not callable(adapter):
             return {"status": "INVALID_ADAPTER", "executed": False}
         if not isinstance(adapter_options, (dict, type(None))):
@@ -273,6 +361,17 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        if not isinstance(automatic_fallback, bool):
+            return {"status": "INVALID_AUTOMATIC_FALLBACK_POLICY", "executed": False}
+        if automatic_fallback:
+            if (
+                not isinstance(fallback_request_id, str)
+                or not fallback_request_id.strip()
+                or fallback_request_id == request_id
+            ):
+                return {"status": "INVALID_FALLBACK_REQUEST_ID", "executed": False}
+        elif fallback_request_id is not None:
+            return {"status": "FALLBACK_ID_WITH_AUTOMATIC_FALLBACK_DISABLED", "executed": False}
 
         route = self.route_request(
             category=category,
@@ -337,12 +436,47 @@ class ProviderService:
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id
             )
-            return {
+            primary_result = {
                 "status": "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
                 "release": released,
+            }
+            if released.get("released") is not True or not automatic_fallback:
+                return primary_result
+            if route.get("strategy") == "PRIMARY_ONLY":
+                primary_result["fallback_status"] = "PRIMARY_ONLY_FALLBACK_DISABLED"
+                return primary_result
+            if self.routing_manager is None or not callable(getattr(self.routing_manager, "select_fallback", None)):
+                primary_result["fallback_status"] = "FALLBACK_MANAGER_UNAVAILABLE"
+                return primary_result
+            excluded_raw = route_options.get("excluded_providers", set())
+            if not isinstance(excluded_raw, (set, frozenset)):
+                primary_result["fallback_status"] = "INVALID_EXCLUDED_PROVIDER_SET"
+                return primary_result
+            fallback_options = dict(route_options)
+            fallback_options["excluded_providers"] = set(excluded_raw) | {provider_id}
+            fallback_result = self.execute_routed_request(
+                category=category,
+                project_id=project_id,
+                request_id=fallback_request_id,
+                estimated_cost=estimated_cost,
+                adapter=adapter,
+                modality=modality,
+                output_path=output_path,
+                estimated_cost_unit=estimated_cost_unit,
+                adapter_options=adapter_options,
+                automatic_fallback=False,
+                **fallback_options,
+            )
+            return {
+                "status": "AUTOMATIC_FALLBACK_COMPLETED"
+                if fallback_result.get("status") == "EXECUTION_SUCCEEDED"
+                else "AUTOMATIC_FALLBACK_ATTEMPTED",
+                "executed": fallback_result.get("executed") is True,
+                "primary_attempt": primary_result,
+                "fallback_attempt": fallback_result,
             }
 
         accounting_required = False

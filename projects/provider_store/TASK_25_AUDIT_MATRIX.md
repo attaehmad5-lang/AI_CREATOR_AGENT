@@ -1,12 +1,12 @@
 # Task #25 — A–P Verification Matrix
 
-**Status: IN PROGRESS. Do not merge or mark complete.**
+**Status: IN PROGRESS. PR #1 was merged by the user on 2026-10-12; Task #25 is not complete.**
 
-This matrix preserves the canonical feature-ID ranges and group names. It is an evidence tracker, not a replacement for the user's exact 138-item checklist. A group is not complete merely because a supporting module or test exists; every original item still requires individual verification.
+This matrix is the section-level evidence tracker. `TASK_25_FEATURE_INDEX.md` now records 138 recovered item names and numbering for durable tracking, but its latest recovered per-item markers (6/65/67) conflict with the user's original baseline aggregate (6/29/103). It is therefore not yet a verbatim replacement for the user's original pasted list. Compare the source list before locking baseline wording/statuses; do not renumber or merge items. A group is not complete merely because a supporting module or test exists.
 
 ## Latest confirmed verification
 
-GitHub Actions run [#38280285131](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280285131) passed on Ubuntu and Windows with Python 3.13: **291 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation also passed. Compilation and provider JSON catalog validation passed. Newer runs may be in progress; use Actions for the latest result.
+GitHub Actions run [#38284816723](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38284816723) passed on Ubuntu and Windows with Python 3.13: **303 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation passed. Historical failed runs remain in Actions for audit and were not relabeled as passing.
 
 | Group / IDs | Canonical group | Current evidence | Status | Remaining verification |
 |---|---|---|---|---|
@@ -17,7 +17,7 @@ GitHub Actions run [#38280285131](https://github.com/attaehmad5-lang/AI_CREATOR_
 | E / 33–40 | Retry & Failure Handling | `retry_policy.py`, `test_retry_policy.py`, execution failure tests | PARTIAL | Provider-specific transient/network failure injection and end-to-end retry verification. |
 | F / 41–48 | Provider Health | `health_manager.py`, `test_health_manager.py` | PARTIAL | Live health probes for each provider and checklist-level verification of freshness, recovery, and thresholds. |
 | G / 49–56 | Output Validation | `output_validator.py`, `test_output_validator.py` | PARTIAL | Full media decoding, malware scanning, and semantic/content-quality checks are not provided by signature validation. |
-| H / 57–64 | Cost, Credits & Budgets | `cost_policy.py`, `credit_manager.py`, `quota_manager.py` and corresponding tests | PARTIAL | Provider-account credit integrations and a single durable transaction across cost, credits, quota, and health. Pollinations uses `gen.pollinations.ai`, `POLLINATIONS_API_KEY`, and no assumed zero-cost access; its OAuth helper requests the `usage` scope, but a verified balance probe is still required before credit-first routing can rely on that balance. |
+| H / 57–64 | Cost, Credits & Budgets | `cost_policy.py`, `credit_manager.py`, `quota_manager.py`, `pollinations_credit_probe.py`, `ProviderService.verify_pollinations_account()`, and corresponding tests | PARTIAL | Pollinations now has an integrated read-only account-budget verification flow for the official `/account/balance` endpoint. Its combined pollen balance is deliberately not classified as free credit; live authorized-token/scope verification, evidence of truly free credits, other providers' balance integrations, and a single durable transaction across cost, credits, quota, and health remain open. Pollinations uses `gen.pollinations.ai`, `POLLINATIONS_API_KEY`, and no assumed zero-cost access; its OAuth helper requests the `usage` scope, but a verified balance probe is still required before credit-first routing can rely on that balance. |
 | I / 65–72 | Security & Privacy | Secret-field redaction, environment-only API credentials, host allowlists, redirect rejection, bounded reads | PARTIAL | Full threat-model review, real-provider security verification, and production credential-storage integration. |
 | J / 73–80 | Jobs & Execution | `provider_service.py` execution/finalization facade and regression tests | PARTIAL | End-to-end runs with real generation adapters and recovery of ambiguous external requests. |
 | K / 81–88 | Performance & Observability | Interprocess locking, bounded health history, retry metadata, test coverage | PARTIAL | Production telemetry/metrics, load tests, and multi-worker storage validation. |
@@ -33,4 +33,12 @@ GitHub Actions run [#38280285131](https://github.com/attaehmad5-lang/AI_CREATOR_
 2. Mark each original item individually only after code evidence and relevant tests exist.
 3. Fix and rerun every failing test; no failure is ignored or marked passed without a rerun.
 4. Complete live-provider checks only with user-authorized credentials and safe, provider-specific probes. A generic HTTP 2xx is not proof of authenticated access unless the configured endpoint is documented to enforce the credential.
-5. Keep this pull request in draft and do not merge into `main` until the full checklist and all required tests are verified.
+5. PR #1 has already been merged by the user. Do not mark Task #25 complete; use a follow-up branch/PR for remaining work and do not merge follow-up changes without explicit user approval.
+
+
+## Canonical 138-item checklist preservation
+
+- The authoritative scope remains the user's original 138 individual feature descriptions across sections A–P, originally marked 6 🟢, 29 🟡, and 103 🔴.
+- `TASK_25_FEATURE_INDEX.md` contains 138 recovered names and IDs, but the recovered marker counts (6/65/67) conflict with the original baseline aggregate. Treat it as a working index until compared against the verbatim original list; do not silently replace the baseline statuses.
+- Do not invent descriptions from group headings or silently renumber/merge items. Track each verified feature with implementation path, test evidence, verification result, and backup/commit reference.
+- Workflow for every item: **Scope → Build → Test → Fix failures → Rerun → Verify → Save evidence**. A test failure remains unresolved until a confirming rerun passes.

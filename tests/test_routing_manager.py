@@ -62,6 +62,77 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "primary")
 
+    def test_model_and_version_aware_routing_requires_exact_configured_match(self):
+        self.assertEqual(
+            self.connections.configure_provider("primary", model="image-alpha", model_version="v1")["status"],
+            "CONFIGURED",
+        )
+        self.assertEqual(
+            self.connections.configure_provider("fallback", model="image-beta", model_version="v2")["status"],
+            "CONFIGURED",
+        )
+        router = ProviderRoutingManager(self.connections)
+        selected = router.route(
+            category="image", project_id="film", model="image-beta", model_version="v2"
+        )
+        self.assertTrue(selected["allowed"])
+        self.assertEqual(selected["provider"], "fallback")
+        self.assertEqual(selected["model"], "image-beta")
+        self.assertEqual(selected["model_version"], "v2")
+
+        mismatch = router.route(
+            category="image", project_id="film", model="image-alpha", model_version="v2"
+        )
+        self.assertFalse(mismatch["allowed"])
+        self.assertEqual(mismatch["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertTrue(any(item["status"] == "MODEL_VERSION_MISMATCH" for item in mismatch["decisions"]))
+        self.assertEqual(
+            router.route(category="image", project_id="film", model_version="v2")["status"],
+            "INVALID_MODEL_VERSION",
+        )
+
+    def test_capability_based_routing_selects_only_matching_provider(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"].append({
+            "id": "editing", "name": "Editing", "category": "image",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "zero_cost_allowed": True, "priority": 3,
+            "capabilities": ["image_editing"],
+        })
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        verified = self.connections.verify_connectivity(
+            "editing", lambda provider, **kwargs: {"ok": True}
+        )
+        self.assertTrue(verified["verified"])
+
+        result = ProviderRoutingManager(self.connections).route(
+            category="image", project_id="film", capability="image_editing"
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "editing")
+
+    def test_primary_only_strategy_never_selects_fallback_after_primary_rejected(self):
+        router = ProviderRoutingManager(self.connections)
+        result = router.route(
+            category="image",
+            project_id="film",
+            strategy="PRIMARY_ONLY",
+            estimated_costs={"primary": 1.0, "fallback": 0.0},
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["strategy"], "PRIMARY_ONLY")
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertFalse(any(item.get("provider") == "fallback" for item in result["decisions"]))
+
+        fallback = router.select_fallback(
+            failed_provider="primary",
+            category="image",
+            project_id="film",
+            strategy="PRIMARY_ONLY",
+        )
+        self.assertFalse(fallback["allowed"])
+        self.assertEqual(fallback["status"], "PRIMARY_ONLY_FALLBACK_DISABLED")
+
     def test_primary_route_skips_disabled_and_orders_by_priority(self):
         router = ProviderRoutingManager(self.connections)
         result = router.route(category="image", project_id="film")
