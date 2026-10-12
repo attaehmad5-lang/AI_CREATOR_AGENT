@@ -46,9 +46,19 @@ class ConnectionManager:
     ) -> None:
         self.catalog_path = Path(catalog_path) if catalog_path else self._default_catalog()
         self.state_path = Path(state_path) if state_path else DEFAULT_STATE
-        self.catalog = self._load_json(self.catalog_path)
+        # Constructor reads must use the same interprocess locks as writers. On
+        # Windows, an unlocked read can race with atomic replacement and fail with
+        # a transient sharing violation while another process registers a provider.
+        catalog_lock_path = self.catalog_path.with_name(self.catalog_path.name + ".lock")
+        with interprocess_file_lock(catalog_lock_path):
+            self.catalog = self._load_json(self.catalog_path)
         self.validate_catalog_schema(self.catalog, raise_on_error=True)
-        self.state = self._load_json(self.state_path, default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}})
+        state_lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+        with interprocess_file_lock(state_lock_path):
+            self.state = self._load_json(
+                self.state_path,
+                default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}},
+            )
         if not isinstance(self.state.get("providers"), dict):
             raise ValueError("Invalid connection state schema: providers must be an object")
         self._lock = threading.RLock()
