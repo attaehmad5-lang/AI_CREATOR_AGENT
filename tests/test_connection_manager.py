@@ -830,6 +830,26 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(loaded["status"], "CONTRACT_VIOLATION")
         self.assertNotIn("private provider details", repr(loaded))
 
+    def test_advanced_provider_categories_have_explicit_callable_contracts(self):
+        cases = (
+            ("advanced_image_editing", "edit_image"),
+            ("advanced_upscaling", "upscale_video"),
+            ("advanced_transcription", "transcribe"),
+            ("advanced_audio", "generate_music"),
+            ("script_story", "generate_text"),
+            ("advanced_video_editing", "edit_video"),
+        )
+        for category, method_name in cases:
+            with self.subTest(category=category):
+                catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+                catalog["providers"][0]["category"] = category
+                self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+                manager = ConnectionManager(self.catalog_path, self.state_path)
+                instance = type("Adapter", (), {method_name: lambda self, *args, **kwargs: None})()
+                result = manager.validate_provider_contract("public_image", instance)
+                self.assertTrue(result["valid"], result)
+                self.assertEqual(result["status"], "VALID")
+
     def test_provider_contract_handles_unknown_modality_explicitly(self):
         self.manager.catalog["providers"][0]["category"] = "quantum"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
