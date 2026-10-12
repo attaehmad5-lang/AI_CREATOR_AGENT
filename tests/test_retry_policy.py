@@ -86,6 +86,16 @@ class RetryPolicyTests(unittest.TestCase):
             results = list(pool.map(lambda _: breaker.allow_request(), range(40)))
         self.assertEqual(sum(results), 1)
 
+    def test_cancelled_half_open_probe_releases_single_probe_slot(self):
+        now = [0.0]
+        breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=1, clock=lambda: now[0])
+        breaker.record_failure()
+        now[0] = 1.0
+        self.assertTrue(breaker.allow_request())
+        self.assertFalse(breaker.allow_request())
+        breaker.cancel_probe()
+        self.assertTrue(breaker.allow_request())
+
     def test_circuit_breaker_reopens_after_half_open_failure(self):
         now = [0.0]
         breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=2, clock=lambda: now[0])
