@@ -55,7 +55,12 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "official_api_url": "https://developers.openai.com/api/docs/guides/images-vision",
+      "capabilities": [
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "google_image",
@@ -72,7 +77,12 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://ai.google.dev/gemini-api/docs/image-generation",
+      "capabilities": [
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "recraft",
@@ -86,7 +96,14 @@
       "allowed_hosts": [
         "external-api.recraft.ai"
       ],
-      "token_env": "RECRAFT_API_KEY"
+      "token_env": "RECRAFT_API_KEY",
+      "official_api_url": "https://www.recraft.ai/api",
+      "capabilities": [
+        "image_generation",
+        "image_editing",
+        "vector_generation",
+        "background_removal"
+      ]
     },
     {
       "id": "ideogram",
@@ -102,7 +119,12 @@
       ],
       "token_env": "IDEOGRAM_API_KEY",
       "auth_header_name": "Api-Key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://developer.ideogram.ai/ideogram-api/api-overview",
+      "capabilities": [
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "black_forest_labs",
@@ -132,7 +154,12 @@
       "allowed_hosts": [
         "api.stability.ai"
       ],
-      "token_env": "STABILITY_API_KEY"
+      "token_env": "STABILITY_API_KEY",
+      "official_api_url": "https://platform.stability.ai/docs/getting-started/stable-image",
+      "capabilities": [
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "replicate",
@@ -146,7 +173,11 @@
       "allowed_hosts": [
         "api.replicate.com"
       ],
-      "token_env": "REPLICATE_API_TOKEN"
+      "token_env": "REPLICATE_API_TOKEN",
+      "official_api_url": "https://replicate.com/docs/reference/http",
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "fal_ai",
@@ -163,7 +194,12 @@
       ],
       "token_env": "FAL_KEY",
       "auth_header_name": "Authorization",
-      "auth_scheme": "Key"
+      "auth_scheme": "Key",
+      "official_api_url": "https://fal.ai/docs/model-api-reference/image-generation-api/overview",
+      "capabilities": [
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "elevenlabs",
