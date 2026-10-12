@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
+from .safe_numbers import finite_number
 
 
 class ProviderCostPolicy:
@@ -121,7 +122,7 @@ class ProviderCostPolicy:
 
     @staticmethod
     def _valid_amount(value: Any) -> bool:
-        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+        return finite_number(value, minimum=0) is not None
 
     def _spent(self, project_id: str) -> float:
         project = self.ledger["projects"].get(project_id, {})
