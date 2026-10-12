@@ -182,6 +182,12 @@ class ConnectionManagerTests(unittest.TestCase):
             "providers": [{"id": "provider", "secret_ref": "vault://provider/access-token"}]
         })
         self.assertTrue(valid["valid"], valid["errors"])
+        sanitized = ConnectionManager._sanitize_public_data({
+            "secret_ref": "sk_12345678901234567890",
+            "token_env": "not a valid env reference",
+            "credential_env": "AI_PROVIDER_TOKEN",
+        })
+        self.assertEqual(sanitized, {"credential_env": "AI_PROVIDER_TOKEN"})
 
     def test_registration_rejects_secret_values_disguised_as_references(self):
         base = {
