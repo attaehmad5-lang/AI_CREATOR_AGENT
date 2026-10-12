@@ -169,6 +169,11 @@ class CircuitBreaker:
                 return True
             return False
 
+    def cancel_probe(self) -> None:
+        """Release a half-open probe slot when execution was cancelled before an outcome."""
+        with self._lock:
+            self._half_open_probe_in_flight = False
+
     def record_success(self) -> None:
         with self._lock:
             self.failures = 0
