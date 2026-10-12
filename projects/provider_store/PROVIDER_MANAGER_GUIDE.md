@@ -12,7 +12,7 @@ This guide describes the current implementation in this branch. It is not a clai
 - `quota_manager.py` — hourly/daily/monthly UTC quota windows and request reserve/commit/release.
 - `health_manager.py` — bounded provider health history, staleness/latency checks, and eligibility.
 - `retry_policy.py` — bounded backoff decisions and a concurrency-safe circuit breaker.
-- `output_validator.py` — file size, extension, signature/basic content checks, and SHA-256 for supported artifacts.
+- `output_validator.py` — bounded file reads, file-mutation detection during validation, file size/extension/signature/basic-content checks, JSON depth limits, and SHA-256 for supported artifacts.
 - `provider_service.py` — integration facade for API/manual connection verification, health recording, routing, output checks, retry decisions, and usage finalization.
 - `provider_catalog.json` and `provider_catalog_master.json` — one synchronized 54-provider registry, including the 18 advanced-provider records. The master catalog is the fallback copy; the older v2 backup remains archival.
 - Legacy store, category, advanced, unlock, status, and unified-registry/router facades now read the central catalog. Discovery facades distinguish catalog labels from live verified state; actual policy-aware execution still belongs to `ProviderRoutingManager`.
