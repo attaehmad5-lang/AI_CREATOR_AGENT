@@ -77,6 +77,23 @@ class ProviderHealthManager:
             history = record.get("history", [])
             if not isinstance(history, list):
                 raise ValueError("Invalid provider health history")
+            request_events = record.get("request_events", {})
+            if not isinstance(request_events, dict) or len(request_events) > 1000:
+                raise ValueError("Invalid provider health request ledger")
+            for request_id, request_event in request_events.items():
+                if (
+                    not isinstance(request_id, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", request_id)
+                    or not isinstance(request_event, dict)
+                    or not isinstance(request_event.get("success"), bool)
+                ):
+                    raise ValueError("Invalid provider health request event")
+                request_error = request_event.get("error_code")
+                if request_error is not None and (
+                    not isinstance(request_error, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", request_error)
+                ):
+                    raise ValueError("Invalid provider health request error code")
             for event in history:
                 if not isinstance(event, dict) or not isinstance(event.get("success"), bool):
                     raise ValueError("Invalid provider health history event")
@@ -124,11 +141,17 @@ class ProviderHealthManager:
         success: bool,
         latency_ms: float | None = None,
         error_code: str | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER", "saved": False}
         if not isinstance(success, bool):
             return {"status": "INVALID_RESULT", "saved": False}
+        if request_id is not None and (
+            not isinstance(request_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", request_id)
+        ):
+            return {"status": "INVALID_REQUEST_ID", "saved": False}
         if latency_ms is not None and (
             not isinstance(latency_ms, (int, float))
             or isinstance(latency_ms, bool)
@@ -141,20 +164,52 @@ class ProviderHealthManager:
             current = providers.get(provider_id, {})
             record = dict(current) if isinstance(current, dict) else {}
             history = list(record.get("history", []))
-            event = {
-                "success": success,
-                "timestamp": self.clock().astimezone(timezone.utc).isoformat(),
-            }
-            if latency_ms is not None:
-                event["latency_ms"] = round(float(latency_ms), 2)
+            request_events = dict(record.get("request_events", {}))
+            normalized_error = None
             if not success and error_code:
                 # Only store compact machine-readable codes, never arbitrary exception text.
                 candidate_code = str(error_code).strip()
-                event["error_code"] = (
+                normalized_error = (
                     candidate_code
                     if re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", candidate_code)
                     else "UNCLASSIFIED_ERROR"
                 )
+            if request_id is not None and request_id in request_events:
+                previous = request_events[request_id]
+                if (
+                    previous.get("success") is success
+                    and previous.get("error_code") == normalized_error
+                ):
+                    return {
+                        "provider": provider_id,
+                        "status": record.get("status", "UNKNOWN"),
+                        "saved": True,
+                        "duplicate": True,
+                        "history_size": len(history),
+                    }
+                return {
+                    "provider": provider_id,
+                    "status": "HEALTH_EVENT_ID_CONFLICT",
+                    "saved": False,
+                    "duplicate": False,
+                    "history_size": len(history),
+                }
+            event = {
+                "success": success,
+                "timestamp": self.clock().astimezone(timezone.utc).isoformat(),
+            }
+            if request_id is not None:
+                event["request_id"] = request_id
+                request_events[request_id] = {
+                    "success": success,
+                    "error_code": normalized_error,
+                }
+                while len(request_events) > 1000:
+                    request_events.pop(next(iter(request_events)))
+            if latency_ms is not None:
+                event["latency_ms"] = round(float(latency_ms), 2)
+            if normalized_error is not None:
+                event["error_code"] = normalized_error
             history.append(event)
             history = history[-self.history_limit:]
             consecutive_failures = 0 if success else int(record.get("consecutive_failures", 0)) + 1
@@ -167,6 +222,7 @@ class ProviderHealthManager:
             record.update({
                 "status": status,
                 "history": history,
+                "request_events": request_events,
                 "consecutive_failures": consecutive_failures,
                 "last_checked_at": event["timestamp"],
             })
