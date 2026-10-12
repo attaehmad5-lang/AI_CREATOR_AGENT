@@ -155,6 +155,19 @@ class ProviderOAuthPKCEManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "OAUTH_STATE_EXPIRED")
         self.assertEqual(manager.opener.calls, [])
 
+    def test_near_expiry_access_token_is_not_returned_for_new_requests(self):
+        opener = _Opener(_Response({
+            "access_token": "short-lived-token", "token_type": "Bearer", "expires_in": 20,
+        }))
+        manager = ProviderOAuthPKCEManager(
+            environ=self.environ, opener=opener, clock=lambda: self.now[0]
+        )
+        begun = self.begin(manager)
+        result = manager.exchange_code("provider", state=begun["state"], code="code")
+        self.assertEqual(result["status"], "OAUTH_CONNECTED")
+        self.assertIsNone(manager.get_access_token("provider"))
+        self.assertEqual(manager.status("provider")["status"], "TOKEN_EXPIRING")
+
     def test_refresh_rotates_access_and_refresh_tokens(self):
         begun = self.begin()
         self.assertEqual(
