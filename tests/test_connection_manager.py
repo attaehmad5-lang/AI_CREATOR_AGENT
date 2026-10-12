@@ -250,6 +250,11 @@ class ConnectionManagerTests(unittest.TestCase):
             {provider["id"] for provider in catalog["providers"]},
             {provider["id"] for provider in master["providers"]},
         )
+        self.assertEqual(catalog, master)
+        sora = next(provider for provider in catalog["providers"] if provider["id"] == "openai_sora")
+        self.assertTrue(sora["deprecated"])
+        self.assertFalse(sora["enabled"])
+        self.assertEqual(sora["status"], "DEPRECATED")
         providers = catalog["providers"]
         allowlisted = [provider for provider in providers if "allowed_hosts" in provider]
         self.assertGreaterEqual(len(allowlisted), 25)
