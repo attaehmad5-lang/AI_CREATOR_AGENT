@@ -470,17 +470,15 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("test-only-secret", repr(status))
         missing = manager.credential_status("google_image", {})
         self.assertEqual(missing["status"], "CREDENTIALS_MISSING")
-        env_names = (
-            "HF_TOKEN", "POLLINATIONS_API_KEY", "REPLICATE_API_TOKEN", "OPENAI_API_KEY", "GOOGLE_API_KEY",
-            "RECRAFT_API_KEY", "IDEOGRAM_API_KEY", "BFL_API_KEY", "STABILITY_API_KEY",
-            "FAL_KEY", "ELEVENLABS_API_KEY", "CARTESIA_API_KEY", "PLAYHT_API_KEY",
-            "DEEPGRAM_API_KEY", "RUNWAY_API_KEY", "KLING_API_KEY", "LUMA_API_KEY",
-            "MINIMAX_API_KEY", "HEYGEN_API_KEY", "SYNTHESIA_API_KEY", "SYNC_LABS_API_KEY",
-            "HEDRA_API_KEY", "ASSEMBLYAI_API_KEY", "MAGNIFIC_API_KEY", "ADOBE_FIREFLY_API_KEY",
-            "ANTHROPIC_API_KEY",
-        )
+        providers = manager.list_providers()
+        env_names = {
+            provider[key]
+            for provider in providers
+            for key in ("token_env", "api_key_env", "credential_env")
+            if isinstance(provider.get(key), str) and provider[key].strip()
+        }
         all_credentials = {name: "test-only-secret" for name in env_names}
-        for provider in manager.list_providers():
+        for provider in providers:
             if provider.get("auth_type") in {"API_KEY", "API_TOKEN"} and provider.get("allowed_hosts"):
                 with self.subTest(provider=provider["id"]):
                     status = manager.credential_status(provider["id"], all_credentials)
