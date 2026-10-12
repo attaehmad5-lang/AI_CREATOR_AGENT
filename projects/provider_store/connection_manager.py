@@ -25,6 +25,11 @@ MASTER_CATALOG = MODULE_DIR / "provider_catalog_master.json"
 DEFAULT_STATE = MODULE_DIR / "connection_state.json"
 
 
+class ProviderAuthenticationVerificationRequired(PermissionError):
+    """The generic HTTP probe needs a documented auth-protected endpoint."""
+
+
+
 class ConnectionManager:
     VALID_STATES = {
         "LOCKED",
@@ -883,12 +888,21 @@ class ConnectionManager:
         *,
         model: str | None = None,
         endpoint: str | None = None,
+        authentication_required: bool | None = None,
     ) -> dict[str, Any]:
-        """Persist non-secret endpoint/model settings after endpoint safety checks."""
+        """Persist non-secret endpoint/model settings after endpoint safety checks.
+
+        Set authentication_required=True only when the configured endpoint is
+        documented to require and validate the provider credential.
+        """
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
         configuration: dict[str, Any] = {}
+        if authentication_required is not None:
+            if not isinstance(authentication_required, bool):
+                return {"status": "INVALID_AUTHENTICATION_POLICY", "provider": provider_id, "saved": False}
+            configuration["authentication_required"] = authentication_required
         if model is not None:
             if not isinstance(model, str) or not model.strip() or len(model) > 200:
                 return {"status": "INVALID_MODEL", "provider": provider_id, "saved": False}
@@ -953,6 +967,9 @@ class ConnectionManager:
             configuration = self._sanitize_public_data(raw)
         if self._contains_credential_value_field(configuration):
             return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
+        authentication_required = configuration.get("authentication_required")
+        if authentication_required is not None and not isinstance(authentication_required, bool):
+            return {"status": "INVALID_AUTHENTICATION_POLICY", "provider": provider_id, "configuration": {}}
         model = configuration.get("model")
         if model is not None and (
             not isinstance(model, str) or not model.strip() or len(model) > 200
@@ -1069,7 +1086,9 @@ class ConnectionManager:
                 ord(char) < 32 or ord(char) == 127 for char in retry_after
             ):
                 retry_after = None
-            if http_status in {401, 403}:
+            if isinstance(exc, ProviderAuthenticationVerificationRequired):
+                status = "AUTHENTICATION_VERIFICATION_REQUIRED"
+            elif http_status in {401, 403}:
                 status = "AUTHENTICATION_OR_PERMISSION_FAILED"
             elif http_status == 429:
                 status = "RATE_LIMITED"
