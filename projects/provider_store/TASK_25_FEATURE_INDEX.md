@@ -56,30 +56,30 @@ Every feature's **verification status is NOT ITEM-AUDITED** until the exact requ
 | 38 | E — Retry, Failure & Recovery | Circuit Breaker | 🔴 | TESTED FOUNDATION | tests/test_retry_policy.py::test_circuit_breaker_opens_at_threshold_and_recovers_after_cooldown; test_circuit_breaker_admits_only_one_concurrent_half_open_probe |
 | 39 | E — Retry, Failure & Recovery | Cooldown and Provider Recheck | 🔴 | TESTED FOUNDATION | tests/test_retry_policy.py::test_circuit_breaker_opens_at_threshold_and_recovers_after_cooldown; test_circuit_breaker_reopens_after_half_open_failure |
 | 40 | E — Retry, Failure & Recovery | Timeout, Cancellation and Stalled-Request Handling | 🔴 | PARTIAL; timeout/retry and circuit-breaker cancellation are tested, generation job cancellation/stall handling is not integrated | tests/test_retry_policy.py::test_timeout_is_retryable_but_respects_attempt_limit; test_cancelled_half_open_probe_releases_single_probe_slot |
-| 41 | F — Provider Health | Provider Health State Tracking | 🟢 | NOT ITEM-AUDITED | TBD |
-| 42 | F — Provider Health | Basic Success/Failure History | 🟢 | NOT ITEM-AUDITED | TBD |
-| 43 | F — Provider Health | Health Check Before Generation | 🟡 | NOT ITEM-AUDITED | TBD |
-| 44 | F — Provider Health | Configurable Health-Check Policy | 🟡 | NOT ITEM-AUDITED | TBD |
-| 45 | F — Provider Health | Active Health Probes | 🔴 | NOT ITEM-AUDITED | TBD |
-| 46 | F — Provider Health | Unhealthy Provider Exclusion | 🟡 | NOT ITEM-AUDITED | TBD |
-| 47 | F — Provider Health | Provider Recovery Detection | 🔴 | NOT ITEM-AUDITED | TBD |
-| 48 | F — Provider Health | Stale Health and Consistency Checks | 🔴 | NOT ITEM-AUDITED | TBD |
-| 49 | G — Output Validation | Image Output Validation | 🟢 | NOT ITEM-AUDITED | TBD |
-| 50 | G — Output Validation | Output File Existence Validation | 🟡 | NOT ITEM-AUDITED | TBD |
-| 51 | G — Output Validation | Audio/Video Format, Codec and Integrity Validation | 🔴 | NOT ITEM-AUDITED | TBD |
-| 52 | G — Output Validation | Corrupt/Incomplete Output Rejection | 🟡 | NOT ITEM-AUDITED | TBD |
-| 53 | G — Output Validation | Temporary File Cleanup and Atomic Replacement | 🟡 | NOT ITEM-AUDITED | TBD |
-| 54 | G — Output Validation | Previous Output Preservation on Failure | 🟡 | NOT ITEM-AUDITED | TBD |
-| 55 | G — Output Validation | File Size, Dimensions, Duration and Codec Constraints | 🔴 | NOT ITEM-AUDITED | TBD |
-| 56 | G — Output Validation | Provider Attribution and Output Metadata | 🟡 | NOT ITEM-AUDITED | TBD |
-| 57 | H — Cost, Credits & Budgets | Free-Credit-First Routing | 🟡 | NOT ITEM-AUDITED | TBD |
-| 58 | H — Cost, Credits & Budgets | Provider Free-Tier/Quota Verification | 🔴 | NOT ITEM-AUDITED | TBD |
-| 59 | H — Cost, Credits & Budgets | Explicit Approval Before Paid Usage | 🟡 | NOT ITEM-AUDITED | TBD |
-| 60 | H — Cost, Credits & Budgets | Per-Request/Project Budgets | 🟡 | NOT ITEM-AUDITED | TBD |
-| 61 | H — Cost, Credits & Budgets | Estimated vs Actual Usage Reconciliation | 🟡 | NOT ITEM-AUDITED | TBD |
-| 62 | H — Cost, Credits & Budgets | Credit Exhaustion and Billing Error Handling | 🟡 | NOT ITEM-AUDITED | TBD |
-| 63 | H — Cost, Credits & Budgets | Cost-Aware Provider/Model Selection | 🟡 | NOT ITEM-AUDITED | TBD |
-| 64 | H — Cost, Credits & Budgets | Budget Alerts and Hard-Stop Policy | 🟡 | NOT ITEM-AUDITED | TBD |
+| 41 | F — Provider Health | Provider Health State Tracking | 🟢 | TESTED FOUNDATION | tests/test_health_manager.py::test_success_and_failure_history_persist; test_concurrent_health_updates_across_processes_preserve_history |
+| 42 | F — Provider Health | Basic Success/Failure History | 🟢 | TESTED FOUNDATION | tests/test_health_manager.py::test_success_and_failure_history_persist; test_request_id_makes_health_recording_idempotent_and_conflict_safe |
+| 43 | F — Provider Health | Health Check Before Generation | 🟡 | PARTIAL; health evidence can be required by routing, generation-path enforcement remains open | tests/test_routing_manager.py::test_health_evidence_can_be_required_and_unhealthy_providers_are_skipped |
+| 44 | F — Provider Health | Configurable Health-Check Policy | 🟡 | TESTED FOUNDATION | tests/test_health_manager.py::test_failure_threshold_excludes_unhealthy_provider; test_latency_limit_excludes_slow_provider; test_invalid_manager_configuration_and_probe_timeout_are_rejected |
+| 45 | F — Provider Health | Active Health Probes | 🔴 | TESTED FOUNDATION; provider-specific live probes still need authorized credentials | tests/test_health_manager.py::test_active_probe_classifies_failure_without_leaking_details; test_active_probe_fails_closed_when_health_state_cannot_be_saved |
+| 46 | F — Provider Health | Unhealthy Provider Exclusion | 🟡 | TESTED FOUNDATION | tests/test_health_manager.py::test_failure_threshold_excludes_unhealthy_provider; tests/test_routing_manager.py::test_health_evidence_can_be_required_and_unhealthy_providers_are_skipped |
+| 47 | F — Provider Health | Provider Recovery Detection | 🔴 | TESTED FOUNDATION | tests/test_health_manager.py::test_success_recovers_provider |
+| 48 | F — Provider Health | Stale Health and Consistency Checks | 🔴 | TESTED FOUNDATION | tests/test_health_manager.py::test_stale_health_is_excluded; test_future_health_evidence_and_malformed_latency_fail_closed; test_history_is_bounded |
+| 49 | G — Output Validation | Image Output Validation | 🟢 | TESTED FOUNDATION for signature/hash checks; image semantic/dimension validation remains open | tests/test_output_validator.py::test_valid_image_signature_returns_hash_and_metadata; test_mismatched_signature_and_extension_are_rejected |
+| 50 | G — Output Validation | Output File Existence Validation | 🟡 | TESTED FOUNDATION | tests/test_output_validator.py::test_missing_empty_and_oversized_outputs_are_rejected |
+| 51 | G — Output Validation | Audio/Video Format, Codec and Integrity Validation | 🔴 | OPEN; audio/video decoding, codec and integrity validators are not implemented | tests/test_output_validator.py::test_symlinks_and_unsupported_modalities_fail_closed |
+| 52 | G — Output Validation | Corrupt/Incomplete Output Rejection | 🟡 | TESTED FOUNDATION for supported formats | tests/test_output_validator.py::test_mismatched_signature_and_extension_are_rejected; test_text_json_and_pdf_content_are_checked; test_deeply_nested_json_is_rejected_without_crashing |
+| 53 | G — Output Validation | Temporary File Cleanup and Atomic Replacement | 🟡 | OPEN; validator does not own generation temp-file lifecycle/atomic replacement | tests/test_output_validator.py does not exercise temp-file creation or atomic output replacement |
+| 54 | G — Output Validation | Previous Output Preservation on Failure | 🟡 | OPEN; prior-output preservation needs execution pipeline integration | No end-to-end generation/output replacement test exists in the current provider suite |
+| 55 | G — Output Validation | File Size, Dimensions, Duration and Codec Constraints | 🔴 | PARTIAL; file-size limits exist, image dimensions/audio-video duration/codecs are not checked | tests/test_output_validator.py::test_missing_empty_and_oversized_outputs_are_rejected; test_invalid_size_limits_are_rejected |
+| 56 | G — Output Validation | Provider Attribution and Output Metadata | 🟡 | PARTIAL; safe metadata/hash exists, provider attribution is not end-to-end | tests/test_output_validator.py::test_valid_image_signature_returns_hash_and_metadata; tests/test_provider_service.py output validation tests |
+| 57 | H — Cost, Credits & Budgets | Free-Credit-First Routing | 🟡 | PARTIAL; verified free-credit routing is tested, actual provider free-tier eligibility remains unverified | tests/test_routing_manager.py::test_verified_credit_manager_drives_free_first_routing; tests/test_credit_manager.py::test_stale_or_unverified_balances_never_authorize_free_routing |
+| 58 | H — Cost, Credits & Budgets | Provider Free-Tier/Quota Verification | 🔴 | OPEN; Pollinations combined pollen budget is not proof of free credits | projects/provider_store/pollinations_credit_probe.py returns remaining_account_budget only and cannot authorize free-credit routing |
+| 59 | H — Cost, Credits & Budgets | Explicit Approval Before Paid Usage | 🟡 | TESTED FOUNDATION | tests/test_cost_policy.py::test_paid_usage_is_blocked_without_explicit_approval; test_paid_usage_requires_budget_and_approval |
+| 60 | H — Cost, Credits & Budgets | Per-Request/Project Budgets | 🟡 | TESTED FOUNDATION | tests/test_cost_policy.py::test_project_budget_is_hard_stop; test_budget_reservations_prevent_overcommit_and_are_idempotent |
+| 61 | H — Cost, Credits & Budgets | Estimated vs Actual Usage Reconciliation | 🟡 | TESTED FOUNDATION | tests/test_cost_policy.py::test_reconciliation_is_idempotent_and_persists_actual_usage; test_reconciliation_consumes_reservation_and_release_frees_budget |
+| 62 | H — Cost, Credits & Budgets | Credit Exhaustion and Billing Error Handling | 🟡 | TESTED FOUNDATION; provider-specific billing webhooks remain open | tests/test_cost_policy.py::test_zero_actual_cost_requires_explicit_no_charge_evidence; test_unknown_charge_outcome_does_not_free_quota_for_another_request; tests/test_credit_manager.py::test_probe_failures_do_not_leak_exception_details |
+| 63 | H — Cost, Credits & Budgets | Cost-Aware Provider/Model Selection | 🟡 | TESTED FOUNDATION | tests/test_routing_manager.py::test_free_credit_and_lowest_cost_strategies |
+| 64 | H — Cost, Credits & Budgets | Budget Alerts and Hard-Stop Policy | 🟡 | TESTED FOUNDATION | tests/test_cost_policy.py::test_project_budget_is_hard_stop; test_actual_cost_overrun_triggers_budget_alert |
 | 65 | I — Security & Privacy | Secrets Management | 🟡 | NOT ITEM-AUDITED | TBD |
 | 66 | I — Security & Privacy | Secret Leakage Prevention | 🟡 | NOT ITEM-AUDITED | TBD |
 | 67 | I — Security & Privacy | Endpoint Allowlisting | 🟡 | NOT ITEM-AUDITED | TBD |
