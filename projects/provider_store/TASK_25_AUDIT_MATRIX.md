@@ -1,12 +1,12 @@
 # Task #25 — A–P Verification Matrix
 
-**Status: IN PROGRESS. Do not merge or mark complete.**
+**Status: IN PROGRESS. PR #1 was merged by the user on 2026-10-12; Task #25 is not complete.**
 
 This matrix preserves the canonical feature-ID ranges and group names. It is an evidence tracker, not a replacement for the user's exact 138-item checklist. A group is not complete merely because a supporting module or test exists; every original item still requires individual verification.
 
 ## Latest confirmed verification
 
-GitHub Actions run [#38280285131](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280285131) passed on Ubuntu and Windows with Python 3.13: **291 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation also passed. Compilation and provider JSON catalog validation passed. Newer runs may be in progress; use Actions for the latest result.
+GitHub Actions run [#38280619566](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280619566) passed on Ubuntu and Windows with Python 3.13: **292 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation passed. Historical failed runs remain in Actions for audit and were not relabeled as passing.
 
 | Group / IDs | Canonical group | Current evidence | Status | Remaining verification |
 |---|---|---|---|---|
@@ -33,4 +33,12 @@ GitHub Actions run [#38280285131](https://github.com/attaehmad5-lang/AI_CREATOR_
 2. Mark each original item individually only after code evidence and relevant tests exist.
 3. Fix and rerun every failing test; no failure is ignored or marked passed without a rerun.
 4. Complete live-provider checks only with user-authorized credentials and safe, provider-specific probes. A generic HTTP 2xx is not proof of authenticated access unless the configured endpoint is documented to enforce the credential.
-5. Keep this pull request in draft and do not merge into `main` until the full checklist and all required tests are verified.
+5. PR #1 has already been merged by the user. Do not mark Task #25 complete; use a follow-up branch/PR for remaining work and do not merge follow-up changes without explicit user approval.
+
+
+## Canonical 138-item checklist preservation
+
+- The authoritative scope remains the user's original 138 individual feature descriptions across sections A–P, originally marked 6 🟢, 29 🟡, and 103 🔴.
+- This matrix currently preserves section names and item-number ranges, but does **not** contain all 138 original descriptions verbatim. Do not invent descriptions from the group headings or silently renumber/merge items.
+- Feature-by-feature completion requires the original wording to be copied verbatim into a dedicated checklist file, then each item tracked separately with implementation path, test evidence, verification result, and backup/commit reference.
+- Workflow for every item: **Scope → Build → Test → Fix failures → Rerun → Verify → Save evidence**. A test failure remains unresolved until a confirming rerun passes.
