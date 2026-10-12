@@ -248,7 +248,7 @@ class ConnectionManager:
                     return True
                 if ConnectionManager._contains_credential_value_field(item):
                     return True
-        elif isinstance(value, list):
+        elif isinstance(value, (list, tuple)):
             return any(ConnectionManager._contains_credential_value_field(item) for item in value)
         return False
 
