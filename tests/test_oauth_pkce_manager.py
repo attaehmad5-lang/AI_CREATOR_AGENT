@@ -208,6 +208,7 @@ class ProviderOAuthPKCEManagerTests(unittest.TestCase):
     def test_invalid_token_response_never_connects(self):
         for payload, expected in (
             ({"access_token": "", "token_type": "Bearer", "expires_in": 3600}, "OAUTH_ACCESS_TOKEN_INVALID"),
+            ({"access_token": "bad token", "token_type": "Bearer", "expires_in": 3600}, "OAUTH_ACCESS_TOKEN_INVALID"),
             ({"access_token": "token", "token_type": "Basic", "expires_in": 3600}, "OAUTH_TOKEN_TYPE_UNSUPPORTED"),
             ({"access_token": "token", "token_type": "Bearer", "expires_in": float("nan")}, "OAUTH_EXPIRY_INVALID"),
             ({"access_token": "token", "token_type": "Bearer", "expires_in": 3600, "scope": "usage\nsecret"}, "OAUTH_SCOPE_INVALID"),
