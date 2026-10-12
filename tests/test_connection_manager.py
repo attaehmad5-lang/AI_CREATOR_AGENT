@@ -252,6 +252,18 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(any("official_api_url is required" in error for error in result["errors"]))
         self.assertTrue(any("capabilities must be non-empty" in error for error in result["errors"]))
 
+        manual = ConnectionManager.validate_catalog_schema({
+            "version": "3.0",
+            "providers": [{
+                "id": "manual", "name": "Manual", "category": "video",
+                "auth_type": "ACCOUNT", "connection_type": "MANUAL_CONNECT",
+                "enabled": True, "subscription_required": True,
+            }],
+        })
+        self.assertFalse(manual["valid"])
+        self.assertTrue(any("official_api_url is required" in error for error in manual["errors"]))
+        self.assertTrue(any("capabilities must be non-empty" in error for error in manual["errors"]))
+
     def test_production_catalog_api_allowlists_are_explicit_and_valid(self):
         catalog_path = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
