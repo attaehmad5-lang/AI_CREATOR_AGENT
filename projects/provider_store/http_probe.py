@@ -44,6 +44,7 @@ class ProviderHTTPConnectivityProbe:
 
     _DEFAULT_TOKEN_ENV = {
         "huggingface": "HF_TOKEN",
+        "pollinations": "POLLINATIONS_API_KEY",
         "replicate": "REPLICATE_API_TOKEN",
         "openai_image": "OPENAI_API_KEY",
         "openai_voice": "OPENAI_API_KEY",
