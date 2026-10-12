@@ -100,6 +100,38 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                 self.assertFalse(result["valid"])
                 self.assertTrue(any(field in error and "required" in error for error in result["errors"]))
 
+    def test_enabled_v3_provider_requires_official_docs_and_capabilities(self):
+        base = {
+            "id": "provider", "name": "Provider",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "API", "enabled": True,
+            "subscription_required": False, "allowed_hosts": ["api.example.com"],
+            "official_api_url": "https://api.example.com/docs",
+            "capabilities": ["image_generation"],
+        }
+        self.assertTrue(ConnectionManager.validate_catalog_schema({
+            "version": "3.0", "providers": [base],
+        })["valid"])
+        for field in ("official_api_url", "capabilities"):
+            with self.subTest(field=field):
+                incomplete = dict(base)
+                incomplete.pop(field)
+                result = ConnectionManager.validate_catalog_schema({
+                    "version": "3.0", "providers": [incomplete],
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any(field in error and "required" in error for error in result["errors"]))
+
+    def test_every_enabled_catalog_provider_has_docs_and_capability_metadata(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        enabled = [p for p in catalog["providers"] if p.get("enabled") is True]
+        self.assertGreater(len(enabled), 0)
+        for provider in enabled:
+            with self.subTest(provider=provider.get("id")):
+                self.assertTrue(provider.get("official_api_url"), "official docs required")
+                self.assertTrue(provider.get("capabilities"), "declared capability required")
+
     def test_schema_rejects_enabled_api_provider_without_allowlist(self):
         result = ConnectionManager.validate_catalog_schema({
             "version": "3.0",
