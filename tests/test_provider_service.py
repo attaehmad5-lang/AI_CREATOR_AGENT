@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.cost_policy import ProviderCostPolicy
@@ -58,6 +59,59 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["connection"]["status"], "CONNECTED")
         self.assertEqual(result["health"]["status"], "HEALTHY")
         self.assertEqual(self.connections.get_state("image")["status"], "CONNECTED")
+
+    def test_pollinations_account_verification_uses_oauth_without_persisting_token_or_free_credit(self):
+        secret = "temporary-pollinations-oauth-token"
+        provider = {
+            "id": "pollinations", "name": "Pollinations", "category": "image",
+            "auth_type": "API_KEY", "connection_type": "API", "enabled": True,
+            "api_key_env": "POLLINATIONS_API_KEY",
+            "allowed_hosts": ["gen.pollinations.ai"],
+        }
+
+        class OAuthStub:
+            def get_access_token(self, provider_id):
+                self.asserted_provider = provider_id
+                return secret
+
+        class Response:
+            status = 200
+            closed = False
+
+            def getcode(self):
+                return self.status
+
+            def read(self, size=-1):
+                return b'{"balance": 4.25}'[:size]
+
+            def close(self):
+                self.closed = True
+
+        class Opener:
+            def __init__(self):
+                self.response = Response()
+                self.calls = []
+
+            def open(self, request, timeout):
+                self.calls.append((request, timeout))
+                return self.response
+
+        opener = Opener()
+        with patch.object(self.connections, "get_provider", return_value=provider):
+            result = self.service.verify_pollinations_account(
+                OAuthStub(), opener=opener, timeout_seconds=2.0
+            )
+
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["connection"]["status"], "CONNECTED")
+        self.assertEqual(result["account_balance"]["balance"], 4.25)
+        self.assertEqual(result["account_balance"]["unit"], "pollen")
+        self.assertEqual(opener.calls[0][0].full_url, "https://gen.pollinations.ai/account/balance")
+        self.assertEqual(opener.calls[0][1], 2.0)
+        self.assertTrue(opener.response.closed)
+        self.assertNotIn(secret, repr(result))
+        self.assertNotIn(secret, self.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(self.connections.get_state("pollinations")["status"], "CONNECTED")
 
     def test_builtin_http_provider_verification_updates_connection_and_health(self):
         class Response:
