@@ -150,6 +150,15 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             self.assertEqual(result["http_status"], 429)
             self.assertEqual(result["retry_after"], "5")
             self.assertFalse(result["verified"])
+            from projects.provider_store.retry_policy import RetryPolicy
+            retry = RetryPolicy(max_delay_seconds=10).decide(
+                attempt=1,
+                status_code=result["http_status"],
+                retry_after=result["retry_after"],
+            )
+            self.assertTrue(retry.retry)
+            self.assertEqual(retry.reason, "RATE_LIMIT_RETRY_AFTER")
+            self.assertGreaterEqual(retry.delay_seconds, 5.0)
             self.assertEqual(manager.get_state("probe_provider")["status"], "ERROR")
 
     def test_server_http_failure_maps_to_provider_unavailable(self):
