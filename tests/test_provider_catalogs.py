@@ -125,6 +125,32 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                     provider.get("id"),
                 )
 
+    def test_enabled_providers_have_explicit_generation_capabilities(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        enabled = [provider for provider in catalog["providers"] if provider.get("enabled") is True]
+        self.assertTrue(enabled)
+        for provider in enabled:
+            with self.subTest(provider=provider["id"]):
+                capabilities = provider.get("capabilities")
+                self.assertIsInstance(capabilities, list)
+                self.assertTrue(capabilities)
+                self.assertEqual(len(capabilities), len(set(capabilities)))
+                self.assertTrue(all(
+                    isinstance(item, str) and item == item.casefold() and item.strip()
+                    for item in capabilities
+                ))
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            catalog_path, state_path = temp / "catalog.json", temp / "state.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog_path, state_path)
+            matches = manager.discover_providers(
+                capability="image_generation", enabled_only=True
+            )
+            self.assertEqual({provider["id"] for provider in matches}, {"huggingface", "pollinations"})
+
     def test_every_catalog_modality_has_a_callable_contract(self):
         root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
         catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
