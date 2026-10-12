@@ -170,6 +170,8 @@ class ProviderServiceTests(unittest.TestCase):
         class ConnectionStub:
             def get_provider(self, provider_id):
                 return {"id": provider_id, "token_env": "OAUTH_ACCESS_TOKEN"}
+            def verify_connectivity(self, provider_id, probe, **kwargs):
+                return {"status": "CONNECTED", "provider": provider_id, "verified": True}
         service = ProviderService(ConnectionStub())
         result = service.verify_oauth_provider("image", OAuthStub())
         self.assertFalse(result["verified"])
