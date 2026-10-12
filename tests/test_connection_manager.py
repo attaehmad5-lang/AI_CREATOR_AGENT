@@ -397,6 +397,13 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["restored"])
         self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{still-corrupt")
 
+    def test_configure_provider_rejects_non_boolean_authentication_policy(self):
+        result = self.manager.configure_provider(
+            "public_image", authentication_required="true"
+        )
+        self.assertEqual(result["status"], "INVALID_AUTHENTICATION_POLICY")
+        self.assertFalse(result["saved"])
+
     def test_configured_endpoint_and_model_are_passed_to_probe(self):
         self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
