@@ -192,6 +192,24 @@ class ProviderServiceTests(unittest.TestCase):
         invalid = self.service.finalize_started_request(**{**kwargs, "actual_cost": float("nan")})
         self.assertEqual(invalid["status"], "INVALID_COST_AMOUNT")
 
+        self.cost.reserve_usage(
+            project_id="film", provider_id="image", estimated_cost=2.0,
+            request_id="job-no-charge-replay",
+        )
+        self.quota.reserve(provider_id="image", request_id="job-no-charge-replay")
+        no_charge_kwargs = {
+            "project_id": "film", "provider_id": "image",
+            "request_id": "job-no-charge-replay", "estimated_cost": 2.0,
+            "actual_cost": 0.0, "success": False, "charge_outcome": "not_incurred",
+        }
+        no_charge_first = self.service.finalize_started_request(**no_charge_kwargs)
+        no_charge_conflict = self.service.finalize_started_request(
+            **{**no_charge_kwargs, "charge_outcome": "unknown"}
+        )
+        self.assertTrue(no_charge_first["finalized"])
+        self.assertFalse(no_charge_conflict["finalized"])
+        self.assertEqual(no_charge_conflict["cost"]["status"], "REQUEST_ID_CONFLICT")
+
     def test_concurrent_finalization_is_idempotent(self):
         self.cost.reserve_usage(
             project_id="film", provider_id="image", estimated_cost=2.0,
