@@ -228,6 +228,8 @@ class ConnectionManager:
         catalog: dict[str, Any], *, raise_on_error: bool = False
     ) -> dict[str, Any]:
         """Validate catalog structure, provider identities, and safe metadata fields."""
+        from urllib.parse import urlsplit
+
         errors: list[str] = []
         if not isinstance(catalog, dict):
             errors.append("catalog must be an object")
@@ -335,6 +337,28 @@ class ConnectionManager:
                         errors.append(
                             f"providers[{index}].allowed_hosts is required for enabled API providers"
                         )
+                    for url_field in ("official_api_url", "subscription_url"):
+                        if url_field in provider:
+                            raw_url = provider[url_field]
+                            try:
+                                parsed_url = urlsplit(raw_url) if isinstance(raw_url, str) else None
+                                _ = parsed_url.port if parsed_url is not None else None
+                            except ValueError:
+                                parsed_url = None
+                            if (
+                                not isinstance(raw_url, str)
+                                or not raw_url.strip()
+                                or len(raw_url) > 2048
+                                or any(ord(char) < 32 or ord(char) == 127 for char in raw_url)
+                                or parsed_url is None
+                                or parsed_url.scheme != "https"
+                                or not parsed_url.hostname
+                                or parsed_url.username is not None
+                                or parsed_url.password is not None
+                            ):
+                                errors.append(
+                                    f"providers[{index}].{url_field} must be a safe HTTPS URL without embedded credentials"
+                                )
                     if "auth_header_name" in provider:
                         safe_auth_headers = {
                             "authorization", "x-api-key", "api-key", "xi-api-key",
