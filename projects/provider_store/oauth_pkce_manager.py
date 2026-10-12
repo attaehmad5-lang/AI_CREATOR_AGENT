@@ -78,7 +78,10 @@ class ProviderOAuthPKCEManager:
             port = parsed.port
         except ValueError:
             return False
-        if not host or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+        if (
+            not host or parsed.username is not None or parsed.password is not None
+            or parsed.query or parsed.fragment or port == 0
+        ):
             return False
         if parsed.scheme == "https":
             return True
