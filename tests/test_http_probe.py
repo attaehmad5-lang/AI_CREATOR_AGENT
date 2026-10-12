@@ -82,6 +82,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
         })
         self.assertEqual(result["http_status"], 200)
+        self.assertTrue(result["authentication_verified"])
         self.assertEqual(opener.calls[0][0].get_header("Authorization"), f"Bearer {secret}")
         self.assertNotIn(secret, repr(result))
 
