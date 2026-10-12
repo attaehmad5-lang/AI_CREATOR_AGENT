@@ -171,15 +171,27 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(valid["valid"], valid["errors"])
 
     def test_catalog_schema_rejects_literal_secret_in_secret_reference(self):
-        result = ConnectionManager.validate_catalog_schema({
-            "providers": [{"id": "provider", "secret_ref": "token=private-value"}]
-        })
-        self.assertFalse(result["valid"])
-        self.assertTrue(any("secret_ref must be a safe" in error for error in result["errors"]))
+        for secret_ref in ("token=private-value", "sk_12345678901234567890", "raw-secret-value"):
+            with self.subTest(secret_ref=secret_ref):
+                result = ConnectionManager.validate_catalog_schema({
+                    "providers": [{"id": "provider", "secret_ref": secret_ref}]
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("secret_ref must use" in error for error in result["errors"]))
         valid = ConnectionManager.validate_catalog_schema({
             "providers": [{"id": "provider", "secret_ref": "vault://provider/access-token"}]
         })
         self.assertTrue(valid["valid"], valid["errors"])
+
+    def test_registration_rejects_secret_values_disguised_as_references(self):
+        base = {
+            "name": "Provider", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API",
+        }
+        for key, value in (("secret_ref", "sk_12345678901234567890"), ("token_env", "hf_secret_token_value")):
+            with self.subTest(key=key):
+                result = self.manager.register_provider({"id": f"bad_{key}", **base, key: value})
+                self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
 
     def test_catalog_schema_requires_boolean_subscription_flag(self):
         result = ConnectionManager.validate_catalog_schema({
