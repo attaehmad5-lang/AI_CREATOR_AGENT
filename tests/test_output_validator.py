@@ -106,6 +106,28 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertEqual(result["status"], "OUTPUT_CHANGED_DURING_VALIDATION")
 
+    def test_same_size_file_mutation_is_detected_by_final_metadata(self):
+        path = self.root / "changing.txt"
+        path.write_text("before", encoding="utf-8")
+        actual = path.stat()
+        initial = SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o600, st_size=6,
+            st_dev=actual.st_dev, st_ino=actual.st_ino,
+            st_mtime_ns=100, st_ctime_ns=100,
+        )
+        changed = SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o600, st_size=6,
+            st_dev=actual.st_dev, st_ino=actual.st_ino,
+            st_mtime_ns=101, st_ctime_ns=101,
+        )
+        with patch(
+            "projects.provider_store.output_validator.os.fstat",
+            side_effect=[initial, changed],
+        ):
+            result = self.validator.validate_file(path, modality="text")
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "OUTPUT_CHANGED_DURING_VALIDATION")
+
     def test_deeply_nested_json_is_rejected_without_crashing(self):
         validator = ProviderOutputValidator(max_size_bytes=10000)
         path = self.root / "deep.json"
