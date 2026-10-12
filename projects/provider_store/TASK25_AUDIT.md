@@ -1,15 +1,16 @@
 # Task #25 — Provider Connection Manager Verification Audit
 
-**Branch:** `task-25-provider-connection-manager`  
-**Pull request:** #1 (draft; not approved for merge)  
+**Branch:** `task-25-continuation-audit`  
+**Continuation pull request:** #4 (draft; not approved for merge)  
+**Original pull request:** #1 was merged on 2026-10-12; that merge did not complete Task #25.  
 **Audit status:** In progress — do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
-GitHub Actions run [#38278998978](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38278998978) completed successfully on Python 3.13:
+GitHub Actions run [#38291285381](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38291285381) completed successfully on Python 3.13:
 
-- Ubuntu: 275 tests passed, 0 failures.
-- Windows: 275 tests passed, 0 failures.
+- Ubuntu: 294 tests passed, 0 failures.
+- Windows: 294 tests passed, 0 failures.
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
 
@@ -50,4 +51,4 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 ## Completion gate
 
-Do not mark this task complete, mark all 138 items PASS, or merge PR #1 until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and the user approves any merge.
+Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and the user approves any merge. PR #4 remains a draft and must not be merged without explicit user approval.
