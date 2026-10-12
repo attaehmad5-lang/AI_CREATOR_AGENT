@@ -125,6 +125,17 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                     provider.get("id"),
                 )
 
+    def test_pollinations_uses_current_documented_api_auth_and_host(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        provider = next(item for item in catalog["providers"] if item["id"] == "pollinations")
+        self.assertEqual(provider["auth_type"], "API_KEY")
+        self.assertEqual(provider["token_env"], "POLLINATIONS_API_KEY")
+        self.assertEqual(provider["allowed_hosts"], ["gen.pollinations.ai"])
+        self.assertEqual(provider["official_api_url"], "https://gen.pollinations.ai/docs")
+        self.assertIsNot(provider.get("zero_cost_allowed"), True)
+        self.assertTrue(ConnectionManager.validate_catalog_schema(catalog)["valid"])
+
     def test_enabled_providers_have_explicit_generation_capabilities(self):
         root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
         catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
