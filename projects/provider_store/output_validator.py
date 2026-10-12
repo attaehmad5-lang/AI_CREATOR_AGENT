@@ -179,6 +179,12 @@ class ProviderOutputValidator:
                     remaining -= len(chunk)
                 if stream.read(1):
                     return {"valid": False, "status": "OUTPUT_CHANGED_DURING_VALIDATION"}
+                final_stat = os.fstat(stream.fileno())
+                if any(
+                    getattr(final_stat, field, None) != getattr(file_stat, field, None)
+                    for field in ("st_size", "st_mtime_ns", "st_ctime_ns", "st_dev", "st_ino")
+                ):
+                    return {"valid": False, "status": "OUTPUT_CHANGED_DURING_VALIDATION"}
         except OSError:
             if artifact.is_symlink():
                 return {"valid": False, "status": "SYMLINK_REJECTED"}
