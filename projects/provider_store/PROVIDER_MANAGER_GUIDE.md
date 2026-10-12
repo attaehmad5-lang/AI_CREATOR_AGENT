@@ -19,6 +19,10 @@ This guide describes the current implementation in this branch. It is not a clai
 - `provider_catalog.json` and `provider_catalog_master.json` — one synchronized 54-provider registry, including the 18 advanced-provider records. Catalog v3 requires complete provider identity fields and explicit `enabled` / `subscription_required` booleans; provider IDs and documentation/subscription links are validated before acceptance. The master catalog is the fallback copy, and the older v2 backup remains archival.
 - Legacy store, category, advanced, unlock, status, and unified-registry/router facades now read the central catalog. Discovery facades distinguish catalog labels from live verified state; actual policy-aware execution still belongs to `ProviderRoutingManager`.
 
+## Catalog readiness
+
+The catalog contains 54 providers. Official API documentation links are verified for 46 entries and capability metadata is present for 50 entries. Entries without verified official docs/capabilities remain disabled; do not infer support from a product landing page or activate them without authoritative API and auth details. OpenAI Sora is explicitly marked deprecated and cannot be re-enabled because its Videos API was removed on 2026-09-24.
+
 ## Safety contracts
 
 0. **Secret references are references, not secret values.** Environment references must be valid environment-variable names; `secret_ref` accepts only `env://`, `vault://`, or `keyring://` references. Runtime configuration is restricted to model, generation endpoint, probe endpoint, and the explicit authentication-verification flag. Documentation URLs cannot carry query strings or fragments, which could leak credentials.
