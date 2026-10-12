@@ -146,6 +146,8 @@ class RetryPolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             CircuitBreaker(cooldown_seconds=float("inf"))
         with self.assertRaises(ValueError):
+            CircuitBreaker(cooldown_seconds=10**1000)
+        with self.assertRaises(ValueError):
             CircuitBreaker(clock="not-callable")
 
     def test_invalid_attempt_and_non_finite_retry_after_are_safe(self):
