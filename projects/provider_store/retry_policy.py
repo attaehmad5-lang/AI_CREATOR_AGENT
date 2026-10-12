@@ -83,6 +83,25 @@ class RetryPolicy:
             return RetryDecision(False, attempt, 0.0, "RETRY_LIMIT_REACHED")
         if not isinstance(idempotent, bool):
             return RetryDecision(False, attempt, 0.0, "INVALID_IDEMPOTENCY_FLAG")
+        if exception is not None:
+            if status_code is None:
+                try:
+                    candidate_status = getattr(exception, "status_code", None)
+                except Exception:
+                    candidate_status = None
+                if (
+                    isinstance(candidate_status, int)
+                    and not isinstance(candidate_status, bool)
+                    and 100 <= candidate_status <= 599
+                ):
+                    status_code = candidate_status
+            if retry_after is None:
+                try:
+                    candidate_retry_after = getattr(exception, "retry_after", None)
+                except Exception:
+                    candidate_retry_after = None
+                if isinstance(candidate_retry_after, (str, int, float)) and not isinstance(candidate_retry_after, bool):
+                    retry_after = candidate_retry_after
         if status_code is not None and (
             not isinstance(status_code, int) or isinstance(status_code, bool)
             or status_code < 100 or status_code > 599
