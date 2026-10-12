@@ -485,6 +485,23 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             })
         self.assertNotIn("private timeout detail", str(caught.exception))
 
+    def test_basic_auth_is_rejected_until_a_real_basic_encoder_exists(self):
+        opener = _Opener()
+        probe = ProviderHTTPConnectivityProbe(
+            environ={"CUSTOM_CREDENTIAL": "raw-token"}, opener=opener
+        )
+        with self.assertRaisesRegex(ValueError, "auth scheme is not permitted"):
+            probe({
+                "id": "custom", "auth_type": "API_KEY",
+                "credential_env": "CUSTOM_CREDENTIAL", "auth_scheme": "Basic",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {
+                    "endpoint": "https://api.example.com/health",
+                    "authentication_required": True,
+                },
+            })
+        self.assertEqual(opener.calls, [])
+
     def test_invalid_probe_configuration_is_rejected(self):
         with self.assertRaises(ValueError):
             ProviderHTTPConnectivityProbe(max_response_bytes=-1)
