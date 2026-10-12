@@ -315,6 +315,22 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertEqual(record["charge_outcome"], "not_incurred")
         self.assertEqual(persisted.ledger["projects"]["documentary"]["actual_spend"], 0.0)
 
+    def test_unresolved_finalization_rejects_mismatched_reservation(self):
+        self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=2.0, request_id="reservation-mismatch-finalize",
+        )
+        result = self.policy.finalize_usage(
+            project_id="documentary", provider_id="other-provider",
+            estimated_cost=2.0, actual_cost=0.0,
+            request_id="reservation-mismatch-finalize", success=False,
+            charge_outcome="unknown",
+        )
+        self.assertEqual(result["status"], "REQUEST_ID_CONFLICT")
+        self.assertFalse(result["saved"])
+        reservation = self.policy.ledger["projects"]["documentary"]["reservations"]["reservation-mismatch-finalize"]
+        self.assertEqual(reservation["provider_id"], "paid")
+
     def test_reconciliation_rejects_reservation_provider_or_estimate_mismatch(self):
         self.policy.reserve_usage(
             project_id="documentary", provider_id="paid-a",
