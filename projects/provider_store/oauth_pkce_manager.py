@@ -265,6 +265,12 @@ class ProviderOAuthPKCEManager:
         raw_scope = data.get("scope", pending.get("scope", ""))
         if not isinstance(raw_scope, str) or len(raw_scope) > 2000 or any(ord(char) < 32 for char in raw_scope):
             return {"status": "OAUTH_SCOPE_INVALID", "provider": provider_id}
+        requested_scope = pending.get("scope", "")
+        if requested_scope and raw_scope:
+            requested_set = set(requested_scope.split())
+            granted_set = set(raw_scope.split())
+            if not granted_set.issubset(requested_set):
+                return {"status": "OAUTH_SCOPE_ESCALATION", "provider": provider_id}
         with self._lock:
             expected_generation = pending.get("generation", self._generation.get(provider_id, 0))
             if expected_generation != self._generation.get(provider_id, 0):
