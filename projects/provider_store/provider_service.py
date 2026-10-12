@@ -616,6 +616,7 @@ class ProviderService:
                     success=success,
                     latency_ms=latency_ms,
                     error_code=None if success else (error_code or "EXECUTION_FAILED"),
+                    request_id=request_id,
                 )
             except Exception as exc:
                 health_result = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
