@@ -211,13 +211,17 @@
       "subscription_required": true,
       "enabled": false,
       "subscription_url": "https://elevenlabs.io",
-      "official_api_url": "https://elevenlabs.io/docs/api-reference",
+      "official_api_url": "https://elevenlabs.io/docs/overview/capabilities/text-to-speech",
       "allowed_hosts": [
         "api.elevenlabs.io"
       ],
       "token_env": "ELEVENLABS_API_KEY",
       "auth_header_name": "xi-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "capabilities": [
+        "text_to_speech",
+        "voice_cloning"
+      ]
     },
     {
       "id": "openai_voice",
@@ -231,7 +235,11 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "official_api_url": "https://developers.openai.com/api/reference/cli/resources/audio",
+      "capabilities": [
+        "text_to_speech"
+      ]
     },
     {
       "id": "google_speech",
@@ -248,7 +256,11 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://docs.cloud.google.com/text-to-speech/docs",
+      "capabilities": [
+        "text_to_speech"
+      ]
     },
     {
       "id": "cartesia",
@@ -264,7 +276,12 @@
       ],
       "token_env": "CARTESIA_API_KEY",
       "auth_header_name": "Cartesia-API-Key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://docs.cartesia.ai/",
+      "capabilities": [
+        "text_to_speech",
+        "speech_to_text"
+      ]
     },
     {
       "id": "playht",
@@ -278,7 +295,12 @@
       "allowed_hosts": [
         "api.play.ht"
       ],
-      "token_env": "PLAYHT_API_KEY"
+      "token_env": "PLAYHT_API_KEY",
+      "official_api_url": "https://docs.play.ht/reference/api-getting-started",
+      "capabilities": [
+        "text_to_speech",
+        "voice_cloning"
+      ]
     },
     {
       "id": "deepgram",
@@ -294,7 +316,12 @@
       ],
       "token_env": "DEEPGRAM_API_KEY",
       "auth_header_name": "Authorization",
-      "auth_scheme": "Token"
+      "auth_scheme": "Token",
+      "official_api_url": "https://developers.deepgram.com/",
+      "capabilities": [
+        "speech_to_text",
+        "text_to_speech"
+      ]
     },
     {
       "id": "suno",
@@ -512,7 +539,11 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "official_api_url": "https://developers.openai.com/api/reference/cli/resources/audio",
+      "capabilities": [
+        "speech_to_text"
+      ]
     },
     {
       "id": "assemblyai",
@@ -528,7 +559,12 @@
       ],
       "token_env": "ASSEMBLYAI_API_KEY",
       "auth_header_name": "Authorization",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://www.assemblyai.com/docs/",
+      "capabilities": [
+        "speech_to_text",
+        "audio_intelligence"
+      ]
     },
     {
       "id": "topaz",
@@ -764,15 +800,13 @@
       "enabled": false,
       "capabilities": [
         "speech_to_text",
-        "speaker_detection",
-        "subtitle_generation",
-        "caption_timing",
-        "transcript_cleanup"
+        "audio_intelligence"
       ],
       "allowed_hosts": [
         "api.assemblyai.com"
       ],
-      "token_env": "ASSEMBLYAI_API_KEY"
+      "token_env": "ASSEMBLYAI_API_KEY",
+      "official_api_url": "https://www.assemblyai.com/docs/"
     },
     {
       "id": "deepgram_transcription",
@@ -785,14 +819,13 @@
       "enabled": false,
       "capabilities": [
         "speech_to_text",
-        "speaker_detection",
-        "transcript_cleanup",
-        "caption_timing"
+        "text_to_speech"
       ],
       "allowed_hosts": [
         "api.deepgram.com"
       ],
-      "token_env": "DEEPGRAM_API_KEY"
+      "token_env": "DEEPGRAM_API_KEY",
+      "official_api_url": "https://developers.deepgram.com/"
     },
     {
       "id": "google_cloud_speech",
@@ -804,11 +837,7 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "speech_to_text",
-        "speaker_detection",
-        "subtitle_generation",
-        "caption_timing",
-        "transcript_cleanup"
+        "speech_to_text"
       ],
       "allowed_hosts": [
         "speech.googleapis.com",
@@ -816,7 +845,8 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://docs.cloud.google.com/speech-to-text/docs"
     },
     {
       "id": "elevenlabs_advanced_audio",
@@ -828,18 +858,16 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "voice_generation",
-        "voice_cloning",
-        "voice_dubbing",
-        "audio_enhancement",
-        "noise_removal"
+        "text_to_speech",
+        "voice_cloning"
       ],
       "allowed_hosts": [
         "api.elevenlabs.io"
       ],
       "token_env": "ELEVENLABS_API_KEY",
       "auth_header_name": "xi-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://elevenlabs.io/docs/overview/capabilities/text-to-speech"
     },
     {
       "id": "playht_advanced_audio",
@@ -851,15 +879,14 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "voice_generation",
-        "voice_cloning",
-        "voice_dubbing",
-        "audio_enhancement"
+        "text_to_speech",
+        "voice_cloning"
       ],
       "allowed_hosts": [
         "api.play.ht"
       ],
-      "token_env": "PLAYHT_API_KEY"
+      "token_env": "PLAYHT_API_KEY",
+      "official_api_url": "https://docs.play.ht/reference/api-getting-started"
     },
     {
       "id": "suno_advanced_audio",
