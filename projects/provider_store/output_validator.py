@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import codecs
 import hashlib
+import io
 import json
 import os
 import stat
@@ -137,31 +138,47 @@ class ProviderOutputValidator:
                 elif normalized_modality == "text":
                     stream.seek(0)
                     decoder = codecs.getincrementaldecoder("utf-8")()
+                    remaining = size
                     try:
-                        for chunk in iter(lambda: stream.read(64 * 1024), b""):
+                        while remaining:
+                            chunk = stream.read(min(64 * 1024, remaining))
+                            if not chunk:
+                                return {"valid": False, "status": "OUTPUT_CHANGED_DURING_VALIDATION"}
                             decoder.decode(chunk)
+                            remaining -= len(chunk)
                         decoder.decode(b"", final=True)
                     except UnicodeDecodeError:
                         return {"valid": False, "status": "INVALID_TEXT_ENCODING"}
+                    if stream.read(1):
+                        return {"valid": False, "status": "OUTPUT_CHANGED_DURING_VALIDATION"}
                     mime = "text/plain"
                 else:
                     if size > 10_000_000:
                         return {"valid": False, "status": "OUTPUT_TOO_LARGE", "size_bytes": size}
                     stream.seek(0)
-                    if not self._json_depth_within_limit(stream, self.max_json_depth):
+                    payload = stream.read(size + 1)
+                    if len(payload) != size:
+                        return {"valid": False, "status": "OUTPUT_CHANGED_DURING_VALIDATION"}
+                    if not self._json_depth_within_limit(io.BytesIO(payload), self.max_json_depth):
                         return {"valid": False, "status": "JSON_NESTING_LIMIT"}
-                    stream.seek(0)
                     def reject_nonstandard_constant(token: str) -> None:
                         raise ValueError(f"non-standard JSON constant: {token}")
                     try:
-                        json.load(stream, parse_constant=reject_nonstandard_constant)
+                        json.loads(payload, parse_constant=reject_nonstandard_constant)
                     except (json.JSONDecodeError, UnicodeDecodeError, ValueError, RecursionError):
                         return {"valid": False, "status": "INVALID_JSON"}
                     mime = "application/json"
                 digest = hashlib.sha256()
                 stream.seek(0)
-                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                remaining = size
+                while remaining:
+                    chunk = stream.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        return {"valid": False, "status": "OUTPUT_CHANGED_DURING_VALIDATION"}
                     digest.update(chunk)
+                    remaining -= len(chunk)
+                if stream.read(1):
+                    return {"valid": False, "status": "OUTPUT_CHANGED_DURING_VALIDATION"}
         except OSError:
             if artifact.is_symlink():
                 return {"valid": False, "status": "SYMLINK_REJECTED"}
