@@ -16,14 +16,14 @@ Every feature's **verification status is NOT ITEM-AUDITED** until the exact requ
 
 | ID | Section | Feature name | Latest recovered triage marker | Verification status | Evidence / test reference |
 |---:|---|---|:---:|---|---|
-| 1 | A — Provider Registry & Lifecycle | Provider Registry | 🟡 | NOT ITEM-AUDITED | TBD |
-| 2 | A — Provider Registry & Lifecycle | Provider Registration | 🟡 | NOT ITEM-AUDITED | TBD |
-| 3 | A — Provider Registry & Lifecycle | Provider Discovery | 🟡 | NOT ITEM-AUDITED | TBD |
-| 4 | A — Provider Registry & Lifecycle | Provider Loading | 🟡 | NOT ITEM-AUDITED | TBD |
-| 5 | A — Provider Registry & Lifecycle | Provider Unloading | 🟡 | NOT ITEM-AUDITED | TBD |
-| 6 | A — Provider Registry & Lifecycle | Provider Enable/Disable | 🟡 | NOT ITEM-AUDITED | TBD |
-| 7 | A — Provider Registry & Lifecycle | Provider Metadata | 🟡 | NOT ITEM-AUDITED | TBD |
-| 8 | A — Provider Registry & Lifecycle | Provider Interface Contract | 🟡 | NOT ITEM-AUDITED | TBD |
+| 1 | A — Provider Registry & Lifecycle | Provider Registry | 🟡 | TESTED FOUNDATION; original wording comparison pending | provider_catalog.json; tests/test_provider_catalogs.py::test_all_provider_catalog_json_files_pass_schema_validation; tests/test_connection_manager.py::test_loads_catalog_and_unknown_state |
+| 2 | A — Provider Registry & Lifecycle | Provider Registration | 🟡 | TESTED FOUNDATION; original wording comparison pending | tests/test_connection_manager.py::test_register_provider_persists_valid_metadata; test_register_provider_rejects_duplicate_without_overwrite; test_register_provider_rejects_missing_contract_fields |
+| 3 | A — Provider Registry & Lifecycle | Provider Discovery | 🟡 | TESTED FOUNDATION; original wording comparison pending | tests/test_connection_manager.py::test_discovery_filters_by_category_case_insensitively; test_discovery_filters_by_capability; test_discovery_enabled_only_excludes_unspecified_and_disabled |
+| 4 | A — Provider Registry & Lifecycle | Provider Loading | 🟡 | TESTED FOUNDATION; original wording comparison pending | tests/test_connection_manager.py::test_load_provider_uses_factory_and_keeps_instance_in_memory; test_load_provider_rejects_disabled_provider; test_load_provider_rejects_missing_factory_and_unknown_provider |
+| 5 | A — Provider Registry & Lifecycle | Provider Unloading | 🟡 | TESTED FOUNDATION; original wording comparison pending | tests/test_connection_manager.py::test_unload_provider_calls_close_and_removes_instance; test_unload_provider_preserves_instance_if_cleanup_fails; test_unload_provider_reports_not_loaded_and_unknown |
+| 6 | A — Provider Registry & Lifecycle | Provider Enable/Disable | 🟡 | TESTED FOUNDATION; original wording comparison pending | tests/test_connection_manager.py::test_enable_disable_persists_catalog_flag_without_claiming_connection; test_disabling_unloads_runtime_instance; test_enabled_flag_rejects_non_boolean_and_unknown_provider |
+| 7 | A — Provider Registry & Lifecycle | Provider Metadata | 🟡 | TESTED FOUNDATION; original wording comparison pending | tests/test_connection_manager.py::test_metadata_returns_detached_copy_and_filters_sensitive_fields; test_catalog_status_is_not_exposed_as_live_connection_status; test_metadata_returns_none_for_unknown_provider |
+| 8 | A — Provider Registry & Lifecycle | Provider Interface Contract | 🟡 | TESTED FOUNDATION; original wording comparison pending | tests/test_connection_manager.py::test_provider_contract_accepts_required_modality_method; test_provider_contract_rejects_missing_method_and_prevents_loading; test_provider_contract_fails_closed_when_method_attribute_raises |
 | 9 | B — Credentials & Connection | API Key Management | 🟡 | NOT ITEM-AUDITED | TBD |
 | 10 | B — Credentials & Connection | Token Expiry Detection | 🟡 | NOT ITEM-AUDITED | TBD |
 | 11 | B — Credentials & Connection | Connection Verification | 🟡 | NOT ITEM-AUDITED | TBD |
