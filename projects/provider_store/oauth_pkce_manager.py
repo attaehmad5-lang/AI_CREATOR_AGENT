@@ -30,6 +30,8 @@ class _RejectOAuthRedirects(HTTPRedirectHandler):
 class ProviderOAuthPKCEManager:
     """In-memory OAuth PKCE flow and access-token lifecycle."""
 
+    TOKEN_EXPIRY_SKEW_SECONDS = 30
+
     def __init__(
         self,
         *,
@@ -398,7 +400,7 @@ class ProviderOAuthPKCEManager:
                 now = float(self.clock())
             except Exception:
                 return None
-            if not math.isfinite(now) or now >= record.get("expires_at", 0):
+            if not math.isfinite(now) or now >= record.get("expires_at", 0) - self.TOKEN_EXPIRY_SKEW_SECONDS:
                 return None
             token = record.get("access_token")
             return token if self._valid_token(token) else None
@@ -417,6 +419,11 @@ class ProviderOAuthPKCEManager:
             if now >= record.get("expires_at", 0):
                 return {
                     "status": "TOKEN_EXPIRED", "provider": provider_id,
+                    "connected": False, "refresh_available": self._valid_token(record.get("refresh_token")),
+                }
+            if now >= record.get("expires_at", 0) - self.TOKEN_EXPIRY_SKEW_SECONDS:
+                return {
+                    "status": "TOKEN_EXPIRING", "provider": provider_id,
                     "connected": False, "refresh_available": self._valid_token(record.get("refresh_token")),
                 }
             return {
