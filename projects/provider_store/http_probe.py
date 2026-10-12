@@ -155,14 +155,14 @@ class ProviderHTTPConnectivityProbe:
         if not isinstance(raw_auth_type, str) or not raw_auth_type.strip():
             raise ValueError("INVALID_AUTH_TYPE")
         auth_type = raw_auth_type.strip().upper()
+        if auth_type in {"ACCOUNT", "MANUAL", "MANUAL_CONNECT", "OAUTH_BROWSER"}:
+            raise PermissionError("manual account connection is required")
         credentialed_auth = auth_type not in {"NONE", "PUBLIC", "ANONYMOUS"}
         if credentialed_auth and configuration.get("authentication_required") is not True:
             raise ProviderAuthenticationVerificationRequired(
                 "configure a documented endpoint that validates provider authentication"
             )
         if credentialed_auth:
-            if auth_type in {"ACCOUNT", "MANUAL", "MANUAL_CONNECT", "OAUTH_BROWSER"}:
-                raise PermissionError("manual account connection is required")
             token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env") or self._DEFAULT_TOKEN_ENV.get(
                 str(provider.get("id", "")).casefold()
             )
