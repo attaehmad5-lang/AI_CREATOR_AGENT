@@ -232,6 +232,12 @@ class ConnectionManager:
         if not isinstance(catalog, dict):
             errors.append("catalog must be an object")
         else:
+            if "version" in catalog and (
+                not isinstance(catalog.get("version"), (str, int, float))
+                or isinstance(catalog.get("version"), bool)
+                or not re.fullmatch(r"\d+(?:\.\d+){0,2}", str(catalog.get("version")))
+            ):
+                errors.append("catalog.version must be a numeric version such as '2.0' or '3.0'")
             providers = catalog.get("providers")
             if not isinstance(providers, list):
                 errors.append("providers must be a list")
