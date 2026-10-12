@@ -6,12 +6,12 @@ This matrix preserves the canonical feature-ID ranges and group names. It is an 
 
 ## Latest confirmed verification
 
-GitHub Actions run [#38280619566](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280619566) completed successfully with Python 3.13: **292 tests passed, 0 failures**. Compilation and provider JSON catalog validation also passed. The run's job result is green; the workflow log confirms 292 tests. Ubuntu/Windows parity must be claimed only when that exact run contains both platform jobs.
+GitHub Actions run [#38302200652](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38302200652) passed on Ubuntu and Windows with Python 3.13: **293 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation also passed. The run's job result is green; the workflow log confirms 292 tests. Ubuntu/Windows parity must be claimed only when that exact run contains both platform jobs.
 
 | Group / IDs | Canonical group | Current evidence | Status | Remaining verification |
 |---|---|---|---|---|
 | A / 1–8 | Provider Registry & Lifecycle | `provider_catalog.json`, `connection_manager.py`, `test_provider_catalogs.py` | PARTIAL | Audit each of the 8 original items, lifecycle edge cases, and catalog recovery paths. |
-| B / 9–16 | Credentials & Connection | `connection_manager.py`, `http_probe.py`, `test_connection_manager.py`, `test_http_probe.py` | PARTIAL | Authorized live provider checks, provider-specific OAuth registration/scopes and token-refresh verification, and each provider's authentication scheme; the generic PKCE helper itself is covered by tests. Generic API-key probes now require `authentication_required=True` for a documented auth-protected endpoint. |
+| B / 9–16 | Credentials & Connection | `connection_manager.py`, `http_probe.py`, `test_connection_manager.py`, `test_http_probe.py`; credentialed custom probes must return `authentication_verified: true` | PARTIAL | Authorized live provider checks, provider-specific OAuth registration/scopes and token-refresh verification, and each provider's authentication scheme; the generic PKCE helper itself is covered by tests. Generic API-key probes now require `authentication_required=True` for a documented auth-protected endpoint. |
 | C / 17–24 | Provider Modalities | Catalog modality contracts and compatibility facades; `test_provider_catalogs.py` | PARTIAL | Real generation adapters and provider-specific capability verification; a callable contract is not a working adapter. |
 | D / 25–32 | Routing & Fallback | `routing_manager.py`, `provider_service.py`, `test_routing_manager.py` | PARTIAL | Audit all canonical routing/fallback rules against their required evidence and execution behavior. |
 | E / 33–40 | Retry & Failure Handling | `retry_policy.py`, `test_retry_policy.py`, execution failure tests | PARTIAL | Provider-specific transient/network failure injection and end-to-end retry verification. |

@@ -1105,6 +1105,22 @@ class ConnectionManager:
                     "status": "CONNECTION_FAILED", "provider": provider_id, "verified": False,
                     "latency_ms": round((time.monotonic() - started) * 1000, 2),
                 }
+            auth_type = str(provider.get("auth_type", "NONE")).strip().upper()
+            credentialed_auth = auth_type not in {
+                "NONE", "PUBLIC", "ANONYMOUS", "ACCOUNT", "MANUAL",
+                "MANUAL_CONNECT", "OAUTH_BROWSER",
+            }
+            if credentialed_auth and not (
+                isinstance(result, dict) and result.get("authentication_verified") is True
+            ):
+                if not save_state("ERROR"):
+                    return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
+                return {
+                    "status": "AUTHENTICATION_VERIFICATION_REQUIRED",
+                    "provider": provider_id,
+                    "verified": False,
+                    "latency_ms": round((time.monotonic() - started) * 1000, 2),
+                }
         except Exception as exc:
             name = type(exc).__name__.casefold()
             http_status = getattr(exc, "status_code", None)

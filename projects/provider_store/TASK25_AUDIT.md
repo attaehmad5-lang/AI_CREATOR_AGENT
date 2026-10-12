@@ -6,9 +6,9 @@
 
 ## Latest automated verification
 
-GitHub Actions run [#38280619566](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280619566) completed successfully on Python 3.13:
+GitHub Actions run [#38302200652](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38302200652) completed successfully on Ubuntu and Windows with Python 3.13:
 
-- 292 tests passed, 0 failures (confirmed in the run log).
+- 293 tests passed on each platform, 0 failures (confirmed in both run logs).
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
 - PR #1 has already been merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
@@ -20,7 +20,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | Canonical section | Scope range | Current evidence | Audit disposition |
 |---|---:|---|---|
 | A — Provider Registry & Lifecycle | 1–8 | Versioned 54-provider catalog, schema validation, registration and enabled/disabled lifecycle, catalog recovery, catalog compatibility tests | Foundation implemented; item-by-item audit pending |
-| B — Credentials & Connection | 9–16 | Environment-reference validation, secret redaction, expiry checks, configured endpoint/model checks, verified state gating, manual-session verification hooks, bounded HTTPS probe; enabled catalog entries now have official API documentation URLs | Foundation implemented; provider-specific live verification pending |
+| B — Credentials & Connection | 9–16 | Environment-reference validation, secret redaction, expiry checks, configured endpoint/model checks, verified state gating, manual-session verification hooks, bounded HTTPS probe; credentialed custom probes now require explicit `authentication_verified: true` evidence | Foundation implemented; provider-specific live verification pending |
 | C — Provider Modalities | 17–24 | Catalog categories/capabilities and modality contract validation | Catalog/contract evidence only; actual provider adapters and live modality checks pending |
 | D — Routing & Fallback | 25–32 | Priority, free-credit-first, lowest-cost, healthiest-first and round-robin selection; verified-connection gating; fallback reservations | Foundation implemented; real generation-path integration pending |
 | E — Retry & Failure Handling | 33–40 | Bounded backoff, status/Retry-After handling, idempotency checks, circuit breaker and probe-slot recovery | Unit-tested foundation; provider-specific failure injection pending |
