@@ -153,7 +153,7 @@ class ProviderJSONBalanceProbe:
                 return {"status": "BALANCE_RESPONSE_TOO_LARGE", "provider": provider_id, "verified": False}
             try:
                 data = json.loads(body.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+            except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
                 return {"status": "BALANCE_RESPONSE_INVALID", "provider": provider_id, "verified": False}
             if not isinstance(data, dict) or self.balance_field not in data:
                 return {"status": "BALANCE_FIELD_MISSING", "provider": provider_id, "verified": False}
