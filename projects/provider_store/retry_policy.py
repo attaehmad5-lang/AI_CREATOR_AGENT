@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
+from .safe_numbers import finite_number
+
 
 @dataclass(frozen=True)
 class RetryDecision:
@@ -30,15 +32,13 @@ class RetryPolicy:
     ) -> None:
         if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or max_attempts < 1:
             raise ValueError("max_attempts must be a positive integer")
-        numeric_limits = (base_delay_seconds, max_delay_seconds, jitter_fraction)
-        if any(
-            not isinstance(value, (int, float))
-            or isinstance(value, bool)
-            or not math.isfinite(value)
-            for value in numeric_limits
-        ):
+        normalized_limits = tuple(finite_number(value, minimum=0) for value in (
+            base_delay_seconds, max_delay_seconds, jitter_fraction
+        ))
+        if any(value is None for value in normalized_limits):
             raise ValueError("retry limits must be finite numbers")
-        if base_delay_seconds < 0 or max_delay_seconds < base_delay_seconds:
+        base_delay_seconds, max_delay_seconds, jitter_fraction = normalized_limits
+        if max_delay_seconds < base_delay_seconds:
             raise ValueError("invalid backoff limits")
         if not 0 <= jitter_fraction <= 1:
             raise ValueError("jitter_fraction must be between 0 and 1")
@@ -58,7 +58,7 @@ class RetryPolicy:
             seconds = float(value)
             if math.isfinite(seconds) and seconds >= 0:
                 return seconds
-        except (TypeError, ValueError):
+        except (OverflowError, TypeError, ValueError):
             pass
         try:
             target = parsedate_to_datetime(str(value))
@@ -148,13 +148,10 @@ class CircuitBreaker:
     ) -> None:
         if not isinstance(failure_threshold, int) or isinstance(failure_threshold, bool) or failure_threshold < 1:
             raise ValueError("failure_threshold must be a positive integer")
-        if (
-            not isinstance(cooldown_seconds, (int, float))
-            or isinstance(cooldown_seconds, bool)
-            or not math.isfinite(cooldown_seconds)
-            or cooldown_seconds < 0
-        ):
+        cooldown_value = finite_number(cooldown_seconds, minimum=0)
+        if cooldown_value is None:
             raise ValueError("cooldown_seconds must be a finite non-negative number")
+        cooldown_seconds = cooldown_value
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         import time
