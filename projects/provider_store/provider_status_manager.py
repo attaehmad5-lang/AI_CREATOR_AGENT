@@ -1,52 +1,61 @@
-import json
-from pathlib import Path
+"""Live provider status queries backed by the central connection manager."""
+from __future__ import annotations
 
-BASE = Path("/storage/emulated/0/AI_CREATOR_AGENT/projects/provider_store")
-CATALOG = BASE / "provider_catalog.json"
+from typing import Any
+
+from .connection_manager import ConnectionManager
+from .provider_store_manager import ProviderStoreManager
+
 
 class ProviderStatusManager:
     VALID_STATUSES = {
-        "LOCKED",
-        "CONNECTED",
-        "CREDITS_UNAVAILABLE",
-        "READY",
-        "DISABLED"
+        "UNKNOWN", "DISCONNECTED", "CONNECTING", "CONNECTED", "ERROR", "DISABLED", "STATE_READ_FAILED",
     }
 
-    def __init__(self):
-        self.catalog = self._load()
+    def __init__(
+        self,
+        connection_manager: ConnectionManager | None = None,
+        *,
+        catalog_path: str | None = None,
+        state_path: str | None = None,
+    ) -> None:
+        if connection_manager is not None and (catalog_path is not None or state_path is not None):
+            raise ValueError("pass either connection_manager or explicit paths, not both")
+        self.store = ProviderStoreManager(
+            catalog_path, state_path, connection_manager=connection_manager
+        )
+        self.manager = self.store.manager
 
-    def _load(self):
-        with open(CATALOG, "r", encoding="utf-8") as f:
-            return json.load(f)
+    @property
+    def catalog(self) -> dict[str, Any]:
+        return self.store.catalog
 
-    def get_status(self, provider_id):
-        for provider in self.catalog.get("providers", []):
-            if provider.get("id") == provider_id:
-                return provider.get("status", "LOCKED")
-        return "LOCKED"
+    def get_status(self, provider_id: str) -> str:
+        provider = self.manager.get_provider(provider_id)
+        if provider is None:
+            return "UNKNOWN"
+        if provider.get("enabled") is False:
+            return "DISABLED"
+        state = self.manager.get_state(provider_id)
+        status = state.get("status", "UNKNOWN")
+        return status if status in self.VALID_STATUSES else "UNKNOWN"
 
-    def is_available(self, provider_id):
-        return self.get_status(provider_id) in {"CONNECTED", "READY"}
+    def is_available(self, provider_id: str) -> bool:
+        provider = self.manager.get_provider(provider_id)
+        if provider is None or provider.get("enabled") is not True:
+            return False
+        state = self.manager.get_state(provider_id)
+        return state.get("status") == "CONNECTED" and state.get("verified") is True
 
-    def summary(self):
-        providers = self.catalog.get("providers", [])
-        result = {
-            "total": len(providers),
-            "CONNECTED": 0,
-            "READY": 0,
-            "LOCKED": 0,
-            "CREDITS_UNAVAILABLE": 0,
-            "DISABLED": 0
-        }
-
+    def summary(self) -> dict[str, int]:
+        providers = self.store.list_providers()
+        result = {"total": len(providers), **{status: 0 for status in sorted(self.VALID_STATUSES)}}
         for provider in providers:
-            status = provider.get("status", "LOCKED")
-            if status not in self.VALID_STATUSES:
-                status = "LOCKED"
-            result[status] += 1
-
+            provider_id = provider.get("id")
+            status = self.get_status(provider_id) if isinstance(provider_id, str) else "UNKNOWN"
+            result[status] = result.get(status, 0) + 1
         return result
+
 
 if __name__ == "__main__":
     manager = ProviderStatusManager()

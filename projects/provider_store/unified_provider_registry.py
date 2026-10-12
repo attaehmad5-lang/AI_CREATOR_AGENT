@@ -1,56 +1,86 @@
-import json
-from pathlib import Path
+"""Unified provider registry backed by the central validated catalog."""
+from __future__ import annotations
 
-BASE = Path("/storage/emulated/0/AI_CREATOR_AGENT/projects/provider_store")
-CORE = BASE / "provider_catalog.json"
-ADVANCED = BASE / "advanced" / "advanced_provider_catalog.json"
+from typing import Any
+
+from .connection_manager import ConnectionManager
+from .provider_store_manager import ProviderStoreManager
+
+
+ADVANCED_CATEGORIES = {
+    "script_story",
+    "advanced_image_editing",
+    "advanced_upscaling",
+    "advanced_transcription",
+    "advanced_audio",
+    "advanced_video_editing",
+}
+
 
 class UnifiedProviderRegistry:
-
-    def __init__(self):
-        self.core = self._load(CORE)
-        self.advanced = self._load(ADVANCED)
-
-    def _load(self, path):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-    def all_providers(self):
-        return (
-            self.core.get("providers", [])
-            + self.advanced.get("providers", [])
+    def __init__(
+        self,
+        connection_manager: ConnectionManager | None = None,
+        *,
+        catalog_path: str | None = None,
+        state_path: str | None = None,
+    ) -> None:
+        if connection_manager is not None and (catalog_path is not None or state_path is not None):
+            raise ValueError("pass either connection_manager or explicit paths, not both")
+        self.store = ProviderStoreManager(
+            catalog_path, state_path, connection_manager=connection_manager
         )
+        self.connection_manager = self.store.manager
 
-    def by_category(self, category):
+    @property
+    def core(self) -> dict[str, Any]:
+        providers = [
+            provider for provider in self.all_providers()
+            if provider.get("category") not in ADVANCED_CATEGORIES
+        ]
+        return {"version": "1.0", "status": "READY", "providers": providers}
+
+    @property
+    def advanced(self) -> dict[str, Any]:
+        providers = [
+            provider for provider in self.all_providers()
+            if provider.get("category") in ADVANCED_CATEGORIES
+        ]
+        return {"version": "1.0", "status": "READY", "providers": providers}
+
+    def all_providers(self) -> list[dict[str, Any]]:
+        return self.store.list_providers()
+
+    def by_category(self, category: str) -> list[dict[str, Any]]:
         return [
-            p for p in self.all_providers()
-            if p.get("category") == category
+            provider for provider in self.all_providers()
+            if provider.get("category") == category
         ]
 
-    def get_provider(self, provider_id):
-        for provider in self.all_providers():
-            if provider.get("id") == provider_id:
-                return provider
-        return None
+    def get_provider(self, provider_id: str) -> dict[str, Any] | None:
+        return self.store.get_provider(provider_id)
 
-    def status(self):
+    def status(self) -> dict[str, Any]:
         providers = self.all_providers()
+        advanced = sum(
+            1 for provider in providers
+            if provider.get("category") in ADVANCED_CATEGORIES
+        )
         return {
-            "core_providers": len(self.core.get("providers", [])),
-            "advanced_providers": len(self.advanced.get("providers", [])),
+            "core_providers": len(providers) - advanced,
+            "advanced_providers": advanced,
             "total_providers": len(providers),
-            "ready": True
+            "ready": True,
         }
 
 
 if __name__ == "__main__":
     registry = UnifiedProviderRegistry()
-    s = registry.status()
-
+    status = registry.status()
     print("===================================")
     print("     UNIFIED PROVIDER REGISTRY")
     print("===================================")
-    print("Core Providers:", s["core_providers"])
-    print("Advanced Providers:", s["advanced_providers"])
-    print("Total Providers:", s["total_providers"])
+    print("Core Providers:", status["core_providers"])
+    print("Advanced Providers:", status["advanced_providers"])
+    print("Total Providers:", status["total_providers"])
     print("STATUS: READY")
