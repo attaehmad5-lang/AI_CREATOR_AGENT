@@ -92,6 +92,34 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 headers = {key.casefold(): value for key, value in opener.calls[0][0].header_items()}
                 self.assertEqual(headers[expected_header], expected_value)
 
+    def test_http_probe_integrates_with_connection_manager_verified_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            catalog_path = root / "catalog.json"
+            state_path = root / "state.json"
+            catalog_path.write_text(json.dumps({"providers": [{
+                "id": "probe_provider", "name": "Probe Provider",
+                "category": "image", "auth_type": "NONE",
+                "connection_type": "API", "enabled": True,
+                "allowed_hosts": ["api.example.com"],
+            }]}), encoding="utf-8")
+            state_path.write_text(json.dumps({
+                "version": "1.0", "policy": "USER_CONTROLLED", "providers": {},
+            }), encoding="utf-8")
+            manager = ConnectionManager(catalog_path, state_path)
+            configured = manager.configure_provider(
+                "probe_provider", endpoint="https://api.example.com/health"
+            )
+            self.assertTrue(configured["saved"])
+            response = _Response()
+            probe = ProviderHTTPConnectivityProbe(opener=_Opener(response))
+            result = manager.verify_connectivity("probe_provider", probe)
+            self.assertEqual(result["status"], "CONNECTED")
+            self.assertTrue(result["verified"])
+            self.assertEqual(manager.get_state("probe_provider")["status"], "CONNECTED")
+            self.assertTrue(manager.get_state("probe_provider")["verified"])
+            self.assertTrue(response.closed)
+
     def test_missing_endpoint_and_unallowlisted_host_fail_before_network(self):
         opener = _Opener()
         probe = ProviderHTTPConnectivityProbe(opener=opener)
