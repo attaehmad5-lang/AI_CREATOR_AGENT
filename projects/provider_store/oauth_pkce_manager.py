@@ -252,16 +252,17 @@ class ProviderOAuthPKCEManager:
         raw_scope = data.get("scope", pending.get("scope", ""))
         if not isinstance(raw_scope, str) or len(raw_scope) > 2000 or any(ord(char) < 32 for char in raw_scope):
             return {"status": "OAUTH_SCOPE_INVALID", "provider": provider_id}
-        self._tokens[provider_id] = {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "Bearer",
-            "expires_at": now + float(expires_in),
-            "token_url": pending["token_url"],
-            "allowed_hosts": list(pending["allowed_hosts"]),
-            "client_id": pending["client_id"],
-            "scope": raw_scope,
-        }
+        with self._lock:
+            self._tokens[provider_id] = {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "token_type": "Bearer",
+                "expires_at": now + float(expires_in),
+                "token_url": pending["token_url"],
+                "allowed_hosts": list(pending["allowed_hosts"]),
+                "client_id": pending["client_id"],
+                "scope": raw_scope,
+            }
         return {
             "status": "OAUTH_CONNECTED",
             "provider": provider_id,
@@ -312,79 +313,93 @@ class ProviderOAuthPKCEManager:
         return self._install_tokens(provider_id, pending, result["data"])
 
     def refresh(self, provider_id: str, *, timeout_seconds: float = 10.0) -> dict[str, Any]:
-        record = self._tokens.get(provider_id) if isinstance(provider_id, str) else None
-        if not isinstance(record, dict):
-            return {"status": "OAUTH_SESSION_NOT_FOUND", "provider": provider_id}
-        refresh_token = record.get("refresh_token")
-        if not self._valid_token(refresh_token):
-            return {"status": "REFRESH_NOT_SUPPORTED", "provider": provider_id}
-        result = self._post_form(
-            record["token_url"], record["allowed_hosts"],
-            {
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
+        with self._lock:
+            record = self._tokens.get(provider_id) if isinstance(provider_id, str) else None
+            if not isinstance(record, dict):
+                return {"status": "OAUTH_SESSION_NOT_FOUND", "provider": provider_id}
+            refresh_token = record.get("refresh_token")
+            if not self._valid_token(refresh_token):
+                return {"status": "REFRESH_NOT_SUPPORTED", "provider": provider_id}
+            if provider_id in self._refreshing:
+                return {"status": "REFRESH_IN_PROGRESS", "provider": provider_id}
+            self._refreshing.add(provider_id)
+            record = dict(record)
+        try:
+            result = self._post_form(
+                record["token_url"], record["allowed_hosts"],
+                {
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                    "client_id": record["client_id"],
+                },
+                timeout_seconds,
+            )
+            if result.get("status") != "OK":
+                failure = {
+                    "status": result.get("status", "OAUTH_TOKEN_REQUEST_FAILED"),
+                    "provider": provider_id,
+                }
+                http_status = result.get("http_status")
+                if isinstance(http_status, int) and not isinstance(http_status, bool) and 100 <= http_status <= 599:
+                    failure["http_status"] = http_status
+                return failure
+            pending = {
+                "token_url": record["token_url"],
+                "allowed_hosts": record["allowed_hosts"],
                 "client_id": record["client_id"],
-            },
-            timeout_seconds,
-        )
-        if result.get("status") != "OK":
-            failure = {
-                "status": result.get("status", "OAUTH_TOKEN_REQUEST_FAILED"),
-                "provider": provider_id,
+                "scope": record.get("scope", ""),
             }
-            http_status = result.get("http_status")
-            if isinstance(http_status, int) and not isinstance(http_status, bool) and 100 <= http_status <= 599:
-                failure["http_status"] = http_status
-            return failure
-        pending = {
-            "token_url": record["token_url"],
-            "allowed_hosts": record["allowed_hosts"],
-            "client_id": record["client_id"],
-            "scope": record.get("scope", ""),
-        }
-        data = dict(result["data"])
-        data.setdefault("refresh_token", refresh_token)
-        return self._install_tokens(provider_id, pending, data)
+            data = dict(result["data"])
+            data.setdefault("refresh_token", refresh_token)
+            return self._install_tokens(provider_id, pending, data)
+        finally:
+            with self._lock:
+                self._refreshing.discard(provider_id)
 
     def get_access_token(self, provider_id: str) -> str | None:
-        record = self._tokens.get(provider_id) if isinstance(provider_id, str) else None
-        if not isinstance(record, dict):
-            return None
-        try:
-            now = float(self.clock())
-        except Exception:
-            return None
-        if not math.isfinite(now) or now >= record.get("expires_at", 0):
-            return None
-        token = record.get("access_token")
-        return token if self._valid_token(token) else None
+        with self._lock:
+            record = self._tokens.get(provider_id) if isinstance(provider_id, str) else None
+            if not isinstance(record, dict):
+                return None
+            try:
+                now = float(self.clock())
+            except Exception:
+                return None
+            if not math.isfinite(now) or now >= record.get("expires_at", 0):
+                return None
+            token = record.get("access_token")
+            return token if self._valid_token(token) else None
 
     def status(self, provider_id: str) -> dict[str, Any]:
-        record = self._tokens.get(provider_id) if isinstance(provider_id, str) else None
-        if not isinstance(record, dict):
-            return {"status": "DISCONNECTED", "provider": provider_id, "connected": False}
-        try:
-            now = float(self.clock())
-        except Exception:
-            return {"status": "CLOCK_INVALID", "provider": provider_id, "connected": False}
-        if not math.isfinite(now):
-            return {"status": "CLOCK_INVALID", "provider": provider_id, "connected": False}
-        if now >= record.get("expires_at", 0):
+        with self._lock:
+            record = self._tokens.get(provider_id) if isinstance(provider_id, str) else None
+            if not isinstance(record, dict):
+                return {"status": "DISCONNECTED", "provider": provider_id, "connected": False}
+            try:
+                now = float(self.clock())
+            except Exception:
+                return {"status": "CLOCK_INVALID", "provider": provider_id, "connected": False}
+            if not math.isfinite(now):
+                return {"status": "CLOCK_INVALID", "provider": provider_id, "connected": False}
+            if now >= record.get("expires_at", 0):
+                return {
+                    "status": "TOKEN_EXPIRED", "provider": provider_id,
+                    "connected": False, "refresh_available": self._valid_token(record.get("refresh_token")),
+                }
             return {
-                "status": "TOKEN_EXPIRED", "provider": provider_id,
-                "connected": False, "refresh_available": self._valid_token(record.get("refresh_token")),
+                "status": "CONNECTED", "provider": provider_id,
+                "connected": True, "expires_at": record["expires_at"],
+                "scopes": record.get("scope", "").split(),
+                "refresh_available": self._valid_token(record.get("refresh_token")),
             }
-        return {
-            "status": "CONNECTED", "provider": provider_id,
-            "connected": True, "expires_at": record["expires_at"],
-            "scopes": record.get("scope", "").split(),
-            "refresh_available": self._valid_token(record.get("refresh_token")),
-        }
 
     def clear(self, provider_id: str) -> dict[str, Any]:
-        self._pending = {
-            state: record for state, record in self._pending.items()
-            if record.get("provider_id") != provider_id
-        }
-        existed = self._tokens.pop(provider_id, None) is not None
-        return {"status": "CLEARED" if existed else "NOT_CONNECTED", "provider": provider_id}
+        with self._lock:
+            if provider_id in self._refreshing:
+                return {"status": "REFRESH_IN_PROGRESS", "provider": provider_id}
+            self._pending = {
+                state: record for state, record in self._pending.items()
+                if record.get("provider_id") != provider_id
+            }
+            existed = self._tokens.pop(provider_id, None) is not None
+            return {"status": "CLEARED" if existed else "NOT_CONNECTED", "provider": provider_id}
