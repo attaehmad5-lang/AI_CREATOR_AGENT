@@ -6,6 +6,7 @@ or claim a provider is live unless health evidence was supplied by the caller.
 from __future__ import annotations
 
 import math
+import re
 import threading
 
 from .safe_numbers import finite_number
@@ -124,6 +125,8 @@ class ProviderRoutingManager:
         project_id: str,
         estimated_cost: float = 0.0,
         capability: str | None = None,
+        model: str | None = None,
+        model_version: str | None = None,
         strategy: str | None = None,
         estimated_costs: dict[str, float] | None = None,
         estimated_cost_unit: str = "USD",
@@ -141,6 +144,17 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
         if not self._valid_amount(estimated_cost):
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "INVALID_ESTIMATED_COST"}
+        if model is not None and (
+            not isinstance(model, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}", model)
+        ):
+            return {"allowed": False, "status": "INVALID_MODEL_ID"}
+        if model_version is not None and (
+            model is None
+            or not isinstance(model_version, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,99}", model_version)
+        ):
+            return {"allowed": False, "status": "INVALID_MODEL_VERSION"}
         selected_strategy = str(strategy or self.default_strategy).upper()
         if selected_strategy not in self.STRATEGIES:
             return {"allowed": False, "status": "INVALID_ROUTING_STRATEGY"}
@@ -234,6 +248,29 @@ class ProviderRoutingManager:
                 continue
             if provider.get("enabled") is not True:
                 continue
+            if model is not None:
+                model_records = provider.get("supported_models")
+                if not isinstance(model_records, list):
+                    decisions.append({"provider": provider_id, "status": "MODEL_METADATA_UNVERIFIED"})
+                    continue
+                model_record = next(
+                    (
+                        item for item in model_records
+                        if isinstance(item, dict) and item.get("id") == model
+                    ),
+                    None,
+                )
+                if model_record is None:
+                    decisions.append({"provider": provider_id, "status": "MODEL_NOT_SUPPORTED"})
+                    continue
+                if model_version is not None:
+                    versions = model_record.get("versions")
+                    if not isinstance(versions, list):
+                        decisions.append({"provider": provider_id, "status": "MODEL_VERSION_METADATA_UNVERIFIED"})
+                        continue
+                    if model_version not in versions:
+                        decisions.append({"provider": provider_id, "status": "MODEL_VERSION_NOT_SUPPORTED"})
+                        continue
             if self.require_verified_connection:
                 try:
                     connection_state = self.connection_manager.get_state(provider_id)
@@ -503,6 +540,8 @@ class ProviderRoutingManager:
                 "category": category.strip(),
                 "strategy": selected_strategy,
                 "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
+                "model": model,
+                "model_version": model_version,
                 "estimated_cost": cost,
                 "estimated_cost_unit": estimated_cost_unit.strip(),
                 "health_verified": self.health_manager is not None,
@@ -526,6 +565,8 @@ class ProviderRoutingManager:
             "category": category.strip(),
             "strategy": selected_strategy,
             "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
+            "model": model,
+            "model_version": model_version,
             "decisions": decisions,
         }
 
