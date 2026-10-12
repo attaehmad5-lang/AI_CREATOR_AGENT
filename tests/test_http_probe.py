@@ -152,6 +152,35 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             self.assertFalse(result["verified"])
             self.assertEqual(manager.get_state("probe_provider")["status"], "ERROR")
 
+    def test_server_http_failure_maps_to_provider_unavailable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            catalog_path = root / "catalog.json"
+            state_path = root / "state.json"
+            catalog_path.write_text(json.dumps({"providers": [{
+                "id": "probe_provider", "name": "Probe Provider",
+                "category": "image", "auth_type": "NONE",
+                "connection_type": "API", "enabled": True,
+                "allowed_hosts": ["api.example.com"],
+            }]}), encoding="utf-8")
+            state_path.write_text(json.dumps({
+                "version": "1.0", "policy": "USER_CONTROLLED", "providers": {},
+            }), encoding="utf-8")
+            manager = ConnectionManager(catalog_path, state_path)
+            manager.configure_provider(
+                "probe_provider", endpoint="https://api.example.com/health"
+            )
+            error = HTTPError(
+                "https://api.example.com/health", 503, "Unavailable", {}, None,
+            )
+            result = manager.verify_connectivity(
+                "probe_provider",
+                ProviderHTTPConnectivityProbe(opener=_Opener(error=error)),
+            )
+            self.assertEqual(result["status"], "PROVIDER_UNAVAILABLE")
+            self.assertEqual(result["http_status"], 503)
+            self.assertFalse(result["verified"])
+
     def test_authentication_http_status_is_preserved_for_non_retryable_decisions(self):
         from projects.provider_store.retry_policy import RetryPolicy
 
