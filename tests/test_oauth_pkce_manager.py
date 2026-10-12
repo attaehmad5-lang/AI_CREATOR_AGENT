@@ -213,6 +213,7 @@ class ProviderOAuthPKCEManagerTests(unittest.TestCase):
             ({"access_token": "token", "token_type": "Basic", "expires_in": 3600}, "OAUTH_TOKEN_TYPE_UNSUPPORTED"),
             ({"access_token": "token", "token_type": "Bearer", "expires_in": float("nan")}, "OAUTH_EXPIRY_INVALID"),
             ({"access_token": "token", "token_type": "Bearer", "expires_in": 3600, "scope": "usage\nsecret"}, "OAUTH_SCOPE_INVALID"),
+            ({"access_token": "token", "token_type": "Bearer", "expires_in": 3600, "scope": "usage admin"}, "OAUTH_SCOPE_ESCALATION"),
         ):
             opener = _Opener(_Response(payload))
             manager = ProviderOAuthPKCEManager(environ=self.environ, opener=opener, clock=lambda: self.now[0])
