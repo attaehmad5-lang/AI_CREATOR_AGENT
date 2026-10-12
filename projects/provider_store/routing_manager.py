@@ -15,6 +15,7 @@ from typing import Any
 class ProviderRoutingManager:
     STRATEGIES = {
         "PRIMARY_THEN_FALLBACK",
+        "PRIMARY_ONLY",
         "FREE_CREDITS_FIRST",
         "LOWEST_COST",
         "HEALTHIEST_FIRST",
@@ -131,6 +132,7 @@ class ProviderRoutingManager:
         paid_approved_providers: set[str] | frozenset[str] | None = None,
         excluded_providers: set[str] | frozenset[str] | None = None,
         require_health_evidence: bool = False,
+        automatic_fallback: bool = True,
     ) -> dict[str, Any]:
         """Return the first policy-compliant provider and the decisions that led to it."""
         if not isinstance(category, str) or not category.strip():
@@ -159,6 +161,9 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_EXCLUDED_PROVIDER_SET"}
         if not isinstance(require_health_evidence, bool):
             return {"allowed": False, "status": "INVALID_HEALTH_POLICY"}
+
+        if not isinstance(automatic_fallback, bool):
+            return {"allowed": False, "status": "INVALID_FALLBACK_POLICY"}
 
         estimates = {} if estimated_costs is None else estimated_costs
         if self.credit_manager is not None:
@@ -204,6 +209,20 @@ class ProviderRoutingManager:
             }
         if not isinstance(discovered, list):
             return {"allowed": False, "status": "PROVIDER_DISCOVERY_FAILED", "reason": "INVALID_DISCOVERY_RESULT"}
+
+        ordered_discovery = sorted(
+            [item for item in discovered if isinstance(item, dict)],
+            key=self._priority,
+        )
+        primary_id = ordered_discovery[0].get("id") if ordered_discovery else None
+        fallback_disabled = selected_strategy == "PRIMARY_ONLY" or not automatic_fallback
+        if fallback_disabled:
+            # Resolve the primary before health/cost/exclusion checks. If it cannot
+            # run, return failure rather than silently using another provider.
+            discovered = [
+                item for item in discovered
+                if isinstance(item, dict) and item.get("id") == primary_id
+            ]
 
         candidates: list[dict[str, Any]] = []
         decisions: list[dict[str, Any]] = []
@@ -483,6 +502,7 @@ class ProviderRoutingManager:
                 "provider": provider_id,
                 "category": category.strip(),
                 "strategy": selected_strategy,
+                "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
                 "estimated_cost": cost,
                 "estimated_cost_unit": estimated_cost_unit.strip(),
                 "health_verified": self.health_manager is not None,
@@ -505,6 +525,7 @@ class ProviderRoutingManager:
             "status": "NO_POLICY_COMPLIANT_PROVIDER",
             "category": category.strip(),
             "strategy": selected_strategy,
+            "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
             "decisions": decisions,
         }
 
