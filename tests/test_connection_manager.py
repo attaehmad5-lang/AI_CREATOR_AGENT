@@ -237,6 +237,21 @@ class ConnectionManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid provider catalog"):
             ConnectionManager(bad_catalog, self.state_path)
 
+    def test_v3_enabled_api_provider_requires_docs_and_capabilities(self):
+        catalog = {
+            "version": "3.0",
+            "providers": [{
+                "id": "incomplete", "name": "Incomplete", "category": "image",
+                "auth_type": "API_KEY", "connection_type": "API",
+                "enabled": True, "subscription_required": True,
+                "allowed_hosts": ["api.example.com"],
+            }],
+        }
+        result = ConnectionManager.validate_catalog_schema(catalog)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("official_api_url is required" in error for error in result["errors"]))
+        self.assertTrue(any("capabilities must be non-empty" in error for error in result["errors"]))
+
     def test_production_catalog_api_allowlists_are_explicit_and_valid(self):
         catalog_path = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
