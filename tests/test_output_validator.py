@@ -92,7 +92,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
 
     def test_file_growth_during_validation_is_detected(self):
         path = self.root / "changing.png"
-        signature = b"\\x89PNG\\r\\n\\x1a\\n"
+        signature = b"\x89PNG\r\n\x1a\n"
         path.write_bytes(signature + b"extra bytes")
         actual = path.stat()
         fake_stat = SimpleNamespace(
