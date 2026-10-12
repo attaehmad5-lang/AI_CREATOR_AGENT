@@ -241,6 +241,20 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(unknown["cost"]["status"], "CHARGE_OUTCOME_UNKNOWN")
         self.assertIn("successful-charge-unknown", self.cost.ledger["projects"]["film"]["reservations"])
         self.assertEqual(unknown["quota"]["status"], "COMMITTED")
+        health_count_before_confirmation = len(self.health.data["providers"]["image"]["history"])
+        confirmed_after_unknown = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="successful-charge-unknown",
+            estimated_cost=2.0, actual_cost=0.0, success=True, charge_outcome="not_incurred",
+        )
+        self.assertTrue(confirmed_after_unknown["finalized"])
+        self.assertEqual(
+            len(self.health.data["providers"]["image"]["history"]),
+            health_count_before_confirmation,
+        )
+        self.assertNotIn(
+            "successful-charge-unknown",
+            self.cost.ledger["projects"]["film"]["reservations"],
+        )
 
         self.cost.reserve_usage(
             project_id="film", provider_id="image", estimated_cost=2.0,
