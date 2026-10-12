@@ -1,4 +1,5 @@
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -37,6 +38,31 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                     all(isinstance(host, str) and host.strip() == host for host in hosts),
                     provider.get("id"),
                 )
+
+    def test_every_catalog_modality_has_a_callable_contract(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        required_methods = (
+            "generate_image", "generate_video", "generate_speech", "generate_audio",
+            "generate_music", "generate_text", "transcribe", "translate", "dub",
+            "edit_image", "upscale_image", "upscale_video", "generate_lipsync", "edit_video",
+        )
+        adapter = type("CompleteTestAdapter", (), {
+            method: (lambda self, *args, **kwargs: None) for method in required_methods
+        })()
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            catalog_path = temp / "catalog.json"
+            state_path = temp / "state.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            state_path.write_text(json.dumps({
+                "version": "1.0", "policy": "USER_CONTROLLED", "providers": {},
+            }), encoding="utf-8")
+            manager = ConnectionManager(catalog_path, state_path)
+            for provider in catalog["providers"]:
+                with self.subTest(provider=provider["id"], category=provider["category"]):
+                    result = manager.validate_provider_contract(provider["id"], adapter)
+                    self.assertTrue(result["valid"], result)
 
     def test_capability_identifiers_must_be_bounded_unique_and_normalized(self):
         base = {
