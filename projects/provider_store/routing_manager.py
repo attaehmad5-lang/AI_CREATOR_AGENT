@@ -400,7 +400,9 @@ class ProviderRoutingManager:
                             )
                             cleanup.append({
                                 "manager": "cost",
-                                "released": isinstance(released, dict) and released.get("released") is True,
+                                "released": isinstance(released, dict)
+                                and released.get("status") == "RESERVATION_RELEASED"
+                                and released.get("saved") is True,
                             })
                         except Exception:
                             cleanup.append({"manager": "cost", "released": False, "status": "CLEANUP_FAILED"})
