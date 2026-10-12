@@ -33,7 +33,8 @@
       "subscription_required": false,
       "enabled": true,
       "allowed_hosts": [
-        "gen.pollinations.ai"
+        "gen.pollinations.ai",
+        "enter.pollinations.ai"
       ],
       "zero_cost_allowed": false,
       "capabilities": [
