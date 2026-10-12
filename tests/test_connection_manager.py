@@ -1114,6 +1114,14 @@ class ConnectionManagerTests(unittest.TestCase):
             reloaded.get_state("public_image")["configuration"]["model"], "test-model-v1"
         )
 
+    def test_provider_model_rejects_bearer_credential_patterns(self):
+        for model in ("Bearer private-secret", "model token=private", "model api_key=private"):
+            with self.subTest(model=model):
+                result = self.manager.configure_provider("public_image", model=model)
+                self.assertEqual(result["status"], "SENSITIVE_CONFIGURATION_REJECTED")
+                self.assertNotIn(model, repr(result))
+        self.assertNotIn("configuration", self.manager.get_state("public_image"))
+
     def test_provider_endpoint_configuration_rejects_unsafe_or_secret_urls(self):
         self.assertEqual(
             self.manager.configure_provider(
