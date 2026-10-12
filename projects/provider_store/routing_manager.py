@@ -260,41 +260,47 @@ class ProviderRoutingManager:
         if not isinstance(discovered, list):
             return {"allowed": False, "status": "PROVIDER_DISCOVERY_FAILED", "reason": "INVALID_DISCOVERY_RESULT"}
 
-        ordered_discovery = sorted(
-            [item for item in discovered if isinstance(item, dict)],
-            key=self._priority,
-        )
+        decisions: list[dict[str, Any]] = []
+        policy_filtered_discovery = []
+        allowed_providers = project_policy.get("allowed_providers")
+        denied_providers = project_policy.get("denied_providers", [])
+        allowed_capabilities = project_policy.get("allowed_capabilities")
+        for item in discovered:
+            if not isinstance(item, dict):
+                continue
+            item_id = item.get("id")
+            if allowed_providers is not None and item_id not in allowed_providers:
+                decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_NOT_ALLOWED"})
+                continue
+            if item_id in denied_providers:
+                decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_DENIED"})
+                continue
+            if allowed_capabilities is not None and capability is None:
+                item_capabilities = item.get("capabilities", [])
+                if not isinstance(item_capabilities, list) or not set(item_capabilities).intersection(allowed_capabilities):
+                    decisions.append({"provider": item_id, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"})
+                    continue
+            policy_filtered_discovery.append(item)
+        discovered = policy_filtered_discovery
+
+        ordered_discovery = sorted(discovered, key=self._priority)
         primary_id = ordered_discovery[0].get("id") if ordered_discovery else None
         fallback_disabled = selected_strategy == "PRIMARY_ONLY" or not automatic_fallback
         if fallback_disabled:
-            # Resolve the primary before health/cost/exclusion checks. If it cannot
-            # run, return failure rather than silently using another provider.
+            # Resolve the primary among project-allowed providers before health/cost
+            # checks. If it cannot run, never silently use another provider.
             discovered = [
                 item for item in discovered
                 if isinstance(item, dict) and item.get("id") == primary_id
             ]
 
         candidates: list[dict[str, Any]] = []
-        decisions: list[dict[str, Any]] = []
         for provider in discovered:
             if not isinstance(provider, dict):
                 continue
             provider_id = provider.get("id")
             if not isinstance(provider_id, str) or not provider_id or provider_id in excluded:
                 continue
-            allowed_providers = project_policy.get("allowed_providers")
-            if allowed_providers is not None and provider_id not in allowed_providers:
-                decisions.append({"provider": provider_id, "status": "PROJECT_PROVIDER_NOT_ALLOWED"})
-                continue
-            if provider_id in project_policy.get("denied_providers", []):
-                decisions.append({"provider": provider_id, "status": "PROJECT_PROVIDER_DENIED"})
-                continue
-            allowed_capabilities = project_policy.get("allowed_capabilities")
-            if allowed_capabilities is not None and capability is None:
-                provider_capabilities = provider.get("capabilities", [])
-                if not isinstance(provider_capabilities, list) or not set(provider_capabilities).intersection(allowed_capabilities):
-                    decisions.append({"provider": provider_id, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"})
-                    continue
             if provider.get("enabled") is not True:
                 continue
             if model is not None:
