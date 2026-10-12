@@ -64,16 +64,22 @@ class PollinationsBalanceProbeTests(unittest.TestCase):
         self.assertNotIn(secret, repr(result))
         self.assertTrue(response.closed)
 
-    def test_balance_probe_refreshes_credit_manager_without_a_generation_request(self):
+    def test_account_balance_is_not_misclassified_as_free_credits(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = ProviderCreditManager(Path(directory) / "credits.json")
             opener = _Opener(_Response(b'{"balance": 7}'))
             probe = self._provider("ephemeral-token", opener)
-            result = manager.refresh("pollinations", probe)
-            self.assertEqual(result["status"], "CREDIT_BALANCE_UPDATED")
-            self.assertEqual(manager.usable_free_credits(unit="pollen"), {"pollinations": 7.0})
-            self.assertEqual(len(opener.calls), 1)
-            self.assertIn("/account/balance", opener.calls[0][0].full_url)
+            result = probe("pollinations")
+            self.assertEqual(result["balance"], 7.0)
+            self.assertEqual(result["unit"], "pollen")
+            self.assertEqual(result["balance_type"], "remaining_account_budget")
+            self.assertNotIn("free_credits_remaining", result)
+            # ProviderCreditManager must reject this account budget as a free-credit snapshot.
+            rejected = manager.refresh("pollinations", probe)
+            self.assertEqual(rejected["status"], "INVALID_CREDIT_AMOUNT")
+            self.assertEqual(manager.usable_free_credits(unit="pollen"), {})
+            self.assertEqual(len(opener.calls), 2)
+            self.assertTrue(all("/account/balance" in call[0].full_url for call in opener.calls))
             self.assertNotIn("ephemeral-token", (Path(directory) / "credits.json").read_text())
 
     def test_missing_or_invalid_user_authorized_token_fails_before_network(self):
