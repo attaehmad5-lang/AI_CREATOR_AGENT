@@ -20,24 +20,27 @@
       "token_env": "HF_TOKEN",
       "capabilities": [
         "image_generation"
-      ]
+      ],
+      "official_api_url": "https://huggingface.co/docs/inference-providers/main/index"
     },
     {
       "id": "pollinations",
       "name": "Pollinations",
       "category": "image",
       "status": "READY",
-      "auth_type": "NONE",
+      "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": false,
       "enabled": true,
       "allowed_hosts": [
-        "image.pollinations.ai"
+        "gen.pollinations.ai"
       ],
-      "zero_cost_allowed": true,
+      "zero_cost_allowed": false,
       "capabilities": [
         "image_generation"
-      ]
+      ],
+      "official_api_url": "https://gen.pollinations.ai/docs",
+      "token_env": "POLLINATIONS_API_KEY"
     },
     {
       "id": "openai_image",
