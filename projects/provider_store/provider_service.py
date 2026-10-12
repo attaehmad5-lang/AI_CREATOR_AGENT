@@ -111,6 +111,8 @@ class ProviderService:
             }
         if not isinstance(provider, dict):
             return {"status": "NOT_FOUND", "provider": provider_id, "verified": False}
+        if provider.get("auth_type") != "API_KEY":
+            return {"status": "POLLINATIONS_AUTH_MODE_UNSUPPORTED", "provider": provider_id, "verified": False}
         token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env")
         if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
             return {"status": "OAUTH_TOKEN_ENV_REFERENCE_INVALID", "provider": provider_id, "verified": False}
