@@ -75,6 +75,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
     def test_provider_specific_auth_header_defaults_are_supported(self):
         cases = [
             ("elevenlabs", "ELEVENLABS_API_KEY", "xi-api-key", "secret-eleven", "secret-eleven"),
+            ("pollinations", "POLLINATIONS_API_KEY", "authorization", "secret-pollinations", "Bearer secret-pollinations"),
             ("fal_ai", "FAL_KEY", "authorization", "secret-fal", "Key secret-fal"),
             ("ideogram", "IDEOGRAM_API_KEY", "api-key", "secret-ideogram", "secret-ideogram"),
             ("black_forest_labs", "BFL_API_KEY", "x-key", "secret-bfl", "secret-bfl"),
