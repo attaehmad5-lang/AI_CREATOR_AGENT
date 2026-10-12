@@ -92,7 +92,8 @@ class ProviderServiceTests(unittest.TestCase):
         state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
         manager = ConnectionManager(catalog, state)
         self.assertTrue(manager.configure_provider(
-            "huggingface", endpoint="https://api.example.com/health"
+            "huggingface", endpoint="https://api.example.com/health",
+            authentication_required=True,
         )["saved"])
         health = ProviderHealthManager(self.root / "http-health.json")
         service = ProviderService(manager, health_manager=health)
