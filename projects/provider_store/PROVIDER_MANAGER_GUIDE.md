@@ -58,4 +58,32 @@ python -c "import json; from pathlib import Path; [json.loads(p.read_text(encodi
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
+For a local Hugging Face credential check, set `HF_TOKEN` in the process environment (never paste it into source code or print it), then run this from the repository root. It checks the documented authenticated identity endpoint, not generation credits or model availability:
+
+```python
+import os
+from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_service import ProviderService
+
+manager = ConnectionManager()
+configured = manager.configure_provider(
+    "huggingface",
+    probe_endpoint="https://huggingface.co/api/whoami-v2",
+    authentication_required=True,
+)
+if configured.get("saved") is not True:
+    print(configured.get("status", "CONFIGURATION_FAILED"))
+else:
+    result = ProviderService(manager).verify_http_provider(
+        "huggingface", environ=os.environ
+    )
+    print({
+        "status": result.get("status"),
+        "verified": result.get("verified"),
+        "health": (result.get("health") or {}).get("status"),
+    })
+```
+
+This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
+
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
