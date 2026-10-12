@@ -6,9 +6,9 @@
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#38304998757](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680) completed successfully on Python 3.13:
+GitHub Actions code-verification run [#38305524275](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680) completed successfully on Python 3.13:
 
-- Ubuntu: 304 tests passed, 0 failures.
+- Ubuntu: 311 tests passed, 0 failures.
 - Windows: 304 tests passed, 0 failures.
 - Provider module/test compilation and provider JSON catalog validation passed on both platforms.
 - The only changes after that code-verification run are audit/documentation updates. Follow-up work is isolated in draft PR #7; PR #1 is already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
@@ -22,7 +22,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | A — Basic Provider Management | 1–8 | Versioned 54-provider catalog, schema validation, registration and enabled/disabled lifecycle, catalog recovery, catalog compatibility tests | Foundation implemented; item-by-item audit pending |
 | B — Authentication and Connection | 9–16 | Environment-reference validation, secret redaction, expiry checks, configured endpoint/model checks, verified state gating, manual-session verification hooks, bounded HTTPS probe, and explicit Hugging Face authenticated-account probe host | Foundation implemented; provider-specific live verification pending |
 | C — Multimodal Provider Support | 17–24 | Catalog categories/capabilities and modality contract validation | Catalog/contract evidence only; actual provider adapters and live modality checks pending |
-| D — Routing and Selection | 25–32 | Priority, free-credit-first, lowest-cost, healthiest-first and round-robin selection; verified-connection gating; fallback reservations | Foundation implemented; real generation-path integration pending |
+| D — Routing and Selection | 25–32 | Priority, free-credit-first, lowest-cost, healthiest-first, round-robin, PRIMARY_ONLY and explicit automatic-fallback control; declared model/version filtering; verified-connection gating and fallback reservations | Foundation implemented; real generation-path integration pending |
 | E — Retry, Failure and Recovery | 33–40 | Bounded backoff, status/Retry-After handling, idempotency checks, circuit breaker and probe-slot recovery | Unit-tested foundation; provider-specific failure injection pending |
 | F — Health and Reliability | 41–48 | Persisted health history, latency/staleness checks, eligibility and active probe recording | Foundation implemented; live provider health evidence pending |
 | G — Output and Asset Safety | 49–56 | Size/signature/basic-content checks, bounded reads, mutation detection, JSON nesting limits and SHA-256 | Basic validation implemented; full media decoding, malware scanning and semantic QA pending |
