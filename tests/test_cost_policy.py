@@ -20,6 +20,19 @@ def _reserve_cost_in_process(args):
     )["status"]
 
 
+def _finalize_no_charge_in_process(args):
+    ledger_path, request_id = args
+    policy = ProviderCostPolicy(
+        ledger_path, project_budgets={"documentary": 5.0}
+    )
+    return policy.finalize_usage(
+        project_id="documentary", provider_id="paid",
+        estimated_cost=2.0, actual_cost=0.0,
+        request_id=request_id, success=False,
+        charge_outcome="not_incurred",
+    )["status"]
+
+
 class ProviderCostPolicyTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -314,6 +327,26 @@ class ProviderCostPolicyTests(unittest.TestCase):
         record = persisted.ledger["projects"]["documentary"]["requests"]["no-charge-stale-replay"]
         self.assertEqual(record["charge_outcome"], "not_incurred")
         self.assertEqual(persisted.ledger["projects"]["documentary"]["actual_spend"], 0.0)
+
+    def test_concurrent_no_charge_finalization_across_processes_is_idempotent(self):
+        self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=2.0, request_id="no-charge-process-race",
+        )
+        with ProcessPoolExecutor(max_workers=6) as pool:
+            statuses = list(pool.map(
+                _finalize_no_charge_in_process,
+                [(str(self.ledger), "no-charge-process-race")] * 12,
+            ))
+        self.assertEqual(statuses.count("NO_CHARGE_RECORDED"), 1)
+        self.assertEqual(statuses.count("DUPLICATE_REQUEST"), 11)
+        reloaded = ProviderCostPolicy(
+            self.ledger, project_budgets={"documentary": 5.0}
+        )
+        project = reloaded.ledger["projects"]["documentary"]
+        self.assertEqual(len(project["requests"]), 1)
+        self.assertEqual(project["actual_spend"], 0.0)
+        self.assertEqual(project["requests"]["no-charge-process-race"]["charge_outcome"], "not_incurred")
 
     def test_unresolved_finalization_rejects_mismatched_reservation(self):
         self.policy.reserve_usage(
