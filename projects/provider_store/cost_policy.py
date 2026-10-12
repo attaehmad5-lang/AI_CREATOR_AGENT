@@ -379,6 +379,21 @@ class ProviderCostPolicy:
                 }
 
             if estimated_cost > 0 and actual_cost == 0:
+                existing_project = self.ledger["projects"].get(project_id, {})
+                existing_reservations = (
+                    existing_project.get("reservations", {})
+                    if isinstance(existing_project, dict) else {}
+                )
+                existing_reservation = (
+                    existing_reservations.get(request_id)
+                    if isinstance(existing_reservations, dict) else None
+                )
+                if existing_reservation is not None and (
+                    not isinstance(existing_reservation, dict)
+                    or existing_reservation.get("provider_id") != provider_id
+                    or existing_reservation.get("estimated_cost") != float(estimated_cost)
+                ):
+                    return {"status": "REQUEST_ID_CONFLICT", "saved": False, "request_id": request_id}
                 if charge_outcome == "unknown":
                     return {"status": "CHARGE_OUTCOME_UNKNOWN", "saved": False, "request_id": request_id}
                 if charge_outcome == "incurred":
