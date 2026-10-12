@@ -630,6 +630,16 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["quota"]["status"], "QUOTA_RELEASE_MANAGER_UNAVAILABLE")
         self.assertEqual(result["credits"]["status"], "CREDIT_RELEASE_MANAGER_UNAVAILABLE")
 
+    def test_unstarted_release_rejects_malformed_manager_response(self):
+        self.cost.release_reservation = lambda **kwargs: None
+        result = self.service.release_unstarted_request(
+            project_id="film", provider_id="image", request_id="malformed-release-response"
+        )
+        self.assertFalse(result["released"])
+        self.assertEqual(result["status"], "RELEASE_PARTIAL")
+        self.assertIsNone(result["cost"])
+        self.assertEqual(result["quota"]["status"], "RESERVATION_NOT_FOUND")
+
     def test_failed_started_request_retains_cost_reservation_when_charge_is_unknown(self):
         self.cost.reserve_usage(
             project_id="film", provider_id="image", estimated_cost=2.0, request_id="job-failed-unknown"
