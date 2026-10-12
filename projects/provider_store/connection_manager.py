@@ -509,7 +509,12 @@ class ConnectionManager:
             safe[key] = value
         return safe
 
-    def set_provider_enabled(
+    def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
+        """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
+        with self._lock:
+            return self._set_provider_enabled_locked(provider_id, enabled)
+
+    def _set_provider_enabled_locked(
         self, provider_id: str, enabled: bool
     ) -> dict[str, Any]:
         """Enable/disable catalog eligibility only; never purchases or proves connectivity."""
@@ -529,7 +534,6 @@ class ConnectionManager:
         if not enabled and provider_id in self._loaded_providers:
             unload_result = self.unload_provider(provider_id)
             if unload_result["status"] not in {"UNLOADED", "NOT_LOADED"}:
-                # The catalog remains disabled even if cleanup failed: fail closed.
                 return {
                     "status": "DISABLED_CLEANUP_FAILED",
                     "provider": provider_id,
@@ -604,11 +608,15 @@ class ConnectionManager:
         }
 
     def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
-        """Instantiate a provider through an injected factory, without dynamic imports."""
+        """Load one validated runtime instance while holding the lifecycle lock."""
+        with self._lock:
+            return self._load_provider_locked(provider_id, factory)
+
+    def _load_provider_locked(self, provider_id: str, factory: Any) -> dict[str, Any]:
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "loaded": False}
-        if provider.get("enabled") is False:
+        if provider.get("enabled") is not True:
             return {"status": "DISABLED", "provider": provider_id, "loaded": False}
         if provider_id in self._loaded_providers:
             return {"status": "ALREADY_LOADED", "provider": provider_id, "loaded": True}
@@ -617,7 +625,6 @@ class ConnectionManager:
         try:
             instance = factory(provider)
         except Exception as exc:
-            # Never return raw exception text: it may contain endpoints or credentials.
             return {
                 "status": "LOAD_FAILED",
                 "provider": provider_id,
@@ -640,10 +647,15 @@ class ConnectionManager:
 
     def get_loaded_provider(self, provider_id: str) -> Any | None:
         """Return a process-local instance; callers must not persist or log it."""
-        return self._loaded_providers.get(provider_id)
+        with self._lock:
+            return self._loaded_providers.get(provider_id)
 
     def unload_provider(self, provider_id: str) -> dict[str, Any]:
-        """Release a loaded provider; preserve it if its cleanup hook fails."""
+        """Unload a runtime instance under the same lock used by loading/disabling."""
+        with self._lock:
+            return self._unload_provider_locked(provider_id)
+
+    def _unload_provider_locked(self, provider_id: str) -> dict[str, Any]:
         if not self.provider_exists(provider_id):
             return {"status": "NOT_FOUND", "provider": provider_id, "unloaded": False}
         if provider_id not in self._loaded_providers:
@@ -656,7 +668,6 @@ class ConnectionManager:
             try:
                 cleanup()
             except Exception as exc:
-                # Keep the instance registered so the caller can inspect/retry cleanup.
                 return {
                     "status": "UNLOAD_FAILED",
                     "provider": provider_id,
