@@ -46,7 +46,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 "id": "public_provider",
                 "auth_type": "NONE",
                 "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health"},
+                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             },
             timeout_seconds=2.5,
         )
@@ -55,6 +55,19 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         self.assertEqual(opener.calls[0][0].get_method(), "GET")
         self.assertEqual(len(opener.response.body), 5000)
         self.assertTrue(opener.response.closed)
+
+    def test_credentialed_probe_requires_explicit_auth_protected_endpoint(self):
+        opener = _Opener()
+        probe = ProviderHTTPConnectivityProbe(
+            environ={"HF_TOKEN": "private-token"}, opener=opener
+        )
+        with self.assertRaisesRegex(PermissionError, "documented endpoint"):
+            probe({
+                "id": "huggingface", "auth_type": "API_TOKEN",
+                "token_env": "HF_TOKEN", "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertEqual(opener.calls, [])
 
     def test_token_is_read_from_environment_and_never_returned(self):
         secret = "do-not-return-this-token"
@@ -66,7 +79,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             "id": "huggingface",
             "auth_type": "API_TOKEN",
             "allowed_hosts": ["api.example.com"],
-            "configuration": {"endpoint": "https://api.example.com/health"},
+            "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
         })
         self.assertEqual(result["http_status"], 200)
         self.assertEqual(opener.calls[0][0].get_header("Authorization"), f"Bearer {secret}")
@@ -87,7 +100,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 result = probe({
                     "id": provider_id, "auth_type": "API_KEY",
                     "allowed_hosts": ["api.example.com"],
-                    "configuration": {"endpoint": "https://api.example.com/health"},
+                    "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
                 })
                 self.assertTrue(result["ok"])
                 headers = {key.casefold(): value for key, value in opener.calls[0][0].header_items()}
@@ -252,7 +265,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             probe({
                 "id": "huggingface", "auth_type": "API_TOKEN",
                 "token_env": "HF_TOKEN", "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health"},
+                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertNotIn(secret_body.decode(), str(caught.exception))
         self.assertEqual(len(opener.calls), 1)
@@ -268,7 +281,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             probe({
                 "id": "public_provider", "auth_type": "NONE",
                 "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health"},
+                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertTrue(error.closed)
 
@@ -279,7 +292,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         result = probe({
             "id": "google_image", "auth_type": "API_KEY",
             "allowed_hosts": ["api.example.com"],
-            "configuration": {"endpoint": "https://api.example.com/health"},
+            "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
         })
         self.assertTrue(result["ok"])
         headers = {name.casefold(): value for name, value in opener.calls[0][0].header_items()}
@@ -297,7 +310,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 "id": "huggingface", "auth_type": "API_TOKEN",
                 "auth_header_name": "Host", "token_env": "HF_TOKEN",
                 "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health"},
+                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertEqual(opener.calls, [])
 
@@ -307,7 +320,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         provider = {
             "id": "custom", "auth_type": "API_KEY", "token_env": "HF_TOKEN\\nEVIL",
             "allowed_hosts": ["api.example.com"],
-            "configuration": {"endpoint": "https://api.example.com/health"},
+            "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
         }
         with self.assertRaises(PermissionError):
             probe(provider)
@@ -323,7 +336,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             "id": "custom", "auth_type": "API_KEY",
             "credential_env": "CUSTOM_CREDENTIAL",
             "allowed_hosts": ["api.example.com"],
-            "configuration": {"endpoint": "https://api.example.com/health"},
+            "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
         })
         self.assertTrue(result["ok"])
         headers = {key.casefold(): value for key, value in opener.calls[0][0].header_items()}
@@ -336,7 +349,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             probe({
                 "id": "public", "auth_type": "NONE",
-                "configuration": {"endpoint": "https://api.example.com/health"},
+                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertEqual(opener.calls, [])
 
@@ -408,7 +421,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             probe({
                 "id": "music", "auth_type": "ACCOUNT",
                 "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health"},
+                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertEqual(opener.calls, [])
 
@@ -424,7 +437,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 probe({
                     "id": "public_provider", "auth_type": "NONE",
                     "allowed_hosts": ["api.example.com"],
-                    "configuration": {"endpoint": "https://api.example.com/health"},
+                    "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
                 })
             self.assertNotIn("https://", str(caught.exception))
             self.assertEqual(len(opener.calls), 1)
@@ -437,7 +450,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             probe({
                 "id": "public_provider", "auth_type": "NONE",
                 "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health"},
+                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertNotIn("private timeout detail", str(caught.exception))
 
@@ -451,7 +464,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         probe = ProviderHTTPConnectivityProbe(opener=_Opener())
         provider = {
             "id": "p", "auth_type": "NONE", "allowed_hosts": ["api.example.com"],
-            "configuration": {"endpoint": "https://api.example.com/health"},
+            "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
         }
         with self.assertRaises(ValueError):
             probe(provider, timeout_seconds=float("nan"))
@@ -467,7 +480,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             probe({
                 "id": "huggingface", "auth_type": "API_TOKEN", "token_env": "HF_TOKEN",
                 "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health"},
+                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertEqual(opener.calls, [])
 
@@ -479,7 +492,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 "id": "huggingface", "auth_type": "API_TOKEN",
                 "token_env": "HF_TOKEN", "auth_header_name": "Host",
                 "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health"},
+                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertEqual(opener.calls, [])
 
@@ -490,7 +503,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             probe({
                 "id": "p", "auth_type": None,
                 "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health"},
+                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertEqual(opener.calls, [])
 
@@ -500,7 +513,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "HOST_ALLOWLIST_REQUIRED"):
             probe({
                 "id": "p", "auth_type": "NONE",
-                "configuration": {"endpoint": "https://api.example.com/health"},
+                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertEqual(opener.calls, [])
 
