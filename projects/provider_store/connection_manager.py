@@ -31,6 +31,9 @@ class ProviderAuthenticationVerificationRequired(PermissionError):
 
 
 class ConnectionManager:
+    CONFIGURATION_FIELDS = frozenset({
+        "model", "endpoint", "probe_endpoint", "authentication_required",
+    })
     VALID_STATES = {
         "LOCKED",
         "CONNECTING",
@@ -994,6 +997,11 @@ class ConnectionManager:
             current = record.get("configuration", {})
             if not isinstance(current, dict):
                 return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "saved": False}
+            if any(
+                not isinstance(key, str) or key not in self.CONFIGURATION_FIELDS
+                for key in current
+            ):
+                return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "saved": False}
             if self._contains_credential_value_field(current):
                 return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
             merged = dict(current)
@@ -1054,6 +1062,11 @@ class ConnectionManager:
                 return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
             if self._contains_credential_value_field(raw):
                 return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
+            if any(
+                not isinstance(key, str) or key not in self.CONFIGURATION_FIELDS
+                for key in raw
+            ):
+                return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
             configuration = self._sanitize_public_data(raw)
         if self._contains_credential_value_field(configuration):
             return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
