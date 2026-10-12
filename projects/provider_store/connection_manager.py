@@ -967,7 +967,12 @@ class ConnectionManager:
             record = dict(state) if isinstance(state, dict) else {}
             current = record.get("configuration", {})
             merged = dict(current) if isinstance(current, dict) else {}
+            if "model_version" in configuration and "model" not in configuration and not isinstance(merged.get("model"), str):
+                return {"status": "MODEL_REQUIRED_FOR_VERSION", "provider": provider_id, "saved": False}
+            previous_model = merged.get("model")
             merged.update(configuration)
+            if "model" in configuration and "model_version" not in configuration and previous_model != configuration["model"]:
+                merged.pop("model_version", None)
             record["configuration"] = merged
             record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
             self.state["providers"][provider_id] = record
