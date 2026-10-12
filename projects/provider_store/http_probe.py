@@ -15,6 +15,14 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from .connection_manager import ConnectionManager
 
 
+class ProviderHTTPAuthError(PermissionError):
+    """Authentication failure carrying a safe HTTP status code."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        super().__init__("provider rejected credentials or permissions")
+
+
 class ProviderHTTPStatusError(ConnectionError):
     """Safe provider HTTP failure with bounded status metadata for retry decisions."""
 
@@ -189,7 +197,7 @@ class ProviderHTTPConnectivityProbe:
             status_code = exc.code
             exc.close()
             if status_code in {401, 403}:
-                raise PermissionError("provider rejected credentials or permissions") from None
+                raise ProviderHTTPAuthError(status_code) from None
             if 300 <= status_code < 400:
                 raise ConnectionError("provider endpoint redirected; redirects are not followed") from None
             retry_after = None
