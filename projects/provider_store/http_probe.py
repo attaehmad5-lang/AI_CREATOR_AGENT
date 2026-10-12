@@ -189,7 +189,8 @@ class ProviderHTTPConnectivityProbe:
                 or header_name.casefold() not in allowed_auth_headers
             ):
                 raise ValueError("provider auth header name is not permitted")
-            allowed_auth_schemes = {"", "bearer", "key", "token", "basic"}
+            # Basic auth needs a separate username/password encoder; do not mislabel a raw token as Basic credentials.
+            allowed_auth_schemes = {"", "bearer", "key", "token"}
             if (
                 not isinstance(auth_scheme, str)
                 or auth_scheme.casefold() not in allowed_auth_schemes
