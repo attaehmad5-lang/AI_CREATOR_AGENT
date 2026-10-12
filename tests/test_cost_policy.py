@@ -433,10 +433,12 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertTrue(result["budget_exceeded"])
 
     def test_invalid_cost_values_are_rejected(self):
-        result = self.policy.evaluate_request(
-            {"id": "free"}, project_id="documentary", estimated_cost=float("nan")
-        )
-        self.assertEqual(result["status"], "INVALID_COST_AMOUNT")
+        for amount in (float("nan"), 10**1000):
+            with self.subTest(amount_type=type(amount).__name__):
+                result = self.policy.evaluate_request(
+                    {"id": "free"}, project_id="documentary", estimated_cost=amount
+                )
+                self.assertEqual(result["status"], "INVALID_COST_AMOUNT")
 
     def test_invalid_project_budgets_are_rejected_at_construction(self):
         for budgets in ({"documentary": float("nan")}, {"documentary": float("inf")}, {"": 1.0}, []):
