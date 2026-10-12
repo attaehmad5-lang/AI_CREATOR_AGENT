@@ -62,6 +62,26 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "primary")
 
+    def test_capability_based_routing_selects_only_matching_provider(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"].append({
+            "id": "editing", "name": "Editing", "category": "image",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "zero_cost_allowed": True, "priority": 3,
+            "capabilities": ["image_editing"],
+        })
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        verified = self.connections.verify_connectivity(
+            "editing", lambda provider, **kwargs: {"ok": True}
+        )
+        self.assertTrue(verified["verified"])
+
+        result = ProviderRoutingManager(self.connections).route(
+            category="image", project_id="film", capability="image_editing"
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "editing")
+
     def test_primary_only_strategy_never_selects_fallback_after_primary_rejected(self):
         router = ProviderRoutingManager(self.connections)
         result = router.route(
