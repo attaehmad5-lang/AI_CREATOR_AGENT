@@ -424,6 +424,39 @@ class ConnectionManager:
                                 f"providers[{index}].capabilities must contain unique lowercase identifiers "
                                 "of at most 80 characters (maximum 100)"
                             )
+                    if "supported_models" in provider:
+                        supported_models = provider["supported_models"]
+                        if not isinstance(supported_models, list) or len(supported_models) > 100:
+                            errors.append(f"providers[{index}].supported_models must be a list of at most 100 model records")
+                        else:
+                            seen_models: set[str] = set()
+                            for model_index, model_record in enumerate(supported_models):
+                                prefix = f"providers[{index}].supported_models[{model_index}]"
+                                if not isinstance(model_record, dict):
+                                    errors.append(f"{prefix} must be an object")
+                                    continue
+                                model_id = model_record.get("id")
+                                if (
+                                    not isinstance(model_id, str)
+                                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}", model_id)
+                                    or model_id.casefold() in seen_models
+                                ):
+                                    errors.append(f"{prefix}.id must be a unique safe model identifier")
+                                else:
+                                    seen_models.add(model_id.casefold())
+                                if "versions" in model_record:
+                                    versions = model_record["versions"]
+                                    if (
+                                        not isinstance(versions, list)
+                                        or len(versions) > 100
+                                        or any(
+                                            not isinstance(version, str)
+                                            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,99}", version)
+                                            for version in versions
+                                        )
+                                        or len({version.casefold() for version in versions if isinstance(version, str)}) != len(versions)
+                                    ):
+                                        errors.append(f"{prefix}.versions must contain unique safe version identifiers")
                     if ConnectionManager._contains_credential_value_field(provider):
                         errors.append(f"providers[{index}] contains a forbidden credential value field")
         result = {"valid": not errors, "errors": errors, "provider_count": len(catalog.get("providers", [])) if isinstance(catalog, dict) and isinstance(catalog.get("providers"), list) else 0}
