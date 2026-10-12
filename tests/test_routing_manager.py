@@ -505,7 +505,8 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             decision.get("status") == "COST_RESERVATION_MANAGER_UNAVAILABLE"
             for decision in result["decisions"]
         ))
-        self.assertNotIn("no-reserver", policy.ledger["projects"]["film"]["reservations"])
+        project = policy.ledger["projects"].get("film", {})
+        self.assertNotIn("no-reserver", project.get("reservations", {}))
 
     def test_paid_routing_reserves_budget_and_requires_idempotency_key(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
