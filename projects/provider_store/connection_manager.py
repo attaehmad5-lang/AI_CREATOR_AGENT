@@ -997,13 +997,13 @@ class ConnectionManager:
             current = record.get("configuration", {})
             if not isinstance(current, dict):
                 return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "saved": False}
+            if self._contains_credential_value_field(current):
+                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
             if any(
                 not isinstance(key, str) or key not in self.CONFIGURATION_FIELDS
                 for key in current
             ):
                 return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "saved": False}
-            if self._contains_credential_value_field(current):
-                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
             merged = dict(current)
             merged.update(configuration)
             if self._contains_credential_value_field(merged):
