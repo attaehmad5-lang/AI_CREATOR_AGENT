@@ -547,6 +547,10 @@ class ProviderRoutingManager:
                 "health_verified": self.health_manager is not None,
                 "prior_decisions": decisions,
             }
+            if model is not None:
+                result["model"] = model.strip()
+            if model_version is not None:
+                result["model_version"] = model_version.strip()
             if billing_mode is not None:
                 result["billing_mode"] = billing_mode
             if cost_reserved:
