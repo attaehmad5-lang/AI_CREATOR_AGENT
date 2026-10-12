@@ -364,20 +364,20 @@ class ConnectionManager:
                         catalog_major_version >= 3
                         and provider.get("enabled") is True
                         and isinstance(connection_type, str)
-                        and connection_type.upper() == "API"
+                        and connection_type.upper() != "LOCAL"
                     ):
-                        if not provider.get("allowed_hosts"):
+                        if connection_type.upper() == "API" and not provider.get("allowed_hosts"):
                             errors.append(
                                 f"providers[{index}].allowed_hosts is required for enabled API providers"
                             )
                         if not provider.get("official_api_url"):
                             errors.append(
-                                f"providers[{index}].official_api_url is required for enabled API providers"
+                                f"providers[{index}].official_api_url is required for enabled non-local providers"
                             )
                         capabilities = provider.get("capabilities")
                         if not isinstance(capabilities, list) or not capabilities:
                             errors.append(
-                                f"providers[{index}].capabilities must be non-empty for enabled API providers"
+                                f"providers[{index}].capabilities must be non-empty for enabled non-local providers"
                             )
                     for url_field in ("official_api_url", "subscription_url"):
                         if url_field in provider:
