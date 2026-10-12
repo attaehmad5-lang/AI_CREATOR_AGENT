@@ -349,6 +349,42 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "CREDENTIALS_EXPIRING")
 
+    def test_catalog_recovery_restores_only_from_valid_master_copy(self):
+        master_path = self.root / "provider_catalog_master.json"
+        master = {
+            "version": "3.0",
+            "providers": [{
+                "id": "safe_api", "name": "Safe API", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "allowed_hosts": ["api.example.com"],
+            }],
+        }
+        master_path.write_text(json.dumps(master), encoding="utf-8")
+        self.catalog_path.write_text("{corrupt", encoding="utf-8")
+        restored = ConnectionManager.restore_catalog_from_master(
+            self.catalog_path, master_path
+        )
+        self.assertEqual(restored["status"], "RESTORED_FROM_MASTER")
+        self.assertTrue(restored["restored"])
+        self.assertEqual(json.loads(self.catalog_path.read_text(encoding="utf-8")), master)
+
+        no_op = ConnectionManager.restore_catalog_from_master(
+            self.catalog_path, master_path
+        )
+        self.assertEqual(no_op["status"], "TARGET_CATALOG_VALID")
+        self.assertFalse(no_op["restored"])
+
+    def test_catalog_recovery_fails_closed_when_master_is_invalid(self):
+        master_path = self.root / "invalid_master.json"
+        master_path.write_text("{invalid", encoding="utf-8")
+        self.catalog_path.write_text("{still-corrupt", encoding="utf-8")
+        result = ConnectionManager.restore_catalog_from_master(
+            self.catalog_path, master_path
+        )
+        self.assertEqual(result["status"], "MASTER_CATALOG_INVALID")
+        self.assertFalse(result["restored"])
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{still-corrupt")
+
     def test_configured_endpoint_and_model_are_passed_to_probe(self):
         self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
