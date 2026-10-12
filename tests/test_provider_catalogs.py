@@ -28,6 +28,21 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("cannot require a subscription" in error for error in result["errors"]))
 
+    def test_catalog_rejects_malformed_versions_instead_of_downgrading_schema(self):
+        for version in ("3.invalid", "", True, None, {"major": 3}):
+            with self.subTest(version=version):
+                result = ConnectionManager.validate_catalog_schema({
+                    "version": version,
+                    "providers": [{
+                        "id": "provider", "name": "Provider",
+                        "category": "image", "auth_type": "NONE",
+                        "connection_type": "API", "enabled": False,
+                        "subscription_required": False,
+                    }],
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("catalog.version" in error for error in result["errors"]))
+
     def test_v3_catalog_requires_complete_provider_identity_and_billing_flags(self):
         valid_provider = {
             "id": "complete", "name": "Complete Provider",
