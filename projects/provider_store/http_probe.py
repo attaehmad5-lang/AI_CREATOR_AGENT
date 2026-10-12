@@ -13,6 +13,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .connection_manager import ConnectionManager, ProviderAuthenticationVerificationRequired
+from .safe_numbers import finite_number
 
 
 class ProviderHTTPAuthError(PermissionError):
@@ -119,12 +120,8 @@ class ProviderHTTPConnectivityProbe:
     def __call__(self, provider: dict[str, Any], *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         if not isinstance(provider, dict):
             raise ValueError("provider metadata must be an object")
-        if (
-            not isinstance(timeout_seconds, (int, float))
-            or isinstance(timeout_seconds, bool)
-            or not math.isfinite(timeout_seconds)
-            or timeout_seconds <= 0
-        ):
+        timeout_value = finite_number(timeout_seconds, minimum=0)
+        if timeout_value is None or timeout_value <= 0:
             raise ValueError("timeout_seconds must be positive")
 
         configuration = provider.get("configuration", {})
@@ -200,7 +197,7 @@ class ProviderHTTPConnectivityProbe:
 
         request = Request(endpoint.strip(), headers=headers, method="GET")
         try:
-            response = self.opener.open(request, timeout=float(timeout_seconds))
+            response = self.opener.open(request, timeout=timeout_value)
         except HTTPError as exc:
             status_code = exc.code
             exc.close()
