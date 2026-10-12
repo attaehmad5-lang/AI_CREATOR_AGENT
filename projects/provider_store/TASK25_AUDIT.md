@@ -6,10 +6,10 @@
 
 ## Latest automated verification
 
-GitHub Actions run [#38277941749](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38277941749) completed successfully on Python 3.13:
+GitHub Actions run [#38278323010](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38278323010) completed successfully on Python 3.13:
 
-- Ubuntu: 269 tests passed, 0 failures.
-- Windows: 269 tests passed, 0 failures.
+- Ubuntu: 270 tests passed, 0 failures.
+- Windows: 270 tests passed, 0 failures.
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
 
@@ -39,7 +39,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 ## Known open verification requirements
 
 1. Compare the exact canonical A–P feature list item-by-item. This file is deliberately a range-level evidence summary, **not a replacement for the user's exact 138 feature names**.
-2. Run provider-specific probes only against endpoints and accounts explicitly configured and authorized by the user. A generic HTTP 2xx response proves reachability/authentication only, not model support, free credits, or successful generation.
+2. Run provider-specific probes only against endpoints and accounts explicitly configured and authorized by the user. A generic HTTP 2xx proves only endpoint reachability unless the configured endpoint is documented to require and validate the supplied credential; it never proves model support, free credits, or successful generation.
 3. Implement and test provider-specific credential/authentication, account-balance, and generation adapters where required by the canonical scope.
 4. Add provider-specific network failure injection and end-to-end generation execution tests.
 5. Add full image/audio/video decoding, malware scanning, and semantic output checks where required.
