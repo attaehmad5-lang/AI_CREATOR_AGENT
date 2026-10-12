@@ -15,7 +15,8 @@
       "enabled": true,
       "allowed_hosts": [
         "router.huggingface.co",
-        "api-inference.huggingface.co"
+        "api-inference.huggingface.co",
+        "huggingface.co"
       ],
       "token_env": "HF_TOKEN",
       "capabilities": [
