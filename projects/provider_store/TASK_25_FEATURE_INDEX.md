@@ -4,7 +4,7 @@
 
 ## Status integrity warning
 
-The user's original baseline aggregate was **138 total: 6 🟢, 29 🟡, 103 🔴**. The available saved conversation notes also contain a later triage snapshot with conflicting per-item markers. The marker column below records the **latest recovered triage marker**, not a claim that it reproduces every original baseline marker verbatim. Do not overwrite the original baseline or infer an item's initial marker from the aggregate. The verbatim original pasted list should be compared against this index before the baseline markers are locked.
+The user's original baseline aggregate was **138 total: 6 🟢, 29 🟡, 103 🔴**. The latest recovered per-item notes currently produce **6 🟢, 65 🟡, 67 🔴**, so they are not the same snapshot. The marker column below records the **latest recovered triage marker**, not a claim that it reproduces every original baseline marker verbatim. Do not overwrite the original baseline or infer an item's initial marker from the aggregate. The verbatim original pasted list should be compared against this index before the baseline markers are locked.
 
 Every feature's **verification status is NOT ITEM-AUDITED** until the exact requirement is matched to implementation evidence and a relevant test. A group/module existing is not proof that each feature is complete.
 
