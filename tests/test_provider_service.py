@@ -167,9 +167,13 @@ class ProviderServiceTests(unittest.TestCase):
         class OAuthStub:
             def get_access_token(self, provider_id):
                 return None
-        result = self.service.verify_oauth_provider("image", OAuthStub())
+        class ConnectionStub:
+            def get_provider(self, provider_id):
+                return {"id": provider_id, "token_env": "OAUTH_ACCESS_TOKEN"}
+        service = ProviderService(ConnectionStub())
+        result = service.verify_oauth_provider("image", OAuthStub())
         self.assertFalse(result["verified"])
-        self.assertEqual(result["status"], "OAUTH_TOKEN_ENV_REFERENCE_INVALID")
+        self.assertEqual(result["status"], "OAUTH_ACCESS_TOKEN_UNAVAILABLE")
 
     def test_builtin_http_verification_rejects_invalid_probe_configuration(self):
         result = self.service.verify_http_provider(
