@@ -313,6 +313,10 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].connection_type is unsupported")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
+                    if "deprecated" in provider and not isinstance(provider["deprecated"], bool):
+                        errors.append(f"providers[{index}].deprecated must be boolean")
+                    if provider.get("deprecated") is True and provider.get("enabled") is True:
+                        errors.append(f"providers[{index}] is deprecated and cannot be enabled")
                     if "allowed_hosts" in provider:
                         hosts = provider["allowed_hosts"]
                         if not isinstance(hosts, list) or not hosts or len(hosts) > 100:
@@ -507,6 +511,13 @@ class ConnectionManager:
             index = next((i for i, item in enumerate(providers) if item.get("id") == provider_id), None)
             if index is None:
                 return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+            if enabled and providers[index].get("deprecated") is True:
+                return {
+                    "status": "PROVIDER_DEPRECATED",
+                    "provider": provider_id,
+                    "enabled": False,
+                    "saved": False,
+                }
             updated = [dict(item) for item in providers]
             updated[index]["enabled"] = enabled
             new_catalog = dict(self.catalog)
