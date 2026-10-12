@@ -31,6 +31,7 @@ class ProviderRoutingManager:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        project_policy_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
         require_verified_connection: bool = True,
     ) -> None:
@@ -44,6 +45,8 @@ class ProviderRoutingManager:
             raise ValueError("quota_manager must support request reservations")
         if credit_manager is not None and not callable(getattr(credit_manager, "usable_free_credits", None)):
             raise ValueError("credit_manager must provide fresh verified balances")
+        if project_policy_manager is not None and not callable(getattr(project_policy_manager, "get_policy", None)):
+            raise ValueError("project_policy_manager must support policy lookup")
         if not isinstance(require_verified_connection, bool):
             raise ValueError("require_verified_connection must be boolean")
         if require_verified_connection and not callable(getattr(connection_manager, "get_state", None)):
@@ -56,6 +59,7 @@ class ProviderRoutingManager:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager
+        self.project_policy_manager = project_policy_manager
         self.default_strategy = normalized_strategy
         self.require_verified_connection = require_verified_connection
         self._round_robin_counters: dict[str, int] = {}
@@ -142,6 +146,38 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_REQUIRED"}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
+
+        project_policy: dict[str, Any] = {}
+        if self.project_policy_manager is not None:
+            try:
+                policy_result = self.project_policy_manager.get_policy(project_id)
+            except Exception as exc:
+                return {
+                    "allowed": False, "status": "PROJECT_POLICY_LOOKUP_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if (
+                not isinstance(policy_result, dict)
+                or policy_result.get("status") != "PROJECT_POLICY_FOUND"
+                or not isinstance(policy_result.get("policy"), dict)
+            ):
+                return {"allowed": False, "status": "PROJECT_POLICY_REQUIRED"}
+            project_policy = policy_result["policy"]
+            allowed_models = project_policy.get("allowed_models")
+            if allowed_models is not None and (
+                model is None or model not in allowed_models
+            ):
+                return {"allowed": False, "status": "PROJECT_MODEL_NOT_ALLOWED"}
+            allowed_capabilities = project_policy.get("allowed_capabilities")
+            if allowed_capabilities is not None and capability is not None and capability not in allowed_capabilities:
+                return {"allowed": False, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"}
+            max_estimated_cost = project_policy.get("max_estimated_cost")
+            if max_estimated_cost is not None and self._valid_amount(estimated_cost) and estimated_cost > max_estimated_cost:
+                return {"allowed": False, "status": "PROJECT_COST_LIMIT_EXCEEDED"}
+            if project_policy.get("automatic_fallback") is False:
+                automatic_fallback = False
+            require_health_evidence = require_health_evidence or project_policy.get("require_health_evidence") is True
+
         if not self._valid_amount(estimated_cost):
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "INVALID_ESTIMATED_COST"}
         if model is not None and (
@@ -246,6 +282,19 @@ class ProviderRoutingManager:
             provider_id = provider.get("id")
             if not isinstance(provider_id, str) or not provider_id or provider_id in excluded:
                 continue
+            allowed_providers = project_policy.get("allowed_providers")
+            if allowed_providers is not None and provider_id not in allowed_providers:
+                decisions.append({"provider": provider_id, "status": "PROJECT_PROVIDER_NOT_ALLOWED"})
+                continue
+            if provider_id in project_policy.get("denied_providers", []):
+                decisions.append({"provider": provider_id, "status": "PROJECT_PROVIDER_DENIED"})
+                continue
+            allowed_capabilities = project_policy.get("allowed_capabilities")
+            if allowed_capabilities is not None and capability is None:
+                provider_capabilities = provider.get("capabilities", [])
+                if not isinstance(provider_capabilities, list) or not set(provider_capabilities).intersection(allowed_capabilities):
+                    decisions.append({"provider": provider_id, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"})
+                    continue
             if provider.get("enabled") is not True:
                 continue
             if model is not None:
@@ -271,7 +320,11 @@ class ProviderRoutingManager:
                     if model_version not in versions:
                         decisions.append({"provider": provider_id, "status": "MODEL_VERSION_NOT_SUPPORTED"})
                         continue
-            if self.require_verified_connection:
+            require_verified = (
+                self.require_verified_connection
+                or project_policy.get("require_verified_connection") is True
+            )
+            if require_verified:
                 try:
                     connection_state = self.connection_manager.get_state(provider_id)
                 except Exception as exc:
@@ -309,6 +362,10 @@ class ProviderRoutingManager:
             cost = estimates.get(provider_id, estimated_cost)
             if not self._valid_amount(cost):
                 decisions.append({"provider": provider_id, "status": "INVALID_COST_AMOUNT"})
+                continue
+            max_estimated_cost = project_policy.get("max_estimated_cost")
+            if max_estimated_cost is not None and cost > max_estimated_cost:
+                decisions.append({"provider": provider_id, "status": "PROJECT_COST_LIMIT_EXCEEDED"})
                 continue
             credit = credits.get(provider_id, 0.0)
             credit_sort = float(credit) if self._valid_amount(credit) else 0.0
