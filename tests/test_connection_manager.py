@@ -356,6 +356,7 @@ class ConnectionManagerTests(unittest.TestCase):
             "providers": [{
                 "id": "safe_api", "name": "Safe API", "category": "image",
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "subscription_required": False,
                 "allowed_hosts": ["api.example.com"],
             }],
         }
@@ -373,6 +374,7 @@ class ConnectionManagerTests(unittest.TestCase):
             "providers": [{
                 "id": "keep_me", "name": "Keep Me", "category": "image",
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "subscription_required": False,
                 "allowed_hosts": ["keep.example.com"],
             }],
         }
