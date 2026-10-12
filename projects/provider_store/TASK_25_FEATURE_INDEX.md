@@ -40,22 +40,22 @@ Every feature's **verification status is NOT ITEM-AUDITED** until the exact requ
 | 22 | C — Provider Modalities | Editing Integration | 🔴 | OPEN; catalog contract is not a working generator adapter | tests/test_provider_catalogs.py::test_every_catalog_modality_has_a_callable_contract; editing/upscaling/restoration adapter not present |
 | 23 | C — Provider Modalities | Transcription Integration | 🔴 | OPEN; catalog contract is not a working generator adapter | tests/test_provider_catalogs.py::test_every_catalog_modality_has_a_callable_contract; transcription/translation/dubbing adapter not present |
 | 24 | C — Provider Modalities | Modality Interface Contracts | 🟡 | TESTED FOUNDATION; actual provider modality adapters remain open | tests/test_connection_manager.py::test_provider_contract_accepts_required_modality_method; test_provider_contract_rejects_missing_method_and_prevents_loading; tests/test_provider_catalogs.py::test_every_catalog_modality_has_a_callable_contract |
-| 25 | D — Routing & Fallback | Primary Provider Selection | 🟡 | NOT ITEM-AUDITED | TBD |
-| 26 | D — Routing & Fallback | Fallback Provider Selection | 🟡 | NOT ITEM-AUDITED | TBD |
-| 27 | D — Routing & Fallback | PRIMARY_THEN_FALLBACK Strategy | 🟡 | NOT ITEM-AUDITED | TBD |
-| 28 | D — Routing & Fallback | PRIMARY_ONLY Strategy Testing | 🔴 | NOT ITEM-AUDITED | TBD |
-| 29 | D — Routing & Fallback | Automatic Fallback On/Off Testing | 🟡 | NOT ITEM-AUDITED | TBD |
-| 30 | D — Routing & Fallback | Capability-Based Routing | 🔴 | NOT ITEM-AUDITED | TBD |
-| 31 | D — Routing & Fallback | Model/Version-Aware Routing | 🔴 | NOT ITEM-AUDITED | TBD |
-| 32 | D — Routing & Fallback | User/Project Policy-Based Routing | 🔴 | NOT ITEM-AUDITED | TBD |
-| 33 | E — Retry, Failure & Recovery | Configurable Retry Limit | 🟢 | NOT ITEM-AUDITED | TBD |
-| 34 | E — Retry, Failure & Recovery | Error-Specific Retry Policy | 🟡 | NOT ITEM-AUDITED | TBD |
-| 35 | E — Retry, Failure & Recovery | Exponential Backoff and Jitter | 🔴 | NOT ITEM-AUDITED | TBD |
-| 36 | E — Retry, Failure & Recovery | HTTP 429/Rate-Limit Handling | 🔴 | NOT ITEM-AUDITED | TBD |
-| 37 | E — Retry, Failure & Recovery | Quota Exhaustion Detection | 🟡 | NOT ITEM-AUDITED | TBD |
-| 38 | E — Retry, Failure & Recovery | Circuit Breaker | 🔴 | NOT ITEM-AUDITED | TBD |
-| 39 | E — Retry, Failure & Recovery | Cooldown and Provider Recheck | 🔴 | NOT ITEM-AUDITED | TBD |
-| 40 | E — Retry, Failure & Recovery | Timeout, Cancellation and Stalled-Request Handling | 🔴 | NOT ITEM-AUDITED | TBD |
+| 25 | D — Routing & Fallback | Primary Provider Selection | 🟡 | TESTED FOUNDATION; full canonical-item comparison pending | tests/test_routing_manager.py::test_primary_route_skips_disabled_and_orders_by_priority |
+| 26 | D — Routing & Fallback | Fallback Provider Selection | 🟡 | TESTED FOUNDATION; generation-path fallback integration pending | tests/test_routing_manager.py::test_fallback_excludes_failed_provider; test_quota_manager_blocks_over_limit_provider_and_uses_fallback |
+| 27 | D — Routing & Fallback | PRIMARY_THEN_FALLBACK Strategy | 🟡 | TESTED FOUNDATION; orchestration integration pending | tests/test_routing_manager.py::test_primary_route_skips_disabled_and_orders_by_priority; test_fallback_excludes_failed_provider |
+| 28 | D — Routing & Fallback | PRIMARY_ONLY Strategy Testing | 🔴 | TESTED FOUNDATION; no automatic paid operation is performed | tests/test_routing_manager.py::test_primary_only_strategy_never_selects_fallback_after_primary_rejected |
+| 29 | D — Routing & Fallback | Automatic Fallback On/Off Testing | 🟡 | PARTIAL; explicit fallback is tested, automatic fallback on/off toggle is not integrated | tests/test_routing_manager.py::test_fallback_excludes_failed_provider; test_fallback_releases_and_reassigns_budget_and_quota_reservations |
+| 30 | D — Routing & Fallback | Capability-Based Routing | 🔴 | TESTED FOUNDATION; real modality adapters remain open | tests/test_routing_manager.py::test_capability_based_routing_selects_only_matching_provider; tests/test_connection_manager.py::test_discovery_filters_by_capability |
+| 31 | D — Routing & Fallback | Model/Version-Aware Routing | 🔴 | TESTED FOUNDATION; requires explicit configured model/version | tests/test_connection_manager.py::test_provider_model_configuration_is_persisted_without_credentials; tests/test_routing_manager.py::test_model_and_version_aware_routing_requires_exact_configured_match |
+| 32 | D — Routing & Fallback | User/Project Policy-Based Routing | 🔴 | PARTIAL; project budgets and approvals are checked, per-project provider selection policy is not implemented | tests/test_routing_manager.py::test_cost_policy_blocks_paid_route_without_budget_or_approval; test_paid_budget_routing_rejects_incompatible_cost_unit |
+| 33 | E — Retry, Failure & Recovery | Configurable Retry Limit | 🟢 | TESTED FOUNDATION | tests/test_retry_policy.py::test_timeout_is_retryable_but_respects_attempt_limit; test_invalid_policy_configuration_is_rejected |
+| 34 | E — Retry, Failure & Recovery | Error-Specific Retry Policy | 🟡 | TESTED FOUNDATION | tests/test_retry_policy.py::test_auth_and_nonretryable_errors_are_not_retried; test_http_status_and_retry_after_are_read_from_exception |
+| 35 | E — Retry, Failure & Recovery | Exponential Backoff and Jitter | 🔴 | TESTED FOUNDATION | tests/test_retry_policy.py::test_retries_transient_server_failure_with_exponential_backoff |
+| 36 | E — Retry, Failure & Recovery | HTTP 429/Rate-Limit Handling | 🔴 | TESTED FOUNDATION | tests/test_retry_policy.py::test_http_429_respects_retry_after; tests/test_http_probe.py::test_rate_limit_metadata_reaches_connection_manager_safely |
+| 37 | E — Retry, Failure & Recovery | Quota Exhaustion Detection | 🟡 | TESTED FOUNDATION | tests/test_routing_manager.py::test_quota_manager_blocks_over_limit_provider_and_uses_fallback; tests/test_quota_manager.py |
+| 38 | E — Retry, Failure & Recovery | Circuit Breaker | 🔴 | TESTED FOUNDATION | tests/test_retry_policy.py::test_circuit_breaker_opens_at_threshold_and_recovers_after_cooldown; test_circuit_breaker_admits_only_one_concurrent_half_open_probe |
+| 39 | E — Retry, Failure & Recovery | Cooldown and Provider Recheck | 🔴 | TESTED FOUNDATION | tests/test_retry_policy.py::test_circuit_breaker_opens_at_threshold_and_recovers_after_cooldown; test_circuit_breaker_reopens_after_half_open_failure |
+| 40 | E — Retry, Failure & Recovery | Timeout, Cancellation and Stalled-Request Handling | 🔴 | PARTIAL; timeout/retry and circuit-breaker cancellation are tested, generation job cancellation/stall handling is not integrated | tests/test_retry_policy.py::test_timeout_is_retryable_but_respects_attempt_limit; test_cancelled_half_open_probe_releases_single_probe_slot |
 | 41 | F — Provider Health | Provider Health State Tracking | 🟢 | NOT ITEM-AUDITED | TBD |
 | 42 | F — Provider Health | Basic Success/Failure History | 🟢 | NOT ITEM-AUDITED | TBD |
 | 43 | F — Provider Health | Health Check Before Generation | 🟡 | NOT ITEM-AUDITED | TBD |
