@@ -201,10 +201,17 @@ class ProviderOAuthPKCEManager:
         except Exception as exc:
             return {"status": "OAUTH_TOKEN_REQUEST_FAILED", "error_type": type(exc).__name__}
         try:
-            status = response.getcode() if callable(getattr(response, "getcode", None)) else getattr(response, "status", None)
-            if not isinstance(status, int) or not 200 <= status < 300:
-                return {"status": "OAUTH_TOKEN_HTTP_ERROR", "http_status": status if isinstance(status, int) else None}
-            body = response.read(self.max_response_bytes + 1)
+            try:
+                status = response.getcode() if callable(getattr(response, "getcode", None)) else getattr(response, "status", None)
+                if not isinstance(status, int) or not 200 <= status < 300:
+                    return {"status": "OAUTH_TOKEN_HTTP_ERROR", "http_status": status if isinstance(status, int) else None}
+                body = response.read(self.max_response_bytes + 1)
+            except TimeoutError:
+                return {"status": "OAUTH_TOKEN_TIMEOUT"}
+            except OSError:
+                return {"status": "OAUTH_TOKEN_NETWORK_ERROR"}
+            except Exception as exc:
+                return {"status": "OAUTH_TOKEN_RESPONSE_READ_FAILED", "error_type": type(exc).__name__}
             if not isinstance(body, bytes) or len(body) > self.max_response_bytes:
                 return {"status": "OAUTH_TOKEN_RESPONSE_TOO_LARGE"}
             try:
@@ -267,9 +274,10 @@ class ProviderOAuthPKCEManager:
             return {"status": "INVALID_OAUTH_STATE", "provider": provider_id}
         if not isinstance(code, str) or not code.strip() or len(code) > 4096 or any(ord(char) < 32 or ord(char) == 127 for char in code):
             return {"status": "INVALID_AUTHORIZATION_CODE", "provider": provider_id}
-        pending = self._pending.pop(state, None)
+        pending = self._pending.get(state)
         if not isinstance(pending, dict) or pending.get("provider_id") != provider_id:
             return {"status": "OAUTH_STATE_NOT_FOUND", "provider": provider_id}
+        self._pending.pop(state, None)
         try:
             now = float(self.clock())
         except Exception:
