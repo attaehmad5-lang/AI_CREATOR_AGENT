@@ -73,6 +73,28 @@ class ProviderOAuthPKCEManagerTests(unittest.TestCase):
         args.update(overrides)
         return manager.begin_authorization(**args)
 
+    def test_pollinations_helper_uses_official_pkce_endpoints_and_scopes(self):
+        manager = ProviderOAuthPKCEManager(
+            environ={"POLLINATIONS_APP_KEY": "pk_public_app_key"},
+            opener=_Opener(), clock=lambda: self.now[0],
+        )
+        redirect_uri = "https://app.example.com/pollinations/callback"
+        result = manager.begin_pollinations_authorization(
+            redirect_uri=redirect_uri,
+            allowed_redirect_uris=[redirect_uri],
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_REQUIRED")
+        parsed = urlsplit(result["authorization_url"])
+        self.assertEqual(parsed.netloc, "enter.pollinations.ai")
+        self.assertEqual(parsed.path, "/authorize")
+        query = parse_qs(parsed.query)
+        self.assertEqual(query["client_id"], ["pk_public_app_key"])
+        self.assertEqual(query["scope"], ["profile usage"])
+        self.assertEqual(
+            manager._pending[result["state"]]["token_url"],
+            "https://enter.pollinations.ai/api/oauth/token",
+        )
+
     def test_authorization_url_uses_pkce_s256_and_random_state(self):
         result = self.begin()
         self.assertEqual(result["status"], "AUTHORIZATION_REQUIRED")
