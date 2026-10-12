@@ -700,16 +700,14 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "story_generation",
-        "screenplay",
-        "scene_breakdown",
-        "character_development",
-        "dialogue_writing"
+        "text_generation",
+        "scriptwriting"
       ],
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "official_api_url": "https://developers.openai.com/api/docs/guides/text"
     },
     {
       "id": "google_gemini_script",
@@ -743,18 +741,16 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "story_generation",
-        "screenplay",
-        "scene_breakdown",
-        "character_development",
-        "dialogue_writing"
+        "text_generation",
+        "scriptwriting"
       ],
       "allowed_hosts": [
         "api.anthropic.com"
       ],
       "token_env": "ANTHROPIC_API_KEY",
       "auth_header_name": "x-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://docs.anthropic.com/en/docs/welcome"
     },
     {
       "id": "adobe_firefly_advanced",
