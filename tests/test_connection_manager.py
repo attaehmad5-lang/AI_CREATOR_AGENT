@@ -23,6 +23,7 @@ def _register_provider_in_process(args):
         "auth_type": "NONE",
         "connection_type": "API",
         "enabled": True,
+        "allowed_hosts": ["api.example.com"],
     })
     return result["status"]
 
