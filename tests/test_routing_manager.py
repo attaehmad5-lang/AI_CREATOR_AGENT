@@ -492,6 +492,21 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         reservation = policy.ledger["projects"]["film"]["reservations"]["existing-paid-job"]
         self.assertEqual(reservation["provider_id"], "primary")
 
+    def test_paid_route_fails_closed_without_reservation_method(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        router = ProviderRoutingManager(self.connections, cost_policy=policy)
+        with patch.object(policy, "reserve_usage", None):
+            result = router.route(
+                category="image", project_id="film", estimated_cost=1.0,
+                paid_approved_providers={"primary"}, request_id="no-reserver",
+            )
+        self.assertFalse(result["allowed"])
+        self.assertTrue(any(
+            decision.get("status") == "COST_RESERVATION_MANAGER_UNAVAILABLE"
+            for decision in result["decisions"]
+        ))
+        self.assertNotIn("no-reserver", policy.ledger["projects"]["film"]["reservations"])
+
     def test_paid_routing_reserves_budget_and_requires_idempotency_key(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
