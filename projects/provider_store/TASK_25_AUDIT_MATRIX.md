@@ -2,7 +2,7 @@
 
 **Status: IN PROGRESS. PR #1 was merged by the user on 2026-10-12; Task #25 is not complete.**
 
-This matrix preserves the canonical feature-ID ranges and group names. It is an evidence tracker, not a replacement for the user's exact 138-item checklist. A group is not complete merely because a supporting module or test exists; every original item still requires individual verification.
+This matrix is the section-level evidence tracker. `TASK_25_FEATURE_INDEX.md` now records 138 recovered item names and numbering for durable tracking, but its latest recovered per-item markers (6/65/67) conflict with the user's original baseline aggregate (6/29/103). It is therefore not yet a verbatim replacement for the user's original pasted list. Compare the source list before locking baseline wording/statuses; do not renumber or merge items. A group is not complete merely because a supporting module or test exists.
 
 ## Latest confirmed verification
 
@@ -39,6 +39,6 @@ GitHub Actions run [#38284816723](https://github.com/attaehmad5-lang/AI_CREATOR_
 ## Canonical 138-item checklist preservation
 
 - The authoritative scope remains the user's original 138 individual feature descriptions across sections A–P, originally marked 6 🟢, 29 🟡, and 103 🔴.
-- This matrix currently preserves section names and item-number ranges, but does **not** contain all 138 original descriptions verbatim. Do not invent descriptions from the group headings or silently renumber/merge items.
-- Feature-by-feature completion requires the original wording to be copied verbatim into a dedicated checklist file, then each item tracked separately with implementation path, test evidence, verification result, and backup/commit reference.
+- `TASK_25_FEATURE_INDEX.md` contains 138 recovered names and IDs, but the recovered marker counts (6/65/67) conflict with the original baseline aggregate. Treat it as a working index until compared against the verbatim original list; do not silently replace the baseline statuses.
+- Do not invent descriptions from group headings or silently renumber/merge items. Track each verified feature with implementation path, test evidence, verification result, and backup/commit reference.
 - Workflow for every item: **Scope → Build → Test → Fix failures → Rerun → Verify → Save evidence**. A test failure remains unresolved until a confirming rerun passes.
