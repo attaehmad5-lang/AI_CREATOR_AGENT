@@ -907,7 +907,10 @@ class ConnectionManager:
         if model is not None:
             if not isinstance(model, str) or not model.strip() or len(model) > 200:
                 return {"status": "INVALID_MODEL", "provider": provider_id, "saved": False}
-            if any(term in model.casefold() for term in ("api_key=", "token=", "password=", "secret=")):
+            if any(
+                term in model.casefold()
+                for term in ("api_key=", "token=", "password=", "secret=", "bearer ")
+            ):
                 return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
             configuration["model"] = model.strip()
         if endpoint is not None:
