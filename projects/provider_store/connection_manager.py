@@ -366,9 +366,12 @@ class ConnectionManager:
                         and isinstance(connection_type, str)
                         and connection_type.upper() != "LOCAL"
                     ):
-                        if connection_type.upper() == "API" and not provider.get("allowed_hosts"):
+                        if (
+                            connection_type.upper() in {"API", "ACCOUNT_OR_API", "API_OR_ACCOUNT"}
+                            and not provider.get("allowed_hosts")
+                        ):
                             errors.append(
-                                f"providers[{index}].allowed_hosts is required for enabled API providers"
+                                f"providers[{index}].allowed_hosts is required for enabled API-capable providers"
                             )
                         if not provider.get("official_api_url"):
                             errors.append(
