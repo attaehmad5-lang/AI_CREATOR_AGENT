@@ -268,6 +268,35 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertEqual(confirmed["status"], "RECONCILED")
         self.assertEqual(confirmed["actual_spend"], 0.0)
 
+    def test_atomic_finalization_rejects_conflicting_replay_from_stale_instance(self):
+        self.policy.reserve_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=2.0, request_id="no-charge-stale-replay",
+        )
+        stale_policy = ProviderCostPolicy(
+            self.ledger, project_budgets={"documentary": 5.0}
+        )
+        first = self.policy.finalize_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=2.0, actual_cost=0.0,
+            request_id="no-charge-stale-replay", success=False,
+            charge_outcome="not_incurred",
+        )
+        replay = stale_policy.finalize_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=2.0, actual_cost=0.0,
+            request_id="no-charge-stale-replay", success=False,
+            charge_outcome="unknown",
+        )
+        self.assertEqual(first["status"], "NO_CHARGE_RECORDED")
+        self.assertEqual(replay["status"], "REQUEST_ID_CONFLICT")
+        persisted = ProviderCostPolicy(
+            self.ledger, project_budgets={"documentary": 5.0}
+        )
+        record = persisted.ledger["projects"]["documentary"]["requests"]["no-charge-stale-replay"]
+        self.assertEqual(record["charge_outcome"], "not_incurred")
+        self.assertEqual(persisted.ledger["projects"]["documentary"]["actual_spend"], 0.0)
+
     def test_reconciliation_rejects_reservation_provider_or_estimate_mismatch(self):
         self.policy.reserve_usage(
             project_id="documentary", provider_id="paid-a",
