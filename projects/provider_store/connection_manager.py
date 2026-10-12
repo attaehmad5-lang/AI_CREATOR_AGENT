@@ -63,6 +63,52 @@ class ConnectionManager:
             return MASTER_CATALOG
         return DEFAULT_CATALOG
 
+    @classmethod
+    def restore_catalog_from_master(
+        cls,
+        catalog_path: str | os.PathLike[str] | None = None,
+        master_path: str | os.PathLike[str] | None = None,
+    ) -> dict[str, Any]:
+        """Restore only a missing/invalid catalog from a separately validated master copy."""
+        target = Path(catalog_path) if catalog_path is not None else DEFAULT_CATALOG
+        master = Path(master_path) if master_path is not None else MASTER_CATALOG
+        if target.resolve() == master.resolve():
+            return {"status": "RECOVERY_TARGET_EQUALS_MASTER", "restored": False}
+        lock_path = target.with_name(target.name + ".lock")
+        with interprocess_file_lock(lock_path):
+            if target.exists():
+                try:
+                    current = cls._load_json(target)
+                    validation = cls.validate_catalog_schema(current)
+                except (OSError, ValueError, json.JSONDecodeError):
+                    validation = {"valid": False, "errors": ["target catalog is unreadable"]}
+                if validation.get("valid") is True:
+                    return {"status": "TARGET_CATALOG_VALID", "restored": False}
+            try:
+                backup = cls._load_json(master)
+                validation = cls.validate_catalog_schema(backup)
+            except (OSError, ValueError, json.JSONDecodeError):
+                return {"status": "MASTER_CATALOG_INVALID", "restored": False}
+            if validation.get("valid") is not True:
+                return {
+                    "status": "MASTER_CATALOG_INVALID",
+                    "restored": False,
+                    "errors": validation.get("errors", []),
+                }
+            try:
+                cls._atomic_write_json(target, backup)
+            except OSError as exc:
+                return {
+                    "status": "CATALOG_RECOVERY_WRITE_FAILED",
+                    "restored": False,
+                    "error_type": type(exc).__name__,
+                }
+            return {
+                "status": "RESTORED_FROM_MASTER",
+                "restored": True,
+                "provider_count": validation.get("provider_count", 0),
+            }
+
     @staticmethod
     def _load_json(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
         if not path.exists():
