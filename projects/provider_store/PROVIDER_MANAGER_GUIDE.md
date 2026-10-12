@@ -49,7 +49,7 @@ The GitHub Actions workflow compiles provider modules/tests, parses provider JSO
 
 ```bash
 python -m compileall -q projects/provider_store tests
-python -c "import json; from pathlib import Path; [json.loads(p.read_text(encoding='utf-8')) for p in Path('projects/provider_store').glob('*.json')]"
+python -c "import json; from pathlib import Path; [json.loads(p.read_text(encoding='utf-8')) for p in Path('projects/provider_store').rglob('*.json')]"
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
