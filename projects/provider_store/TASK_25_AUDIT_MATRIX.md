@@ -4,6 +4,10 @@
 
 This matrix preserves the canonical feature-ID ranges and group names. It is an evidence tracker, not a replacement for the user's exact 138-item checklist. A group is not complete merely because a supporting module or test exists; every original item still requires individual verification.
 
+## Catalog readiness snapshot
+
+The current v3 catalog contains **54 provider records: 2 enabled and 52 disabled**. Both enabled records have an explicit `official_api_url` and non-empty `capabilities` list. At the current audit snapshot, **52 disabled records lack `official_api_url` and 34 lack explicit capabilities**. The new schema gate prevents enabling a v3 record until both fields are present; metadata must be sourced from official provider documentation, not guessed. This is catalog metadata readiness only—not live connectivity, generation support, or credit verification.
+
 ## Latest confirmed verification
 
 GitHub Actions run [#38280619566](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280619566) completed successfully with Python 3.13: **292 tests passed, 0 failures**. Compilation and provider JSON catalog validation also passed. The run's job result is green; the workflow log confirms 292 tests. Ubuntu/Windows parity must be claimed only when that exact run contains both platform jobs.
