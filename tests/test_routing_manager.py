@@ -62,6 +62,28 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "primary")
 
+    def test_primary_only_strategy_never_selects_fallback_after_primary_rejected(self):
+        router = ProviderRoutingManager(self.connections)
+        result = router.route(
+            category="image",
+            project_id="film",
+            strategy="PRIMARY_ONLY",
+            estimated_costs={"primary": 1.0, "fallback": 0.0},
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["strategy"], "PRIMARY_ONLY")
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertFalse(any(item.get("provider") == "fallback" for item in result["decisions"]))
+
+        fallback = router.select_fallback(
+            failed_provider="primary",
+            category="image",
+            project_id="film",
+            strategy="PRIMARY_ONLY",
+        )
+        self.assertFalse(fallback["allowed"])
+        self.assertEqual(fallback["status"], "PRIMARY_ONLY_FALLBACK_DISABLED")
+
     def test_primary_route_skips_disabled_and_orders_by_priority(self):
         router = ProviderRoutingManager(self.connections)
         result = router.route(category="image", project_id="film")
