@@ -251,6 +251,18 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 "allowed_hosts": ["api.example.com"],
                 "configuration": {"endpoint": "https://evil.example.com/health"},
             })
+        with self.assertRaises(ValueError):
+            probe({
+                "id": "p",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        with self.assertRaises(ValueError):
+            probe({
+                "id": "p", "auth_type": None,
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
         self.assertEqual(opener.calls, [])
 
     def test_authentication_failure_is_generic_and_does_not_leak_response(self):

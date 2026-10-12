@@ -696,7 +696,9 @@ class ProviderService:
             return {"status": "RESERVATION_MANAGERS_UNAVAILABLE", "released": False}
         if self.cost_policy is not None:
             release = getattr(self.cost_policy, "release_reservation", None)
-            if callable(release):
+            if not callable(release):
+                results["cost"] = {"status": "COST_RELEASE_MANAGER_UNAVAILABLE", "released": False}
+            else:
                 try:
                     results["cost"] = release(
                         project_id=project_id,
@@ -705,23 +707,34 @@ class ProviderService:
                         charge_outcome="not_incurred",
                     )
                 except Exception as exc:
-                    results["cost"] = {"status": "COST_RELEASE_FAILED", "error_type": type(exc).__name__}
+                    results["cost"] = {"status": "COST_RELEASE_FAILED", "released": False, "error_type": type(exc).__name__}
         if self.quota_manager is not None:
             release = getattr(self.quota_manager, "release", None)
-            if callable(release):
+            if not callable(release):
+                results["quota"] = {"status": "QUOTA_RELEASE_MANAGER_UNAVAILABLE", "released": False}
+            else:
                 try:
                     results["quota"] = release(request_id=request_id, provider_id=provider_id)
                 except Exception as exc:
-                    results["quota"] = {"status": "QUOTA_RELEASE_FAILED", "error_type": type(exc).__name__}
+                    results["quota"] = {"status": "QUOTA_RELEASE_FAILED", "released": False, "error_type": type(exc).__name__}
         if self.credit_manager is not None:
             release = getattr(self.credit_manager, "release", None)
-            if callable(release):
+            if not callable(release):
+                results["credits"] = {"status": "CREDIT_RELEASE_MANAGER_UNAVAILABLE", "released": False}
+            else:
                 try:
                     results["credits"] = release(request_id=request_id, provider_id=provider_id)
                 except Exception as exc:
-                    results["credits"] = {"status": "CREDIT_RELEASE_FAILED", "error_type": type(exc).__name__}
-        released = all(
-            item.get("status") in {"RESERVATION_RELEASED", "RELEASED", "RESERVATION_NOT_FOUND"}
+                    results["credits"] = {"status": "CREDIT_RELEASE_FAILED", "released": False, "error_type": type(exc).__name__}
+        releasable_statuses = {"RESERVATION_RELEASED", "RELEASED", "RESERVATION_NOT_FOUND"}
+        released = bool(results) and all(
+            isinstance(item, dict)
+            and item.get("status") in releasable_statuses
+            and (
+                item.get("status") == "RESERVATION_NOT_FOUND"
+                or item.get("released") is True
+                or item.get("saved") is True
+            )
             for item in results.values()
         )
         return {"status": "RELEASED" if released else "RELEASE_PARTIAL", "released": released, **results}

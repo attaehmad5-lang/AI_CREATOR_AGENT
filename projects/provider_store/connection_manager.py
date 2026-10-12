@@ -31,6 +31,9 @@ class ProviderAuthenticationVerificationRequired(PermissionError):
 
 
 class ConnectionManager:
+    CONFIGURATION_FIELDS = frozenset({
+        "model", "endpoint", "probe_endpoint", "authentication_required",
+    })
     VALID_STATES = {
         "LOCKED",
         "CONNECTING",
@@ -199,6 +202,25 @@ class ConnectionManager:
                 yield
 
     @staticmethod
+    def _is_safe_reference_value(key: str, value: Any) -> bool:
+        """Validate secret references so secret-like field names cannot hide raw values."""
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value) > 256
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        ):
+            return False
+        if key in {"token_env", "token_expiry_env", "api_key_env", "credential_env"}:
+            return bool(re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", value))
+        if key == "secret_ref":
+            return bool(re.fullmatch(
+                r"(?:env://[A-Z][A-Z0-9_]{0,79}|vault://[A-Za-z0-9._/-]{1,220}|keyring://[A-Za-z0-9._/-]{1,220})",
+                value,
+            )) and not any(part == ".." for part in value.split("/"))
+        return False
+
+    @staticmethod
     def _contains_credential_value_field(value: Any) -> bool:
         """Detect secret-bearing keys recursively while allowing environment references."""
         safe_reference_keys = {"token_env", "token_expiry_env", "api_key_env", "secret_ref", "credential_env"}
@@ -211,6 +233,8 @@ class ConnectionManager:
             for key, item in value.items():
                 normalized = str(key).casefold().replace("-", "_")
                 if normalized in safe_reference_keys:
+                    if not ConnectionManager._is_safe_reference_value(normalized, item):
+                        return True
                     continue
                 if normalized in forbidden_keys or any(
                     marker in normalized
@@ -224,7 +248,7 @@ class ConnectionManager:
                     return True
                 if ConnectionManager._contains_credential_value_field(item):
                     return True
-        elif isinstance(value, list):
+        elif isinstance(value, (list, tuple)):
             return any(ConnectionManager._contains_credential_value_field(item) for item in value)
         return False
 
@@ -289,6 +313,10 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].connection_type is unsupported")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
+                    if "deprecated" in provider and not isinstance(provider["deprecated"], bool):
+                        errors.append(f"providers[{index}].deprecated must be boolean")
+                    if provider.get("deprecated") is True and provider.get("enabled") is True:
+                        errors.append(f"providers[{index}] is deprecated and cannot be enabled")
                     if "allowed_hosts" in provider:
                         hosts = provider["allowed_hosts"]
                         if not isinstance(hosts, list) or not hosts or len(hosts) > 100:
@@ -336,12 +364,24 @@ class ConnectionManager:
                         catalog_major_version >= 3
                         and provider.get("enabled") is True
                         and isinstance(connection_type, str)
-                        and connection_type.upper() == "API"
-                        and not provider.get("allowed_hosts")
+                        and connection_type.upper() != "LOCAL"
                     ):
-                        errors.append(
-                            f"providers[{index}].allowed_hosts is required for enabled API providers"
-                        )
+                        if (
+                            connection_type.upper() in {"API", "ACCOUNT_OR_API", "API_OR_ACCOUNT"}
+                            and not provider.get("allowed_hosts")
+                        ):
+                            errors.append(
+                                f"providers[{index}].allowed_hosts is required for enabled API-capable providers"
+                            )
+                        if not provider.get("official_api_url"):
+                            errors.append(
+                                f"providers[{index}].official_api_url is required for enabled non-local providers"
+                            )
+                        capabilities = provider.get("capabilities")
+                        if not isinstance(capabilities, list) or not capabilities:
+                            errors.append(
+                                f"providers[{index}].capabilities must be non-empty for enabled non-local providers"
+                            )
                     for url_field in ("official_api_url", "subscription_url"):
                         if url_field in provider:
                             raw_url = provider[url_field]
@@ -360,6 +400,8 @@ class ConnectionManager:
                                 or not parsed_url.hostname
                                 or parsed_url.username is not None
                                 or parsed_url.password is not None
+                                or parsed_url.query
+                                or parsed_url.fragment
                             ):
                                 errors.append(
                                     f"providers[{index}].{url_field} must be a safe HTTPS URL without embedded credentials"
@@ -396,17 +438,12 @@ class ConnectionManager:
                             errors.append(
                                 f"providers[{index}].{reference_key} must be a valid environment-variable name"
                             )
-                    if "secret_ref" in provider and (
-                        not isinstance(provider["secret_ref"], str)
-                        or not provider["secret_ref"].strip()
-                        or len(provider["secret_ref"]) > 256
-                        or any(ord(char) < 32 for char in provider["secret_ref"])
-                        or any(
-                            marker in provider["secret_ref"].casefold()
-                            for marker in ("token=", "api_key=", "password=", "secret=", "bearer ")
-                        )
+                    if "secret_ref" in provider and not ConnectionManager._is_safe_reference_value(
+                        "secret_ref", provider["secret_ref"]
                     ):
-                        errors.append(f"providers[{index}].secret_ref must be a safe non-empty reference")
+                        errors.append(
+                            f"providers[{index}].secret_ref must use env://, vault://, or keyring:// reference syntax"
+                        )
                     if "capabilities" in provider:
                         capabilities = provider["capabilities"]
                         if (
@@ -486,10 +523,25 @@ class ConnectionManager:
             index = next((i for i, item in enumerate(providers) if item.get("id") == provider_id), None)
             if index is None:
                 return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+            if enabled and providers[index].get("deprecated") is True:
+                return {
+                    "status": "PROVIDER_DEPRECATED",
+                    "provider": provider_id,
+                    "enabled": False,
+                    "saved": False,
+                }
             updated = [dict(item) for item in providers]
             updated[index]["enabled"] = enabled
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation["valid"]:
+                return {
+                    "status": "INVALID_PROVIDER_METADATA",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation["errors"],
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
         if not enabled and provider_id in self._loaded_providers:
@@ -702,6 +754,14 @@ class ConnectionManager:
             updated.append(safe_provider)
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation["valid"]:
+                return {
+                    "status": "INVALID_PROVIDER_METADATA",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation["errors"],
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
             return {
@@ -726,7 +786,8 @@ class ConnectionManager:
             for key, item in value.items():
                 normalized = str(key).casefold().replace("-", "_")
                 if normalized in safe_reference_keys:
-                    safe[key] = item
+                    if ConnectionManager._is_safe_reference_value(normalized, item):
+                        safe[key] = item
                 elif normalized == "token" or any(part in normalized for part in secret_fragments):
                     continue
                 else:
@@ -959,8 +1020,50 @@ class ConnectionManager:
             state = self.state["providers"].get(provider_id, {})
             record = dict(state) if isinstance(state, dict) else {}
             current = record.get("configuration", {})
-            merged = dict(current) if isinstance(current, dict) else {}
+            if not isinstance(current, dict):
+                return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "saved": False}
+            if self._contains_credential_value_field(current):
+                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
+            if any(
+                not isinstance(key, str) or key not in self.CONFIGURATION_FIELDS
+                for key in current
+            ):
+                return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "saved": False}
+            merged = dict(current)
             merged.update(configuration)
+            if self._contains_credential_value_field(merged):
+                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
+            existing_authentication_policy = merged.get("authentication_required")
+            if existing_authentication_policy is not None and not isinstance(existing_authentication_policy, bool):
+                return {"status": "INVALID_AUTHENTICATION_POLICY", "provider": provider_id, "saved": False}
+            existing_model = merged.get("model")
+            if existing_model is not None and (
+                not isinstance(existing_model, str) or not existing_model.strip() or len(existing_model) > 200
+            ):
+                return {"status": "INVALID_MODEL", "provider": provider_id, "saved": False}
+            if isinstance(existing_model, str) and any(
+                marker in existing_model.casefold()
+                for marker in ("api_key=", "token=", "password=", "secret=", "bearer ")
+            ):
+                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
+            allowed_hosts_raw = provider.get("allowed_hosts")
+            allowed_hosts = (
+                {item for item in allowed_hosts_raw if isinstance(item, str) and item.strip()}
+                if isinstance(allowed_hosts_raw, list) else None
+            )
+            for endpoint_key in ("endpoint", "probe_endpoint"):
+                existing_endpoint = merged.get(endpoint_key)
+                if existing_endpoint is None:
+                    continue
+                if not allowed_hosts:
+                    return {"status": "HOST_ALLOWLIST_REQUIRED", "provider": provider_id, "saved": False}
+                endpoint_validation = self.validate_endpoint(existing_endpoint, allowed_hosts=allowed_hosts)
+                if not endpoint_validation["valid"]:
+                    return {
+                        "status": endpoint_validation["status"],
+                        "provider": provider_id,
+                        "saved": False,
+                    }
             record["configuration"] = merged
             record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
             self.state["providers"][provider_id] = record
@@ -984,6 +1087,11 @@ class ConnectionManager:
                 return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
             if self._contains_credential_value_field(raw):
                 return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
+            if any(
+                not isinstance(key, str) or key not in self.CONFIGURATION_FIELDS
+                for key in raw
+            ):
+                return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
             configuration = self._sanitize_public_data(raw)
         if self._contains_credential_value_field(configuration):
             return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}

@@ -152,7 +152,7 @@ class ProviderHTTPConnectivityProbe:
             str(provider.get("id", "")).casefold(), {}
         ).items():
             headers[name] = value
-        raw_auth_type = provider.get("auth_type", "NONE")
+        raw_auth_type = provider.get("auth_type")
         if not isinstance(raw_auth_type, str) or not raw_auth_type.strip():
             raise ValueError("INVALID_AUTH_TYPE")
         auth_type = raw_auth_type.strip().upper()

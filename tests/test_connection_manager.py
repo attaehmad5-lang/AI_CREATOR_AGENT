@@ -171,15 +171,58 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(valid["valid"], valid["errors"])
 
     def test_catalog_schema_rejects_literal_secret_in_secret_reference(self):
-        result = ConnectionManager.validate_catalog_schema({
-            "providers": [{"id": "provider", "secret_ref": "token=private-value"}]
-        })
-        self.assertFalse(result["valid"])
-        self.assertTrue(any("secret_ref must be a safe" in error for error in result["errors"]))
+        for secret_ref in ("token=private-value", "sk_12345678901234567890", "raw-secret-value"):
+            with self.subTest(secret_ref=secret_ref):
+                result = ConnectionManager.validate_catalog_schema({
+                    "providers": [{"id": "provider", "secret_ref": secret_ref}]
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("secret_ref must use" in error for error in result["errors"]))
         valid = ConnectionManager.validate_catalog_schema({
             "providers": [{"id": "provider", "secret_ref": "vault://provider/access-token"}]
         })
         self.assertTrue(valid["valid"], valid["errors"])
+        sanitized = ConnectionManager._sanitize_public_data({
+            "secret_ref": "sk_12345678901234567890",
+            "token_env": "not a valid env reference",
+            "credential_env": "AI_PROVIDER_TOKEN",
+        })
+        self.assertEqual(sanitized, {"credential_env": "AI_PROVIDER_TOKEN"})
+
+    def test_registration_rejects_secret_values_disguised_as_references(self):
+        base = {
+            "name": "Provider", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API",
+        }
+        for key, value in (("secret_ref", "sk_12345678901234567890"), ("token_env", "hf_secret_token_value")):
+            with self.subTest(key=key):
+                result = self.manager.register_provider({"id": f"bad_{key}", **base, key: value})
+                self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
+
+    def test_catalog_documentation_urls_reject_query_and_fragment_data(self):
+        for url in (
+            "https://docs.example.com/api?api_key=private-value",
+            "https://docs.example.com/api#access-token",
+        ):
+            with self.subTest(url=url):
+                result = ConnectionManager.validate_catalog_schema({
+                    "providers": [{"id": "provider", "official_api_url": url}]
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("official_api_url must be a safe HTTPS URL" in error for error in result["errors"]))
+
+    def test_catalog_schema_rejects_invalid_deprecation_flag_and_enabled_deprecated_provider(self):
+        invalid_flag = ConnectionManager.validate_catalog_schema({
+            "providers": [{"id": "provider", "deprecated": "true"}]
+        })
+        self.assertFalse(invalid_flag["valid"])
+        self.assertTrue(any("deprecated must be boolean" in error for error in invalid_flag["errors"]))
+
+        invalid_enabled = ConnectionManager.validate_catalog_schema({
+            "providers": [{"id": "provider", "deprecated": True, "enabled": True}]
+        })
+        self.assertFalse(invalid_enabled["valid"])
+        self.assertTrue(any("deprecated and cannot be enabled" in error for error in invalid_enabled["errors"]))
 
     def test_catalog_schema_requires_boolean_subscription_flag(self):
         result = ConnectionManager.validate_catalog_schema({
@@ -194,6 +237,46 @@ class ConnectionManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid provider catalog"):
             ConnectionManager(bad_catalog, self.state_path)
 
+    def test_v3_enabled_api_provider_requires_docs_and_capabilities(self):
+        catalog = {
+            "version": "3.0",
+            "providers": [{
+                "id": "incomplete", "name": "Incomplete", "category": "image",
+                "auth_type": "API_KEY", "connection_type": "API",
+                "enabled": True, "subscription_required": True,
+                "allowed_hosts": ["api.example.com"],
+            }],
+        }
+        result = ConnectionManager.validate_catalog_schema(catalog)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("official_api_url is required" in error for error in result["errors"]))
+        self.assertTrue(any("capabilities must be non-empty" in error for error in result["errors"]))
+
+        manual = ConnectionManager.validate_catalog_schema({
+            "version": "3.0",
+            "providers": [{
+                "id": "manual", "name": "Manual", "category": "video",
+                "auth_type": "ACCOUNT", "connection_type": "MANUAL_CONNECT",
+                "enabled": True, "subscription_required": True,
+            }],
+        })
+        self.assertFalse(manual["valid"])
+        self.assertTrue(any("official_api_url is required" in error for error in manual["errors"]))
+        self.assertTrue(any("capabilities must be non-empty" in error for error in manual["errors"]))
+
+        hybrid = ConnectionManager.validate_catalog_schema({
+            "version": "3.0",
+            "providers": [{
+                "id": "hybrid", "name": "Hybrid", "category": "image",
+                "auth_type": "ACCOUNT_OR_API", "connection_type": "API_OR_ACCOUNT",
+                "enabled": True, "subscription_required": True,
+                "official_api_url": "https://docs.example.com/api",
+                "capabilities": ["image_generation"],
+            }],
+        })
+        self.assertFalse(hybrid["valid"])
+        self.assertTrue(any("allowed_hosts is required" in error for error in hybrid["errors"]))
+
     def test_production_catalog_api_allowlists_are_explicit_and_valid(self):
         catalog_path = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
@@ -207,6 +290,11 @@ class ConnectionManagerTests(unittest.TestCase):
             {provider["id"] for provider in catalog["providers"]},
             {provider["id"] for provider in master["providers"]},
         )
+        self.assertEqual(catalog, master)
+        sora = next(provider for provider in catalog["providers"] if provider["id"] == "openai_sora")
+        self.assertTrue(sora["deprecated"])
+        self.assertFalse(sora["enabled"])
+        self.assertEqual(sora["status"], "DEPRECATED")
         providers = catalog["providers"]
         allowlisted = [provider for provider in providers if "allowed_hosts" in provider]
         self.assertGreaterEqual(len(allowlisted), 25)
@@ -358,6 +446,8 @@ class ConnectionManagerTests(unittest.TestCase):
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
                 "subscription_required": False,
                 "allowed_hosts": ["api.example.com"],
+                "official_api_url": "https://docs.example.com/api",
+                "capabilities": ["image_generation"],
             }],
         }
         master_path.write_text(json.dumps(master), encoding="utf-8")
@@ -376,6 +466,8 @@ class ConnectionManagerTests(unittest.TestCase):
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
                 "subscription_required": False,
                 "allowed_hosts": ["keep.example.com"],
+                "official_api_url": "https://docs.keep.example.com/api",
+                "capabilities": ["image_generation"],
             }],
         }
         self.catalog_path.write_text(json.dumps(valid_target), encoding="utf-8")
@@ -417,6 +509,35 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "INVALID_AUTHENTICATION_POLICY")
         self.assertFalse(result["saved"])
+
+    def test_configure_provider_does_not_echo_or_merge_existing_secret_fields(self):
+        self.manager.state["providers"]["public_image"] = {
+            "status": "READY",
+            "verified": False,
+            "configuration": {"api_key": "never-echo-this-secret"},
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+
+        result = self.manager.configure_provider("public_image", model="safe-model")
+
+        self.assertEqual(result["status"], "SENSITIVE_CONFIGURATION_REJECTED")
+        self.assertFalse(result["saved"])
+        self.assertNotIn("never-echo-this-secret", repr(result))
+        public_config = self.manager.get_provider_configuration("public_image")
+        self.assertEqual(public_config["status"], "SENSITIVE_CONFIGURATION_REJECTED")
+        self.assertEqual(public_config["configuration"], {})
+
+        self.manager.state["providers"]["public_image"]["configuration"] = {
+            "unrecognized_field": "unexpected value",
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+        invalid = self.manager.configure_provider("public_image", model="safe-model")
+        self.assertEqual(invalid["status"], "INVALID_CONFIGURATION")
+        self.assertFalse(invalid["saved"])
+        self.assertEqual(
+            self.manager.get_provider_configuration("public_image")["status"],
+            "INVALID_CONFIGURATION",
+        )
 
     def test_configured_endpoint_and_model_are_passed_to_probe(self):
         self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
@@ -714,6 +835,24 @@ class ConnectionManagerTests(unittest.TestCase):
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertEqual(reloaded.get_provider("local_image")["name"], "Local Image")
 
+    def test_register_provider_rejects_invalid_schema_before_persisting(self):
+        base = {
+            "name": "Invalid Provider", "category": "image",
+            "connection_type": "API", "enabled": True,
+            "allowed_hosts": ["api.example.com"],
+        }
+        invalid_auth = self.manager.register_provider({
+            "id": "invalid_auth", **base, "auth_type": "MAGIC_AUTH",
+        })
+        self.assertEqual(invalid_auth["status"], "INVALID_PROVIDER_METADATA")
+        self.assertFalse(self.manager.provider_exists("invalid_auth"))
+
+        invalid_flag = self.manager.register_provider({
+            "id": "invalid_flag", **base, "auth_type": "NONE", "enabled": "true",
+        })
+        self.assertEqual(invalid_flag["status"], "INVALID_PROVIDER_METADATA")
+        self.assertFalse(self.manager.provider_exists("invalid_flag"))
+
     def test_register_provider_rejects_duplicate_without_overwrite(self):
         provider = {
             "id": "token_image", "name": "Replacement", "category": "image",
@@ -763,6 +902,14 @@ class ConnectionManagerTests(unittest.TestCase):
         nested_result = self.manager.register_provider(nested)
         self.assertEqual(nested_result["status"], "SENSITIVE_METADATA_REJECTED")
         self.assertFalse(self.manager.provider_exists("unsafe_nested"))
+        nested_tuple = {
+            "id": "unsafe_tuple", "name": "Unsafe", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API",
+            "metadata": ("safe", {"api_key": "never-store-this"}),
+        }
+        tuple_result = self.manager.register_provider(nested_tuple)
+        self.assertEqual(tuple_result["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertFalse(self.manager.provider_exists("unsafe_tuple"))
 
     def test_register_provider_rejects_invalid_id(self):
         provider = {
@@ -935,6 +1082,14 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "DISABLED")
         self.assertTrue(instance.closed)
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_deprecated_provider_cannot_be_reenabled(self):
+        self.manager.catalog["providers"][0]["deprecated"] = True
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        result = self.manager.set_provider_enabled("public_image", True)
+        self.assertEqual(result["status"], "PROVIDER_DEPRECATED")
+        self.assertFalse(result["saved"])
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
 
     def test_enabled_flag_rejects_non_boolean_and_unknown_provider(self):
         self.assertEqual(

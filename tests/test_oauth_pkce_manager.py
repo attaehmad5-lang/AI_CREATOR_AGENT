@@ -229,6 +229,7 @@ class ProviderOAuthPKCEManagerTests(unittest.TestCase):
             self.begin(authorization_url="http://login.example.com/oauth/authorize"),
             self.begin(token_url="https://evil.example.com/token"),
             self.begin(redirect_uri="https://user:pass@app.example.com/callback"),
+            self.begin(redirect_uri="https://app.example.com:0/callback"),
             self.begin(redirect_uri="https://app.example.com/callback?token=secret"),
             self.begin(client_id_env="bad-name"),
         ):

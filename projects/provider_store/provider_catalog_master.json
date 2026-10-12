@@ -55,7 +55,12 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "official_api_url": "https://developers.openai.com/api/docs/guides/images-vision",
+      "capabilities": [
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "google_image",
@@ -72,7 +77,12 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://ai.google.dev/gemini-api/docs/image-generation",
+      "capabilities": [
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "recraft",
@@ -86,7 +96,14 @@
       "allowed_hosts": [
         "external-api.recraft.ai"
       ],
-      "token_env": "RECRAFT_API_KEY"
+      "token_env": "RECRAFT_API_KEY",
+      "official_api_url": "https://www.recraft.ai/api",
+      "capabilities": [
+        "image_generation",
+        "image_editing",
+        "vector_generation",
+        "background_removal"
+      ]
     },
     {
       "id": "ideogram",
@@ -102,7 +119,12 @@
       ],
       "token_env": "IDEOGRAM_API_KEY",
       "auth_header_name": "Api-Key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://developer.ideogram.ai/ideogram-api/api-overview",
+      "capabilities": [
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "black_forest_labs",
@@ -118,7 +140,12 @@
       ],
       "token_env": "BFL_API_KEY",
       "auth_header_name": "x-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://docs.bfl.ml/",
+      "capabilities": [
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "stability_ai",
@@ -132,7 +159,12 @@
       "allowed_hosts": [
         "api.stability.ai"
       ],
-      "token_env": "STABILITY_API_KEY"
+      "token_env": "STABILITY_API_KEY",
+      "official_api_url": "https://platform.stability.ai/docs/getting-started/stable-image",
+      "capabilities": [
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "replicate",
@@ -146,7 +178,11 @@
       "allowed_hosts": [
         "api.replicate.com"
       ],
-      "token_env": "REPLICATE_API_TOKEN"
+      "token_env": "REPLICATE_API_TOKEN",
+      "official_api_url": "https://replicate.com/docs/reference/http",
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "fal_ai",
@@ -163,7 +199,12 @@
       ],
       "token_env": "FAL_KEY",
       "auth_header_name": "Authorization",
-      "auth_scheme": "Key"
+      "auth_scheme": "Key",
+      "official_api_url": "https://fal.ai/docs/model-api-reference/image-generation-api/overview",
+      "capabilities": [
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "elevenlabs",
@@ -175,13 +216,17 @@
       "subscription_required": true,
       "enabled": false,
       "subscription_url": "https://elevenlabs.io",
-      "official_api_url": "https://elevenlabs.io/docs/api-reference",
+      "official_api_url": "https://elevenlabs.io/docs/overview/capabilities/text-to-speech",
       "allowed_hosts": [
         "api.elevenlabs.io"
       ],
       "token_env": "ELEVENLABS_API_KEY",
       "auth_header_name": "xi-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "capabilities": [
+        "text_to_speech",
+        "voice_cloning"
+      ]
     },
     {
       "id": "openai_voice",
@@ -195,7 +240,11 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "official_api_url": "https://developers.openai.com/api/reference/cli/resources/audio",
+      "capabilities": [
+        "text_to_speech"
+      ]
     },
     {
       "id": "google_speech",
@@ -212,7 +261,11 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://docs.cloud.google.com/text-to-speech/docs",
+      "capabilities": [
+        "text_to_speech"
+      ]
     },
     {
       "id": "cartesia",
@@ -228,7 +281,12 @@
       ],
       "token_env": "CARTESIA_API_KEY",
       "auth_header_name": "Cartesia-API-Key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://docs.cartesia.ai/",
+      "capabilities": [
+        "text_to_speech",
+        "speech_to_text"
+      ]
     },
     {
       "id": "playht",
@@ -242,7 +300,12 @@
       "allowed_hosts": [
         "api.play.ht"
       ],
-      "token_env": "PLAYHT_API_KEY"
+      "token_env": "PLAYHT_API_KEY",
+      "official_api_url": "https://docs.play.ht/reference/api-getting-started",
+      "capabilities": [
+        "text_to_speech",
+        "voice_cloning"
+      ]
     },
     {
       "id": "deepgram",
@@ -258,7 +321,12 @@
       ],
       "token_env": "DEEPGRAM_API_KEY",
       "auth_header_name": "Authorization",
-      "auth_scheme": "Token"
+      "auth_scheme": "Token",
+      "official_api_url": "https://developers.deepgram.com/",
+      "capabilities": [
+        "speech_to_text",
+        "text_to_speech"
+      ]
     },
     {
       "id": "suno",
@@ -295,7 +363,12 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://ai.google.dev/gemini-api/docs/music-generation",
+      "capabilities": [
+        "music_generation",
+        "audio_generation"
+      ]
     },
     {
       "id": "stability_audio",
@@ -309,7 +382,13 @@
       "allowed_hosts": [
         "api.stability.ai"
       ],
-      "token_env": "STABILITY_API_KEY"
+      "token_env": "STABILITY_API_KEY",
+      "official_api_url": "https://platform.stability.ai/docs/api-reference",
+      "capabilities": [
+        "music_generation",
+        "sound_effect_generation",
+        "audio_to_audio"
+      ]
     },
     {
       "id": "google_veo",
@@ -326,13 +405,19 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://ai.google.dev/gemini-api/docs/veo",
+      "capabilities": [
+        "video_generation",
+        "image_to_video",
+        "video_extension"
+      ]
     },
     {
       "id": "openai_sora",
       "name": "OpenAI Sora",
       "category": "video",
-      "status": "LOCKED",
+      "status": "DEPRECATED",
       "auth_type": "API_KEY",
       "connection_type": "API",
       "subscription_required": true,
@@ -340,7 +425,12 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "official_api_url": "https://developers.openai.com/api/docs/deprecations",
+      "capabilities": [
+        "video_generation"
+      ],
+      "deprecated": true
     },
     {
       "id": "runway",
@@ -354,7 +444,13 @@
       "allowed_hosts": [
         "api.dev.runwayml.com"
       ],
-      "token_env": "RUNWAY_API_KEY"
+      "token_env": "RUNWAY_API_KEY",
+      "official_api_url": "https://docs.dev.runwayml.com/api/",
+      "capabilities": [
+        "video_generation",
+        "image_generation",
+        "image_upscaling"
+      ]
     },
     {
       "id": "kling",
@@ -368,7 +464,12 @@
       "allowed_hosts": [
         "api.klingai.com"
       ],
-      "token_env": "KLING_API_KEY"
+      "token_env": "KLING_API_KEY",
+      "official_api_url": "https://kling.ai/document-api/guides/get-started/quick-start",
+      "capabilities": [
+        "video_generation",
+        "image_to_video"
+      ]
     },
     {
       "id": "luma",
@@ -382,7 +483,14 @@
       "allowed_hosts": [
         "api.lumalabs.ai"
       ],
-      "token_env": "LUMA_API_KEY"
+      "token_env": "LUMA_API_KEY",
+      "official_api_url": "https://docs.agents.lumalabs.ai/",
+      "capabilities": [
+        "video_generation",
+        "image_to_video",
+        "image_generation",
+        "image_editing"
+      ]
     },
     {
       "id": "pika",
@@ -392,7 +500,12 @@
       "auth_type": "ACCOUNT",
       "connection_type": "MANUAL_CONNECT",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "official_api_url": "https://dev.pika.art/",
+      "capabilities": [
+        "video_generation",
+        "image_to_video"
+      ]
     },
     {
       "id": "minimax_hailuo",
@@ -420,7 +533,13 @@
       "allowed_hosts": [
         "api.heygen.com"
       ],
-      "token_env": "HEYGEN_API_KEY"
+      "token_env": "HEYGEN_API_KEY",
+      "official_api_url": "https://docs.heygen.com/reference/introduction",
+      "capabilities": [
+        "avatar_video_generation",
+        "text_to_speech",
+        "lipsync"
+      ]
     },
     {
       "id": "synthesia",
@@ -434,7 +553,13 @@
       "allowed_hosts": [
         "api.synthesia.io"
       ],
-      "token_env": "SYNTHESIA_API_KEY"
+      "token_env": "SYNTHESIA_API_KEY",
+      "official_api_url": "https://docs.synthesia.io/reference/introduction",
+      "capabilities": [
+        "avatar_video_generation",
+        "lipsync",
+        "video_translation"
+      ]
     },
     {
       "id": "sync_labs",
@@ -448,7 +573,12 @@
       "allowed_hosts": [
         "api.sync.so"
       ],
-      "token_env": "SYNC_LABS_API_KEY"
+      "token_env": "SYNC_LABS_API_KEY",
+      "official_api_url": "https://sync.so/docs/introduction",
+      "capabilities": [
+        "lipsync",
+        "video_dubbing"
+      ]
     },
     {
       "id": "hedra",
@@ -476,7 +606,11 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "official_api_url": "https://developers.openai.com/api/reference/cli/resources/audio",
+      "capabilities": [
+        "speech_to_text"
+      ]
     },
     {
       "id": "assemblyai",
@@ -492,7 +626,12 @@
       ],
       "token_env": "ASSEMBLYAI_API_KEY",
       "auth_header_name": "Authorization",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://www.assemblyai.com/docs/",
+      "capabilities": [
+        "speech_to_text",
+        "audio_intelligence"
+      ]
     },
     {
       "id": "topaz",
@@ -502,7 +641,13 @@
       "auth_type": "ACCOUNT",
       "connection_type": "MANUAL_CONNECT",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "official_api_url": "https://developer.topazlabs.com/",
+      "capabilities": [
+        "image_upscaling",
+        "video_upscaling",
+        "image_denoising"
+      ]
     },
     {
       "id": "magnific",
@@ -516,7 +661,14 @@
       "allowed_hosts": [
         "api.magnific.ai"
       ],
-      "token_env": "MAGNIFIC_API_KEY"
+      "token_env": "MAGNIFIC_API_KEY",
+      "official_api_url": "https://www.magnific.com/ai/docs/magnific-api",
+      "capabilities": [
+        "image_generation",
+        "image_editing",
+        "image_upscaling",
+        "video_generation"
+      ]
     },
     {
       "id": "adobe_firefly",
@@ -530,7 +682,13 @@
       "allowed_hosts": [
         "firefly-api.adobe.io"
       ],
-      "token_env": "ADOBE_FIREFLY_API_KEY"
+      "token_env": "ADOBE_FIREFLY_API_KEY",
+      "official_api_url": "https://developer.adobe.com/firefly-services/docs/firefly-api/",
+      "capabilities": [
+        "image_generation",
+        "image_editing",
+        "generative_fill"
+      ]
     },
     {
       "id": "openai_script",
@@ -542,16 +700,14 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "story_generation",
-        "screenplay",
-        "scene_breakdown",
-        "character_development",
-        "dialogue_writing"
+        "text_generation",
+        "scriptwriting"
       ],
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "official_api_url": "https://developers.openai.com/api/docs/guides/text"
     },
     {
       "id": "google_gemini_script",
@@ -563,11 +719,8 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "story_generation",
-        "screenplay",
-        "character_development",
-        "dialogue_writing",
-        "storyboard_planning"
+        "text_generation",
+        "scriptwriting"
       ],
       "allowed_hosts": [
         "generativelanguage.googleapis.com",
@@ -575,7 +728,8 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://ai.google.dev/gemini-api/docs/text-generation"
     },
     {
       "id": "anthropic_claude_script",
@@ -587,18 +741,16 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "story_generation",
-        "screenplay",
-        "scene_breakdown",
-        "character_development",
-        "dialogue_writing"
+        "text_generation",
+        "scriptwriting"
       ],
       "allowed_hosts": [
         "api.anthropic.com"
       ],
       "token_env": "ANTHROPIC_API_KEY",
       "auth_header_name": "x-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://docs.anthropic.com/en/docs/welcome"
     },
     {
       "id": "adobe_firefly_advanced",
@@ -610,18 +762,15 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "inpainting",
-        "outpainting",
-        "object_removal",
-        "background_removal",
-        "background_replacement",
-        "relighting",
-        "image_restoration"
+        "image_generation",
+        "image_editing",
+        "generative_fill"
       ],
       "allowed_hosts": [
         "firefly-api.adobe.io"
       ],
-      "token_env": "ADOBE_FIREFLY_API_KEY"
+      "token_env": "ADOBE_FIREFLY_API_KEY",
+      "official_api_url": "https://developer.adobe.com/firefly-services/docs/firefly-api/"
     },
     {
       "id": "replicate_image_editing",
@@ -633,16 +782,15 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
+        "image_editing",
         "inpainting",
-        "outpainting",
-        "object_removal",
-        "background_removal",
-        "image_restoration"
+        "outpainting"
       ],
       "allowed_hosts": [
         "api.replicate.com"
       ],
-      "token_env": "REPLICATE_API_TOKEN"
+      "token_env": "REPLICATE_API_TOKEN",
+      "official_api_url": "https://replicate.com/docs/reference/http"
     },
     {
       "id": "runway_image_editing",
@@ -654,15 +802,14 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "object_removal",
-        "background_replacement",
         "image_editing",
-        "image_restoration"
+        "image_upscaling"
       ],
       "allowed_hosts": [
         "api.dev.runwayml.com"
       ],
-      "token_env": "RUNWAY_API_KEY"
+      "token_env": "RUNWAY_API_KEY",
+      "official_api_url": "https://docs.dev.runwayml.com/api/"
     },
     {
       "id": "topaz_advanced",
@@ -675,12 +822,10 @@
       "enabled": false,
       "capabilities": [
         "image_upscaling",
-        "face_restoration",
-        "detail_enhancement",
-        "denoise",
-        "old_photo_restoration",
-        "video_upscaling"
-      ]
+        "video_upscaling",
+        "frame_interpolation"
+      ],
+      "official_api_url": "https://developer.topazlabs.com/"
     },
     {
       "id": "magnific_advanced",
@@ -692,15 +837,16 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
+        "image_generation",
+        "image_editing",
         "image_upscaling",
-        "face_restoration",
-        "detail_enhancement",
-        "old_photo_restoration"
+        "video_generation"
       ],
       "allowed_hosts": [
         "api.magnific.ai"
       ],
-      "token_env": "MAGNIFIC_API_KEY"
+      "token_env": "MAGNIFIC_API_KEY",
+      "official_api_url": "https://www.magnific.com/ai/docs/magnific-api"
     },
     {
       "id": "krea_upscaling",
@@ -728,15 +874,13 @@
       "enabled": false,
       "capabilities": [
         "speech_to_text",
-        "speaker_detection",
-        "subtitle_generation",
-        "caption_timing",
-        "transcript_cleanup"
+        "audio_intelligence"
       ],
       "allowed_hosts": [
         "api.assemblyai.com"
       ],
-      "token_env": "ASSEMBLYAI_API_KEY"
+      "token_env": "ASSEMBLYAI_API_KEY",
+      "official_api_url": "https://www.assemblyai.com/docs/"
     },
     {
       "id": "deepgram_transcription",
@@ -749,14 +893,13 @@
       "enabled": false,
       "capabilities": [
         "speech_to_text",
-        "speaker_detection",
-        "transcript_cleanup",
-        "caption_timing"
+        "text_to_speech"
       ],
       "allowed_hosts": [
         "api.deepgram.com"
       ],
-      "token_env": "DEEPGRAM_API_KEY"
+      "token_env": "DEEPGRAM_API_KEY",
+      "official_api_url": "https://developers.deepgram.com/"
     },
     {
       "id": "google_cloud_speech",
@@ -768,11 +911,7 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "speech_to_text",
-        "speaker_detection",
-        "subtitle_generation",
-        "caption_timing",
-        "transcript_cleanup"
+        "speech_to_text"
       ],
       "allowed_hosts": [
         "speech.googleapis.com",
@@ -780,7 +919,8 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://docs.cloud.google.com/speech-to-text/docs"
     },
     {
       "id": "elevenlabs_advanced_audio",
@@ -792,18 +932,16 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "voice_generation",
-        "voice_cloning",
-        "voice_dubbing",
-        "audio_enhancement",
-        "noise_removal"
+        "text_to_speech",
+        "voice_cloning"
       ],
       "allowed_hosts": [
         "api.elevenlabs.io"
       ],
       "token_env": "ELEVENLABS_API_KEY",
       "auth_header_name": "xi-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://elevenlabs.io/docs/overview/capabilities/text-to-speech"
     },
     {
       "id": "playht_advanced_audio",
@@ -815,15 +953,14 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "voice_generation",
-        "voice_cloning",
-        "voice_dubbing",
-        "audio_enhancement"
+        "text_to_speech",
+        "voice_cloning"
       ],
       "allowed_hosts": [
         "api.play.ht"
       ],
-      "token_env": "PLAYHT_API_KEY"
+      "token_env": "PLAYHT_API_KEY",
+      "official_api_url": "https://docs.play.ht/reference/api-getting-started"
     },
     {
       "id": "suno_advanced_audio",
@@ -850,17 +987,15 @@
       "subscription_required": true,
       "enabled": false,
       "capabilities": [
-        "video_editing",
-        "scene_detection",
-        "object_removal",
-        "background_replacement",
-        "color_grading",
-        "video_restoration"
+        "video_generation",
+        "image_to_video",
+        "video_upscaling"
       ],
       "allowed_hosts": [
         "api.dev.runwayml.com"
       ],
-      "token_env": "RUNWAY_API_KEY"
+      "token_env": "RUNWAY_API_KEY",
+      "official_api_url": "https://docs.dev.runwayml.com/api/"
     },
     {
       "id": "adobe_premiere_advanced",

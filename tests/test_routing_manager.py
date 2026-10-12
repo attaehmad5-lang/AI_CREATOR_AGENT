@@ -96,6 +96,15 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(cheapest["allowed"])
         self.assertEqual(cheapest["provider"], "fallback")
         self.assertEqual(cheapest["billing_mode"], "PAID_APPROVED")
+        missing_estimates = cost_router.route(
+            category="image", project_id="film", strategy="LOWEST_COST",
+            estimated_cost=0.5,
+        )
+        self.assertFalse(missing_estimates["allowed"])
+        self.assertEqual(
+            missing_estimates["status"],
+            "PROVIDER_SPECIFIC_COST_ESTIMATES_REQUIRED",
+        )
 
     def test_round_robin_distributes_across_eligible_providers(self):
         router = ProviderRoutingManager(self.connections, default_strategy="ROUND_ROBIN")
