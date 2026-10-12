@@ -83,6 +83,87 @@ class ProviderService:
             "health": health,
         }
 
+    def verify_pollinations_account(
+        self,
+        oauth_manager: Any,
+        *,
+        timeout_seconds: float = 5.0,
+        opener: Any = None,
+        max_response_bytes: int = 16_384,
+    ) -> dict[str, Any]:
+        """Verify Pollinations access using its read-only account-balance endpoint.
+
+        The unexpired OAuth token is kept in memory and passed only to the
+        credential-presence check and the balance probe. The returned pollen budget
+        is informational and is never registered as free credits or persisted.
+        """
+        provider_id = "pollinations"
+        if not callable(getattr(oauth_manager, "get_access_token", None)):
+            return {"status": "OAUTH_MANAGER_INVALID", "provider": provider_id, "verified": False}
+        try:
+            provider = self.connection_manager.get_provider(provider_id)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_LOOKUP_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(provider, dict):
+            return {"status": "NOT_FOUND", "provider": provider_id, "verified": False}
+        token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env")
+        if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
+            return {"status": "OAUTH_TOKEN_ENV_REFERENCE_INVALID", "provider": provider_id, "verified": False}
+        try:
+            access_token = oauth_manager.get_access_token(provider_id)
+        except Exception as exc:
+            return {
+                "status": "OAUTH_TOKEN_LOOKUP_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(access_token, str) or not access_token.strip():
+            return {"status": "OAUTH_ACCESS_TOKEN_UNAVAILABLE", "provider": provider_id, "verified": False}
+        try:
+            from .pollinations_credit_probe import PollinationsBalanceProbe
+
+            balance_probe = PollinationsBalanceProbe(
+                lambda: access_token,
+                opener=opener,
+                timeout_seconds=timeout_seconds,
+                max_response_bytes=max_response_bytes,
+            )
+        except Exception as exc:
+            return {
+                "status": "BALANCE_PROBE_CONFIGURATION_INVALID",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        observed: dict[str, Any] = {}
+
+        def probe(_provider: dict[str, Any], *, timeout_seconds: float = 5.0) -> dict[str, Any]:
+            account = balance_probe(provider_id, timeout_seconds=timeout_seconds)
+            observed.update(account)
+            return {"ok": True}
+
+        # Ephemeral mapping only: the token is never added to os.environ or persisted state.
+        result = self.verify_provider(
+            provider_id,
+            probe,
+            timeout_seconds=timeout_seconds,
+            environ={token_env: access_token},
+        )
+        if result.get("verified") is True and observed.get("verified") is True:
+            result["account_balance"] = {
+                "balance": observed["balance"],
+                "unit": observed["unit"],
+                "balance_type": observed["balance_type"],
+                "source": observed["source"],
+            }
+        return result
+
     def verify_http_provider(
         self,
         provider_id: str,
