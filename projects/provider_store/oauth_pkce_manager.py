@@ -91,8 +91,9 @@ class ProviderOAuthPKCEManager:
     @staticmethod
     def _valid_token(value: Any) -> bool:
         return (
-            isinstance(value, str) and bool(value.strip()) and len(value) <= 16384
-            and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+            isinstance(value, str) and bool(value) and value == value.strip()
+            and len(value) <= 16384
+            and all(0x21 <= ord(char) <= 0x7E for char in value)
         )
 
     def begin_authorization(
@@ -169,6 +170,8 @@ class ProviderOAuthPKCEManager:
                 key: value for key, value in self._pending.items()
                 if value.get("expires_at", 0) > now
             }
+            while len(self._pending) > 1000:
+                self._pending.pop(next(iter(self._pending)))
         return {
             "status": "AUTHORIZATION_REQUIRED",
             "provider": provider_id,
@@ -277,7 +280,7 @@ class ProviderOAuthPKCEManager:
             return {"status": "INVALID_PROVIDER", "provider": provider_id}
         if not isinstance(state, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,200}", state):
             return {"status": "INVALID_OAUTH_STATE", "provider": provider_id}
-        if not isinstance(code, str) or not code.strip() or len(code) > 4096 or any(ord(char) < 32 or ord(char) == 127 for char in code):
+        if not isinstance(code, str) or not code or code != code.strip() or len(code) > 4096 or any(char.isspace() or ord(char) < 33 or ord(char) > 126 for char in code):
             return {"status": "INVALID_AUTHORIZATION_CODE", "provider": provider_id}
         with self._lock:
             pending = self._pending.get(state)
