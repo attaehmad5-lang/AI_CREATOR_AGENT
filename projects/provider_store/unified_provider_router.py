@@ -33,8 +33,6 @@ class UnifiedProviderRouter:
             if not isinstance(capabilities, list):
                 capabilities = []
             capabilities = [item for item in capabilities if isinstance(item, str)]
-            if provider.get("category") == "image":
-                capabilities = list(set(capabilities + ["text_to_image", "image_to_image", "upscaling"]))
             if capability in capabilities:
                 matches.append({
                     "id": provider.get("id"),

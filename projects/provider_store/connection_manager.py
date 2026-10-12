@@ -332,6 +332,17 @@ class ConnectionManager:
                                 errors.append(
                                     f"providers[{index}].{required_flag} is required and must be boolean"
                                 )
+                    if catalog_major_version >= 3 and provider.get("enabled") is True:
+                        official_api_url = provider.get("official_api_url")
+                        if not isinstance(official_api_url, str) or not official_api_url.strip():
+                            errors.append(
+                                f"providers[{index}].official_api_url is required for enabled providers"
+                            )
+                        capabilities = provider.get("capabilities")
+                        if not isinstance(capabilities, list) or not capabilities:
+                            errors.append(
+                                f"providers[{index}].capabilities must be a non-empty list for enabled providers"
+                            )
                     if (
                         catalog_major_version >= 3
                         and provider.get("enabled") is True

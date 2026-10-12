@@ -358,6 +358,8 @@ class ConnectionManagerTests(unittest.TestCase):
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
                 "subscription_required": False,
                 "allowed_hosts": ["api.example.com"],
+                "official_api_url": "https://api.example.com/docs",
+                "capabilities": ["image_generation"],
             }],
         }
         master_path.write_text(json.dumps(master), encoding="utf-8")
@@ -376,6 +378,8 @@ class ConnectionManagerTests(unittest.TestCase):
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
                 "subscription_required": False,
                 "allowed_hosts": ["keep.example.com"],
+                "official_api_url": "https://keep.example.com/docs",
+                "capabilities": ["image_generation"],
             }],
         }
         self.catalog_path.write_text(json.dumps(valid_target), encoding="utf-8")

@@ -73,7 +73,7 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
                     {
                         "id": "image", "name": "Image", "category": "image",
                         "auth_type": "NONE", "connection_type": "API", "enabled": True,
-                        "status": "CONNECTED",
+                        "status": "CONNECTED", "capabilities": ["text_to_image"],
                     },
                     {
                         "id": "story", "name": "Story", "category": "script_story",
@@ -106,6 +106,28 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             self.assertEqual(after["status"], "ROUTABLE")
             self.assertFalse(after["route_selected"])
             self.assertEqual(after["available"][0]["id"], "image")
+
+    def test_router_does_not_infer_capabilities_from_provider_category(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = root / "catalog.json"
+            state = root / "state.json"
+            catalog.write_text(json.dumps({
+                "version": "3.0",
+                "providers": [{
+                    "id": "generic-image", "name": "Generic Image",
+                    "category": "image", "auth_type": "NONE",
+                    "connection_type": "API", "enabled": False,
+                    "subscription_required": False,
+                }],
+            }), encoding="utf-8")
+            state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            router = UnifiedProviderRouter(
+                connection_manager=ConnectionManager(catalog, state)
+            )
+            self.assertEqual(router.find("text_to_image"), [])
+            self.assertEqual(router.find("image_to_image"), [])
+            self.assertEqual(router.find("upscaling"), [])
 
     def test_production_registry_contains_all_advanced_provider_entries(self):
         project_root = Path(__file__).resolve().parents[1]
