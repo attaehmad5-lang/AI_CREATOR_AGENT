@@ -238,6 +238,15 @@ class ConnectionManager:
                             or len({host.casefold().rstrip(".") for host in hosts if isinstance(host, str)}) != len(hosts)
                         ):
                             errors.append(f"providers[{index}].allowed_hosts contains invalid or duplicate hostnames")
+                    if (
+                        provider.get("enabled") is True
+                        and isinstance(connection_type, str)
+                        and connection_type.upper() == "API"
+                        and not provider.get("allowed_hosts")
+                    ):
+                        errors.append(
+                            f"providers[{index}].allowed_hosts is required for enabled API providers"
+                        )
                     if "auth_header_name" in provider:
                         safe_auth_headers = {
                             "authorization", "x-api-key", "api-key", "xi-api-key",
