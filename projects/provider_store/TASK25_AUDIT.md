@@ -58,3 +58,8 @@ Do not mark this task complete, mark all 138 items PASS, or merge PR #1 until th
 The authoritative scope is the user's original 138 individual feature descriptions across sections A–P (6 🟢, 29 🟡, 103 🔴). This report contains group summaries and evidence, not all 138 descriptions verbatim. Do not reconstruct or rename individual features from section headings. The original wording must be preserved in a dedicated checklist file before claiming item-by-item coverage.
 
 For each feature: Scope → Build → Test → Fix failures → Rerun → Verify → Save the code/test evidence and commit reference. Failed test runs remain historical evidence; only a later successful rerun confirms the fix.
+
+
+## Feature index file
+
+`TASK_25_FEATURE_INDEX.md` now contains 138 numbered feature rows (A–P) with recovered names and per-feature evidence placeholders. The recovered triage markers total 6 green / 65 yellow / 67 red, which conflicts with the user's stated original baseline aggregate of 6 green / 29 yellow / 103 red. The index explicitly preserves this discrepancy instead of silently rewriting baseline statuses. It remains a working index until compared with the verbatim original pasted checklist. Every item remains NOT ITEM-AUDITED until individually verified.
