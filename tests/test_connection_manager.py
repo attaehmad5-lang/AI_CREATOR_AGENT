@@ -397,6 +397,20 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["restored"])
         self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{still-corrupt")
 
+    def test_persisted_authentication_policy_must_be_boolean(self):
+        self.state_path.write_text(json.dumps({
+            "version": "1.0", "policy": "USER_CONTROLLED",
+            "providers": {
+                "public_image": {
+                    "configuration": {"authentication_required": "true"}
+                }
+            },
+        }), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+        result = manager.get_provider_configuration("public_image")
+        self.assertEqual(result["status"], "INVALID_AUTHENTICATION_POLICY")
+        self.assertEqual(result["configuration"], {})
+
     def test_configure_provider_rejects_non_boolean_authentication_policy(self):
         result = self.manager.configure_provider(
             "public_image", authentication_required="true"
