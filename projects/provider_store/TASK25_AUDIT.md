@@ -6,9 +6,9 @@
 
 ## Latest automated verification
 
-GitHub Actions run [#38280619566](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280619566) completed successfully on Python 3.13:
+GitHub Actions run [#38296367506](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38296367506) completed successfully on Ubuntu and Windows with Python 3.13:
 
-- 292 tests passed, 0 failures (confirmed in the run log).
+- 299 tests passed on each platform, 0 failures.
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
 - PR #1 has already been merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
@@ -35,6 +35,13 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | N — Advanced Routing | 111–118 | Multiple selection policies, verified credit data, cost guards and quota-aware fallback | Foundation implemented; full canonical behavior matrix pending |
 | O — Usage & Management | 119–128 | Request IDs, reservations, committed usage, budget/quota records and duplicate/conflict protection | Local usage controls tested; real provider billing reconciliation pending |
 | P — Extensibility & Administration | 129–138 | Provider registration, metadata validation and compatibility facades | Partial evidence; complete canonical administration/extension checks pending |
+
+## Additional safety findings fixed in follow-up PR #5
+
+- Enabled v3 catalog records must include a safe official API documentation URL and a non-empty explicit capability list.
+- The unified discovery router no longer infers fine-grained capabilities from the broad `image` category.
+- The execution gateway no longer calls the legacy image adapter directly when policy-aware execution is not wired; it fails closed instead. Production policy-aware execution still needs to be connected to the legacy generation adapters and account for actual provider billing/credit outcomes.
+- Catalog snapshot: 54 providers total; 2 enabled and 52 disabled. The 52 disabled records lack official API documentation URLs; 34 lack explicit capabilities. The schema now prevents enabling them until required evidence metadata is supplied.
 
 ## Known open verification requirements
 
