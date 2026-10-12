@@ -4,7 +4,7 @@ This guide describes the current implementation in this branch. It is not a clai
 
 ## Components
 
-- `connection_manager.py` — provider catalog discovery, registration, enabled/disabled state, modality contract checks, credential-presence checks, endpoint policy, and verified connection state. Public catalog views rename legacy `status` to `catalog_status`; only a successful provider-specific probe can set runtime connection state to `CONNECTED`.
+- `connection_manager.py` — provider catalog discovery, registration, enabled/disabled state, callable contracts for every modality present in the 54-provider catalog (including advanced editing, upscaling, transcription, audio, story, and video-editing categories), credential-presence checks, endpoint policy, and verified connection state. Public catalog views rename legacy `status` to `catalog_status`; only a successful probe can set runtime connection state to `CONNECTED`.
 - `http_probe.py` — optional standard-library HTTPS probe for explicitly configured endpoints, with mandatory allowlist validation, TLS verification, no automatic redirects, bounded response reads, timeout propagation, and provider-specific environment-only API credential headers. It checks endpoint reachability/authentication only, not generation capability.
 - `routing_manager.py` — priority, free-credit-first, lowest-cost, healthiest-first, and round-robin selection; requires a verified runtime connection by default (catalog labels alone are not evidence), with an explicit catalog-only planning option; optional health, cost, credit, and quota managers; duplicate request reservations fail closed; explicit fallback behavior.
 - `credit_manager.py` — stores verified free-credit snapshots from an injected provider-specific probe, filters by compatible units, and atomically reserves/commits/releases local credit usage to prevent concurrent overspend.
@@ -53,4 +53,4 @@ python -c "import json; from pathlib import Path; [json.loads(p.read_text(encodi
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Live provider API probes, OAuth/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements.
+Live provider API probes, OAuth/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
