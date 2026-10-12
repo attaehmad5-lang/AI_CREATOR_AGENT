@@ -199,6 +199,18 @@ class ConnectionManagerTests(unittest.TestCase):
                 result = self.manager.register_provider({"id": f"bad_{key}", **base, key: value})
                 self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
 
+    def test_catalog_documentation_urls_reject_query_and_fragment_data(self):
+        for url in (
+            "https://docs.example.com/api?api_key=private-value",
+            "https://docs.example.com/api#access-token",
+        ):
+            with self.subTest(url=url):
+                result = ConnectionManager.validate_catalog_schema({
+                    "providers": [{"id": "provider", "official_api_url": url}]
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("official_api_url must be a safe HTTPS URL" in error for error in result["errors"]))
+
     def test_catalog_schema_requires_boolean_subscription_flag(self):
         result = ConnectionManager.validate_catalog_schema({
             "providers": [{"id": "paid", "subscription_required": "true"}]
