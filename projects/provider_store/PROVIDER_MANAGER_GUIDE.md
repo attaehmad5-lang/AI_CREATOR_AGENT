@@ -35,7 +35,7 @@ This guide describes the current implementation in this branch. It is not a clai
 
 `ConnectionManager.restore_catalog_from_master()` restores the provider catalog only when the target is missing or fails validation. It validates the master copy first, refuses to overwrite an already-valid target, uses the target's interprocess lock, and reports a safe status instead of silently replacing a valid catalog.
 
-Numeric request values are normalized with overflow-safe finite-number checks before they reach cost, credit, routing, and connection policies.
+Numeric request values are normalized with overflow-safe finite-number checks before they reach cost, credit, routing, connection, health, retry, OAuth, and account-balance policies.
 
 Run from the repository root:
 
