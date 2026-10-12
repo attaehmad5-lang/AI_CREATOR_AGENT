@@ -208,6 +208,14 @@ class ProviderRoutingManager:
             }
         if not isinstance(discovered, list):
             return {"allowed": False, "status": "PROVIDER_DISCOVERY_FAILED", "reason": "INVALID_DISCOVERY_RESULT"}
+        if selected_strategy == "PRIMARY_ONLY":
+            # Freeze the primary choice before connection, health, cost, credit, or
+            # quota filtering. A rejected primary must not turn the fallback into
+            # an accidental primary.
+            discovered = sorted(
+                (item for item in discovered if isinstance(item, dict)),
+                key=self._priority,
+            )[:1]
 
         candidates: list[dict[str, Any]] = []
         decisions: list[dict[str, Any]] = []
