@@ -15,6 +15,15 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from .connection_manager import ConnectionManager
 
 
+class ProviderHTTPStatusError(ConnectionError):
+    """Safe provider HTTP failure with bounded status metadata for retry decisions."""
+
+    def __init__(self, status_code: int, retry_after: str | None = None) -> None:
+        self.status_code = status_code
+        self.retry_after = retry_after
+        super().__init__(f"provider returned HTTP {status_code}")
+
+
 class _RejectRedirects(HTTPRedirectHandler):
     def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
         # Redirect targets are never followed automatically; callers must configure
@@ -183,7 +192,18 @@ class ProviderHTTPConnectivityProbe:
                 raise PermissionError("provider rejected credentials or permissions") from None
             if 300 <= status_code < 400:
                 raise ConnectionError("provider endpoint redirected; redirects are not followed") from None
-            raise ConnectionError(f"provider returned HTTP {status_code}") from None
+            retry_after = None
+            try:
+                raw_retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                if (
+                    isinstance(raw_retry_after, str)
+                    and len(raw_retry_after) <= 128
+                    and not any(ord(char) < 32 or ord(char) == 127 for char in raw_retry_after)
+                ):
+                    retry_after = raw_retry_after
+            except Exception:
+                retry_after = None
+            raise ProviderHTTPStatusError(status_code, retry_after) from None
         except URLError as exc:
             reason = getattr(exc, "reason", None)
             if isinstance(reason, TimeoutError) or "timeout" in type(reason).__name__.casefold():
