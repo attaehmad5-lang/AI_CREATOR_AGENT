@@ -948,7 +948,7 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def test_advanced_provider_categories_have_explicit_callable_contracts(self):
         cases = (
-            ("advanced_image_editing", "edit_image", "inpainting"),
+            ("advanced_image_editing", "edit_image", "image_editing"),
             ("advanced_upscaling", "upscale_image", "image_upscaling"),
             ("advanced_transcription", "transcribe", "speech_to_text"),
             ("advanced_audio", "generate_music", "music_generation"),
