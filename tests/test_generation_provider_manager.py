@@ -65,6 +65,71 @@ class GenerationProviderManagerSecurityTests(unittest.TestCase):
         self.assertEqual(status["last_error"], "RuntimeError")
         self.assertNotIn(secret, repr(status))
 
+    def test_paid_provider_never_executes_directly_without_policy_handler(self):
+        manager = ProviderManager()
+        class PaidProvider:
+            requires_paid_approval = True
+            called = False
+            def generate_image(self, prompt, output_path):
+                self.called = True
+                return {"status": "COMPLETED"}
+        provider = PaidProvider()
+        manager.providers["paid"] = provider
+        result = FallbackManager(manager).generate_image(["paid"], "prompt", "out.png")
+        self.assertEqual(result["status"], "FAILED")
+        self.assertFalse(provider.called)
+        self.assertEqual(result["errors"][0]["error"], "PAID_EXECUTION_HANDLER_REQUIRED")
+
+    def test_paid_handler_failure_does_not_silently_try_another_provider(self):
+        manager = ProviderManager()
+        calls = []
+        class PaidProvider:
+            requires_paid_approval = True
+            def generate_image(self, prompt, output_path):
+                raise AssertionError("paid provider must be handled through policy handler")
+        class FreeProvider:
+            def generate_image(self, prompt, output_path):
+                calls.append("free")
+                return {"status": "COMPLETED"}
+        manager.providers.update({"paid": PaidProvider(), "free": FreeProvider()})
+        result = FallbackManager(
+            manager,
+            paid_execution_handler=lambda **kwargs: {"status": "PROJECT_BUDGET_EXCEEDED"},
+        ).generate_image(["paid", "free"], "prompt", "out.png")
+        self.assertEqual(result["status"], "PROJECT_BUDGET_EXCEEDED")
+        self.assertEqual(calls, [])
+
+    def test_paid_handler_status_is_sanitized_and_invalid_results_fail_closed(self):
+        manager = ProviderManager()
+        class PaidProvider:
+            requires_paid_approval = True
+        manager.providers["paid"] = PaidProvider()
+        unsafe = FallbackManager(
+            manager,
+            paid_execution_handler=lambda **kwargs: {"status": "failure\nBearer secret"},
+        ).generate_image(["paid"], "prompt", "out.png")
+        self.assertEqual(unsafe["status"], "PAID_EXECUTION_FAILED")
+        invalid = FallbackManager(
+            manager,
+            paid_execution_handler=lambda **kwargs: ["COMPLETED"],
+        ).generate_image(["paid"], "prompt", "out.png")
+        self.assertEqual(invalid["status"], "PAID_EXECUTION_HANDLER_INVALID_RESULT")
+
+    def test_paid_handler_completed_result_is_returned_with_attempt_history(self):
+        manager = ProviderManager()
+        class PaidProvider:
+            requires_paid_approval = True
+        manager.providers["paid"] = PaidProvider()
+        result = FallbackManager(
+            manager,
+            paid_execution_handler=lambda **kwargs: {
+                "status": "COMPLETED", "output_path": "out.png",
+            },
+        ).generate_image(["missing", "paid"], "prompt", "out.png")
+        self.assertEqual(result["status"], "COMPLETED")
+        self.assertEqual(result["attempted_providers"][0]["provider"], "missing")
+        self.assertEqual(result["attempted_providers"][-1]["status"], "COMPLETED")
+
     def test_invalid_registry_shape_is_rejected(self):
         manager = ProviderManager()
         with self.assertRaises(ValueError):
