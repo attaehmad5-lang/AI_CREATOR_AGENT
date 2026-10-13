@@ -67,6 +67,28 @@ class ProviderAccessControl:
             return False, set()
         return True, set(value)
 
+    def provider_scope(self, principal: Any) -> dict[str, Any]:
+        """Return provider allowlist for pre-routing filtering; None means unrestricted."""
+        if not isinstance(principal, dict):
+            return {"status": "AUTHENTICATED_PRINCIPAL_REQUIRED", "valid": False}
+        subject = principal.get("subject")
+        roles = principal.get("roles")
+        if not isinstance(subject, str) or not IDENTIFIER.fullmatch(subject):
+            return {"status": "INVALID_PRINCIPAL", "valid": False}
+        if not isinstance(roles, (list, tuple, set, frozenset)) or not roles or len(roles) > 32:
+            return {"status": "INVALID_PRINCIPAL_ROLES", "valid": False}
+        if any(not isinstance(role, str) or role not in self.role_permissions for role in roles):
+            return {"status": "UNKNOWN_PRINCIPAL_ROLE", "valid": False}
+        valid, providers = self._scope_list(principal, "providers", PROVIDER_IDENTIFIER)
+        if not valid:
+            return {"status": "INVALID_PROVIDER_SCOPE", "valid": False}
+        return {
+            "status": "PROVIDER_SCOPE_VALID",
+            "valid": True,
+            "restricted": "providers" in principal,
+            "providers": sorted(providers),
+        }
+
     def authorize(
         self,
         principal: Any,
