@@ -384,7 +384,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 probe = ProviderHTTPConnectivityProbe(environ=environment, opener=opener)
                 metadata = dict(provider)
                 metadata["configuration"] = {
-                    "endpoint": f"https://{provider['allowed_hosts'][0]}/health",
+                    "probe_endpoint": f"https://{provider['allowed_hosts'][0]}/health",
                     "authentication_required": True,
                 }
                 result = probe(metadata)
@@ -410,7 +410,8 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
             manager = ConnectionManager(catalog, state)
             manager.configure_provider(
-                "huggingface", endpoint="https://api.example.com/v1/models"
+                "huggingface", endpoint="https://api.example.com/v1/models",
+                probe_endpoint="https://api.example.com/health",
             )
             opener = _Opener()
             result = manager.verify_connectivity(
