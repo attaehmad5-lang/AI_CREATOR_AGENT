@@ -214,6 +214,12 @@ class ProviderCatalogValidationTests(unittest.TestCase):
             "generate_image", "generate_video", "generate_speech", "generate_audio",
             "generate_music", "generate_text", "transcribe", "translate", "dub",
             "edit_image", "upscale_image", "upscale_video", "generate_lipsync", "edit_video", "edit_audio",
+            "clone_voice", "detect_speakers", "generate_subtitles", "align_captions",
+            "clean_transcript", "inpaint_image", "outpaint_image", "remove_video_object",
+            "remove_object", "remove_background", "replace_video_background",
+            "replace_background", "relight_image", "restore_image", "restore_faces",
+            "enhance_details", "restore_old_photo", "denoise_image", "remove_noise",
+            "enhance_audio", "detect_scenes", "grade_color", "restore_video",
         )
         adapter = type("CompleteTestAdapter", (), {
             method: (lambda self, *args, **kwargs: None) for method in required_methods
