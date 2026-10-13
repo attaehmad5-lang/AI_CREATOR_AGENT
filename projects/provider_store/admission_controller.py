@@ -1,6 +1,7 @@
 """Bounded in-process admission control for provider execution backpressure."""
 from __future__ import annotations
 
+import math
 import re
 import threading
 import time
@@ -65,7 +66,7 @@ class ProviderAdmissionController:
             if project_active >= self.max_active_per_project:
                 return {"acquired": False, "status": "BACKPRESSURE_PROJECT_LIMIT"}
             now = self.clock()
-            if not isinstance(now, (int, float)) or isinstance(now, bool):
+            if not isinstance(now, (int, float)) or isinstance(now, bool) or not math.isfinite(now):
                 return {"acquired": False, "status": "INVALID_ADMISSION_CLOCK"}
             self._active[request_id] = {
                 "project_id": project_id,
