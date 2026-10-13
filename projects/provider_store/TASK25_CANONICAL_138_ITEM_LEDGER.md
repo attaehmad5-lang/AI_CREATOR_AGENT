@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38454944973](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38454944973): **360 tests passed on Ubuntu and 360 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite additionally covers role/project/provider scopes, paid-execution authorization for positive per-provider estimates, append-only audited authorization decisions, basic WAV/AVI/MP4 container checks, and bounded global/per-project admission backpressure with safe handling of ambiguous execution outcomes.
+GitHub Actions run [#38455536407](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38455536407): **368 tests passed on Ubuntu and 368 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite additionally covers role/project/provider scopes, paid-execution authorization for positive per-provider estimates, append-only audited authorization decisions, basic WAV/AVI/MP4 container checks, bounded global/per-project admission backpressure, and HMAC webhook signature/replay protection.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
