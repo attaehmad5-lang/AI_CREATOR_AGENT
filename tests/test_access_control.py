@@ -23,7 +23,7 @@ class ProviderAccessControlTests(unittest.TestCase):
 
     def test_paid_execution_requires_explicit_role_permission(self):
         creator = {"subject": "user-1", "roles": ["creator"]}
-        operator = {"subject": "user-2", "roles": ["operator"]}
+        operator = {"subject": "user-2", "roles": ["operator"], "projects": ["film"]}
         self.assertEqual(
             self.acl.authorize(creator, action="provider.paid.execute", project_id="film")["status"],
             "PERMISSION_DENIED",
@@ -73,6 +73,13 @@ class ProviderAccessControlTests(unittest.TestCase):
         result = self.acl.authorize(principal, action="provider.route", project_id="film")
         self.assertEqual(result["status"], "INVALID_PROJECT_SCOPE")
 
+    def test_project_scope_is_required_even_for_known_role(self):
+        result = self.acl.authorize(
+            {"subject": "user-1", "roles": ["creator"]},
+            action="provider.route", project_id="film",
+        )
+        self.assertEqual(result["status"], "PROJECT_SCOPE_REQUIRED")
+
     def test_unknown_role_fails_closed(self):
         result = self.acl.authorize(
             {"subject": "user-1", "roles": ["superuser"]},
@@ -83,7 +90,7 @@ class ProviderAccessControlTests(unittest.TestCase):
     def test_custom_role_permissions_are_validated(self):
         custom = ProviderAccessControl({"auditor": frozenset({"provider.audit.read"})})
         self.assertTrue(custom.authorize(
-            {"subject": "auditor-1", "roles": ["auditor"]},
+            {"subject": "auditor-1", "roles": ["auditor"], "projects": ["film"]},
             action="provider.audit.read", project_id="film",
         )["allowed"])
         with self.assertRaises(ValueError):
