@@ -515,41 +515,116 @@ class ConnectionManager:
         return provider is not None and provider.get("enabled") is True
 
     def validate_provider_contract(self, provider_id: str, instance: Any) -> dict[str, Any]:
-        """Validate the callable surface required by the provider's declared modality."""
+        """Validate only the adapter methods required by this provider's declared capabilities."""
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
-        contracts: dict[str, tuple[tuple[str, ...], ...]] = {
-            "image": (("generate_image",),),
-            "video": (("generate_video",),),
-            "voice": (("generate_speech", "generate_audio"),),
-            "audio": (("generate_audio", "generate_speech"),),
-            "music": (("generate_music",),),
-            "text": (("generate_text",),),
-            "language_model": (("generate_text",),),
-            "transcription": (("transcribe",),),
-            "translation": (("translate",),),
-            "dubbing": (("dub",),),
-            "image_editing": (("edit_image",),),
-            "advanced_image_editing": (("edit_image",),),
-            "upscaling": (("upscale_image",),),
-            "advanced_upscaling": (("upscale_image", "upscale_video"),),
-            "lipsync": (("generate_lipsync",),),
-            "script_story": (("generate_text",),),
-            "advanced_transcription": (("transcribe",),),
-            "advanced_audio": (("generate_audio", "generate_speech", "generate_music"),),
-            "video_editing": (("edit_video",),),
-            "advanced_video_editing": (("edit_video",),),
+        category_contracts: dict[str, tuple[str, ...]] = {
+            "image": ("generate_image",),
+            "video": ("generate_video",),
+            "voice": ("generate_speech",),
+            "audio": ("generate_audio",),
+            "music": ("generate_music",),
+            "text": ("generate_text",),
+            "language_model": ("generate_text",),
+            "transcription": ("transcribe",),
+            "translation": ("translate",),
+            "dubbing": ("dub",),
+            "image_editing": ("edit_image",),
+            "advanced_image_editing": ("edit_image",),
+            "upscaling": ("upscale_image",),
+            "advanced_upscaling": ("upscale_image",),
+            "lipsync": ("generate_lipsync",),
+            "script_story": ("generate_text",),
+            "advanced_transcription": ("transcribe",),
+            "advanced_audio": (),
+            "video_editing": ("edit_video",),
+            "advanced_video_editing": ("edit_video",),
         }
-        requirements = contracts.get(category)
-        if requirements is None:
+        if category not in category_contracts:
             return {
                 "status": "UNSUPPORTED_MODALITY",
                 "provider": provider_id,
                 "valid": False,
                 "contract_version": "1.0",
             }
+
+        capabilities = provider.get("capabilities", [])
+        if isinstance(capabilities, str):
+            capabilities = [capabilities]
+        if not isinstance(capabilities, list) or any(
+            not isinstance(item, str) or not item.strip() for item in capabilities
+        ):
+            return {
+                "status": "INVALID_CAPABILITY_METADATA",
+                "provider": provider_id,
+                "valid": False,
+                "contract_version": "1.0",
+            }
+
+        # A capability is a declared contract, not proof that the provider works.
+        # Every declared capability must have a corresponding callable method.
+        capability_methods: dict[str, tuple[str, ...]] = {
+            "image_generation": ("generate_image",),
+            "video_generation": ("generate_video",),
+            "text_to_speech": ("generate_speech",),
+            "voice_generation": ("generate_speech",),
+            "voice_cloning": ("generate_speech",),
+            "voice_dubbing": ("dub",),
+            "audio_generation": ("generate_audio",),
+            "sound_effect_generation": ("generate_audio",),
+            "music_generation": ("generate_music",),
+            "audio_transcription": ("transcribe",),
+            "speech_to_text": ("transcribe",),
+            "speaker_detection": ("transcribe",),
+            "subtitle_generation": ("transcribe",),
+            "caption_timing": ("transcribe",),
+            "transcript_cleanup": ("transcribe",),
+            "story_generation": ("generate_text",),
+            "screenplay": ("generate_text",),
+            "scene_breakdown": ("generate_text",),
+            "character_development": ("generate_text",),
+            "dialogue_writing": ("generate_text",),
+            "storyboard_planning": ("generate_text",),
+            "image_editing": ("edit_image",),
+            "inpainting": ("edit_image",),
+            "outpainting": ("edit_image",),
+            "object_removal": (("edit_video" if "video" in category else "edit_image"),),
+            "background_removal": ("edit_image",),
+            "background_replacement": (("edit_video" if "video" in category else "edit_image"),),
+            "relighting": ("edit_image",),
+            "image_restoration": (("upscale_image" if "upscal" in category else "edit_image"),),
+            "image_upscaling": ("upscale_image",),
+            "video_upscaling": ("upscale_video",),
+            "face_restoration": ("upscale_image",),
+            "detail_enhancement": ("upscale_image",),
+            "old_photo_restoration": ("upscale_image",),
+            "denoise": (("upscale_image" if "upscal" in category else "edit_audio"),),
+            "lip_sync": ("generate_lipsync",),
+            "audio_enhancement": ("edit_audio",),
+            "noise_removal": ("edit_audio",),
+            "audio_editing": ("edit_audio",),
+            "video_editing": ("edit_video",),
+            "scene_detection": ("edit_video",),
+            "color_grading": ("edit_video",),
+            "video_restoration": ("edit_video",),
+        }
+
+        requirements: list[tuple[str, ...]] = [ (name,) for name in category_contracts[category] ]
+        for capability in dict.fromkeys(capabilities):
+            required = capability_methods.get(capability)
+            if required is None:
+                return {
+                    "status": "UNSUPPORTED_CAPABILITY",
+                    "provider": provider_id,
+                    "valid": False,
+                    "unsupported_capabilities": [capability],
+                    "contract_version": "1.0",
+                }
+            if required not in requirements:
+                requirements.append(required)
+
         def has_callable(name: str) -> bool:
             try:
                 return callable(getattr(instance, name, None))
@@ -566,7 +641,7 @@ class ConnectionManager:
             "provider": provider_id,
             "valid": not missing,
             "missing_methods": missing,
-            "contract_version": "1.0",
+            "contract_version": "2.0",
         }
 
     def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
