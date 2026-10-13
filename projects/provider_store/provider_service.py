@@ -240,12 +240,17 @@ class ProviderService:
                     capability=capability,
                 )
             except Exception as exc:
-                return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+                return {
+                    "allowed": False, "status": "AUTHORIZATION_CHECK_FAILED",
+                    "error_type": type(exc).__name__,
+                }
             if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
-                status = authorization.get("status", "PERMISSION_DENIED") if isinstance(authorization, dict) else "INVALID_AUTHORIZATION_RESPONSE"
+                status = (
+                    authorization.get("status", "PERMISSION_DENIED")
+                    if isinstance(authorization, dict) else "INVALID_AUTHORIZATION_RESPONSE"
+                )
                 return {"allowed": False, "status": status}
-            estimated_cost = route_options.get("estimated_cost", 0.0)
-            normalized_cost = finite_number(estimated_cost, minimum=0)
+            normalized_cost = finite_number(route_options.get("estimated_cost", 0.0), minimum=0)
             if normalized_cost is None:
                 return {"allowed": False, "status": "INVALID_ESTIMATED_COST"}
             if normalized_cost > 0:
@@ -257,10 +262,18 @@ class ProviderService:
                         capability=capability,
                     )
                 except Exception as exc:
-                    return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+                    return {
+                        "allowed": False, "status": "AUTHORIZATION_CHECK_FAILED",
+                        "error_type": type(exc).__name__,
+                    }
                 if not isinstance(paid_authorization, dict) or paid_authorization.get("allowed") is not True:
-                    status = paid_authorization.get("status", "PAID_PERMISSION_REQUIRED") if isinstance(paid_authorization, dict) else "INVALID_AUTHORIZATION_RESPONSE"
+                    status = (
+                        paid_authorization.get("status", "PAID_PERMISSION_REQUIRED")
+                        if isinstance(paid_authorization, dict) else "INVALID_AUTHORIZATION_RESPONSE"
+                    )
                     return {"allowed": False, "status": status}
+        try:
+            result = self.routing_manager.route(**route_options)
         except Exception as exc:
             return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {
