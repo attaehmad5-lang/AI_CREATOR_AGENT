@@ -443,6 +443,34 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotEqual(rejected["status"], "CONNECTED")
         self.assertEqual(called, [])
 
+    def test_credentialed_probe_must_explicitly_confirm_authentication(self):
+        self.manager.catalog["providers"][1]["allowed_hosts"] = ["api.example.com"]
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        configured = self.manager.configure_provider(
+            "token_image",
+            endpoint="https://api.example.com/account",
+            authentication_required=True,
+        )
+        self.assertTrue(configured["saved"])
+        environment = {"TEST_PROVIDER_TOKEN": "test-only-secret"}
+        weak = self.manager.verify_connectivity(
+            "token_image", lambda provider, **kwargs: {"ok": True},
+            environ=environment,
+        )
+        self.assertEqual(weak["status"], "AUTHENTICATION_NOT_VERIFIED")
+        self.assertFalse(weak["verified"])
+        self.assertEqual(self.manager.get_state("token_image")["status"], "ERROR")
+
+        verified = self.manager.verify_connectivity(
+            "token_image",
+            lambda provider, **kwargs: {"ok": True, "authentication_verified": True},
+            environ=environment,
+        )
+        self.assertEqual(verified["status"], "CONNECTED")
+        self.assertTrue(verified["verified"])
+        self.assertNotIn("test-only-secret", repr(verified))
+        self.assertNotIn("test-only-secret", self.state_path.read_text(encoding="utf-8"))
+
     def test_persisted_secret_bearing_configuration_is_rejected_before_probe(self):
         self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
