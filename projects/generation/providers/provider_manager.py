@@ -53,6 +53,10 @@ class ProviderManager:
         modules = registry.get("provider_modules", {})
         if not isinstance(modules, dict):
             raise ValueError("provider_modules must be an object")
+
+        # Validate the complete registry before importing anything; a bad later entry
+        # must not leave a partially replaced provider set behind.
+        validated: list[tuple[str, str, str]] = []
         for name, module_path in modules.items():
             allowed = self._ALLOWED_PROVIDERS.get(name)
             if allowed is None:
@@ -60,7 +64,16 @@ class ProviderManager:
             expected_module, expected_class, expected_path = allowed
             if module_path != expected_path:
                 raise ValueError("registry provider path does not match the built-in allowlist")
-            self.register(name, expected_module, expected_class)
+            validated.append((name, expected_module, expected_class))
+
+        replacement: dict[str, Any] = {}
+        for name, module_name, class_name in validated:
+            module = importlib.import_module(module_name)
+            provider_class = getattr(module, class_name, None)
+            if not callable(provider_class):
+                raise ValueError("allowlisted provider class is unavailable")
+            replacement[name] = provider_class()
+        self.providers = {**self.providers, **replacement}
 
     def get(self, name: str) -> Any | None:
         return self.providers.get(name)
