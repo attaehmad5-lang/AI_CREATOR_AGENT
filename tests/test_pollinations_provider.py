@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
-from projects.generation.providers.pollinations_provider import PollinationsProvider
+from projects.generation.providers.pollinations_provider import PollinationsProvider, _RejectGenerationRedirects
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.http_probe import ProviderHTTPStatusError
 
@@ -107,6 +107,32 @@ class PollinationsProviderTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 429)
         self.assertEqual(caught.exception.retry_after, "7")
         self.assertNotIn("private", str(caught.exception))
+        self.assertEqual(len(opener.calls), 1)
+
+    def test_generation_redirects_are_rejected_to_protect_bearer_key(self):
+        from urllib.request import Request
+
+        handler = _RejectGenerationRedirects()
+        request = Request("https://gen.pollinations.ai/image/test")
+        result = handler.redirect_request(
+            request, None, 302, "Found",
+            {"Location": "https://attacker.example/collect"},
+            "https://attacker.example/collect",
+        )
+        self.assertIsNone(result)
+
+        error = HTTPError(
+            "https://gen.pollinations.ai/image/test", 302, "Found",
+            {"Location": "https://attacker.example/collect"}, None,
+        )
+        opener = _Opener(error=error)
+        provider = PollinationsProvider(
+            environ={"POLLINATIONS_API_KEY": "never-leak"},
+            opener=opener,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaises(ProviderHTTPStatusError):
+                provider.generate_image("test", Path(temporary) / "image.png")
         self.assertEqual(len(opener.calls), 1)
 
     def test_timeout_and_network_errors_are_classified_without_details(self):
