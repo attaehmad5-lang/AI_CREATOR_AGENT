@@ -68,7 +68,10 @@ class ProviderAuditLog:
         project_id = event.get("project_id")
         provider_id = event.get("provider_id")
         request_id = event.get("request_id")
-        if event_type not in _EVENT_TYPES or decision not in _DECISIONS:
+        if (
+            not isinstance(event_type, str) or event_type not in _EVENT_TYPES
+            or not isinstance(decision, str) or decision not in _DECISIONS
+        ):
             return {"status": "INVALID_AUDIT_EVENT", "saved": False}
         if not isinstance(action, str) or not _ACTION.fullmatch(action):
             return {"status": "INVALID_AUDIT_ACTION", "saved": False}
