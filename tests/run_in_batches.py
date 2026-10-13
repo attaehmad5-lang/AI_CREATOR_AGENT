@@ -9,6 +9,14 @@ from __future__ import annotations
 import sys
 import unittest
 from collections.abc import Iterator
+from pathlib import Path
+
+
+# Executing this file sets sys.path[0] to tests/, so explicitly add the repository
+# root before unittest imports test modules that use the "projects" package.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 
 BATCH_SIZE = 10
