@@ -247,6 +247,73 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["saved"])
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
 
+    def test_adapter_contract_requires_only_declared_advanced_capabilities(self):
+        self.manager.catalog["providers"].extend([
+            {
+                "id": "image_upscale_only", "name": "Image Upscale Only",
+                "category": "advanced_upscaling", "auth_type": "NONE",
+                "capabilities": ["image_upscaling"],
+            },
+            {
+                "id": "voice_and_dub_only", "name": "Voice and Dub Only",
+                "category": "advanced_audio", "auth_type": "NONE",
+                "capabilities": ["voice_generation", "voice_dubbing"],
+            },
+        ])
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        self.manager = ConnectionManager(self.catalog_path, self.state_path)
+
+        class ImageUpscaler:
+            def upscale_image(self, *args, **kwargs):
+                return None
+
+        class VoiceDubber:
+            def generate_speech(self, *args, **kwargs):
+                return None
+            def dub(self, *args, **kwargs):
+                return None
+
+        image_contract = self.manager.validate_provider_contract(
+            "image_upscale_only", ImageUpscaler()
+        )
+        voice_contract = self.manager.validate_provider_contract(
+            "voice_and_dub_only", VoiceDubber()
+        )
+        self.assertTrue(image_contract["valid"], image_contract)
+        self.assertTrue(voice_contract["valid"], voice_contract)
+        self.assertEqual(image_contract["contract_version"], "2.0")
+
+    def test_adapter_contract_rejects_missing_declared_capability_method(self):
+        self.manager.catalog["providers"].append({
+            "id": "image_upscale_only", "name": "Image Upscale Only",
+            "category": "advanced_upscaling", "auth_type": "NONE",
+            "capabilities": ["image_upscaling", "video_upscaling"],
+        })
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        self.manager = ConnectionManager(self.catalog_path, self.state_path)
+
+        class ImageOnly:
+            def upscale_image(self, *args, **kwargs):
+                return None
+
+        result = self.manager.validate_provider_contract("image_upscale_only", ImageOnly())
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["missing_methods"], ["upscale_video"])
+
+    def test_adapter_contract_rejects_unknown_capability_instead_of_silently_ignoring_it(self):
+        self.manager.catalog["providers"].append({
+            "id": "unknown_capability", "name": "Unknown Capability",
+            "category": "image", "auth_type": "NONE",
+            "capabilities": ["image_generation", "magic_generation"],
+        })
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        self.manager = ConnectionManager(self.catalog_path, self.state_path)
+        result = self.manager.validate_provider_contract(
+            "unknown_capability", type("ImageAdapter", (), {"generate_image": lambda *a, **k: None})()
+        )
+        self.assertEqual(result["status"], "UNSUPPORTED_CAPABILITY")
+        self.assertFalse(result["valid"])
+
     def test_public_state_setter_cannot_mint_verified_connection(self):
         for state in ("CONNECTED", "READY"):
             with self.subTest(state=state):
