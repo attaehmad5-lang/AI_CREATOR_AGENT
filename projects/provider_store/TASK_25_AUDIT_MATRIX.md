@@ -27,6 +27,29 @@ GitHub Actions run [#38280285131](https://github.com/attaehmad5-lang/AI_CREATOR_
 | O / 119–128 | Usage & Management | Reservation, quota, cost reconciliation, and credit accounting managers | PARTIAL | Complete usage/reporting and management requirements from the canonical checklist. |
 | P / 129–138 | Extensibility & Administration | Central registry and legacy/unified compatibility facades | PARTIAL | Verify provider/plugin lifecycle requirements and any required administration surfaces against the original items. |
 
+## Individual evidence audit — first 16 canonical items
+
+These dispositions describe repository/test evidence only; no item is called live-verified without a real, authorized provider check.
+
+| ID | Canonical item | Evidence checked | Current disposition | Remaining work |
+|---:|---|---|---|---|
+| 1 | Provider Registry | Primary/master catalog schema, 54 unique provider IDs, synchronized registry | PARTIAL | Review every record against its official documentation and original checklist acceptance criteria. |
+| 2 | Provider Registration | Validated registration path, credential-value rejection, cross-process registration regression test | IMPLEMENTED / TESTED | Finish checklist-specific edge-case audit and verify extension lifecycle end to end. |
+| 3 | Provider Discovery | Category/capability filters; every catalog record now has baseline capability metadata | PARTIAL | Capability labels for locked providers are declarations only; verify each supported capability and live adapter. |
+| 4 | Provider Loading | Injected factory, enabled-provider gate, capability-aware interface contract validation | PARTIAL | Real adapters are not present for every catalog entry; test actual load and invocation for each supported adapter. |
+| 5 | Provider Unloading | close/shutdown cleanup and retention on cleanup failure tests | IMPLEMENTED / TESTED | Confirm shutdown behavior for each real adapter as those adapters are integrated. |
+| 6 | Provider Enable/Disable | Persisted eligibility changes and unload-on-disable behavior with cleanup failure handling | IMPLEMENTED / TESTED | Verify admin/UI integration and concurrent lifecycle changes. |
+| 7 | Provider Metadata | Schema validation, public-view redaction, credential-value rejection | PARTIAL | Complete the item-level metadata field, migration, provenance, and documentation audit. |
+| 8 | Provider Interface Contract | Contract v2 checks callable methods for declared capabilities and rejects unknown capabilities; regression tests cover advanced modalities | IMPLEMENTED / TESTED | Run each real adapter against its declared contract; a callable surface alone does not prove functional generation. |
+| 9 | API Key / Token Authentication | Environment-only credential references, provider-specific auth headers, secret redaction and header-injection tests | PARTIAL | Connect only with user-authorized credentials and verify provider-specific authentication endpoints. |
+| 10 | OAuth / Login | Generic OAuth 2.0 authorization-code + PKCE helper, state/TTL validation and in-memory token lifecycle | PARTIAL | Complete provider-specific app registration, scopes, redirect URIs, consent, and authorized end-to-end login tests. |
+| 11 | Credential Expiry / Refresh | Expiry validation and explicit refresh path when a refresh token is available | PARTIAL | Verify expiry/refresh semantics for each provider; providers without refresh tokens require re-consent. |
+| 12 | Connection and Network Timeouts | Bounded HTTP probe timeout and timeout/error classification tests | PARTIAL | Inject real provider network failures and confirm all adapters enforce the timeout themselves. |
+| 13 | Live Connectivity Verification | Verified-state gating, generic allowlisted HTTPS probe, safe error classification | PARTIAL | Run provider-specific live probes with authorized credentials; simulated HTTP tests are not live verification. |
+| 14 | Endpoint / Model Configuration | Model and endpoint validation, allowlist checks, query-string rejection, separate probe_endpoint | IMPLEMENTED / TESTED | Validate model/endpoint combinations against official provider docs and live non-billable probes. |
+| 15 | TLS / HTTPS / Certificate Verification | HTTPS required, TLS verification by standard-library opener, redirects rejected, unsafe hosts blocked | IMPLEMENTED / TESTED | Exercise certificate/handshake failures against controlled endpoints and provider-specific hosts. |
+| 16 | Authentication / Permission / Access Error Handling | Safe classification for 401/403, 429, 5xx, timeout/network failures and bounded Retry-After | IMPLEMENTED / TESTED | Confirm provider-specific error bodies/status semantics without logging secrets or response bodies. |
+
 ## Non-negotiable completion gates
 
 1. Preserve the exact canonical 138-item A–P list; do not infer individual item names from group headings.
