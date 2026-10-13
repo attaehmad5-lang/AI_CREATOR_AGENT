@@ -74,13 +74,13 @@ class ProviderAccessControl:
         provider_id: Any = None,
     ) -> dict[str, Any]:
         result = {"allowed": allowed, "status": status}
-        if allowed and isinstance(action, str) and re.fullmatch(r"provider\\.[a-z][a-z.]{0,79}", action):
+        if allowed and isinstance(action, str) and re.fullmatch(r"provider\.[a-z][a-z.]{0,79}", action):
             result["action"] = action
         if self.audit_logger is not None:
             event = {
                 "event_type": "authorization",
                 "decision": "allowed" if allowed else "denied",
-                "action": action if isinstance(action, str) and re.fullmatch(r"provider\\.[a-z][a-z.]{0,79}", action) else "provider.authorize",
+                "action": action if isinstance(action, str) and re.fullmatch(r"provider\.[a-z][a-z.]{0,79}", action) else "provider.authorize",
                 "status": status if isinstance(status, str) and IDENTIFIER.fullmatch(status) else "AUTHORIZATION_DENIED",
             }
             if isinstance(project_id, str) and IDENTIFIER.fullmatch(project_id):
