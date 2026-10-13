@@ -85,7 +85,7 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "PERMISSION_DENIED")
-        self.assertNotIn("acl-paid-denied", self.cost.data.get("reservations", {}))
+        self.assertNotIn("acl-paid-denied", repr(self.cost.ledger))
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
