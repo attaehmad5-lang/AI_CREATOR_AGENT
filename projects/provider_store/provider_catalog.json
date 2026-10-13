@@ -341,7 +341,10 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "deprecated": true,
+      "deprecation_date": "2026-09-24",
+      "deprecation_reason": "OpenAI Videos API removal was announced for 2026-09-24; no supported Sora generation endpoint is verified in this catalog. Keep disabled until an official supported replacement is verified."
     },
     {
       "id": "runway",
