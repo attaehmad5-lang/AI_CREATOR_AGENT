@@ -124,13 +124,27 @@ class ProviderJSONBalanceProbe:
             response = self.opener.open(request, timeout=self.timeout_seconds)
         except HTTPError as exc:
             status = exc.code
+            retry_after = None
+            try:
+                raw_retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                if (
+                    isinstance(raw_retry_after, str)
+                    and len(raw_retry_after) <= 128
+                    and not any(ord(char) < 32 or ord(char) == 127 for char in raw_retry_after)
+                ):
+                    retry_after = raw_retry_after
+            except Exception:
+                retry_after = None
             exc.close()
-            return {
+            result = {
                 "status": "BALANCE_AUTH_FAILED" if status in {401, 403} else "BALANCE_HTTP_ERROR",
                 "http_status": status if isinstance(status, int) and 100 <= status <= 599 else None,
                 "provider": provider_id,
                 "verified": False,
             }
+            if retry_after is not None:
+                result["retry_after"] = retry_after
+            return result
         except URLError as exc:
             reason = getattr(exc, "reason", None)
             status = "BALANCE_TIMEOUT" if isinstance(reason, TimeoutError) or "timeout" in type(reason).__name__.casefold() else "BALANCE_NETWORK_ERROR"
