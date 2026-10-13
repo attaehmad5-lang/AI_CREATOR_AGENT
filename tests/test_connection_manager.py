@@ -948,17 +948,18 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def test_advanced_provider_categories_have_explicit_callable_contracts(self):
         cases = (
-            ("advanced_image_editing", "edit_image"),
-            ("advanced_upscaling", "upscale_image"),
-            ("advanced_transcription", "transcribe"),
-            ("advanced_audio", "generate_music"),
-            ("script_story", "generate_text"),
-            ("advanced_video_editing", "edit_video"),
+            ("advanced_image_editing", "edit_image", "inpainting"),
+            ("advanced_upscaling", "upscale_image", "image_upscaling"),
+            ("advanced_transcription", "transcribe", "speech_to_text"),
+            ("advanced_audio", "generate_music", "music_generation"),
+            ("script_story", "generate_text", "story_generation"),
+            ("advanced_video_editing", "edit_video", "video_editing"),
         )
-        for category, method_name in cases:
+        for category, method_name, capability in cases:
             with self.subTest(category=category):
                 catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
                 catalog["providers"][0]["category"] = category
+                catalog["providers"][0]["capabilities"] = [capability]
                 self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
                 manager = ConnectionManager(self.catalog_path, self.state_path)
                 instance = type("Adapter", (), {method_name: lambda self, *args, **kwargs: None})()
