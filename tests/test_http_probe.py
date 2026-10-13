@@ -56,6 +56,17 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         self.assertEqual(len(opener.response.body), 5000)
         self.assertTrue(opener.response.closed)
 
+    def test_generation_endpoint_is_never_used_as_implicit_probe(self):
+        opener = _Opener()
+        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        with self.assertRaisesRegex(ValueError, "PROBE_ENDPOINT_NOT_CONFIGURED"):
+            probe({
+                "id": "public_provider", "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/v1/images/generations"},
+            })
+        self.assertEqual(opener.calls, [])
+
     def test_credentialed_probe_requires_explicit_auth_protected_endpoint(self):
         opener = _Opener()
         probe = ProviderHTTPConnectivityProbe(
