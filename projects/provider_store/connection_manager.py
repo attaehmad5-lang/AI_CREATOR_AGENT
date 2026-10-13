@@ -383,6 +383,29 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].auth_scheme is not permitted")
                     if "subscription_required" in provider and not isinstance(provider["subscription_required"], bool):
                         errors.append(f"providers[{index}].subscription_required must be boolean")
+                    deprecated = provider.get("deprecated", False)
+                    if not isinstance(deprecated, bool):
+                        errors.append(f"providers[{index}].deprecated must be boolean")
+                    if deprecated is True:
+                        if provider.get("enabled") is True:
+                            errors.append(f"providers[{index}] deprecated provider must remain disabled")
+                        reason = provider.get("deprecation_reason")
+                        if (
+                            not isinstance(reason, str)
+                            or not reason.strip()
+                            or len(reason) > 500
+                            or any(ord(char) < 32 and char not in "\\t" for char in reason)
+                        ):
+                            errors.append(f"providers[{index}].deprecation_reason is required for deprecated providers")
+                        deprecation_date = provider.get("deprecation_date")
+                        try:
+                            parsed_deprecation_date = date.fromisoformat(deprecation_date) if isinstance(deprecation_date, str) else None
+                        except ValueError:
+                            parsed_deprecation_date = None
+                        if parsed_deprecation_date is None or parsed_deprecation_date.isoformat() != deprecation_date:
+                            errors.append(f"providers[{index}].deprecation_date must be an ISO YYYY-MM-DD date")
+                    elif "deprecation_reason" in provider or "deprecation_date" in provider:
+                        errors.append(f"providers[{index}] deprecation metadata requires deprecated=true")
                     if "zero_cost_allowed" in provider and not isinstance(provider["zero_cost_allowed"], bool):
                         errors.append(f"providers[{index}].zero_cost_allowed must be boolean")
                     if provider.get("subscription_required") is True and provider.get("zero_cost_allowed") is True:
