@@ -1135,8 +1135,18 @@ class ConnectionManager:
                 ord(char) < 32 or ord(char) == 127 for char in retry_after
             ):
                 retry_after = None
+            safe_probe_configuration_statuses = {
+                "PROBE_ENDPOINT_NOT_CONFIGURED", "HOST_ALLOWLIST_REQUIRED",
+                "INVALID_ENDPOINT", "INVALID_HOST_ALLOWLIST", "HTTPS_REQUIRED",
+                "INVALID_PORT", "EMBEDDED_CREDENTIALS_REJECTED",
+                "QUERY_PARAMETERS_REJECTED", "FRAGMENT_REJECTED",
+                "NON_PUBLIC_ADDRESS_REJECTED", "HOST_NOT_ALLOWLISTED",
+                "INVALID_AUTH_TYPE",
+            }
             if isinstance(exc, ProviderAuthenticationVerificationRequired):
                 status = "AUTHENTICATION_VERIFICATION_REQUIRED"
+            elif isinstance(exc, ValueError) and str(exc) in safe_probe_configuration_statuses:
+                status = str(exc)
             elif http_status in {401, 403}:
                 status = "AUTHENTICATION_OR_PERMISSION_FAILED"
             elif http_status == 429:
