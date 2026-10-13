@@ -140,7 +140,15 @@ class ProviderService:
         """
         if not callable(getattr(oauth_manager, "get_access_token", None)):
             return {"status": "OAUTH_MANAGER_INVALID", "provider": provider_id, "verified": False}
-        provider = self.connection_manager.get_provider(provider_id)
+        try:
+            provider = self.connection_manager.get_provider(provider_id)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_LOOKUP_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
         if not isinstance(provider, dict):
             return {"status": "NOT_FOUND", "provider": provider_id, "verified": False}
         token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env")
