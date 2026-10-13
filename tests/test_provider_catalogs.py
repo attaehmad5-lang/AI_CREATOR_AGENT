@@ -164,6 +164,37 @@ class ProviderCatalogValidationTests(unittest.TestCase):
             )
             self.assertEqual({provider["id"] for provider in matches}, {"huggingface", "pollinations"})
 
+    def test_every_catalog_provider_declares_a_conservative_baseline_capability(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        baseline = {
+            "image": "image_generation",
+            "voice": "text_to_speech",
+            "music": "music_generation",
+            "video": "video_generation",
+            "lipsync": "lip_sync",
+            "transcription": "audio_transcription",
+            "upscaling": "image_upscaling",
+            "image_editing": "image_editing",
+            "editing": "media_editing",
+            "story": "story_generation",
+            "text": "text_generation",
+            "research": "research",
+        }
+        self.assertGreaterEqual(len(catalog["providers"]), 50)
+        for provider in catalog["providers"]:
+            with self.subTest(provider=provider["id"]):
+                capabilities = provider.get("capabilities")
+                self.assertIsInstance(capabilities, list)
+                self.assertTrue(capabilities)
+                self.assertEqual(len(capabilities), len(set(capabilities)))
+                self.assertIn(baseline[provider["category"]], capabilities)
+        # Metadata is discoverability only; locked providers still require adapters
+        # and provider-specific live verification before they can be executed.
+        locked = [p for p in catalog["providers"] if p.get("enabled") is False]
+        self.assertTrue(locked)
+        self.assertTrue(all(p.get("enabled") is False for p in locked))
+
     def test_every_catalog_modality_has_a_callable_contract(self):
         root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
         catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
