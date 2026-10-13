@@ -1,6 +1,7 @@
 import unittest
 
 from projects.provider_store.access_control import ProviderAccessControl
+from projects.provider_store.audit_log import ProviderAuditLog
 
 
 class ProviderAccessControlTests(unittest.TestCase):
@@ -97,6 +98,38 @@ class ProviderAccessControlTests(unittest.TestCase):
             ProviderAccessControl({"bad role": {"provider.route"}})
         with self.assertRaises(ValueError):
             ProviderAccessControl({"creator": {"*"}})
+
+    def test_authorization_decisions_are_audited(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "audit.jsonl"
+            acl = ProviderAccessControl(audit_logger=ProviderAuditLog(path))
+            allowed = acl.authorize(
+                {"subject": "user-1", "roles": ["creator"], "projects": ["film"]},
+                action="provider.route", project_id="film",
+            )
+            denied = acl.authorize(
+                {"subject": "user-1", "roles": ["creator"], "projects": ["film"]},
+                action="provider.paid.execute", project_id="film",
+            )
+            self.assertTrue(allowed["allowed"])
+            self.assertFalse(denied["allowed"])
+            events = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([event["decision"] for event in events], ["allowed", "denied"])
+
+    def test_allowed_operation_fails_closed_if_audit_write_fails(self):
+        class BrokenAudit:
+            def record(self, event):
+                return {"status": "AUDIT_WRITE_FAILED", "saved": False}
+        acl = ProviderAccessControl(audit_logger=BrokenAudit())
+        result = acl.authorize(
+            {"subject": "owner-1", "roles": ["owner"], "projects": ["film"]},
+            action="provider.route", project_id="film",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "AUDIT_LOG_WRITE_FAILED")
 
     def test_denial_response_does_not_disclose_principal_or_secrets(self):
         result = self.acl.authorize(
