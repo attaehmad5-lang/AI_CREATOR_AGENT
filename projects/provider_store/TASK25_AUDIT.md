@@ -6,12 +6,12 @@
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#38454396272](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38454396272) completed successfully on Python 3.13:
+GitHub Actions code-verification run [#38454944973](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38454944973) completed successfully on Python 3.13:
 
-- Ubuntu: 351 tests passed, 0 failures.
-- Windows: 351 tests passed, 0 failures.
+- Ubuntu: 360 tests passed, 0 failures.
+- Windows: 360 tests passed, 0 failures.
 - Provider module/test compilation and provider JSON catalog validation passed on both platforms.
-- Coverage added for least-privilege role/project/provider scopes, audited authorization decisions, and basic WAV/AVI/MP4 container structure. Follow-up work is isolated in draft PR #10; PR #1 and PR #7 are already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
+- Coverage includes least-privilege role/project/provider scopes, audited authorization decisions, basic WAV/AVI/MP4 container structure, and bounded global/per-project admission backpressure. Follow-up work is isolated in draft PR #10; PR #1 and PR #7 are already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
@@ -25,10 +25,10 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | D — Routing and Selection | 25–32 | Priority, free-credit-first, lowest-cost, healthiest-first, round-robin, PRIMARY_ONLY and explicit automatic-fallback control; declared model/version filtering; verified-connection gating and fallback reservations | Foundation implemented; real generation-path integration pending |
 | E — Retry, Failure and Recovery | 33–40 | Bounded backoff, status/Retry-After handling, idempotency checks, circuit breaker and probe-slot recovery | Unit-tested foundation; provider-specific failure injection pending |
 | F — Health and Reliability | 41–48 | Persisted health history, latency/staleness checks, eligibility and active probe recording | Foundation implemented; live provider health evidence pending |
-| G — Output and Asset Safety | 49–56 | Size/signature/basic-content checks, bounded reads, mutation detection, JSON nesting limits and SHA-256 | Basic validation implemented; full media decoding, malware scanning and semantic QA pending |
+| G — Output and Asset Safety | 49–56 | Size/signature/basic-content checks, bounded reads, mutation detection, JSON nesting limits, SHA-256, WAV/AVI/MP4 container-boundary checks | Partial validation implemented; full media decoding, malware scanning and semantic QA pending |
 | H — Cost, Free Credits and Quotas | 57–64 | Paid-approval guard, configured budgets, serialized reservations, usage reconciliation, verified credit snapshots and unit compatibility; new `account_balance_probe.py` provides bounded, allowlisted JSON balance reads with explicit available-credit field semantics | Local policy/ledger and generic balance-probe integration tested; provider-specific live balance adapters and balance-field semantics still need authorized verification |
-| I — Security, Privacy and Governance | 65–72 | Secret-safe catalog/state, endpoint allowlists, HTTPS-only probes, redirect rejection, bounded response reads, rejection of unsupported raw-token Basic auth, and overflow-safe numeric validation across cost, credit, routing, connection, health, retry, and OAuth | Implemented safeguards; threat-model and deployment review pending |
-| J — Production Orchestration | 73–80 | Request reservation/finalization integration and idempotency tests in the provider service | Provider-request lifecycle foundation; full end-to-end generation jobs pending |
+| I — Security, Privacy and Governance | 65–72 | Secret-safe catalog/state, endpoint allowlists, HTTPS-only probes, role/project/provider/capability scopes, bounded append-only authorization audit log, redirect rejection, bounded response reads, and overflow-safe numeric validation | Partial safeguards; trusted identity-provider integration, admin/credential authorization, central audit shipping/retention, threat-model and deployment review pending |
+| J — Production Orchestration | 73–80 | Request reservation/finalization integration, bounded in-process global/per-project admission limits, overload rejection, and retention of admission leases for ambiguous external outcomes | Partial foundation; durable queues, async job lifecycle, webhook verification, cross-process worker limits, and full end-to-end generation jobs pending |
 | K — Quality, Performance and Observability | 81–88 | Health/latency history, bounded histories, concurrency tests and structured safe statuses | Partial evidence; production metrics/telemetry and load benchmarks pending |
 | L — Configuration, Compatibility and Change Control | 89–96 | Validated endpoint/model configuration, atomic writes, catalog backup validation and explicit restore path | Foundation implemented; mobile/Pydroid and crash-recovery verification pending |
 | M — Testing, Audit and Release Readiness | 97–110 | Legacy facade compatibility, shared catalog behavior, cross-process state protection and cross-platform CI | Partial evidence; full integration matrix and cross-manager transaction guarantees pending |
