@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434036632](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434036632): **326 tests passed on Ubuntu and 326 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth provider lookup, and deprecated-provider disablement validation.
+GitHub Actions run [#38434531462](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434531462): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation, and runtime enablement rejecting invalid catalogs.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -19,7 +19,7 @@ GitHub Actions run [#38434036632](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 3 | 🟡 | Provider Discovery | VERIFIED | Provider discovery by declared catalog metadata is implemented and covered by discovery/capability tests. |
 | 4 | 🟡 | Provider Loading | VERIFIED | Factory-based loading, disabled-provider rejection, contract enforcement and safe failure behavior are tested. |
 | 5 | 🔴 | Provider Unloading | VERIFIED | `unload_provider()` calls close/shutdown, preserves instances if cleanup fails, and has lifecycle regression tests. |
-| 6 | 🔴 | Provider Enable/Disable | VERIFIED | Enable/disable catalog state is persisted; disabling unloads the runtime instance, with regression tests. |
+| 6 | 🔴 | Provider Enable/Disable | VERIFIED | Enable/disable state persists and disabling unloads runtime instances; enabling validates the candidate catalog first, rejects deprecated providers, and requires official documentation plus declared capabilities for enabled API providers. Evidence: `tests/test_provider_catalogs.py::test_runtime_enablement_cannot_reactivate_deprecated_provider`, `test_runtime_enablement_requires_official_docs_and_capabilities`. |
 | 7 | 🟡 | Provider Metadata | PARTIAL | Metadata/schema validation exists; live capability/version/price metadata refresh is incomplete. |
 | 8 | 🔴 | Provider Interface Contract | VERIFIED | Required modality callables are checked before loading; missing/raising methods fail closed in contract tests. |
 
