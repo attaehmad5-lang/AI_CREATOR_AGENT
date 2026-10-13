@@ -164,6 +164,8 @@ class ProviderHealthManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path, failure_threshold=1.5)
         with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=0)
+        with self.assertRaises(ValueError):
             ProviderHealthManager(self.path, clock="not-callable")
         self.assertEqual(
             self.manager.active_probe("image", lambda **kwargs: True, timeout_seconds=float("nan"))["status"],
