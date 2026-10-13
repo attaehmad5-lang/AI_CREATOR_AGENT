@@ -1,6 +1,8 @@
 import unittest
 
 from projects.generation.providers.provider_manager import ProviderManager
+from projects.generation.providers.fallback_manager import FallbackManager
+from projects.generation.providers.provider_health import ProviderHealth
 
 
 class GenerationProviderManagerSecurityTests(unittest.TestCase):
@@ -45,6 +47,23 @@ class GenerationProviderManagerSecurityTests(unittest.TestCase):
                 }
             })
         self.assertEqual(set(manager.providers), {"existing"})
+
+    def test_fallback_results_and_health_state_never_store_raw_exception_text(self):
+        manager = ProviderManager()
+        secret = "Bearer very-secret-token"
+        class FailingProvider:
+            def generate_image(self, prompt, output_path):
+                raise RuntimeError(f"request failed with {secret}")
+        manager.providers["failing"] = FailingProvider()
+        health = ProviderHealth()
+        result = FallbackManager(manager, health).generate_image(
+            ["failing"], "test prompt", "output.png"
+        )
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(result["errors"][0]["error_type"], "RuntimeError")
+        status = health.get_status("failing")
+        self.assertEqual(status["last_error"], "RuntimeError")
+        self.assertNotIn(secret, repr(status))
 
     def test_invalid_registry_shape_is_rejected(self):
         manager = ProviderManager()
