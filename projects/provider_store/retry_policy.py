@@ -115,7 +115,29 @@ class RetryPolicy:
         retryable_exception = isinstance(exception, (TimeoutError, ConnectionError, OSError))
         if not retryable_status and not retryable_exception:
             return RetryDecision(False, attempt, 0.0, "NON_RETRYABLE_FAILURE")
-        exponential = min(self.max_delay_seconds, self.base_delay_seconds * (2 ** (attempt - 1)))
+        exponent = attempt - 1
+        if self.base_delay_seconds == 0 or self.max_delay_seconds == 0:
+            exponential = 0.0
+        else:
+            # Cap before exponentiation. A malformed/extreme attempt number must not
+            # allocate a gigantic integer or overflow while computing backoff.
+            cap_exponent = max(
+                0,
+                math.ceil(
+                    math.log2(self.max_delay_seconds)
+                    - math.log2(self.base_delay_seconds)
+                ),
+            )
+            if exponent >= cap_exponent:
+                exponential = self.max_delay_seconds
+            else:
+                try:
+                    exponential = min(
+                        self.max_delay_seconds,
+                        math.ldexp(self.base_delay_seconds, exponent),
+                    )
+                except OverflowError:
+                    exponential = self.max_delay_seconds
         try:
             random_value = self.random_fn()
             if (
