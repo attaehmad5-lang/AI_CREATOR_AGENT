@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38453337825](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38453337825): **342 tests passed on Ubuntu and 342 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite additionally covers role permissions, mandatory project scope, provider allowlist filtering before routing, and paid-execution authorization for positive per-provider estimates.
+GitHub Actions run [#38454396272](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38454396272): **351 tests passed on Ubuntu and 351 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite additionally covers role permissions, mandatory project scope, provider allowlist filtering before routing, paid-execution authorization for positive per-provider estimates, append-only audited authorization decisions, and basic WAV/AVI/MP4 container-structure checks.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
