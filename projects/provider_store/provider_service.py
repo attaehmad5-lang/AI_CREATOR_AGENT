@@ -229,6 +229,8 @@ class ProviderService:
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
         principal = route_options.pop("principal", None)
+        if principal is not None and self.access_control_manager is None:
+            return {"allowed": False, "status": "ACCESS_CONTROL_UNAVAILABLE"}
         if self.access_control_manager is not None:
             project_id = route_options.get("project_id")
             capability = route_options.get("capability")
