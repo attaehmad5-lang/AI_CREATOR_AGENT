@@ -125,7 +125,7 @@ GitHub Actions run [#38453337825](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 69 | 🔴 | Sensitive-Data Detection and Privacy Enforcement | OPEN | Sensitive-data detection and policy enforcement are not complete. |
 | 70 | 🔴 | Data Retention and Provider Data-Handling Rules | OPEN | Provider-specific retention/data-handling policy enforcement is not complete. |
 | 71 | 🔴 | Provider Endpoint Allowlisting and Network Security | PARTIAL | HTTPS host allowlists, redirect rejection and bounded reads are tested; deployment threat-model review remains open. |
-| 72 | 🔴 | Routing, Credential and Approval Audit Logs | PARTIAL | Some cost/state ledgers exist; complete immutable routing/credential/approval audit trail is not verified. |
+| 72 | 🔴 | Routing, Credential and Approval Audit Logs | PARTIAL | New `audit_log.py` appends allowlisted JSONL security events under interprocess lock with `fsync`, size limits, and secret-like payload rejection; `ProviderAccessControl` can audit allow/deny decisions and fails closed on audit-write failure for allowed actions. Provider credential changes, paid-approval workflow events, central shipping, and retention policy are still not integrated. Tests: `tests/test_audit_log.py`, `tests/test_access_control.py`. |
 
 ## J — Production Orchestration
 
