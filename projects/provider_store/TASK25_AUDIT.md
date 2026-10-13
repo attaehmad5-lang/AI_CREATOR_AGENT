@@ -6,12 +6,12 @@
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#38454944973](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38454944973) completed successfully on Python 3.13:
+GitHub Actions code-verification run [#38455536407](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38455536407) completed successfully on Python 3.13:
 
-- Ubuntu: 360 tests passed, 0 failures.
-- Windows: 360 tests passed, 0 failures.
+- Ubuntu: 368 tests passed, 0 failures.
+- Windows: 368 tests passed, 0 failures.
 - Provider module/test compilation and provider JSON catalog validation passed on both platforms.
-- Coverage includes least-privilege role/project/provider scopes, audited authorization decisions, basic WAV/AVI/MP4 container structure, and bounded global/per-project admission backpressure. Follow-up work is isolated in draft PR #10; PR #1 and PR #7 are already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
+- Coverage includes least-privilege role/project/provider scopes, audited authorization decisions, basic WAV/AVI/MP4 container structure, bounded global/per-project admission backpressure, and HMAC webhook signature/replay protection. Follow-up work is isolated in draft PR #10; PR #1 and PR #7 are already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
