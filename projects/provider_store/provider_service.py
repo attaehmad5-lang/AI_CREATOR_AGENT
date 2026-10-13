@@ -255,6 +255,16 @@ class ProviderService:
             normalized_cost = finite_number(route_options.get("estimated_cost", 0.0), minimum=0)
             if normalized_cost is None:
                 return {"allowed": False, "status": "INVALID_ESTIMATED_COST"}
+            estimated_costs = route_options.get("estimated_costs")
+            if estimated_costs is not None:
+                if not isinstance(estimated_costs, dict) or len(estimated_costs) > 500:
+                    return {"allowed": False, "status": "INVALID_ESTIMATED_COSTS"}
+                normalized_provider_costs = [
+                    finite_number(amount, minimum=0) for amount in estimated_costs.values()
+                ]
+                if any(amount is None for amount in normalized_provider_costs):
+                    return {"allowed": False, "status": "INVALID_ESTIMATED_COSTS"}
+                normalized_cost = max([normalized_cost, *normalized_provider_costs])
             if normalized_cost > 0:
                 try:
                     paid_authorization = self.access_control_manager.authorize(
