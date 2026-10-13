@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
@@ -13,6 +15,9 @@ from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
+from projects.provider_store.access_control import ProviderAccessControl
+from projects.provider_store.admission_controller import ProviderAdmissionController
+from projects.provider_store.webhook_verifier import ProviderWebhookVerifier
 
 
 class ProviderServiceTests(unittest.TestCase):
@@ -51,6 +56,143 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_route_request_requires_authorized_principal_when_access_control_enabled(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            access_control_manager=ProviderAccessControl(),
+        )
+        denied = service.route_request(
+            category="image", project_id="film", estimated_cost=0.0,
+            principal={"subject": "viewer-1", "roles": ["viewer"]},
+        )
+        self.assertFalse(denied["allowed"])
+        self.assertEqual(denied["status"], "PERMISSION_DENIED")
+        allowed = service.route_request(
+            category="image", project_id="film", estimated_cost=0.0,
+            principal={"subject": "creator-1", "roles": ["creator"], "projects": ["film"]},
+        )
+        self.assertTrue(allowed["allowed"])
+
+    def test_provider_scope_filters_candidates_before_routing(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            access_control_manager=ProviderAccessControl(),
+        )
+        result = service.route_request(
+            category="image", project_id="film", estimated_cost=0.0,
+            principal={
+                "subject": "creator-1", "roles": ["creator"],
+                "projects": ["film"], "providers": ["another-provider"],
+            },
+        )
+        self.assertFalse(result["allowed"])
+        self.assertNotEqual(result.get("provider"), "image")
+
+    def test_principal_is_not_silently_ignored_without_access_controller(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(self.connections, routing_manager=router)
+        result = service.route_request(
+            category="image", project_id="film", estimated_cost=0.0,
+            principal={"subject": "creator-1", "roles": ["creator"]},
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "ACCESS_CONTROL_UNAVAILABLE")
+
+    def test_paid_route_requires_paid_execution_permission_before_reservation(self):
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost)
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            access_control_manager=ProviderAccessControl(),
+            cost_policy=self.cost,
+        )
+        result = service.route_request(
+            category="image", project_id="film", estimated_cost=0.0,
+            estimated_costs={"image": 1.0},
+            request_id="acl-paid-denied",
+            principal={"subject": "creator-1", "roles": ["creator"], "projects": ["film"]},
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "PERMISSION_DENIED")
+        self.assertNotIn("acl-paid-denied", repr(self.cost.ledger))
+
+    def test_admission_backpressure_rejects_before_routing_or_adapter_call(self):
+        admission = ProviderAdmissionController(max_active=1, max_active_per_project=1)
+        self.assertTrue(admission.acquire(request_id="occupied", project_id="film")["acquired"])
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router, admission_controller=admission,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="blocked-job",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(True),
+            modality="image",
+        )
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["status"], "BACKPRESSURE_GLOBAL_LIMIT")
+        self.assertEqual(called, [])
+        self.assertEqual(admission.snapshot()["active"], 1)
+
+    def test_execution_releases_admission_after_terminal_attempt(self):
+        admission = ProviderAdmissionController(max_active=2, max_active_per_project=2)
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router, admission_controller=admission,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="terminal-job",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: {
+                "started": True, "success": False, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "error_code": "TEST_FAILURE",
+            },
+            modality="image",
+        )
+        self.assertTrue(result["executed"])
+        self.assertTrue(result["admission_release"]["released"])
+        self.assertEqual(admission.snapshot()["active"], 0)
+
+    def test_ambiguous_execution_retains_admission_until_explicit_resolution(self):
+        admission = ProviderAdmissionController(max_active=2, max_active_per_project=2)
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router, admission_controller=admission,
+        )
+        def ambiguous_adapter(**kwargs):
+            raise TimeoutError("simulated unknown external outcome")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="ambiguous-job",
+            estimated_cost=0.0, adapter=ambiguous_adapter, modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
+        self.assertTrue(result["admission_lease_retained"])
+        self.assertEqual(admission.snapshot()["active"], 1)
+        resolved = service.resolve_admission("ambiguous-job")
+        self.assertTrue(resolved["released"])
+        self.assertEqual(admission.snapshot()["active"], 0)
+
+    def test_service_verifies_provider_webhooks_before_processing(self):
+        secret = "service-webhook-test-secret-at-least-32-bytes"
+        body = b'{"event":"ready"}'
+        timestamp = "1000"
+        signature = "sha256=" + hmac.new(
+            secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256
+        ).hexdigest()
+        verifier = ProviderWebhookVerifier(lambda _: secret, clock=lambda: 1000)
+        service = ProviderService(self.connections, webhook_verifier=verifier)
+        result = service.verify_webhook(
+            provider_id="image", body=body, timestamp=timestamp,
+            signature=signature, event_id="webhook-1",
+        )
+        self.assertTrue(result["verified"])
+        replay = service.verify_webhook(
+            provider_id="image", body=body, timestamp=timestamp,
+            signature=signature, event_id="webhook-1",
+        )
+        self.assertEqual(replay["status"], "WEBHOOK_REPLAY_DETECTED")
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)

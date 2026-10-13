@@ -22,6 +22,9 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        access_control_manager: Any | None = None,
+        admission_controller: Any | None = None,
+        webhook_verifier: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -45,6 +48,44 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        if access_control_manager is not None and not callable(getattr(access_control_manager, "authorize", None)):
+            raise ValueError("access_control_manager must support authorization")
+        self.access_control_manager = access_control_manager
+        if admission_controller is not None and (
+            not callable(getattr(admission_controller, "acquire", None))
+            or not callable(getattr(admission_controller, "release", None))
+        ):
+            raise ValueError("admission_controller must support acquire and release")
+        self.admission_controller = admission_controller
+        if webhook_verifier is not None and not callable(getattr(webhook_verifier, "verify", None)):
+            raise ValueError("webhook_verifier must support verify")
+        self.webhook_verifier = webhook_verifier
+
+    def verify_webhook(
+        self,
+        *,
+        provider_id: str,
+        body: bytes,
+        timestamp: str,
+        signature: str,
+        event_id: str,
+    ) -> dict[str, Any]:
+        """Verify a provider callback before the caller processes its event."""
+        if self.webhook_verifier is None:
+            return {"verified": False, "status": "WEBHOOK_VERIFIER_UNAVAILABLE"}
+        try:
+            result = self.webhook_verifier.verify(
+                provider_id=provider_id,
+                body=body,
+                timestamp=timestamp,
+                signature=signature,
+                event_id=event_id,
+            )
+        except Exception as exc:
+            return {"verified": False, "status": "WEBHOOK_VERIFICATION_FAILED", "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "verified": False, "status": "INVALID_WEBHOOK_VERIFICATION_RESPONSE"
+        }
 
     def verify_provider(
         self,
@@ -224,6 +265,91 @@ class ProviderService:
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
+        principal = route_options.pop("principal", None)
+        if principal is not None and self.access_control_manager is None:
+            return {"allowed": False, "status": "ACCESS_CONTROL_UNAVAILABLE"}
+        if self.access_control_manager is not None:
+            project_id = route_options.get("project_id")
+            capability = route_options.get("capability")
+            try:
+                authorization = self.access_control_manager.authorize(
+                    principal,
+                    action="provider.route",
+                    project_id=project_id,
+                    capability=capability,
+                )
+            except Exception as exc:
+                return {
+                    "allowed": False, "status": "AUTHORIZATION_CHECK_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+                status = (
+                    authorization.get("status", "PERMISSION_DENIED")
+                    if isinstance(authorization, dict) else "INVALID_AUTHORIZATION_RESPONSE"
+                )
+                return {"allowed": False, "status": status}
+            normalized_cost = finite_number(route_options.get("estimated_cost", 0.0), minimum=0)
+            if normalized_cost is None:
+                return {"allowed": False, "status": "INVALID_ESTIMATED_COST"}
+            estimated_costs = route_options.get("estimated_costs")
+            if estimated_costs is not None:
+                if not isinstance(estimated_costs, dict) or len(estimated_costs) > 500:
+                    return {"allowed": False, "status": "INVALID_ESTIMATED_COSTS"}
+                normalized_provider_costs = [
+                    finite_number(amount, minimum=0) for amount in estimated_costs.values()
+                ]
+                if any(amount is None for amount in normalized_provider_costs):
+                    return {"allowed": False, "status": "INVALID_ESTIMATED_COSTS"}
+                normalized_cost = max([normalized_cost, *normalized_provider_costs])
+            if normalized_cost > 0:
+                try:
+                    paid_authorization = self.access_control_manager.authorize(
+                        principal,
+                        action="provider.paid.execute",
+                        project_id=project_id,
+                        capability=capability,
+                    )
+                except Exception as exc:
+                    return {
+                        "allowed": False, "status": "AUTHORIZATION_CHECK_FAILED",
+                        "error_type": type(exc).__name__,
+                    }
+                if not isinstance(paid_authorization, dict) or paid_authorization.get("allowed") is not True:
+                    status = (
+                        paid_authorization.get("status", "PAID_PERMISSION_REQUIRED")
+                        if isinstance(paid_authorization, dict) else "INVALID_AUTHORIZATION_RESPONSE"
+                    )
+                    return {"allowed": False, "status": status}
+        if self.access_control_manager is not None:
+            try:
+                scope = self.access_control_manager.provider_scope(principal)
+            except Exception as exc:
+                return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+            if not isinstance(scope, dict) or scope.get("valid") is not True:
+                status = scope.get("status", "INVALID_PROVIDER_SCOPE") if isinstance(scope, dict) else "INVALID_PROVIDER_SCOPE"
+                return {"allowed": False, "status": status}
+            if scope.get("restricted") is True:
+                current_exclusions = route_options.get("excluded_providers")
+                if current_exclusions is None:
+                    excluded = set()
+                elif isinstance(current_exclusions, (set, frozenset)):
+                    excluded = set(current_exclusions)
+                else:
+                    return {"allowed": False, "status": "INVALID_PROVIDER_EXCLUSION_LIST"}
+                allowed_provider_ids = set(scope.get("providers", []))
+                try:
+                    catalog = self.connection_manager.list_providers()
+                except Exception as exc:
+                    return {"allowed": False, "status": "PROVIDER_SCOPE_LOOKUP_FAILED", "error_type": type(exc).__name__}
+                if not isinstance(catalog, list):
+                    return {"allowed": False, "status": "PROVIDER_SCOPE_LOOKUP_FAILED"}
+                for item in catalog:
+                    if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                        return {"allowed": False, "status": "INVALID_PROVIDER_CATALOG"}
+                    if item["id"] not in allowed_provider_ids:
+                        excluded.add(item["id"])
+                route_options["excluded_providers"] = excluded
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
@@ -231,6 +357,16 @@ class ProviderService:
         return result if isinstance(result, dict) else {
             "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
         }
+
+    def resolve_admission(self, request_id: str) -> dict[str, Any]:
+        """Release a retained admission lease after an ambiguous external outcome is reconciled."""
+        if self.admission_controller is None:
+            return {"released": False, "status": "ADMISSION_CONTROLLER_UNAVAILABLE"}
+        try:
+            result = self.admission_controller.release(request_id=request_id)
+        except Exception as exc:
+            return {"released": False, "status": "ADMISSION_RELEASE_FAILED", "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"released": False, "status": "INVALID_ADMISSION_RESPONSE"}
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
         if self.output_validator is None:
@@ -284,6 +420,18 @@ class ProviderService:
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
 
+        admission = None
+        if self.admission_controller is not None:
+            try:
+                admission = self.admission_controller.acquire(
+                    request_id=request_id, project_id=project_id
+                )
+            except Exception as exc:
+                return {"status": "ADMISSION_CHECK_FAILED", "executed": False, "error_type": type(exc).__name__}
+            if not isinstance(admission, dict) or admission.get("acquired") is not True:
+                status = admission.get("status", "ADMISSION_REJECTED") if isinstance(admission, dict) else "INVALID_ADMISSION_RESPONSE"
+                return {"status": status, "executed": False}
+
         route = self.route_request(
             category=category,
             project_id=project_id,
@@ -293,10 +441,12 @@ class ProviderService:
             **route_options,
         )
         if not isinstance(route, dict) or route.get("allowed") is not True:
-            return {"status": "ROUTING_REJECTED", "executed": False, "route": route}
+            admission_release = self.resolve_admission(request_id) if admission is not None else None
+            return {"status": "ROUTING_REJECTED", "executed": False, "route": route, "admission_release": admission_release}
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
-            return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+            admission_release = self.resolve_admission(request_id) if admission is not None else None
+            return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route, "admission_release": admission_release}
 
         options = dict(adapter_options or {})
         options["provider_id"] = provider_id
@@ -313,6 +463,7 @@ class ProviderService:
                 "provider": provider_id,
                 "request_id": request_id,
                 "reservations_retained": True,
+                "admission_lease_retained": admission is not None,
                 "error_type": type(exc).__name__,
             }
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
@@ -322,6 +473,7 @@ class ProviderService:
                 "provider": provider_id,
                 "request_id": request_id,
                 "reservations_retained": True,
+                "admission_lease_retained": admission is not None,
             }
         if adapter_result["started"] is False:
             if (
@@ -343,16 +495,19 @@ class ProviderService:
                     "provider": provider_id,
                     "request_id": request_id,
                     "reservations_retained": True,
+                    "admission_lease_retained": admission is not None,
                 }
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id
             )
+            admission_release = self.resolve_admission(request_id) if admission is not None else None
             return {
                 "status": "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
                 "release": released,
+                "admission_release": admission_release,
             }
 
         accounting_required = False
@@ -439,6 +594,7 @@ class ProviderService:
             status = "EXECUTION_SUCCEEDED"
         else:
             status = "EXECUTION_FINALIZATION_PARTIAL"
+        admission_release = self.resolve_admission(request_id) if admission is not None else None
         return {
             "status": status,
             "executed": True,
@@ -448,6 +604,7 @@ class ProviderService:
             "output": output_validation,
             "finalization": finalization,
             "retry_decision": retry,
+            "admission_release": admission_release,
         }
 
     def retry_decision(self, **failure: Any) -> dict[str, Any]:

@@ -135,6 +135,9 @@ class ProviderOutputValidator:
                     mime = self._match_signature(normalized_modality, header)
                     if mime is None:
                         return {"valid": False, "status": "SIGNATURE_MISMATCH"}
+                    container_status = self._validate_container(stream, normalized_modality, mime, size)
+                    if container_status is not None:
+                        return {"valid": False, "status": container_status}
                 elif normalized_modality == "text":
                     stream.seek(0)
                     decoder = codecs.getincrementaldecoder("utf-8")()
@@ -198,6 +201,106 @@ class ProviderOutputValidator:
             "size_bytes": size,
             "sha256": digest.hexdigest(),
         }
+
+    @staticmethod
+    def _validate_container(stream: Any, modality: str, mime: str, file_size: int) -> str | None:
+        """Validate basic container boundaries for WAV, AVI and ISO-BMFF artifacts."""
+        if mime == "audio/wav":
+            stream.seek(0)
+            header = stream.read(12)
+            if (
+                len(header) != 12 or header[:4] != b"RIFF" or header[8:12] != b"WAVE"
+                or int.from_bytes(header[4:8], "little") != file_size - 8
+            ):
+                return "MALFORMED_CONTAINER"
+            offset = 12
+            fmt_found = False
+            data_found = False
+            chunk_count = 0
+            while offset < file_size:
+                if offset + 8 > file_size or chunk_count >= 10000:
+                    return "MALFORMED_CONTAINER"
+                stream.seek(offset)
+                chunk_header = stream.read(8)
+                if len(chunk_header) != 8:
+                    return "MALFORMED_CONTAINER"
+                chunk_id = chunk_header[:4]
+                chunk_size = int.from_bytes(chunk_header[4:8], "little")
+                body_start = offset + 8
+                body_end = body_start + chunk_size
+                if body_end > file_size:
+                    return "MALFORMED_CONTAINER"
+                if chunk_id == b"fmt ":
+                    if chunk_size < 16:
+                        return "MALFORMED_CONTAINER"
+                    stream.seek(body_start)
+                    fmt = stream.read(16)
+                    if len(fmt) != 16:
+                        return "MALFORMED_CONTAINER"
+                    channels = int.from_bytes(fmt[2:4], "little")
+                    sample_rate = int.from_bytes(fmt[4:8], "little")
+                    byte_rate = int.from_bytes(fmt[8:12], "little")
+                    block_align = int.from_bytes(fmt[12:14], "little")
+                    bits_per_sample = int.from_bytes(fmt[14:16], "little")
+                    if not all((channels, sample_rate, byte_rate, block_align, bits_per_sample)):
+                        return "MALFORMED_CONTAINER"
+                    fmt_found = True
+                elif chunk_id == b"data" and chunk_size > 0:
+                    data_found = True
+                offset = body_end + (chunk_size & 1)
+                if offset > file_size:
+                    return "MALFORMED_CONTAINER"
+                chunk_count += 1
+            return None if offset == file_size and fmt_found and data_found else "MALFORMED_CONTAINER"
+
+        if mime == "video/avi":
+            stream.seek(0)
+            header = stream.read(12)
+            if (
+                len(header) != 12 or header[:4] != b"RIFF" or header[8:12] != b"AVI "
+                or int.from_bytes(header[4:8], "little") != file_size - 8
+            ):
+                return "MALFORMED_CONTAINER"
+            return None
+
+        if mime in {"video/mp4", "audio/mp4"}:
+            offset = 0
+            found: set[bytes] = set()
+            box_count = 0
+            while offset < file_size:
+                if offset + 8 > file_size or box_count >= 10000:
+                    return "MALFORMED_CONTAINER"
+                stream.seek(offset)
+                box_header = stream.read(8)
+                if len(box_header) != 8:
+                    return "MALFORMED_CONTAINER"
+                size32 = int.from_bytes(box_header[:4], "big")
+                box_type = box_header[4:8]
+                header_size = 8
+                if size32 == 1:
+                    extended = stream.read(8)
+                    if len(extended) != 8:
+                        return "MALFORMED_CONTAINER"
+                    box_size = int.from_bytes(extended, "big")
+                    header_size = 16
+                elif size32 == 0:
+                    box_size = file_size - offset
+                else:
+                    box_size = size32
+                if box_size < header_size or offset + box_size > file_size:
+                    return "MALFORMED_CONTAINER"
+                if box_type == b"ftyp" and box_size < header_size + 8:
+                    return "MALFORMED_CONTAINER"
+                if box_type in {b"moov", b"mdat"} and box_size <= header_size:
+                    return "MALFORMED_CONTAINER"
+                found.add(box_type)
+                offset += box_size
+                box_count += 1
+                if size32 == 0 and offset != file_size:
+                    return "MALFORMED_CONTAINER"
+            if offset != file_size or not {b"ftyp", b"moov", b"mdat"}.issubset(found):
+                return "MALFORMED_CONTAINER"
+        return None
 
     @classmethod
     def _match_signature(cls, modality: str, header: bytes) -> str | None:

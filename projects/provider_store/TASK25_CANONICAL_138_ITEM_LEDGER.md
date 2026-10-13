@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38455536407](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38455536407): **368 tests passed on Ubuntu and 368 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite additionally covers role/project/provider scopes, paid-execution authorization for positive per-provider estimates, append-only audited authorization decisions, basic WAV/AVI/MP4 container checks, bounded global/per-project admission backpressure, and HMAC webhook signature/replay protection.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -94,7 +94,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 49 | 🟢 | Image Output Validation | PARTIAL | Signature/basic file validation is tested; real provider images and decoder-level validation remain open. |
 | 50 | 🟡 | Output File Existence Validation | VERIFIED | Missing, empty and oversized output files are rejected by output-validator tests. |
-| 51 | 🔴 | Audio/Video Format, Codec and Integrity Validation | OPEN | Full codec/container decoding and integrity checks are not implemented. |
+| 51 | 🔴 | Audio/Video Format, Codec and Integrity Validation | PARTIAL | `output_validator.py` now validates WAV RIFF declared size, chunk bounds, fmt/data presence, AVI RIFF size, and MP4/ISO-BMFF top-level box boundaries plus required non-empty ftyp/moov/mdat boxes. Full codec/container decoding, checksums where applicable, media duration/track semantics, and corruption detection still require specialized decoders. Tests: `tests/test_output_validator.py::test_wav_container_chunks_and_declared_size_are_validated`, `test_mp4_requires_bounded_nonempty_required_boxes`. |
 | 52 | 🟡 | Corrupt/Incomplete Output Rejection | PARTIAL | Basic corrupt/truncated artifact rejection is tested; decoder-level detection remains open. |
 | 53 | 🟡 | Temporary File Cleanup and Atomic Replacement | PARTIAL | Atomic replacement helpers exist; output-pipeline cleanup integration is incomplete. |
 | 54 | 🟡 | Previous Output Preservation on Failure | PARTIAL | Some preservation/atomicity tests exist; end-to-end generation replacement behavior is not verified. |
@@ -120,12 +120,12 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 65 | 🟡 | Secrets Manager Integration | PARTIAL | Environment variable references are supported; managed secret vault/rotation integration is not complete. |
 | 66 | 🟡 | Secret/Token Leak Prevention in Logs | PARTIAL | Credential redaction and no-response-body probes are tested; full application log scan is pending. |
-| 67 | 🔴 | Least-Privilege Access Control | OPEN | Role/permission-based access control is not fully implemented. |
+| 67 | 🔴 | Least-Privilege Access Control | PARTIAL | New `access_control.py` implements deny-by-default role grants, mandatory explicit project scope, and optional provider/capability scopes; `ProviderService.route_request` checks route permission, filters provider candidates to the principal's allowlist, and separately requires paid-execution permission before routing/reserving. Still needs a trusted authentication/identity provider and authorization around direct admin/credential operations. Tests: `tests/test_access_control.py`, `tests/test_provider_service.py`. |
 | 68 | 🔴 | Provider Permissions and Allowed Operations | PARTIAL | Catalog capabilities and OAuth scope checks exist; operation-level authorization coverage is incomplete. |
 | 69 | 🔴 | Sensitive-Data Detection and Privacy Enforcement | OPEN | Sensitive-data detection and policy enforcement are not complete. |
 | 70 | 🔴 | Data Retention and Provider Data-Handling Rules | OPEN | Provider-specific retention/data-handling policy enforcement is not complete. |
 | 71 | 🔴 | Provider Endpoint Allowlisting and Network Security | PARTIAL | HTTPS host allowlists, redirect rejection and bounded reads are tested; deployment threat-model review remains open. |
-| 72 | 🔴 | Routing, Credential and Approval Audit Logs | PARTIAL | Some cost/state ledgers exist; complete immutable routing/credential/approval audit trail is not verified. |
+| 72 | 🔴 | Routing, Credential and Approval Audit Logs | PARTIAL | New `audit_log.py` appends allowlisted JSONL security events under interprocess lock with `fsync`, size limits, and secret-like payload rejection; `ProviderAccessControl` can audit allow/deny decisions and fails closed on audit-write failure for allowed actions. Provider credential changes, paid-approval workflow events, central shipping, and retention policy are still not integrated. Tests: `tests/test_audit_log.py`, `tests/test_access_control.py`. |
 
 ## J — Production Orchestration
 
@@ -134,9 +134,9 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 73 | 🔴 | Unique Request ID and Trace ID | PARTIAL | Request IDs and duplicate protection exist; distributed trace propagation is incomplete. |
 | 74 | 🔴 | Idempotency and Duplicate Prevention | PARTIAL | Manager-level idempotency is tested; full external-provider request idempotency is not verified. |
 | 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | Cross-process reservations and locking are tested; worker pools and provider-specific concurrency limits are incomplete. |
-| 76 | 🔴 | Queue, Backpressure and Overload Handling | OPEN | Queue/backpressure orchestration is not implemented end-to-end. |
+| 76 | 🔴 | Queue, Backpressure and Overload Handling | PARTIAL | New `admission_controller.py` enforces thread-safe global/per-project active limits, rejects overload before routing, prevents duplicate request IDs, supports shutdown/reopen, and retains admission for ambiguous external outcomes until explicit resolution. This is in-process admission control, not a durable queue or cross-process capacity manager. Tests: `tests/test_admission_controller.py`, `tests/test_provider_service.py`. |
 | 77 | 🔴 | Async/Long-Running Job and Polling Support | OPEN | Asynchronous job lifecycle/polling is not implemented end-to-end. |
-| 78 | 🔴 | Webhook/Callback Verification | OPEN | Provider webhook/callback verification is not implemented. |
+| 78 | 🔴 | Webhook/Callback Verification | PARTIAL | New `webhook_verifier.py` verifies HMAC-SHA256 signatures using constant-time comparison, enforces bounded timestamp tolerance/body size, and rejects replayed event IDs under a thread-safe cache; `ProviderService.verify_webhook()` exposes the check. Provider-specific event schemas and shared multi-worker replay storage remain open. Tests: `tests/test_webhook_verifier.py`, `tests/test_provider_service.py::test_service_verifies_provider_webhooks_before_processing`. |
 | 79 | 🔴 | Cancellation, Deadlines and Graceful Shutdown | PARTIAL | Timeout handling exists; cancellation/deadline/shutdown propagation remains incomplete. |
 | 80 | 🔴 | Generation State Manager/Orchestration Integration Tests | OPEN | Generation State Manager integration is explicitly not complete; Task #29 remains paused. |
 

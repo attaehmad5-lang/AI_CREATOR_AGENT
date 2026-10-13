@@ -104,12 +104,25 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertEqual(result["status"], "UNHEALTHY")
 
-    def test_success_recovers_provider(self):
+    def test_success_recovers_provider_only_after_required_consecutive_probes(self):
         self.manager.record_result("image", success=False)
         self.manager.record_result("image", success=False)
-        self.manager.record_result("image", success=True, latency_ms=10)
+        first_success = self.manager.record_result("image", success=True, latency_ms=10)
+        eligibility = self.manager.is_eligible("image")
+        self.assertEqual(first_success["status"], "RECOVERING")
+        self.assertFalse(eligibility["eligible"])
+        self.assertEqual(eligibility["reason"], "RECOVERY_PROBES_REQUIRED")
+        second_success = self.manager.record_result("image", success=True, latency_ms=10)
+        self.assertEqual(second_success["status"], "HEALTHY")
         self.assertTrue(self.manager.is_eligible("image")["eligible"])
-        self.assertEqual(self.manager.data["providers"]["image"]["status"], "HEALTHY")
+
+    def test_failed_probe_during_recovery_keeps_provider_unhealthy(self):
+        self.manager.record_result("image", success=False)
+        self.manager.record_result("image", success=False)
+        self.manager.record_result("image", success=True)
+        failed_recheck = self.manager.record_result("image", success=False, error_code="TIMEOUT")
+        self.assertEqual(failed_recheck["status"], "UNHEALTHY")
+        self.assertFalse(self.manager.is_eligible("image")["eligible"])
 
     def test_stale_health_is_excluded(self):
         self.manager.record_result("image", success=True, latency_ms=10)
@@ -150,6 +163,8 @@ class ProviderHealthManagerTests(unittest.TestCase):
             ProviderHealthManager(self.path, history_limit=True)
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path, failure_threshold=1.5)
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=0)
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path, clock="not-callable")
         self.assertEqual(
