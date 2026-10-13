@@ -147,6 +147,18 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("deprecation_reason is required" in error for error in result["errors"]))
 
+        invalid_date = json.loads(json.dumps(catalog))
+        next(item for item in invalid_date["providers"] if item["id"] == "openai_sora")["deprecation_date"] = "2026-02-30"
+        result = ConnectionManager.validate_catalog_schema(invalid_date)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("deprecation_date must be an ISO" in error for error in result["errors"]))
+
+        control_character = json.loads(json.dumps(catalog))
+        next(item for item in control_character["providers"] if item["id"] == "openai_sora")["deprecation_reason"] = "unsafe\\nreason"
+        result = ConnectionManager.validate_catalog_schema(control_character)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("deprecation_reason is required" in error for error in result["errors"]))
+
     def test_runtime_enablement_cannot_reactivate_deprecated_provider(self):
         root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
         catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
