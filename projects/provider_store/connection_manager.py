@@ -338,11 +338,21 @@ class ConnectionManager:
                         and provider.get("enabled") is True
                         and isinstance(connection_type, str)
                         and connection_type.upper() == "API"
-                        and not provider.get("allowed_hosts")
                     ):
-                        errors.append(
-                            f"providers[{index}].allowed_hosts is required for enabled API providers"
-                        )
+                        if not provider.get("allowed_hosts"):
+                            errors.append(
+                                f"providers[{index}].allowed_hosts is required for enabled API providers"
+                            )
+                        official_api_url = provider.get("official_api_url")
+                        if not isinstance(official_api_url, str) or not official_api_url.startswith("https://"):
+                            errors.append(
+                                f"providers[{index}].official_api_url is required for enabled API providers"
+                            )
+                        capabilities = provider.get("capabilities")
+                        if not isinstance(capabilities, list) or not capabilities:
+                            errors.append(
+                                f"providers[{index}].capabilities must be a non-empty list for enabled API providers"
+                            )
                     for url_field in ("official_api_url", "subscription_url"):
                         if url_field in provider:
                             raw_url = provider[url_field]
@@ -552,6 +562,14 @@ class ConnectionManager:
             updated[index]["enabled"] = enabled
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation.get("valid"):
+                return {
+                    "status": "INVALID_PROVIDER_CATALOG",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
         if not enabled and provider_id in self._loaded_providers:
