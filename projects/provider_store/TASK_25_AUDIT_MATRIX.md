@@ -1,6 +1,6 @@
 # Task #25 — A–P Verification Matrix
 
-**Status: IN PROGRESS. Do not merge or mark complete.**
+**Status: IN PROGRESS — follow-up verification branch. Do not mark Task #25 complete.**
 
 This matrix preserves the canonical feature-ID ranges and group names. It is an evidence tracker, not a replacement for the user's exact 138-item checklist. A group is not complete merely because a supporting module or test exists; every original item still requires individual verification.
 
@@ -10,7 +10,7 @@ GitHub Actions run [#38280285131](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | Group / IDs | Canonical group | Current evidence | Status | Remaining verification |
 |---|---|---|---|---|
-| A / 1–8 | Provider Registry & Lifecycle | `provider_catalog.json`, `connection_manager.py`, `test_provider_catalogs.py` | PARTIAL | Audit each of the 8 original items, lifecycle edge cases, and catalog recovery paths. |
+| A / 1–8 | Provider Registry & Lifecycle | `provider_catalog.json`, synchronized master catalog, `connection_manager.py`, `test_provider_catalogs.py`; all 54 records now declare a conservative baseline capability | PARTIAL | Audit each of the 8 original items, lifecycle edge cases, and catalog recovery paths; baseline capability metadata is not live adapter evidence. |
 | B / 9–16 | Credentials & Connection | `connection_manager.py`, `http_probe.py`, `test_connection_manager.py`, `test_http_probe.py` | PARTIAL | Authorized live provider checks, provider-specific OAuth registration/scopes and token-refresh verification, and each provider's authentication scheme; the generic PKCE helper itself is covered by tests. Generic API-key probes now require `authentication_required=True` for a documented auth-protected endpoint. |
 | C / 17–24 | Provider Modalities | Catalog modality contracts and compatibility facades; `test_provider_catalogs.py` | PARTIAL | Real generation adapters and provider-specific capability verification; a callable contract is not a working adapter. |
 | D / 25–32 | Routing & Fallback | `routing_manager.py`, `provider_service.py`, `test_routing_manager.py` | PARTIAL | Audit all canonical routing/fallback rules against their required evidence and execution behavior. |
