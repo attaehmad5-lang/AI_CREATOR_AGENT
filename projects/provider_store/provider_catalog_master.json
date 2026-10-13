@@ -55,7 +55,10 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "google_image",
@@ -72,7 +75,10 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "recraft",
@@ -86,7 +92,10 @@
       "allowed_hosts": [
         "external-api.recraft.ai"
       ],
-      "token_env": "RECRAFT_API_KEY"
+      "token_env": "RECRAFT_API_KEY",
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "ideogram",
@@ -102,7 +111,10 @@
       ],
       "token_env": "IDEOGRAM_API_KEY",
       "auth_header_name": "Api-Key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "black_forest_labs",
@@ -118,7 +130,10 @@
       ],
       "token_env": "BFL_API_KEY",
       "auth_header_name": "x-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "stability_ai",
@@ -132,7 +147,10 @@
       "allowed_hosts": [
         "api.stability.ai"
       ],
-      "token_env": "STABILITY_API_KEY"
+      "token_env": "STABILITY_API_KEY",
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "replicate",
@@ -146,7 +164,10 @@
       "allowed_hosts": [
         "api.replicate.com"
       ],
-      "token_env": "REPLICATE_API_TOKEN"
+      "token_env": "REPLICATE_API_TOKEN",
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "fal_ai",
@@ -163,7 +184,10 @@
       ],
       "token_env": "FAL_KEY",
       "auth_header_name": "Authorization",
-      "auth_scheme": "Key"
+      "auth_scheme": "Key",
+      "capabilities": [
+        "image_generation"
+      ]
     },
     {
       "id": "elevenlabs",
@@ -181,7 +205,10 @@
       ],
       "token_env": "ELEVENLABS_API_KEY",
       "auth_header_name": "xi-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "capabilities": [
+        "text_to_speech"
+      ]
     },
     {
       "id": "openai_voice",
@@ -195,7 +222,10 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "capabilities": [
+        "text_to_speech"
+      ]
     },
     {
       "id": "google_speech",
@@ -212,7 +242,10 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "capabilities": [
+        "text_to_speech"
+      ]
     },
     {
       "id": "cartesia",
@@ -228,7 +261,10 @@
       ],
       "token_env": "CARTESIA_API_KEY",
       "auth_header_name": "Cartesia-API-Key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "capabilities": [
+        "text_to_speech"
+      ]
     },
     {
       "id": "playht",
@@ -242,7 +278,10 @@
       "allowed_hosts": [
         "api.play.ht"
       ],
-      "token_env": "PLAYHT_API_KEY"
+      "token_env": "PLAYHT_API_KEY",
+      "capabilities": [
+        "text_to_speech"
+      ]
     },
     {
       "id": "deepgram",
@@ -258,7 +297,10 @@
       ],
       "token_env": "DEEPGRAM_API_KEY",
       "auth_header_name": "Authorization",
-      "auth_scheme": "Token"
+      "auth_scheme": "Token",
+      "capabilities": [
+        "text_to_speech"
+      ]
     },
     {
       "id": "suno",
@@ -268,7 +310,10 @@
       "auth_type": "ACCOUNT",
       "connection_type": "MANUAL_CONNECT",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "capabilities": [
+        "music_generation"
+      ]
     },
     {
       "id": "udio",
@@ -278,7 +323,10 @@
       "auth_type": "ACCOUNT",
       "connection_type": "MANUAL_CONNECT",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "capabilities": [
+        "music_generation"
+      ]
     },
     {
       "id": "google_lyria",
@@ -295,7 +343,10 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "capabilities": [
+        "music_generation"
+      ]
     },
     {
       "id": "stability_audio",
@@ -309,7 +360,10 @@
       "allowed_hosts": [
         "api.stability.ai"
       ],
-      "token_env": "STABILITY_API_KEY"
+      "token_env": "STABILITY_API_KEY",
+      "capabilities": [
+        "music_generation"
+      ]
     },
     {
       "id": "google_veo",
@@ -326,7 +380,10 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "capabilities": [
+        "video_generation"
+      ]
     },
     {
       "id": "openai_sora",
@@ -340,7 +397,10 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "capabilities": [
+        "video_generation"
+      ]
     },
     {
       "id": "runway",
@@ -354,7 +414,10 @@
       "allowed_hosts": [
         "api.dev.runwayml.com"
       ],
-      "token_env": "RUNWAY_API_KEY"
+      "token_env": "RUNWAY_API_KEY",
+      "capabilities": [
+        "video_generation"
+      ]
     },
     {
       "id": "kling",
@@ -368,7 +431,10 @@
       "allowed_hosts": [
         "api.klingai.com"
       ],
-      "token_env": "KLING_API_KEY"
+      "token_env": "KLING_API_KEY",
+      "capabilities": [
+        "video_generation"
+      ]
     },
     {
       "id": "luma",
@@ -382,7 +448,10 @@
       "allowed_hosts": [
         "api.lumalabs.ai"
       ],
-      "token_env": "LUMA_API_KEY"
+      "token_env": "LUMA_API_KEY",
+      "capabilities": [
+        "video_generation"
+      ]
     },
     {
       "id": "pika",
@@ -392,7 +461,10 @@
       "auth_type": "ACCOUNT",
       "connection_type": "MANUAL_CONNECT",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "capabilities": [
+        "video_generation"
+      ]
     },
     {
       "id": "minimax_hailuo",
@@ -406,7 +478,10 @@
       "allowed_hosts": [
         "api.minimax.io"
       ],
-      "token_env": "MINIMAX_API_KEY"
+      "token_env": "MINIMAX_API_KEY",
+      "capabilities": [
+        "video_generation"
+      ]
     },
     {
       "id": "heygen",
@@ -420,7 +495,10 @@
       "allowed_hosts": [
         "api.heygen.com"
       ],
-      "token_env": "HEYGEN_API_KEY"
+      "token_env": "HEYGEN_API_KEY",
+      "capabilities": [
+        "lip_sync"
+      ]
     },
     {
       "id": "synthesia",
@@ -434,7 +512,10 @@
       "allowed_hosts": [
         "api.synthesia.io"
       ],
-      "token_env": "SYNTHESIA_API_KEY"
+      "token_env": "SYNTHESIA_API_KEY",
+      "capabilities": [
+        "lip_sync"
+      ]
     },
     {
       "id": "sync_labs",
@@ -448,7 +529,10 @@
       "allowed_hosts": [
         "api.sync.so"
       ],
-      "token_env": "SYNC_LABS_API_KEY"
+      "token_env": "SYNC_LABS_API_KEY",
+      "capabilities": [
+        "lip_sync"
+      ]
     },
     {
       "id": "hedra",
@@ -462,7 +546,10 @@
       "allowed_hosts": [
         "api.hedra.com"
       ],
-      "token_env": "HEDRA_API_KEY"
+      "token_env": "HEDRA_API_KEY",
+      "capabilities": [
+        "lip_sync"
+      ]
     },
     {
       "id": "whisper",
@@ -476,7 +563,10 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "capabilities": [
+        "audio_transcription"
+      ]
     },
     {
       "id": "assemblyai",
@@ -492,7 +582,10 @@
       ],
       "token_env": "ASSEMBLYAI_API_KEY",
       "auth_header_name": "Authorization",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "capabilities": [
+        "audio_transcription"
+      ]
     },
     {
       "id": "topaz",
@@ -502,7 +595,10 @@
       "auth_type": "ACCOUNT",
       "connection_type": "MANUAL_CONNECT",
       "subscription_required": true,
-      "enabled": false
+      "enabled": false,
+      "capabilities": [
+        "image_upscaling"
+      ]
     },
     {
       "id": "magnific",
@@ -516,7 +612,10 @@
       "allowed_hosts": [
         "api.magnific.ai"
       ],
-      "token_env": "MAGNIFIC_API_KEY"
+      "token_env": "MAGNIFIC_API_KEY",
+      "capabilities": [
+        "image_upscaling"
+      ]
     },
     {
       "id": "adobe_firefly",
@@ -530,7 +629,10 @@
       "allowed_hosts": [
         "firefly-api.adobe.io"
       ],
-      "token_env": "ADOBE_FIREFLY_API_KEY"
+      "token_env": "ADOBE_FIREFLY_API_KEY",
+      "capabilities": [
+        "image_editing"
+      ]
     },
     {
       "id": "openai_script",
