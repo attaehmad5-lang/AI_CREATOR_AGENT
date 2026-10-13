@@ -13,6 +13,7 @@ from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
+from projects.provider_store.access_control import ProviderAccessControl
 
 
 class ProviderServiceTests(unittest.TestCase):
@@ -51,6 +52,40 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_route_request_requires_authorized_principal_when_access_control_enabled(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            access_control_manager=ProviderAccessControl(),
+        )
+        denied = service.route_request(
+            category="image", project_id="film", estimated_cost=0.0,
+            principal={"subject": "viewer-1", "roles": ["viewer"]},
+        )
+        self.assertFalse(denied["allowed"])
+        self.assertEqual(denied["status"], "PERMISSION_DENIED")
+        allowed = service.route_request(
+            category="image", project_id="film", estimated_cost=0.0,
+            principal={"subject": "creator-1", "roles": ["creator"], "projects": ["film"]},
+        )
+        self.assertTrue(allowed["allowed"])
+
+    def test_paid_route_requires_paid_execution_permission_before_reservation(self):
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost)
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            access_control_manager=ProviderAccessControl(),
+            cost_policy=self.cost,
+        )
+        result = service.route_request(
+            category="image", project_id="film", estimated_cost=1.0,
+            request_id="acl-paid-denied",
+            principal={"subject": "creator-1", "roles": ["creator"]},
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "PERMISSION_DENIED")
+        self.assertNotIn("acl-paid-denied", self.cost.data.get("reservations", {}))
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
