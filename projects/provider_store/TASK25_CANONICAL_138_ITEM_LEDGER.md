@@ -222,7 +222,7 @@ GitHub Actions run [#38433193369](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 131 | 🟡 | Validated metadata کے ساتھ capability discovery | PARTIAL | Validated capability metadata and discovery exist; live provider metadata trust is incomplete. |
 | 132 | 🟡 | نئے providers کو محفوظ طریقے سے شامل کرنے کا workflow | PARTIAL | Catalog registration/schema validation exists; complete onboarding, approval and probe workflow is incomplete. |
 | 133 | 🔴 | Self-hosted اور local models کی support، جہاں ممکن ہو | OPEN | Local/self-hosted provider lifecycle and modality verification are not complete. |
-| 134 | 🔴 | Model deprecation اور end-of-life handling | OPEN | Deprecation/EOL migration and routing behavior are not implemented. |
+| 134 | 🔴 | Model deprecation اور end-of-life handling | PARTIAL | Catalog schema records a validated deprecation reason/date and rejects deprecated providers that are enabled; OpenAI Sora is marked deprecated and disabled. General deprecation discovery, replacement migration, and EOL routing remain open. Evidence: `tests/test_provider_catalogs.py::test_deprecated_provider_requires_reason_date_and_stays_disabled`. |
 | 135 | 🔴 | Provider policy activation سے پہلے simulation | OPEN | Policy simulation/dry-run before activation is not implemented. |
 | 136 | 🟡 | Backward compatibility اور automated contract checks | PARTIAL | Compatibility facades and contract tests exist; full versioned compatibility checks remain open. |
 | 137 | 🔴 | Provider configuration اور policy کے لیے admin controls | OPEN | Complete administrative controls and authorization are not implemented. |
