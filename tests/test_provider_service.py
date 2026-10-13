@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
@@ -15,6 +17,7 @@ from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 from projects.provider_store.access_control import ProviderAccessControl
 from projects.provider_store.admission_controller import ProviderAdmissionController
+from projects.provider_store.webhook_verifier import ProviderWebhookVerifier
 
 
 class ProviderServiceTests(unittest.TestCase):
@@ -170,6 +173,26 @@ class ProviderServiceTests(unittest.TestCase):
         resolved = service.resolve_admission("ambiguous-job")
         self.assertTrue(resolved["released"])
         self.assertEqual(admission.snapshot()["active"], 0)
+
+    def test_service_verifies_provider_webhooks_before_processing(self):
+        secret = "service-webhook-test-secret-at-least-32-bytes"
+        body = b'{"event":"ready"}'
+        timestamp = "1000"
+        signature = "sha256=" + hmac.new(
+            secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256
+        ).hexdigest()
+        verifier = ProviderWebhookVerifier(lambda _: secret, clock=lambda: 1000)
+        service = ProviderService(self.connections, webhook_verifier=verifier)
+        result = service.verify_webhook(
+            provider_id="image", body=body, timestamp=timestamp,
+            signature=signature, event_id="webhook-1",
+        )
+        self.assertTrue(result["verified"])
+        replay = service.verify_webhook(
+            provider_id="image", body=body, timestamp=timestamp,
+            signature=signature, event_id="webhook-1",
+        )
+        self.assertEqual(replay["status"], "WEBHOOK_REPLAY_DETECTED")
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
