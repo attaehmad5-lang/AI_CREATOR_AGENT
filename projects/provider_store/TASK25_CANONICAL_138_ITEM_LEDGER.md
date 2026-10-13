@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38432317293](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38432317293): **323 tests passed on Ubuntu and 323 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The malformed Retry-After fixture failure from run #38432229162 was corrected and the new head was rerun successfully.
+GitHub Actions run [#38432824682](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38432824682): **324 tests passed on Ubuntu and 324 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The malformed Retry-After fixture failure from run #38432229162 was corrected and rerun successfully; the suite also now proves extreme retry attempt values cannot trigger unbounded exponentiation.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -68,7 +68,7 @@ GitHub Actions run [#38432317293](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 33 | 🟢 | Configurable Retry Limit | VERIFIED | Retry attempt limit is configurable and covered by timeout/transient failure tests. |
 | 34 | 🟡 | Error-Specific Retry Policy | PARTIAL | Retryability/status mapping exists; provider-specific transient failure coverage is incomplete. |
-| 35 | 🔴 | Exponential Backoff and Jitter | VERIFIED | Exponential backoff, jitter and invalid jitter source behavior are covered by tests. |
+| 35 | 🔴 | Exponential Backoff and Jitter | VERIFIED | Exponential backoff and jitter are covered; exponentiation is capped before calculation for extreme attempt numbers. Evidence: `tests/test_retry_policy.py::test_extreme_attempt_number_caps_backoff_without_large_exponentiation`. |
 | 36 | 🔴 | HTTP 429/Rate-Limit Handling | VERIFIED | RetryPolicy seconds/date parsing and maximum-delay capping; HTTP probe and account-balance probe preserve bounded Retry-After metadata. Regression tests: `tests/test_http_probe.py`, `tests/test_account_balance_probe.py::test_rate_limit_preserves_bounded_retry_after_without_leaking_body`, `test_malformed_retry_after_is_not_propagated`. Provider-specific live rate-limit behavior remains unverified. |
 | 37 | 🟡 | Quota Exhaustion Detection | PARTIAL | Quota manager and routing rejection paths are tested; provider-side quota semantics remain incomplete. |
 | 38 | 🔴 | Circuit Breaker | VERIFIED | Circuit breaker threshold, cooldown, half-open single-probe concurrency, cancellation and recovery are tested. |
