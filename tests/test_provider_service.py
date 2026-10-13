@@ -105,7 +105,8 @@ class ProviderServiceTests(unittest.TestCase):
             cost_policy=self.cost,
         )
         result = service.route_request(
-            category="image", project_id="film", estimated_cost=1.0,
+            category="image", project_id="film", estimated_cost=0.0,
+            estimated_costs={"image": 1.0},
             request_id="acl-paid-denied",
             principal={"subject": "creator-1", "roles": ["creator"]},
         )
