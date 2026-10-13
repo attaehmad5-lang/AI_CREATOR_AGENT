@@ -147,6 +147,40 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("deprecation_reason is required" in error for error in result["errors"]))
 
+    def test_runtime_enablement_cannot_reactivate_deprecated_provider(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            catalog_path, state_path = temp / "catalog.json", temp / "state.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog_path, state_path)
+            result = manager.set_provider_enabled("openai_sora", True)
+            self.assertFalse(result["saved"])
+            self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+            self.assertFalse(manager.get_provider("openai_sora")["enabled"])
+
+    def test_runtime_enablement_requires_official_docs_and_capabilities(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        provider = next(item for item in catalog["providers"] if item["id"] == "pollinations")
+        provider["enabled"] = False
+        provider.pop("official_api_url", None)
+        provider.pop("capabilities", None)
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            catalog_path, state_path = temp / "catalog.json", temp / "state.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog_path, state_path)
+            result = manager.set_provider_enabled("pollinations", True)
+            self.assertFalse(result["saved"])
+            self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+            self.assertFalse(manager.get_provider("pollinations")["enabled"])
+            self.assertTrue(any("official_api_url is required" in error for error in result["errors"]))
+            self.assertTrue(any("capabilities must be a non-empty list" in error for error in result["errors"]))
+
     def test_huggingface_account_auth_host_is_allowlisted(self):
         root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
         catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
