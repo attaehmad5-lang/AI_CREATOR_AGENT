@@ -156,7 +156,7 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
     def test_malformed_retry_after_is_not_propagated(self):
         error = HTTPError(
             "https://api.example.com/account/balance", 429,
-            "Too Many Requests", {"Retry-After": "bad\\nsecret"}, None,
+            "Too Many Requests", {"Retry-After": "bad\nsecret"}, None,
         )
         result = self.make_probe(_Opener(error=error))("provider")
         self.assertNotIn("retry_after", result)
