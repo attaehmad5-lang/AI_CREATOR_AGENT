@@ -6,11 +6,11 @@ The exact canonical feature names, original baseline markers and item-by-item ev
 
 ## Latest code verification
 
-GitHub Actions code-verification run [#38434036632](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434036632) completed successfully on Python 3.13: **326 tests passed on Ubuntu and 326 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This run includes bounded Retry-After metadata handling, overflow-safe retry backoff, fail-closed OAuth provider lookup, and deprecated-provider disablement validation.
+GitHub Actions code-verification run [#38434531462](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434531462) completed successfully on Python 3.13: **328 tests passed on Ubuntu and 328 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This run includes bounded Retry-After metadata handling, overflow-safe retry backoff, fail-closed OAuth provider lookup, validated deprecation metadata, and candidate-catalog validation before enablement.
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
-| A / 1–8 | Basic Provider Management | PARTIAL | Registry, registration, discovery and schema tests exist; full unload/adapter lifecycle is incomplete. |
+| A / 1–8 | Basic Provider Management | PARTIAL | Registry, registration, discovery and schema tests exist; runtime enablement now validates the full candidate catalog and rejects deprecated or under-documented enabled API providers. Full unload/adapter lifecycle remains incomplete. |
 | B / 9–16 | Authentication and Connection | PARTIAL | Credential references, OAuth PKCE helper, endpoint/model config, and bounded HTTPS probes exist; provider-specific live auth and scopes are not verified. |
 | C / 17–24 | Multimodal Provider Support | PARTIAL | Image providers and modality contracts are cataloged; real adapters and end-to-end tests for all modalities remain open. |
 | D / 25–32 | Routing and Selection | PARTIAL | Primary/fallback, PRIMARY_ONLY, automatic-fallback on/off, credit/cost/health and declared model/version routing are tested; enabled providers still lack verified live model catalogs and complete project-policy routing remains open. |
