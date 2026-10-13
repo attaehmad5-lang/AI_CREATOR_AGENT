@@ -154,7 +154,7 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         self.assertTrue(any("deprecation_date must be an ISO" in error for error in result["errors"]))
 
         control_character = json.loads(json.dumps(catalog))
-        next(item for item in control_character["providers"] if item["id"] == "openai_sora")["deprecation_reason"] = "unsafe\\nreason"
+        next(item for item in control_character["providers"] if item["id"] == "openai_sora")["deprecation_reason"] = "unsafe\nreason"
         result = ConnectionManager.validate_catalog_schema(control_character)
         self.assertFalse(result["valid"])
         self.assertTrue(any("deprecation_reason is required" in error for error in result["errors"]))
