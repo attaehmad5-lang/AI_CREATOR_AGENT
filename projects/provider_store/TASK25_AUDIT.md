@@ -1,15 +1,15 @@
 # Task #25 — Provider Connection Manager Verification Audit
 
-**Branch:** `task-25-provider-connection-manager`  
-**Pull request:** #1 (draft; not approved for merge)  
+**Previously merged implementation PR:** #1  
+**Current follow-up branch:** `task-25-provider-connection-manager-completion`  
 **Audit status:** In progress — do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
-GitHub Actions run [#38278998978](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38278998978) completed successfully on Python 3.13:
+GitHub Actions run [#38434016937](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434016937) completed successfully on Python 3.13:
 
-- Ubuntu: 275 tests passed, 0 failures.
-- Windows: 275 tests passed, 0 failures.
+- Ubuntu: 299 tests passed, 0 failures.
+- Windows: 299 tests passed, 0 failures.
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
 
@@ -19,9 +19,9 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 | Canonical section | Scope range | Current evidence | Audit disposition |
 |---|---:|---|---|
-| A — Provider Registry & Lifecycle | 1–8 | Versioned 54-provider catalog, schema validation, registration and enabled/disabled lifecycle, catalog recovery, catalog compatibility tests | Foundation implemented; item-by-item audit pending |
-| B — Credentials & Connection | 9–16 | Environment-reference validation, secret redaction, expiry checks, configured endpoint/model checks, verified state gating, manual-session verification hooks, bounded HTTPS probe; enabled catalog entries now have official API documentation URLs | Foundation implemented; provider-specific live verification pending |
-| C — Provider Modalities | 17–24 | Catalog categories/capabilities and modality contract validation | Catalog/contract evidence only; actual provider adapters and live modality checks pending |
+| A — Provider Registry & Lifecycle | 1–8 | Versioned 54-provider catalog, synchronized primary/master registry, all records declare baseline capability metadata, schema validation, registration and enabled/disabled lifecycle, catalog recovery, catalog compatibility tests | Foundation implemented; item-by-item audit pending |
+| B — Credentials & Connection | 9–16 | Environment-reference validation, secret redaction, expiry checks, configured endpoint/model checks, verified state gating, manual-session verification hooks, bounded HTTPS probe requiring a separate non-billable probe endpoint, provider-specific auth header handling, safe HTTP error classification | Foundation implemented; provider-specific live verification pending |
+| C — Provider Modalities | 17–24 | Every provider declares baseline capability metadata; contract v2 validates only methods required by each declared capability and rejects unknown capabilities | Catalog/contract evidence only; actual provider adapters and live modality checks pending |
 | D — Routing & Fallback | 25–32 | Priority, free-credit-first, lowest-cost, healthiest-first and round-robin selection; verified-connection gating; fallback reservations | Foundation implemented; real generation-path integration pending |
 | E — Retry & Failure Handling | 33–40 | Bounded backoff, status/Retry-After handling, idempotency checks, circuit breaker and probe-slot recovery | Unit-tested foundation; provider-specific failure injection pending |
 | F — Provider Health | 41–48 | Persisted health history, latency/staleness checks, eligibility and active probe recording | Foundation implemented; live provider health evidence pending |
@@ -45,9 +45,11 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 5. Add full image/audio/video decoding, malware scanning, and semantic output checks where required.
 6. Review deployment persistence: the JSON/OS-lock design protects cooperating local processes but is not one atomic transaction across manager files, devices, or containers with incompatible lock semantics. Evaluate SQLite/transactional storage for production multi-worker use.
 7. Verify Android/Pydroid compatibility separately; GitHub Ubuntu/Windows CI does not establish mobile-runtime compatibility.
-8. Enabled providers now have explicit basic capability metadata and official documentation URLs. Disabled catalog entries still need their fine-grained capabilities and official links checked against authoritative documentation before enabling. Catalog labels alone never count as live verification.
+8. Every catalog record now has conservative baseline capability metadata, but this does not mean disabled entries have fully audited fine-grained capabilities, official endpoint configurations, adapters, or live accounts. Those must be checked against authoritative documentation before enabling. Catalog labels alone never count as live verification.
+10. The built-in HTTP probe requires a dedicated non-billable probe_endpoint and never falls back to a generation endpoint. Capability-aware adapter contract v2 requires each declared capability's callable surface, including audio editing, while avoiding the old over-broad rule that every advanced upscaling/audio provider must implement unrelated modalities.
+11. The individual audit table for canonical items 1–16 is recorded in TASK_25_AUDIT_MATRIX.md; remaining items continue to require item-by-item evidence.
 9. Pollinations' catalog entry follows its current [official API documentation](https://gen.pollinations.ai/docs): bearer API key reference, `gen.pollinations.ai` allowlist, and no assumed zero-cost access. Free-credit use still requires a trusted account-balance probe; paid usage still requires a positive estimate, project budget, and explicit approval.
 
 ## Completion gate
 
-Do not mark this task complete, mark all 138 items PASS, or merge PR #1 until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and the user approves any merge.
+Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, and unresolved external/account-dependent requirements are explicitly handled. Keep follow-up work in a reviewable branch/PR; do not merge it without the user's explicit approval.
