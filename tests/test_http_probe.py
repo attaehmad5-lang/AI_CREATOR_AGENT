@@ -395,6 +395,31 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                     self.assertEqual(headers["anthropic-version"], "2023-06-01")
                 self.assertNotIn("catalog-test-secret", repr(result))
 
+    def test_connection_manager_classifies_missing_probe_endpoint_without_network(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = root / "catalog.json"
+            state = root / "state.json"
+            catalog.write_text(json.dumps({
+                "providers": [{
+                    "id": "public_provider", "name": "Public Provider", "category": "image",
+                    "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                    "allowed_hosts": ["api.example.com"],
+                }]
+            }), encoding="utf-8")
+            state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog, state)
+            manager.configure_provider(
+                "public_provider", endpoint="https://api.example.com/v1/images/generations"
+            )
+            opener = _Opener()
+            result = manager.verify_connectivity(
+                "public_provider", ProviderHTTPConnectivityProbe(opener=opener)
+            )
+            self.assertEqual(result["status"], "PROBE_ENDPOINT_NOT_CONFIGURED")
+            self.assertFalse(result["verified"])
+            self.assertEqual(opener.calls, [])
+
     def test_connection_manager_does_not_verify_public_endpoint_as_credentialed_connection(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
