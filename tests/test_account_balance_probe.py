@@ -142,6 +142,26 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
         self.assertEqual(result["http_status"], 403)
         self.assertNotIn("private-token", repr(result))
 
+    def test_rate_limit_preserves_bounded_retry_after_without_leaking_body(self):
+        error = HTTPError(
+            "https://api.example.com/account/balance", 429,
+            "Too Many Requests", {"Retry-After": "3"}, None,
+        )
+        result = self.make_probe(_Opener(error=error))("provider")
+        self.assertEqual(result["status"], "BALANCE_HTTP_ERROR")
+        self.assertEqual(result["http_status"], 429)
+        self.assertEqual(result["retry_after"], "3")
+        self.assertFalse(result["verified"])
+
+    def test_malformed_retry_after_is_not_propagated(self):
+        error = HTTPError(
+            "https://api.example.com/account/balance", 429,
+            "Too Many Requests", {"Retry-After": "bad\\nsecret"}, None,
+        )
+        result = self.make_probe(_Opener(error=error))("provider")
+        self.assertNotIn("retry_after", result)
+        self.assertNotIn("secret", repr(result))
+
     def test_redirects_and_invalid_provider_ids_are_not_followed(self):
         opener = _Opener(error=HTTPError(
             "https://api.example.com/account/balance", 302, "redirect", {}, None
