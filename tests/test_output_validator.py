@@ -128,6 +128,45 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertEqual(result["status"], "OUTPUT_CHANGED_DURING_VALIDATION")
 
+    def test_wav_container_chunks_and_declared_size_are_validated(self):
+        fmt_payload = (
+            (1).to_bytes(2, "little") + (1).to_bytes(2, "little")
+            + (8000).to_bytes(4, "little") + (8000).to_bytes(4, "little")
+            + (1).to_bytes(2, "little") + (8).to_bytes(2, "little")
+        )
+        fmt_chunk = b"fmt " + len(fmt_payload).to_bytes(4, "little") + fmt_payload
+        data_payload = b"\x00\x01\x02\x03"
+        data_chunk = b"data" + len(data_payload).to_bytes(4, "little") + data_payload
+        body = b"WAVE" + fmt_chunk + data_chunk
+        valid_bytes = b"RIFF" + len(body).to_bytes(4, "little") + body
+        valid_path = self.root / "valid.wav"
+        valid_path.write_bytes(valid_bytes)
+        valid = ProviderOutputValidator().validate_file(valid_path, modality="audio")
+        self.assertTrue(valid["valid"])
+        self.assertEqual(valid["mime_type"], "audio/wav")
+
+        malformed_path = self.root / "malformed.wav"
+        malformed_path.write_bytes(b"RIFF" + (999).to_bytes(4, "little") + body)
+        malformed = ProviderOutputValidator().validate_file(malformed_path, modality="audio")
+        self.assertFalse(malformed["valid"])
+        self.assertEqual(malformed["status"], "MALFORMED_CONTAINER")
+
+    def test_mp4_requires_bounded_nonempty_required_boxes(self):
+        ftyp = (16).to_bytes(4, "big") + b"ftyp" + b"isom" + (0).to_bytes(4, "big")
+        moov = (9).to_bytes(4, "big") + b"moov" + b"x"
+        mdat = (9).to_bytes(4, "big") + b"mdat" + b"x"
+        valid_path = self.root / "valid.mp4"
+        valid_path.write_bytes(ftyp + moov + mdat)
+        valid = ProviderOutputValidator().validate_file(valid_path, modality="video")
+        self.assertTrue(valid["valid"])
+        self.assertEqual(valid["mime_type"], "video/mp4")
+
+        malformed_path = self.root / "malformed.mp4"
+        malformed_path.write_bytes(ftyp + (8).to_bytes(4, "big") + b"moov" + mdat)
+        malformed = ProviderOutputValidator().validate_file(malformed_path, modality="video")
+        self.assertFalse(malformed["valid"])
+        self.assertEqual(malformed["status"], "MALFORMED_CONTAINER")
+
     def test_deeply_nested_json_is_rejected_without_crashing(self):
         validator = ProviderOutputValidator(max_size_bytes=10000)
         path = self.root / "deep.json"
