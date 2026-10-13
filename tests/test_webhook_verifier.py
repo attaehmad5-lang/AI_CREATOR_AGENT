@@ -37,7 +37,7 @@ class ProviderWebhookVerifierTests(unittest.TestCase):
         self.assertNotIn(SECRET, repr(result))
 
     def test_tampered_body_and_signature_are_rejected(self):
-        result = self.verify(body=b'{"event":"forged"}')
+        result = self.verify(body=b'{"event":"forged"}', sig=signature(self.body))
         self.assertFalse(result["verified"])
         self.assertEqual(result["status"], "WEBHOOK_SIGNATURE_INVALID")
         malformed = self.verify(sig="sha256=bad")
