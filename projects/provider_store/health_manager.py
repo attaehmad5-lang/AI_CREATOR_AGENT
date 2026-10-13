@@ -216,7 +216,7 @@ class ProviderHealthManager:
                     status = "RECOVERING"
                 else:
                     status = "HEALTHY"
-            elif consecutive_failures >= self.failure_threshold:
+            elif current_status in {"UNHEALTHY", "RECOVERING"} or consecutive_failures >= self.failure_threshold:
                 status = "UNHEALTHY"
             else:
                 status = "DEGRADED"
