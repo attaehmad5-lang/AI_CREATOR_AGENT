@@ -6,10 +6,10 @@
 
 ## Latest automated verification
 
-GitHub Actions run [#38434016937](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434016937) completed successfully on Python 3.13:
+GitHub Actions run [#38435397071](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38435397071) completed successfully on Python 3.13:
 
-- Ubuntu: 299 tests passed, 0 failures.
-- Windows: 299 tests passed, 0 failures.
+- Ubuntu: 312 tests passed, 0 failures.
+- Windows: 312 tests passed, 0 failures.
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
 
@@ -19,14 +19,14 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 | Canonical section | Scope range | Current evidence | Audit disposition |
 |---|---:|---|---|
-| A — Provider Registry & Lifecycle | 1–8 | Versioned 54-provider catalog, synchronized primary/master registry, all records declare baseline capability metadata, schema validation, registration and enabled/disabled lifecycle, catalog recovery, catalog compatibility tests | Foundation implemented; item-by-item audit pending |
+| A — Provider Registry & Lifecycle | 1–8 | Versioned 54-provider catalog, synchronized primary/master registry, all records declare baseline capability metadata, schema validation, registration and enabled/disabled lifecycle, catalog recovery, fixed allowlist for legacy generation provider imports, catalog compatibility tests | Foundation implemented; item-by-item audit pending |
 | B — Credentials & Connection | 9–16 | Environment-reference validation, secret redaction, expiry checks, configured endpoint/model checks, verified state gating, manual-session verification hooks, bounded HTTPS probe requiring a separate non-billable probe endpoint, provider-specific auth header handling, safe HTTP error classification | Foundation implemented; provider-specific live verification pending |
 | C — Provider Modalities | 17–24 | Every provider declares baseline capability metadata; contract v2 validates only methods required by each declared capability and rejects unknown capabilities | Catalog/contract evidence only; actual provider adapters and live modality checks pending |
 | D — Routing & Fallback | 25–32 | Priority, free-credit-first, lowest-cost, healthiest-first and round-robin selection; verified-connection gating; fallback reservations | Foundation implemented; real generation-path integration pending |
 | E — Retry & Failure Handling | 33–40 | Bounded backoff, status/Retry-After handling, idempotency checks, circuit breaker and probe-slot recovery | Unit-tested foundation; provider-specific failure injection pending |
 | F — Provider Health | 41–48 | Persisted health history, latency/staleness checks, eligibility and active probe recording | Foundation implemented; live provider health evidence pending |
 | G — Output Validation | 49–56 | Size/signature/basic-content checks, bounded reads, mutation detection, JSON nesting limits and SHA-256 | Basic validation implemented; full media decoding, malware scanning and semantic QA pending |
-| H — Cost, Credits & Budgets | 57–64 | Paid-approval guard, configured budgets, serialized reservations, usage reconciliation, verified credit snapshots and unit compatibility; Pollinations no longer claims zero-cost access and requires its API key reference | Local policy/ledger tested; provider account balance adapters pending |
+| H — Cost, Credits & Budgets | 57–64 | Paid-approval guard, configured budgets, serialized reservations, usage reconciliation, verified credit snapshots and unit compatibility; Pollinations generation now requires its bearer API key and bounds output, but does not invent a billing result | Local policy/ledger tested; provider account balance and actual cost reconciliation adapters pending |
 | I — Security & Privacy | 65–72 | Secret-safe catalog/state, endpoint allowlists, HTTPS-only probe, redirect rejection, bounded response reads, atomic replacement and interprocess locks | Implemented safeguards; threat-model and deployment review pending |
 | J — Jobs & Execution | 73–80 | Request reservation/finalization integration and idempotency tests in the provider service | Provider-request lifecycle foundation; full end-to-end generation jobs pending |
 | K — Performance & Observability | 81–88 | Health/latency history, bounded histories, concurrency tests and structured safe statuses | Partial evidence; production metrics/telemetry and load benchmarks pending |
@@ -40,7 +40,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 1. Compare the exact canonical A–P feature list item-by-item. This file is deliberately a range-level evidence summary, **not a replacement for the user's exact 138 feature names**.
 2. Run provider-specific probes only against endpoints and accounts explicitly configured and authorized by the user. A generic HTTP 2xx proves only endpoint reachability unless the configured endpoint is documented to require and validate the supplied credential; it never proves model support, free credits, or successful generation.
-3. Implement and test provider-specific credential/authentication, account-balance, and generation adapters where required by the canonical scope.
+3. The Pollinations image adapter now uses the current authenticated generation endpoint, and the legacy generation registry loader is allowlisted. Provider-specific account-balance and actual cost reconciliation adapters are still required where the canonical scope demands them.
 4. Add provider-specific network failure injection and end-to-end generation execution tests.
 5. Add full image/audio/video decoding, malware scanning, and semantic output checks where required.
 6. Review deployment persistence: the JSON/OS-lock design protects cooperating local processes but is not one atomic transaction across manager files, devices, or containers with incompatible lock semantics. Evaluate SQLite/transactional storage for production multi-worker use.
