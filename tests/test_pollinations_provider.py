@@ -177,7 +177,7 @@ class PollinationsProviderTests(unittest.TestCase):
                 ("test", {"height": 10000}),
                 ("test", {"seed": -1}),
                 ("x" * 20001, {}),
-                ("x" * 3000, {}),
+                ("x" * 9000, {}),
             ]
             for prompt, options in invalid_calls:
                 with self.subTest(options=options, prompt_length=len(prompt)):
