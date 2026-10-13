@@ -272,6 +272,35 @@ class ProviderService:
                         if isinstance(paid_authorization, dict) else "INVALID_AUTHORIZATION_RESPONSE"
                     )
                     return {"allowed": False, "status": status}
+        if self.access_control_manager is not None:
+            try:
+                scope = self.access_control_manager.provider_scope(principal)
+            except Exception as exc:
+                return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+            if not isinstance(scope, dict) or scope.get("valid") is not True:
+                status = scope.get("status", "INVALID_PROVIDER_SCOPE") if isinstance(scope, dict) else "INVALID_PROVIDER_SCOPE"
+                return {"allowed": False, "status": status}
+            if scope.get("restricted") is True:
+                current_exclusions = route_options.get("excluded_providers")
+                if current_exclusions is None:
+                    excluded = set()
+                elif isinstance(current_exclusions, (set, frozenset)):
+                    excluded = set(current_exclusions)
+                else:
+                    return {"allowed": False, "status": "INVALID_PROVIDER_EXCLUSION_LIST"}
+                allowed_provider_ids = set(scope.get("providers", []))
+                try:
+                    catalog = self.connection_manager.list_providers()
+                except Exception as exc:
+                    return {"allowed": False, "status": "PROVIDER_SCOPE_LOOKUP_FAILED", "error_type": type(exc).__name__}
+                if not isinstance(catalog, list):
+                    return {"allowed": False, "status": "PROVIDER_SCOPE_LOOKUP_FAILED"}
+                for item in catalog:
+                    if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                        return {"allowed": False, "status": "INVALID_PROVIDER_CATALOG"}
+                    if item["id"] not in allowed_provider_ids:
+                        excluded.add(item["id"])
+                route_options["excluded_providers"] = excluded
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
