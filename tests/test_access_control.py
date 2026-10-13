@@ -53,6 +53,21 @@ class ProviderAccessControlTests(unittest.TestCase):
             capability="text_to_video",
         )["status"], "CAPABILITY_SCOPE_DENIED")
 
+    def test_provider_scope_is_explicit_and_validated(self):
+        unrestricted = self.acl.provider_scope({"subject": "user-1", "roles": ["creator"]})
+        self.assertTrue(unrestricted["valid"])
+        self.assertFalse(unrestricted["restricted"])
+        restricted = self.acl.provider_scope({
+            "subject": "user-1", "roles": ["creator"], "providers": ["image-a"]
+        })
+        self.assertTrue(restricted["valid"])
+        self.assertTrue(restricted["restricted"])
+        self.assertEqual(restricted["providers"], ["image-a"])
+        invalid = self.acl.provider_scope({
+            "subject": "user-1", "roles": ["creator"], "providers": "image-a"
+        })
+        self.assertFalse(invalid["valid"])
+
     def test_malformed_scope_fails_closed(self):
         principal = {"subject": "user-1", "roles": ["creator"], "projects": "film"}
         result = self.acl.authorize(principal, action="provider.route", project_id="film")
