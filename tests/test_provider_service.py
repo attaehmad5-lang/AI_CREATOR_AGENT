@@ -108,7 +108,7 @@ class ProviderServiceTests(unittest.TestCase):
             category="image", project_id="film", estimated_cost=0.0,
             estimated_costs={"image": 1.0},
             request_id="acl-paid-denied",
-            principal={"subject": "creator-1", "roles": ["creator"]},
+            principal={"subject": "creator-1", "roles": ["creator"], "projects": ["film"]},
         )
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "PERMISSION_DENIED")
