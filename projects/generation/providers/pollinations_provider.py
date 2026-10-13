@@ -100,13 +100,17 @@ class PollinationsProvider:
         api_key = self.environ.get("POLLINATIONS_API_KEY")
         if not isinstance(api_key, str) or not api_key.strip():
             raise PermissionError("POLLINATIONS_API_KEY is missing")
-        if len(api_key) > 16384 or any(ord(char) < 32 or ord(char) == 127 for char in api_key):
+        if api_key != api_key.strip() or len(api_key) > 16384 or any(
+            ord(char) < 32 or ord(char) == 127 for char in api_key
+        ):
             raise PermissionError("POLLINATIONS_API_KEY format is invalid")
 
         params: dict[str, str | int] = {"model": model, "width": width, "height": height}
         if seed is not None:
             params["seed"] = seed
         url = self.BASE_URL + quote(prompt.strip(), safe="") + "?" + urlencode(params)
+        if len(url) > 8192:
+            raise ValueError("prompt and parameters exceed the safe URL length limit")
         request = Request(
             url,
             headers={
@@ -158,6 +162,16 @@ class PollinationsProvider:
                 raise ValueError("Pollinations response was not a supported image artifact")
 
             target = Path(output_path)
+            allowed_extensions = {
+                "image/png": {".png"},
+                "image/jpeg": {".jpg", ".jpeg"},
+                "image/jpg": {".jpg", ".jpeg"},
+                "image/webp": {".webp"},
+                "image/avif": {".avif"},
+            }
+            media_type = content_type.split(";", 1)[0].strip().casefold()
+            if target.suffix.casefold() not in allowed_extensions.get(media_type, set()):
+                raise ValueError("output extension does not match image content type")
             target.parent.mkdir(parents=True, exist_ok=True)
             temporary_path: str | None = None
             try:
