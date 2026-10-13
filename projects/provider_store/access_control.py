@@ -126,10 +126,12 @@ class ProviderAccessControl:
         if action not in permissions:
             return {"allowed": False, "status": "PERMISSION_DENIED"}
 
+        if "projects" not in principal:
+            return {"allowed": False, "status": "PROJECT_SCOPE_REQUIRED"}
         valid, projects = self._scope_list(principal, "projects", IDENTIFIER)
         if not valid:
             return {"allowed": False, "status": "INVALID_PROJECT_SCOPE"}
-        if projects and project_id not in projects:
+        if project_id not in projects:
             return {"allowed": False, "status": "PROJECT_SCOPE_DENIED"}
 
         valid, providers = self._scope_list(principal, "providers", PROVIDER_IDENTIFIER)
