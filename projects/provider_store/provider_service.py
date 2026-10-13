@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        access_control_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -45,6 +46,9 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        if access_control_manager is not None and not callable(getattr(access_control_manager, "authorize", None)):
+            raise ValueError("access_control_manager must support authorization")
+        self.access_control_manager = access_control_manager
 
     def verify_provider(
         self,
@@ -224,8 +228,39 @@ class ProviderService:
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
-        try:
-            result = self.routing_manager.route(**route_options)
+        principal = route_options.pop("principal", None)
+        if self.access_control_manager is not None:
+            project_id = route_options.get("project_id")
+            capability = route_options.get("capability")
+            try:
+                authorization = self.access_control_manager.authorize(
+                    principal,
+                    action="provider.route",
+                    project_id=project_id,
+                    capability=capability,
+                )
+            except Exception as exc:
+                return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+            if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+                status = authorization.get("status", "PERMISSION_DENIED") if isinstance(authorization, dict) else "INVALID_AUTHORIZATION_RESPONSE"
+                return {"allowed": False, "status": status}
+            estimated_cost = route_options.get("estimated_cost", 0.0)
+            normalized_cost = finite_number(estimated_cost, minimum=0)
+            if normalized_cost is None:
+                return {"allowed": False, "status": "INVALID_ESTIMATED_COST"}
+            if normalized_cost > 0:
+                try:
+                    paid_authorization = self.access_control_manager.authorize(
+                        principal,
+                        action="provider.paid.execute",
+                        project_id=project_id,
+                        capability=capability,
+                    )
+                except Exception as exc:
+                    return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+                if not isinstance(paid_authorization, dict) or paid_authorization.get("allowed") is not True:
+                    status = paid_authorization.get("status", "PAID_PERMISSION_REQUIRED") if isinstance(paid_authorization, dict) else "INVALID_AUTHORIZATION_RESPONSE"
+                    return {"allowed": False, "status": status}
         except Exception as exc:
             return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {
