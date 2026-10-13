@@ -82,13 +82,14 @@ class PollinationsProviderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(PermissionError, "POLLINATIONS_API_KEY is missing"):
                 provider.generate_image("test", Path(temporary) / "image.png")
-        provider = PollinationsProvider(
-            environ={"POLLINATIONS_API_KEY": "secret\r\nX-Evil: injected"},
-            opener=opener,
-        )
-        with tempfile.TemporaryDirectory() as temporary:
-            with self.assertRaisesRegex(PermissionError, "format is invalid"):
-                provider.generate_image("test", Path(temporary) / "image.png")
+        for malformed in ("secret\r\nX-Evil: injected", " secret", "secret "):
+            provider = PollinationsProvider(
+                environ={"POLLINATIONS_API_KEY": malformed},
+                opener=opener,
+            )
+            with tempfile.TemporaryDirectory() as temporary:
+                with self.subTest(key=repr(malformed)), self.assertRaisesRegex(PermissionError, "format is invalid"):
+                    provider.generate_image("test", Path(temporary) / "image.png")
         self.assertEqual(opener.calls, [])
 
     def test_http_errors_are_safe_and_keep_retry_after_metadata(self):
@@ -139,6 +140,18 @@ class PollinationsProviderTests(unittest.TestCase):
                 oversized.generate_image("test", output)
             self.assertFalse(output.exists())
 
+        jpeg_response = _Response(body=b"\xff\xd8\xff" + b"\x00" * 64, content_type="image/jpeg")
+        jpeg = PollinationsProvider(
+            environ={"POLLINATIONS_API_KEY": "private"},
+            opener=_Opener(jpeg_response),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "wrong-extension.png"
+            with self.assertRaisesRegex(ValueError, "extension does not match"):
+                jpeg.generate_image("test", output)
+            self.assertFalse(output.exists())
+            self.assertTrue(jpeg_response.closed)
+
         invalid_response = _Response(body=b"not an image", content_type="text/plain")
         invalid = PollinationsProvider(
             environ={"POLLINATIONS_API_KEY": "private"},
@@ -164,6 +177,7 @@ class PollinationsProviderTests(unittest.TestCase):
                 ("test", {"height": 10000}),
                 ("test", {"seed": -1}),
                 ("x" * 20001, {}),
+                ("x" * 3000, {}),
             ]
             for prompt, options in invalid_calls:
                 with self.subTest(options=options, prompt_length=len(prompt)):
