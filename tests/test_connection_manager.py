@@ -923,7 +923,7 @@ class ConnectionManagerTests(unittest.TestCase):
                 return None
         result = self.manager.validate_provider_contract("public_image", ImageProvider())
         self.assertTrue(result["valid"])
-        self.assertEqual(result["contract_version"], "1.0")
+        self.assertEqual(result["contract_version"], "2.0")
 
     def test_provider_contract_rejects_missing_method_and_prevents_loading(self):
         instance = object()
@@ -949,7 +949,7 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_advanced_provider_categories_have_explicit_callable_contracts(self):
         cases = (
             ("advanced_image_editing", "edit_image"),
-            ("advanced_upscaling", "upscale_video"),
+            ("advanced_upscaling", "upscale_image"),
             ("advanced_transcription", "transcribe"),
             ("advanced_audio", "generate_music"),
             ("script_story", "generate_text"),
