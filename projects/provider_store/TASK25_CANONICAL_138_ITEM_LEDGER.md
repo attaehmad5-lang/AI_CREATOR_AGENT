@@ -94,7 +94,7 @@ GitHub Actions run [#38453337825](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 49 | 🟢 | Image Output Validation | PARTIAL | Signature/basic file validation is tested; real provider images and decoder-level validation remain open. |
 | 50 | 🟡 | Output File Existence Validation | VERIFIED | Missing, empty and oversized output files are rejected by output-validator tests. |
-| 51 | 🔴 | Audio/Video Format, Codec and Integrity Validation | OPEN | Full codec/container decoding and integrity checks are not implemented. |
+| 51 | 🔴 | Audio/Video Format, Codec and Integrity Validation | PARTIAL | `output_validator.py` now validates WAV RIFF declared size, chunk bounds, fmt/data presence, AVI RIFF size, and MP4/ISO-BMFF top-level box boundaries plus required non-empty ftyp/moov/mdat boxes. Full codec/container decoding, checksums where applicable, media duration/track semantics, and corruption detection still require specialized decoders. Tests: `tests/test_output_validator.py::test_wav_container_chunks_and_declared_size_are_validated`, `test_mp4_requires_bounded_nonempty_required_boxes`. |
 | 52 | 🟡 | Corrupt/Incomplete Output Rejection | PARTIAL | Basic corrupt/truncated artifact rejection is tested; decoder-level detection remains open. |
 | 53 | 🟡 | Temporary File Cleanup and Atomic Replacement | PARTIAL | Atomic replacement helpers exist; output-pipeline cleanup integration is incomplete. |
 | 54 | 🟡 | Previous Output Preservation on Failure | PARTIAL | Some preservation/atomicity tests exist; end-to-end generation replacement behavior is not verified. |
