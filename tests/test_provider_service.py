@@ -14,6 +14,7 @@ from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 from projects.provider_store.access_control import ProviderAccessControl
+from projects.provider_store.admission_controller import ProviderAdmissionController
 
 
 class ProviderServiceTests(unittest.TestCase):
@@ -113,6 +114,62 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "PERMISSION_DENIED")
         self.assertNotIn("acl-paid-denied", repr(self.cost.ledger))
+
+    def test_admission_backpressure_rejects_before_routing_or_adapter_call(self):
+        admission = ProviderAdmissionController(max_active=1, max_active_per_project=1)
+        self.assertTrue(admission.acquire(request_id="occupied", project_id="film")["acquired"])
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router, admission_controller=admission,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="blocked-job",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(True),
+            modality="image",
+        )
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["status"], "BACKPRESSURE_GLOBAL_LIMIT")
+        self.assertEqual(called, [])
+        self.assertEqual(admission.snapshot()["active"], 1)
+
+    def test_execution_releases_admission_after_terminal_attempt(self):
+        admission = ProviderAdmissionController(max_active=2, max_active_per_project=2)
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router, admission_controller=admission,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="terminal-job",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: {
+                "started": True, "success": False, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "error_code": "TEST_FAILURE",
+            },
+            modality="image",
+        )
+        self.assertTrue(result["executed"])
+        self.assertTrue(result["admission_release"]["released"])
+        self.assertEqual(admission.snapshot()["active"], 0)
+
+    def test_ambiguous_execution_retains_admission_until_explicit_resolution(self):
+        admission = ProviderAdmissionController(max_active=2, max_active_per_project=2)
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router, admission_controller=admission,
+        )
+        def ambiguous_adapter(**kwargs):
+            raise TimeoutError("simulated unknown external outcome")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="ambiguous-job",
+            estimated_cost=0.0, adapter=ambiguous_adapter, modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
+        self.assertTrue(result["admission_lease_retained"])
+        self.assertEqual(admission.snapshot()["active"], 1)
+        resolved = service.resolve_admission("ambiguous-job")
+        self.assertTrue(resolved["released"])
+        self.assertEqual(admission.snapshot()["active"], 0)
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
