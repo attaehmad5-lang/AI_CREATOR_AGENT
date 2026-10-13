@@ -71,6 +71,32 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertTrue(allowed["allowed"])
 
+    def test_provider_scope_filters_candidates_before_routing(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            access_control_manager=ProviderAccessControl(),
+        )
+        result = service.route_request(
+            category="image", project_id="film", estimated_cost=0.0,
+            principal={
+                "subject": "creator-1", "roles": ["creator"],
+                "projects": ["film"], "providers": ["another-provider"],
+            },
+        )
+        self.assertFalse(result["allowed"])
+        self.assertNotEqual(result.get("provider"), "image")
+
+    def test_principal_is_not_silently_ignored_without_access_controller(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(self.connections, routing_manager=router)
+        result = service.route_request(
+            category="image", project_id="film", estimated_cost=0.0,
+            principal={"subject": "creator-1", "roles": ["creator"]},
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "ACCESS_CONTROL_UNAVAILABLE")
+
     def test_paid_route_requires_paid_execution_permission_before_reservation(self):
         router = ProviderRoutingManager(self.connections, cost_policy=self.cost)
         service = ProviderService(
