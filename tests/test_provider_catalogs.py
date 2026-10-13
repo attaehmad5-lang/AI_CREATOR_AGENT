@@ -125,6 +125,28 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                     provider.get("id"),
                 )
 
+    def test_deprecated_provider_requires_reason_date_and_stays_disabled(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        provider = next(item for item in catalog["providers"] if item["id"] == "openai_sora")
+        self.assertTrue(provider["deprecated"])
+        self.assertFalse(provider["enabled"])
+        self.assertEqual(provider["deprecation_date"], "2026-09-24")
+        self.assertTrue(provider["deprecation_reason"].strip())
+        self.assertTrue(ConnectionManager.validate_catalog_schema(catalog)["valid"])
+
+        enabled_catalog = json.loads(json.dumps(catalog))
+        next(item for item in enabled_catalog["providers"] if item["id"] == "openai_sora")["enabled"] = True
+        result = ConnectionManager.validate_catalog_schema(enabled_catalog)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("deprecated provider must remain disabled" in error for error in result["errors"]))
+
+        missing_reason = json.loads(json.dumps(catalog))
+        next(item for item in missing_reason["providers"] if item["id"] == "openai_sora").pop("deprecation_reason")
+        result = ConnectionManager.validate_catalog_schema(missing_reason)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("deprecation_reason is required" in error for error in result["errors"]))
+
     def test_huggingface_account_auth_host_is_allowlisted(self):
         root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
         catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
