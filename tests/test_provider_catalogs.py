@@ -213,7 +213,7 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         required_methods = (
             "generate_image", "generate_video", "generate_speech", "generate_audio",
             "generate_music", "generate_text", "transcribe", "translate", "dub",
-            "edit_image", "upscale_image", "upscale_video", "generate_lipsync", "edit_video",
+            "edit_image", "upscale_image", "upscale_video", "generate_lipsync", "edit_video", "edit_audio",
         )
         adapter = type("CompleteTestAdapter", (), {
             method: (lambda self, *args, **kwargs: None) for method in required_methods
