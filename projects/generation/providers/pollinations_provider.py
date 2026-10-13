@@ -14,9 +14,15 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
-from urllib.request import Request, build_opener
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from projects.provider_store.http_probe import ProviderHTTPStatusError
+
+
+class _RejectGenerationRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
+        # Never forward Authorization to a redirect target.
+        return None
 
 
 class PollinationsProvider:
@@ -50,7 +56,7 @@ class PollinationsProvider:
         if opener is not None and not callable(getattr(opener, "open", None)):
             raise ValueError("opener must provide an open method")
         self.environ = os.environ if environ is None else environ
-        self.opener = opener or build_opener()
+        self.opener = opener or build_opener(_RejectGenerationRedirects())
         self.timeout_seconds = float(timeout_seconds)
         self.max_output_bytes = max_output_bytes
 
