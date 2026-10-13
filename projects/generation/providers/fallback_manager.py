@@ -28,6 +28,12 @@ class FallbackManager:
             except Exception as exc:
                 if self.provider_health:
                     self.provider_health.record_failure(provider_name, exc)
-                errors.append({"provider": provider_name, "error": str(exc)})
+                status_code = getattr(exc, "status_code", None)
+                safe_status = status_code if isinstance(status_code, int) and 100 <= status_code <= 599 else None
+                errors.append({
+                    "provider": provider_name,
+                    "error_type": type(exc).__name__,
+                    "status_code": safe_status,
+                })
 
         return {"status": "FAILED", "provider": None, "errors": errors}
