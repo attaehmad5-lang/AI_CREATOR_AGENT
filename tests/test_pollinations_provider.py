@@ -1,9 +1,11 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
 from projects.generation.providers.pollinations_provider import PollinationsProvider
+from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.http_probe import ProviderHTTPStatusError
 
 
@@ -168,6 +170,24 @@ class PollinationsProviderTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         provider.generate_image(prompt, output, **options)
         self.assertEqual(provider.opener.calls, [])
+
+    def test_pollinations_adapter_loads_through_central_provider_contract(self):
+        repository_root = Path(__file__).resolve().parents[1]
+        catalog_path = repository_root / "projects" / "provider_store" / "provider_catalog.json"
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = Path(temporary) / "connection-state.json"
+            state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog_path, state_path)
+            adapter = PollinationsProvider(
+                environ={"POLLINATIONS_API_KEY": "private"},
+                opener=_Opener(_Response()),
+            )
+            loaded = manager.load_provider("pollinations", lambda metadata: adapter)
+            self.assertEqual(loaded["status"], "LOADED")
+            self.assertTrue(manager.validate_provider_contract("pollinations", adapter)["valid"])
+            self.assertIs(manager.get_loaded_provider("pollinations"), adapter)
+            unloaded = manager.unload_provider("pollinations")
+            self.assertEqual(unloaded["status"], "UNLOADED")
 
     def test_provider_configuration_is_bounded(self):
         with self.assertRaises(ValueError):
