@@ -180,6 +180,12 @@ class ProviderCatalogValidationTests(unittest.TestCase):
             "story": "story_generation",
             "text": "text_generation",
             "research": "research",
+            "script_story": "story_generation",
+            "advanced_image_editing": "inpainting",
+            "advanced_upscaling": "image_upscaling",
+            "advanced_transcription": "speech_to_text",
+            "advanced_audio": "audio_generation",
+            "advanced_video_editing": "video_editing",
         }
         self.assertGreaterEqual(len(catalog["providers"]), 50)
         for provider in catalog["providers"]:
@@ -188,7 +194,13 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                 self.assertIsInstance(capabilities, list)
                 self.assertTrue(capabilities)
                 self.assertEqual(len(capabilities), len(set(capabilities)))
-                self.assertIn(baseline[provider["category"]], capabilities)
+                expected = baseline[provider["category"]]
+                if provider["category"] == "advanced_image_editing":
+                    self.assertTrue({"inpainting", "outpainting", "image_editing"} & set(capabilities))
+                elif provider["category"] == "advanced_audio":
+                    self.assertTrue({"voice_generation", "audio_generation", "music_generation"} & set(capabilities))
+                else:
+                    self.assertIn(expected, capabilities)
         # Metadata is discoverability only; locked providers still require adapters
         # and provider-specific live verification before they can be executed.
         locked = [p for p in catalog["providers"] if p.get("enabled") is False]
