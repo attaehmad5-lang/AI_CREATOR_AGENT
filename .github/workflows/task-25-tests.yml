@@ -31,5 +31,5 @@ jobs:
       - name: Validate provider JSON catalogs
         run: |
           python -c "import json; from pathlib import Path; [json.loads(p.read_text(encoding='utf-8')) for p in Path('projects/provider_store').rglob('*.json')]"
-      - name: Run unit and regression tests
-        run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: Run unit and regression tests in parallel batches
+        run: python tests/run_test_batches.py
