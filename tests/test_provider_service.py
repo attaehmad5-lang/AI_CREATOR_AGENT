@@ -166,6 +166,25 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn("oauth-access-secret", health_path.read_text(encoding="utf-8"))
         self.assertNotIn("oauth-access-secret", repr(result))
 
+    def test_oauth_verification_fails_closed_when_provider_lookup_raises(self):
+        class OAuthStub:
+            def get_access_token(self, provider_id):
+                return "temporary-token"
+
+        class BrokenConnectionManager:
+            def verify_connectivity(self, *args, **kwargs):
+                raise AssertionError("connectivity must not run after lookup failure")
+            def get_provider(self, provider_id):
+                raise OSError("private storage detail")
+
+        result = ProviderService(BrokenConnectionManager()).verify_oauth_provider(
+            "provider", OAuthStub()
+        )
+        self.assertEqual(result["status"], "PROVIDER_LOOKUP_FAILED")
+        self.assertEqual(result["error_type"], "OSError")
+        self.assertNotIn("private storage detail", repr(result))
+        self.assertNotIn("temporary-token", repr(result))
+
     def test_oauth_verification_fails_closed_without_unexpired_access_token(self):
         class OAuthStub:
             def get_access_token(self, provider_id):
