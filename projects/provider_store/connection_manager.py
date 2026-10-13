@@ -555,7 +555,7 @@ class ConnectionManager:
             capabilities = [capabilities]
         if not isinstance(capabilities, list) or any(
             not isinstance(item, str) or not item.strip() for item in capabilities
-        ):
+        ) or (category == "advanced_audio" and not capabilities):
             return {
                 "status": "INVALID_CAPABILITY_METADATA",
                 "provider": provider_id,
