@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - task-25-provider-connection-manager
+      - task-25-provider-connection-manager-completion
   pull_request:
     branches:
       - main
