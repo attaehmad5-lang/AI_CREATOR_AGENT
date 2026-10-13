@@ -289,6 +289,10 @@ class ProviderOutputValidator:
                     box_size = size32
                 if box_size < header_size or offset + box_size > file_size:
                     return "MALFORMED_CONTAINER"
+                if box_type == b"ftyp" and box_size < header_size + 8:
+                    return "MALFORMED_CONTAINER"
+                if box_type in {b"moov", b"mdat"} and box_size <= header_size:
+                    return "MALFORMED_CONTAINER"
                 found.add(box_type)
                 offset += box_size
                 box_count += 1
