@@ -394,7 +394,7 @@ class ConnectionManager:
                             not isinstance(reason, str)
                             or not reason.strip()
                             or len(reason) > 500
-                            or any(ord(char) < 32 and char not in "\\t" for char in reason)
+                            or any(ord(char) < 32 or ord(char) == 127 for char in reason)
                         ):
                             errors.append(f"providers[{index}].deprecation_reason is required for deprecated providers")
                         deprecation_date = provider.get("deprecation_date")
