@@ -24,6 +24,7 @@ class ProviderService:
         credit_manager: Any | None = None,
         access_control_manager: Any | None = None,
         admission_controller: Any | None = None,
+        webhook_verifier: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -56,6 +57,35 @@ class ProviderService:
         ):
             raise ValueError("admission_controller must support acquire and release")
         self.admission_controller = admission_controller
+        if webhook_verifier is not None and not callable(getattr(webhook_verifier, "verify", None)):
+            raise ValueError("webhook_verifier must support verify")
+        self.webhook_verifier = webhook_verifier
+
+    def verify_webhook(
+        self,
+        *,
+        provider_id: str,
+        body: bytes,
+        timestamp: str,
+        signature: str,
+        event_id: str,
+    ) -> dict[str, Any]:
+        """Verify a provider callback before the caller processes its event."""
+        if self.webhook_verifier is None:
+            return {"verified": False, "status": "WEBHOOK_VERIFIER_UNAVAILABLE"}
+        try:
+            result = self.webhook_verifier.verify(
+                provider_id=provider_id,
+                body=body,
+                timestamp=timestamp,
+                signature=signature,
+                event_id=event_id,
+            )
+        except Exception as exc:
+            return {"verified": False, "status": "WEBHOOK_VERIFICATION_FAILED", "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "verified": False, "status": "INVALID_WEBHOOK_VERIFICATION_RESPONSE"
+        }
 
     def verify_provider(
         self,
