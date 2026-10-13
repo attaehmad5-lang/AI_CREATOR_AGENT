@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38432824682](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38432824682): **324 tests passed on Ubuntu and 324 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The malformed Retry-After fixture failure from run #38432229162 was corrected and rerun successfully; the suite also now proves extreme retry attempt values cannot trigger unbounded exponentiation.
+GitHub Actions run [#38433193369](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38433193369): **325 tests passed on Ubuntu and 325 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The malformed Retry-After fixture failure was corrected and rerun successfully; the suite also covers capped extreme retry attempts and fail-closed OAuth provider lookup errors.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -29,7 +29,7 @@ GitHub Actions run [#38432824682](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 9 | 🔴 | API Key/Token Authentication | PARTIAL | Environment-only credential references and bounded HTTP probes exist; provider-specific auth schemes require live verification. |
 | 10 | 🔴 | OAuth/Login Support | PARTIAL | Generic OAuth 2.0 PKCE helper is tested; provider-specific registration, consent and scopes are not live-verified. |
-| 11 | 🔴 | Credential Expiry and Refresh | PARTIAL | Token expiry/refresh lifecycle primitives exist; provider-specific refresh semantics and revoked-token recovery remain open. |
+| 11 | 🔴 | Credential Expiry and Refresh | PARTIAL | Token expiry/refresh lifecycle primitives exist; OAuth provider lookup errors now fail closed without leaking storage details. Provider-specific refresh semantics and revoked-token recovery remain open. Evidence: `tests/test_provider_service.py::test_oauth_verification_fails_closed_when_provider_lookup_raises`. |
 | 12 | 🔴 | Connection and Network Timeouts | PARTIAL | Bounded timeout validation and tests exist; full generation cancellation/deadline propagation remains open. |
 | 13 | 🔴 | Live Connectivity Verification | PARTIAL | Generic authenticated HTTPS probe and local Hugging Face check are documented; no live credential test was run in CI. |
 | 14 | 🟡 | Provider Endpoint/Model Configuration | VERIFIED | Endpoint/model configuration persistence, safe endpoint validation and passing configuration to probes are tested. |
