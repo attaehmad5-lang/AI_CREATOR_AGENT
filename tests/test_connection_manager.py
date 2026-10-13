@@ -1,7 +1,8 @@
 import json
 import tempfile
+import threading
 import unittest
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
@@ -37,7 +38,7 @@ class ConnectionManagerTests(unittest.TestCase):
         self.catalog_path.write_text(
             json.dumps({
                 "providers": [
-                    {"id": "public_image", "auth_type": "NONE", "category": "image"},
+                    {"id": "public_image", "auth_type": "NONE", "category": "image", "enabled": True},
                     {"id": "token_image", "auth_type": "API_TOKEN", "token_env": "TEST_PROVIDER_TOKEN", "category": "image"},
                 ]
             }),
@@ -358,6 +359,8 @@ class ConnectionManagerTests(unittest.TestCase):
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
                 "subscription_required": False,
                 "allowed_hosts": ["api.example.com"],
+                "official_api_url": "https://api.example.com/docs",
+                "capabilities": ["image_generation"],
             }],
         }
         master_path.write_text(json.dumps(master), encoding="utf-8")
@@ -376,6 +379,8 @@ class ConnectionManagerTests(unittest.TestCase):
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
                 "subscription_required": False,
                 "allowed_hosts": ["keep.example.com"],
+                "official_api_url": "https://keep.example.com/docs",
+                "capabilities": ["image_generation"],
             }],
         }
         self.catalog_path.write_text(json.dumps(valid_target), encoding="utf-8")
@@ -936,6 +941,48 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(instance.closed)
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
 
+    def test_concurrent_disable_waits_for_inflight_load_then_unloads_instance(self):
+        factory_entered = threading.Event()
+        release_factory = threading.Event()
+        disable_started = threading.Event()
+
+        class BlockingImageProvider:
+            def __init__(self):
+                self.closed = False
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+            def close(self):
+                self.closed = True
+
+        instance = BlockingImageProvider()
+
+        def factory(metadata):
+            factory_entered.set()
+            if not release_factory.wait(timeout=3):
+                raise TimeoutError("test factory release timed out")
+            return instance
+
+        def disable_provider():
+            disable_started.set()
+            return self.manager.set_provider_enabled("public_image", False)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            load_future = pool.submit(self.manager.load_provider, "public_image", factory)
+            self.assertTrue(factory_entered.wait(timeout=2))
+            disable_future = pool.submit(disable_provider)
+            self.assertTrue(disable_started.wait(timeout=2))
+            release_factory.set()
+            loaded = load_future.result(timeout=3)
+            disabled = disable_future.result(timeout=3)
+
+        self.assertEqual(loaded["status"], "LOADED")
+        self.assertEqual(disabled["status"], "DISABLED")
+        self.assertTrue(instance.closed)
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
+
     def test_enabled_flag_rejects_non_boolean_and_unknown_provider(self):
         self.assertEqual(
             self.manager.set_provider_enabled("public_image", "yes")["status"],
@@ -1113,6 +1160,14 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(
             reloaded.get_state("public_image")["configuration"]["model"], "test-model-v1"
         )
+
+    def test_provider_model_rejects_bearer_credential_patterns(self):
+        for model in ("Bearer private-secret", "model token=private", "model api_key=private"):
+            with self.subTest(model=model):
+                result = self.manager.configure_provider("public_image", model=model)
+                self.assertEqual(result["status"], "SENSITIVE_CONFIGURATION_REJECTED")
+                self.assertNotIn(model, repr(result))
+        self.assertNotIn("configuration", self.manager.get_state("public_image"))
 
     def test_provider_endpoint_configuration_rejects_unsafe_or_secret_urls(self):
         self.assertEqual(

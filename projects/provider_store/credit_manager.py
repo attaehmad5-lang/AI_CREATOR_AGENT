@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
+from .safe_numbers import finite_number
 
 
 class ProviderCreditManager:
@@ -22,17 +23,13 @@ class ProviderCreditManager:
         max_age_seconds: float = 300.0,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        if (
-            not isinstance(max_age_seconds, (int, float))
-            or isinstance(max_age_seconds, bool)
-            or not math.isfinite(max_age_seconds)
-            or max_age_seconds <= 0
-        ):
+        max_age = finite_number(max_age_seconds, minimum=0)
+        if max_age is None or max_age <= 0:
             raise ValueError("max_age_seconds must be a finite positive number")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
-        self.max_age_seconds = float(max_age_seconds)
+        self.max_age_seconds = max_age
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}, "reservations": {}, "usage": {}}
@@ -106,12 +103,7 @@ class ProviderCreditManager:
 
     @staticmethod
     def _valid_amount(value: Any):
-        return (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(value)
-            and value >= 0
-        )
+        return finite_number(value, minimum=0) is not None
 
     @staticmethod
     def _parse_timestamp(value: Any) -> datetime:

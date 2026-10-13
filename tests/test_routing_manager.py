@@ -10,6 +10,7 @@ from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.credit_manager import ProviderCreditManager
+from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
 
 
 class ProviderRoutingManagerTests(unittest.TestCase):
@@ -69,6 +70,41 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["provider"], "primary")
         self.assertFalse(result["health_verified"])
 
+    def test_primary_only_never_uses_fallback_when_primary_is_unavailable(self):
+        router = ProviderRoutingManager(self.connections)
+        self.connections.set_state("primary", "READY")
+        result = router.route(
+            category="image", project_id="film", strategy="PRIMARY_ONLY"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertEqual(
+            [decision["provider"] for decision in result["decisions"]],
+            ["primary"],
+        )
+        self.assertFalse(result["automatic_fallback"])
+
+    def test_automatic_fallback_can_be_disabled_without_changing_primary_strategy(self):
+        router = ProviderRoutingManager(self.connections)
+        self.connections.set_state("primary", "READY")
+        result = router.route(
+            category="image", project_id="film", automatic_fallback=False
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertEqual(
+            [decision["provider"] for decision in result["decisions"]],
+            ["primary"],
+        )
+        self.assertFalse(result["automatic_fallback"])
+
+    def test_automatic_fallback_policy_requires_boolean(self):
+        result = ProviderRoutingManager(self.connections).route(
+            category="image", project_id="film", automatic_fallback="false"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "INVALID_FALLBACK_POLICY")
+
     def test_fallback_excludes_failed_provider(self):
         router = ProviderRoutingManager(self.connections)
         result = router.select_fallback(
@@ -77,6 +113,106 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "fallback")
         self.assertEqual(result["failed_provider"], "primary")
+
+    def test_model_and_version_aware_routing_uses_declared_compatibility(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        for provider in catalog["providers"]:
+            if provider["id"] == "primary":
+                provider["supported_models"] = [{"id": "flux", "versions": ["1.0", "1.1"]}]
+            elif provider["id"] == "fallback":
+                provider["supported_models"] = [{"id": "sdxl", "versions": ["2.0"]}]
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        router = ProviderRoutingManager(self.connections)
+        routed = router.route(
+            category="image", project_id="film", model="sdxl", model_version="2.0"
+        )
+        self.assertTrue(routed["allowed"])
+        self.assertEqual(routed["provider"], "fallback")
+        self.assertEqual(routed["model"], "sdxl")
+        self.assertEqual(routed["model_version"], "2.0")
+
+        unsupported_version = router.route(
+            category="image", project_id="film", model="sdxl", model_version="3.0"
+        )
+        self.assertFalse(unsupported_version["allowed"])
+        self.assertIn(
+            "MODEL_VERSION_NOT_SUPPORTED",
+            [decision["status"] for decision in unsupported_version["decisions"]],
+        )
+
+    def test_model_routing_fails_closed_without_declared_model_metadata(self):
+        result = ProviderRoutingManager(self.connections).route(
+            category="image", project_id="film", model="undeclared-model"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertEqual(
+            [decision["status"] for decision in result["decisions"]],
+            ["MODEL_METADATA_UNVERIFIED", "MODEL_METADATA_UNVERIFIED"],
+        )
+
+    def test_model_version_requires_a_model_id(self):
+        result = ProviderRoutingManager(self.connections).route(
+            category="image", project_id="film", model_version="1.0"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "INVALID_MODEL_VERSION")
+
+    def test_project_policy_restricts_provider_and_disables_fallback(self):
+        policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        saved = policies.set_policy("film", {
+            "allowed_providers": ["fallback"],
+            "automatic_fallback": False,
+        })
+        self.assertTrue(saved["saved"])
+        router = ProviderRoutingManager(self.connections, project_policy_manager=policies)
+        result = router.route(category="image", project_id="film")
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertFalse(result["automatic_fallback"])
+
+    def test_project_policy_requires_configuration_and_enforces_cost_limit(self):
+        policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        router = ProviderRoutingManager(self.connections, project_policy_manager=policies)
+        missing = router.route(category="image", project_id="unconfigured-project")
+        self.assertFalse(missing["allowed"])
+        self.assertEqual(missing["status"], "PROJECT_POLICY_REQUIRED")
+        policies.set_policy("film", {
+            "allowed_providers": ["primary"],
+            "max_estimated_cost": 1.0,
+        })
+        too_expensive = router.route(
+            category="image", project_id="film", estimated_cost=2.0,
+        )
+        self.assertFalse(too_expensive["allowed"])
+        self.assertEqual(too_expensive["status"], "PROJECT_COST_LIMIT_EXCEEDED")
+
+    def test_project_policy_restricts_models_and_capabilities(self):
+        policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        policies.set_policy("film", {"allowed_models": ["sdxl"]})
+        router = ProviderRoutingManager(self.connections, project_policy_manager=policies)
+        model_denied = router.route(
+            category="image", project_id="film", model="flux"
+        )
+        self.assertFalse(model_denied["allowed"])
+        self.assertEqual(model_denied["status"], "PROJECT_MODEL_NOT_ALLOWED")
+
+        policies.set_policy("film", {"allowed_capabilities": ["voice_generation"]})
+        capability_denied = router.route(category="image", project_id="film")
+        self.assertFalse(capability_denied["allowed"])
+        self.assertEqual(capability_denied["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertTrue(all(
+            decision["status"] == "PROJECT_CAPABILITY_NOT_ALLOWED"
+            for decision in capability_denied["decisions"]
+        ))
+
+    def test_project_policy_can_require_health_evidence(self):
+        policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        policies.set_policy("film", {"require_health_evidence": True})
+        router = ProviderRoutingManager(self.connections, project_policy_manager=policies)
+        result = router.route(category="image", project_id="film")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "HEALTH_DATA_REQUIRED")
 
     def test_free_credit_and_lowest_cost_strategies(self):
         router = ProviderRoutingManager(self.connections)

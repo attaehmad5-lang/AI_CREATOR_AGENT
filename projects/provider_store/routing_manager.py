@@ -6,13 +6,17 @@ or claim a provider is live unless health evidence was supplied by the caller.
 from __future__ import annotations
 
 import math
+import re
 import threading
+
+from .safe_numbers import finite_number
 from typing import Any
 
 
 class ProviderRoutingManager:
     STRATEGIES = {
         "PRIMARY_THEN_FALLBACK",
+        "PRIMARY_ONLY",
         "FREE_CREDITS_FIRST",
         "LOWEST_COST",
         "HEALTHIEST_FIRST",
@@ -27,6 +31,7 @@ class ProviderRoutingManager:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        project_policy_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
         require_verified_connection: bool = True,
     ) -> None:
@@ -40,6 +45,8 @@ class ProviderRoutingManager:
             raise ValueError("quota_manager must support request reservations")
         if credit_manager is not None and not callable(getattr(credit_manager, "usable_free_credits", None)):
             raise ValueError("credit_manager must provide fresh verified balances")
+        if project_policy_manager is not None and not callable(getattr(project_policy_manager, "get_policy", None)):
+            raise ValueError("project_policy_manager must support policy lookup")
         if not isinstance(require_verified_connection, bool):
             raise ValueError("require_verified_connection must be boolean")
         if require_verified_connection and not callable(getattr(connection_manager, "get_state", None)):
@@ -52,6 +59,7 @@ class ProviderRoutingManager:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager
+        self.project_policy_manager = project_policy_manager
         self.default_strategy = normalized_strategy
         self.require_verified_connection = require_verified_connection
         self._round_robin_counters: dict[str, int] = {}
@@ -59,19 +67,14 @@ class ProviderRoutingManager:
 
     @staticmethod
     def _valid_amount(value: Any) -> bool:
-        return (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(value)
-            and value >= 0
-        )
+        return finite_number(value, minimum=0) is not None
 
     @staticmethod
     def _priority(provider: dict[str, Any]) -> tuple[float, str]:
-        value = provider.get("priority", 1000)
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
-            value = 1000
-        return float(value), str(provider.get("id", ""))
+        value = finite_number(provider.get("priority", 1000))
+        if value is None:
+            value = 1000.0
+        return value, str(provider.get("id", ""))
 
     def _cleanup_new_reservations(
         self,
@@ -126,6 +129,8 @@ class ProviderRoutingManager:
         project_id: str,
         estimated_cost: float = 0.0,
         capability: str | None = None,
+        model: str | None = None,
+        model_version: str | None = None,
         strategy: str | None = None,
         estimated_costs: dict[str, float] | None = None,
         estimated_cost_unit: str = "USD",
@@ -134,14 +139,58 @@ class ProviderRoutingManager:
         paid_approved_providers: set[str] | frozenset[str] | None = None,
         excluded_providers: set[str] | frozenset[str] | None = None,
         require_health_evidence: bool = False,
+        automatic_fallback: bool = True,
     ) -> dict[str, Any]:
         """Return the first policy-compliant provider and the decisions that led to it."""
         if not isinstance(category, str) or not category.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_REQUIRED"}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
+
+        project_policy: dict[str, Any] = {}
+        if self.project_policy_manager is not None:
+            try:
+                policy_result = self.project_policy_manager.get_policy(project_id)
+            except Exception as exc:
+                return {
+                    "allowed": False, "status": "PROJECT_POLICY_LOOKUP_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if (
+                not isinstance(policy_result, dict)
+                or policy_result.get("status") != "PROJECT_POLICY_FOUND"
+                or not isinstance(policy_result.get("policy"), dict)
+            ):
+                return {"allowed": False, "status": "PROJECT_POLICY_REQUIRED"}
+            project_policy = policy_result["policy"]
+            allowed_models = project_policy.get("allowed_models")
+            if allowed_models is not None and (
+                model is None or model not in allowed_models
+            ):
+                return {"allowed": False, "status": "PROJECT_MODEL_NOT_ALLOWED"}
+            allowed_capabilities = project_policy.get("allowed_capabilities")
+            if allowed_capabilities is not None and capability is not None and capability not in allowed_capabilities:
+                return {"allowed": False, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"}
+            max_estimated_cost = project_policy.get("max_estimated_cost")
+            if max_estimated_cost is not None and self._valid_amount(estimated_cost) and estimated_cost > max_estimated_cost:
+                return {"allowed": False, "status": "PROJECT_COST_LIMIT_EXCEEDED"}
+            if project_policy.get("automatic_fallback") is False:
+                automatic_fallback = False
+            require_health_evidence = require_health_evidence or project_policy.get("require_health_evidence") is True
+
         if not self._valid_amount(estimated_cost):
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "INVALID_ESTIMATED_COST"}
+        if model is not None and (
+            not isinstance(model, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}", model)
+        ):
+            return {"allowed": False, "status": "INVALID_MODEL_ID"}
+        if model_version is not None and (
+            model is None
+            or not isinstance(model_version, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,99}", model_version)
+        ):
+            return {"allowed": False, "status": "INVALID_MODEL_VERSION"}
         selected_strategy = str(strategy or self.default_strategy).upper()
         if selected_strategy not in self.STRATEGIES:
             return {"allowed": False, "status": "INVALID_ROUTING_STRATEGY"}
@@ -162,6 +211,9 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_EXCLUDED_PROVIDER_SET"}
         if not isinstance(require_health_evidence, bool):
             return {"allowed": False, "status": "INVALID_HEALTH_POLICY"}
+
+        if not isinstance(automatic_fallback, bool):
+            return {"allowed": False, "status": "INVALID_FALLBACK_POLICY"}
 
         estimates = {} if estimated_costs is None else estimated_costs
         if self.credit_manager is not None:
@@ -208,8 +260,41 @@ class ProviderRoutingManager:
         if not isinstance(discovered, list):
             return {"allowed": False, "status": "PROVIDER_DISCOVERY_FAILED", "reason": "INVALID_DISCOVERY_RESULT"}
 
-        candidates: list[dict[str, Any]] = []
         decisions: list[dict[str, Any]] = []
+        policy_filtered_discovery = []
+        allowed_providers = project_policy.get("allowed_providers")
+        denied_providers = project_policy.get("denied_providers", [])
+        allowed_capabilities = project_policy.get("allowed_capabilities")
+        for item in discovered:
+            if not isinstance(item, dict):
+                continue
+            item_id = item.get("id")
+            if allowed_providers is not None and item_id not in allowed_providers:
+                decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_NOT_ALLOWED"})
+                continue
+            if item_id in denied_providers:
+                decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_DENIED"})
+                continue
+            if allowed_capabilities is not None and capability is None:
+                item_capabilities = item.get("capabilities", [])
+                if not isinstance(item_capabilities, list) or not set(item_capabilities).intersection(allowed_capabilities):
+                    decisions.append({"provider": item_id, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"})
+                    continue
+            policy_filtered_discovery.append(item)
+        discovered = policy_filtered_discovery
+
+        ordered_discovery = sorted(discovered, key=self._priority)
+        primary_id = ordered_discovery[0].get("id") if ordered_discovery else None
+        fallback_disabled = selected_strategy == "PRIMARY_ONLY" or not automatic_fallback
+        if fallback_disabled:
+            # Resolve the primary among project-allowed providers before health/cost
+            # checks. If it cannot run, never silently use another provider.
+            discovered = [
+                item for item in discovered
+                if isinstance(item, dict) and item.get("id") == primary_id
+            ]
+
+        candidates: list[dict[str, Any]] = []
         for provider in discovered:
             if not isinstance(provider, dict):
                 continue
@@ -218,7 +303,34 @@ class ProviderRoutingManager:
                 continue
             if provider.get("enabled") is not True:
                 continue
-            if self.require_verified_connection:
+            if model is not None:
+                model_records = provider.get("supported_models")
+                if not isinstance(model_records, list):
+                    decisions.append({"provider": provider_id, "status": "MODEL_METADATA_UNVERIFIED"})
+                    continue
+                model_record = next(
+                    (
+                        item for item in model_records
+                        if isinstance(item, dict) and item.get("id") == model
+                    ),
+                    None,
+                )
+                if model_record is None:
+                    decisions.append({"provider": provider_id, "status": "MODEL_NOT_SUPPORTED"})
+                    continue
+                if model_version is not None:
+                    versions = model_record.get("versions")
+                    if not isinstance(versions, list):
+                        decisions.append({"provider": provider_id, "status": "MODEL_VERSION_METADATA_UNVERIFIED"})
+                        continue
+                    if model_version not in versions:
+                        decisions.append({"provider": provider_id, "status": "MODEL_VERSION_NOT_SUPPORTED"})
+                        continue
+            require_verified = (
+                self.require_verified_connection
+                or project_policy.get("require_verified_connection") is True
+            )
+            if require_verified:
                 try:
                     connection_state = self.connection_manager.get_state(provider_id)
                 except Exception as exc:
@@ -256,6 +368,10 @@ class ProviderRoutingManager:
             cost = estimates.get(provider_id, estimated_cost)
             if not self._valid_amount(cost):
                 decisions.append({"provider": provider_id, "status": "INVALID_COST_AMOUNT"})
+                continue
+            max_estimated_cost = project_policy.get("max_estimated_cost")
+            if max_estimated_cost is not None and cost > max_estimated_cost:
+                decisions.append({"provider": provider_id, "status": "PROJECT_COST_LIMIT_EXCEEDED"})
                 continue
             credit = credits.get(provider_id, 0.0)
             credit_sort = float(credit) if self._valid_amount(credit) else 0.0
@@ -486,6 +602,9 @@ class ProviderRoutingManager:
                 "provider": provider_id,
                 "category": category.strip(),
                 "strategy": selected_strategy,
+                "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
+                "model": model,
+                "model_version": model_version,
                 "estimated_cost": cost,
                 "estimated_cost_unit": estimated_cost_unit.strip(),
                 "health_verified": self.health_manager is not None,
@@ -508,6 +627,9 @@ class ProviderRoutingManager:
             "status": "NO_POLICY_COMPLIANT_PROVIDER",
             "category": category.strip(),
             "strategy": selected_strategy,
+            "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
+            "model": model,
+            "model_version": model_version,
             "decisions": decisions,
         }
 

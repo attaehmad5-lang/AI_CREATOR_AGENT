@@ -12,11 +12,12 @@ import re
 import tempfile
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
+from .safe_numbers import finite_number
 
 
 MODULE_DIR = Path(__file__).resolve().parent
@@ -337,11 +338,21 @@ class ConnectionManager:
                         and provider.get("enabled") is True
                         and isinstance(connection_type, str)
                         and connection_type.upper() == "API"
-                        and not provider.get("allowed_hosts")
                     ):
-                        errors.append(
-                            f"providers[{index}].allowed_hosts is required for enabled API providers"
-                        )
+                        if not provider.get("allowed_hosts"):
+                            errors.append(
+                                f"providers[{index}].allowed_hosts is required for enabled API providers"
+                            )
+                        official_api_url = provider.get("official_api_url")
+                        if not isinstance(official_api_url, str) or not official_api_url.startswith("https://"):
+                            errors.append(
+                                f"providers[{index}].official_api_url is required for enabled API providers"
+                            )
+                        capabilities = provider.get("capabilities")
+                        if not isinstance(capabilities, list) or not capabilities:
+                            errors.append(
+                                f"providers[{index}].capabilities must be a non-empty list for enabled API providers"
+                            )
                     for url_field in ("official_api_url", "subscription_url"):
                         if url_field in provider:
                             raw_url = provider[url_field]
@@ -382,6 +393,29 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].auth_scheme is not permitted")
                     if "subscription_required" in provider and not isinstance(provider["subscription_required"], bool):
                         errors.append(f"providers[{index}].subscription_required must be boolean")
+                    deprecated = provider.get("deprecated", False)
+                    if not isinstance(deprecated, bool):
+                        errors.append(f"providers[{index}].deprecated must be boolean")
+                    if deprecated is True:
+                        if provider.get("enabled") is True:
+                            errors.append(f"providers[{index}] deprecated provider must remain disabled")
+                        reason = provider.get("deprecation_reason")
+                        if (
+                            not isinstance(reason, str)
+                            or not reason.strip()
+                            or len(reason) > 500
+                            or any(ord(char) < 32 or ord(char) == 127 for char in reason)
+                        ):
+                            errors.append(f"providers[{index}].deprecation_reason is required for deprecated providers")
+                        deprecation_date = provider.get("deprecation_date")
+                        try:
+                            parsed_deprecation_date = date.fromisoformat(deprecation_date) if isinstance(deprecation_date, str) else None
+                        except ValueError:
+                            parsed_deprecation_date = None
+                        if parsed_deprecation_date is None or parsed_deprecation_date.isoformat() != deprecation_date:
+                            errors.append(f"providers[{index}].deprecation_date must be an ISO YYYY-MM-DD date")
+                    elif "deprecation_reason" in provider or "deprecation_date" in provider:
+                        errors.append(f"providers[{index}] deprecation metadata requires deprecated=true")
                     if "zero_cost_allowed" in provider and not isinstance(provider["zero_cost_allowed"], bool):
                         errors.append(f"providers[{index}].zero_cost_allowed must be boolean")
                     if provider.get("subscription_required") is True and provider.get("zero_cost_allowed") is True:
@@ -423,6 +457,39 @@ class ConnectionManager:
                                 f"providers[{index}].capabilities must contain unique lowercase identifiers "
                                 "of at most 80 characters (maximum 100)"
                             )
+                    if "supported_models" in provider:
+                        supported_models = provider["supported_models"]
+                        if not isinstance(supported_models, list) or len(supported_models) > 100:
+                            errors.append(f"providers[{index}].supported_models must be a list of at most 100 model records")
+                        else:
+                            seen_models: set[str] = set()
+                            for model_index, model_record in enumerate(supported_models):
+                                prefix = f"providers[{index}].supported_models[{model_index}]"
+                                if not isinstance(model_record, dict):
+                                    errors.append(f"{prefix} must be an object")
+                                    continue
+                                model_id = model_record.get("id")
+                                if (
+                                    not isinstance(model_id, str)
+                                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}", model_id)
+                                    or model_id.casefold() in seen_models
+                                ):
+                                    errors.append(f"{prefix}.id must be a unique safe model identifier")
+                                else:
+                                    seen_models.add(model_id.casefold())
+                                if "versions" in model_record:
+                                    versions = model_record["versions"]
+                                    if (
+                                        not isinstance(versions, list)
+                                        or len(versions) > 100
+                                        or any(
+                                            not isinstance(version, str)
+                                            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,99}", version)
+                                            for version in versions
+                                        )
+                                        or len({version.casefold() for version in versions if isinstance(version, str)}) != len(versions)
+                                    ):
+                                        errors.append(f"{prefix}.versions must contain unique safe version identifiers")
                     if ConnectionManager._contains_credential_value_field(provider):
                         errors.append(f"providers[{index}] contains a forbidden credential value field")
         result = {"valid": not errors, "errors": errors, "provider_count": len(catalog.get("providers", [])) if isinstance(catalog, dict) and isinstance(catalog.get("providers"), list) else 0}
@@ -475,7 +542,12 @@ class ConnectionManager:
             safe[key] = value
         return safe
 
-    def set_provider_enabled(
+    def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
+        """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
+        with self._lock:
+            return self._set_provider_enabled_locked(provider_id, enabled)
+
+    def _set_provider_enabled_locked(
         self, provider_id: str, enabled: bool
     ) -> dict[str, Any]:
         """Enable/disable catalog eligibility only; never purchases or proves connectivity."""
@@ -490,12 +562,19 @@ class ConnectionManager:
             updated[index]["enabled"] = enabled
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation.get("valid"):
+                return {
+                    "status": "INVALID_PROVIDER_CATALOG",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
         if not enabled and provider_id in self._loaded_providers:
             unload_result = self.unload_provider(provider_id)
             if unload_result["status"] not in {"UNLOADED", "NOT_LOADED"}:
-                # The catalog remains disabled even if cleanup failed: fail closed.
                 return {
                     "status": "DISABLED_CLEANUP_FAILED",
                     "provider": provider_id,
@@ -570,11 +649,15 @@ class ConnectionManager:
         }
 
     def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
-        """Instantiate a provider through an injected factory, without dynamic imports."""
+        """Load one validated runtime instance while holding the lifecycle lock."""
+        with self._lock:
+            return self._load_provider_locked(provider_id, factory)
+
+    def _load_provider_locked(self, provider_id: str, factory: Any) -> dict[str, Any]:
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "loaded": False}
-        if provider.get("enabled") is False:
+        if provider.get("enabled") is not True:
             return {"status": "DISABLED", "provider": provider_id, "loaded": False}
         if provider_id in self._loaded_providers:
             return {"status": "ALREADY_LOADED", "provider": provider_id, "loaded": True}
@@ -583,7 +666,6 @@ class ConnectionManager:
         try:
             instance = factory(provider)
         except Exception as exc:
-            # Never return raw exception text: it may contain endpoints or credentials.
             return {
                 "status": "LOAD_FAILED",
                 "provider": provider_id,
@@ -606,10 +688,15 @@ class ConnectionManager:
 
     def get_loaded_provider(self, provider_id: str) -> Any | None:
         """Return a process-local instance; callers must not persist or log it."""
-        return self._loaded_providers.get(provider_id)
+        with self._lock:
+            return self._loaded_providers.get(provider_id)
 
     def unload_provider(self, provider_id: str) -> dict[str, Any]:
-        """Release a loaded provider; preserve it if its cleanup hook fails."""
+        """Unload a runtime instance under the same lock used by loading/disabling."""
+        with self._lock:
+            return self._unload_provider_locked(provider_id)
+
+    def _unload_provider_locked(self, provider_id: str) -> dict[str, Any]:
         if not self.provider_exists(provider_id):
             return {"status": "NOT_FOUND", "provider": provider_id, "unloaded": False}
         if provider_id not in self._loaded_providers:
@@ -622,7 +709,6 @@ class ConnectionManager:
             try:
                 cleanup()
             except Exception as exc:
-                # Keep the instance registered so the caller can inspect/retry cleanup.
                 return {
                     "status": "UNLOAD_FAILED",
                     "provider": provider_id,
@@ -907,7 +993,10 @@ class ConnectionManager:
         if model is not None:
             if not isinstance(model, str) or not model.strip() or len(model) > 200:
                 return {"status": "INVALID_MODEL", "provider": provider_id, "saved": False}
-            if any(term in model.casefold() for term in ("api_key=", "token=", "password=", "secret=")):
+            if any(
+                term in model.casefold()
+                for term in ("api_key=", "token=", "password=", "secret=", "bearer ")
+            ):
                 return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "saved": False}
             configuration["model"] = model.strip()
         if endpoint is not None:
@@ -1048,12 +1137,8 @@ class ConnectionManager:
             return {"status": "DISABLED", "provider": provider_id, "verified": False}
         if not callable(probe):
             return {"status": "INVALID_PROBE", "provider": provider_id, "verified": False}
-        if (
-            not isinstance(timeout_seconds, (int, float))
-            or isinstance(timeout_seconds, bool)
-            or not math.isfinite(timeout_seconds)
-            or timeout_seconds <= 0
-        ):
+        timeout_value = finite_number(timeout_seconds, minimum=0)
+        if timeout_value is None or timeout_value <= 0:
             return {"status": "INVALID_TIMEOUT", "provider": provider_id, "verified": False}
 
         def save_state(status: str) -> bool:
@@ -1097,7 +1182,7 @@ class ConnectionManager:
 
         started = time.monotonic()
         try:
-            result = probe(dict(provider), timeout_seconds=float(timeout_seconds))
+            result = probe(dict(provider), timeout_seconds=timeout_value)
             if result is not True and not (isinstance(result, dict) and result.get("ok") is True):
                 if not save_state("ERROR"):
                     return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}

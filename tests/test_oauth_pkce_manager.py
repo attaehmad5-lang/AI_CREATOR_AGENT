@@ -247,6 +247,7 @@ class ProviderOAuthPKCEManagerTests(unittest.TestCase):
             ({"access_token": "bad token", "token_type": "Bearer", "expires_in": 3600}, "OAUTH_ACCESS_TOKEN_INVALID"),
             ({"access_token": "token", "token_type": "Basic", "expires_in": 3600}, "OAUTH_TOKEN_TYPE_UNSUPPORTED"),
             ({"access_token": "token", "token_type": "Bearer", "expires_in": float("nan")}, "OAUTH_EXPIRY_INVALID"),
+            ({"access_token": "token", "token_type": "Bearer", "expires_in": 10**1000}, "OAUTH_EXPIRY_INVALID"),
             ({"access_token": "token", "token_type": "Bearer", "expires_in": 3600, "scope": "usage\nsecret"}, "OAUTH_SCOPE_INVALID"),
             ({"access_token": "token", "token_type": "Bearer", "expires_in": 3600, "scope": "usage admin"}, "OAUTH_SCOPE_ESCALATION"),
         ):

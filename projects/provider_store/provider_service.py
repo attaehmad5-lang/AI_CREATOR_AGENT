@@ -5,6 +5,8 @@ from typing import Any
 import re
 import time
 
+from .safe_numbers import finite_number
+
 
 class ProviderService:
     """Coordinate existing provider managers without inventing live connection evidence."""
@@ -138,7 +140,15 @@ class ProviderService:
         """
         if not callable(getattr(oauth_manager, "get_access_token", None)):
             return {"status": "OAUTH_MANAGER_INVALID", "provider": provider_id, "verified": False}
-        provider = self.connection_manager.get_provider(provider_id)
+        try:
+            provider = self.connection_manager.get_provider(provider_id)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_LOOKUP_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
         if not isinstance(provider, dict):
             return {"status": "NOT_FOUND", "provider": provider_id, "verified": False}
         token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env")
@@ -456,13 +466,7 @@ class ProviderService:
 
     @staticmethod
     def _valid_amount(value: Any) -> bool:
-        import math
-        return (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(value)
-            and value >= 0
-        )
+        return finite_number(value, minimum=0) is not None
 
     def finalize_started_request(
         self,

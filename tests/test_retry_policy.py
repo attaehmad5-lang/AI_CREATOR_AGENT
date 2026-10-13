@@ -13,6 +13,19 @@ class RetryPolicyTests(unittest.TestCase):
         self.assertEqual(first.delay_seconds, 1)
         self.assertEqual(second.delay_seconds, 2)
 
+    def test_extreme_attempt_number_caps_backoff_without_large_exponentiation(self):
+        policy = RetryPolicy(
+            max_attempts=1_000_000_000,
+            base_delay_seconds=0.5,
+            max_delay_seconds=30,
+            jitter_fraction=0,
+            random_fn=lambda: 0,
+        )
+        result = policy.decide(attempt=100_000_000, status_code=503)
+        self.assertTrue(result.retry)
+        self.assertEqual(result.delay_seconds, 30)
+        self.assertEqual(result.reason, "TRANSIENT_HTTP_FAILURE")
+
     def test_http_429_respects_retry_after(self):
         policy = RetryPolicy(max_attempts=4, base_delay_seconds=1, jitter_fraction=0, random_fn=lambda: 0)
         result = policy.decide(attempt=1, status_code=429, retry_after=7)
@@ -145,6 +158,8 @@ class RetryPolicyTests(unittest.TestCase):
             CircuitBreaker(cooldown_seconds=float("nan"))
         with self.assertRaises(ValueError):
             CircuitBreaker(cooldown_seconds=float("inf"))
+        with self.assertRaises(ValueError):
+            CircuitBreaker(cooldown_seconds=10**1000)
         with self.assertRaises(ValueError):
             CircuitBreaker(clock="not-callable")
 

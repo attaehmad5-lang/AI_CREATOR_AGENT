@@ -125,6 +125,85 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                     provider.get("id"),
                 )
 
+    def test_deprecated_provider_requires_reason_date_and_stays_disabled(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        provider = next(item for item in catalog["providers"] if item["id"] == "openai_sora")
+        self.assertTrue(provider["deprecated"])
+        self.assertFalse(provider["enabled"])
+        self.assertEqual(provider["deprecation_date"], "2026-09-24")
+        self.assertTrue(provider["deprecation_reason"].strip())
+        self.assertTrue(ConnectionManager.validate_catalog_schema(catalog)["valid"])
+
+        enabled_catalog = json.loads(json.dumps(catalog))
+        next(item for item in enabled_catalog["providers"] if item["id"] == "openai_sora")["enabled"] = True
+        result = ConnectionManager.validate_catalog_schema(enabled_catalog)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("deprecated provider must remain disabled" in error for error in result["errors"]))
+
+        missing_reason = json.loads(json.dumps(catalog))
+        next(item for item in missing_reason["providers"] if item["id"] == "openai_sora").pop("deprecation_reason")
+        result = ConnectionManager.validate_catalog_schema(missing_reason)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("deprecation_reason is required" in error for error in result["errors"]))
+
+        invalid_date = json.loads(json.dumps(catalog))
+        next(item for item in invalid_date["providers"] if item["id"] == "openai_sora")["deprecation_date"] = "2026-02-30"
+        result = ConnectionManager.validate_catalog_schema(invalid_date)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("deprecation_date must be an ISO" in error for error in result["errors"]))
+
+        control_character = json.loads(json.dumps(catalog))
+        next(item for item in control_character["providers"] if item["id"] == "openai_sora")["deprecation_reason"] = "unsafe\nreason"
+        result = ConnectionManager.validate_catalog_schema(control_character)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("deprecation_reason is required" in error for error in result["errors"]))
+
+    def test_runtime_enablement_cannot_reactivate_deprecated_provider(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            catalog_path, state_path = temp / "catalog.json", temp / "state.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog_path, state_path)
+            result = manager.set_provider_enabled("openai_sora", True)
+            self.assertFalse(result["saved"])
+            self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+            self.assertFalse(manager.get_provider("openai_sora")["enabled"])
+
+    def test_runtime_enablement_requires_official_docs_and_capabilities(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        provider = next(item for item in catalog["providers"] if item["id"] == "pollinations")
+        provider["enabled"] = False
+        provider.pop("official_api_url", None)
+        provider.pop("capabilities", None)
+        with tempfile.TemporaryDirectory() as temporary:
+            temp = Path(temporary)
+            catalog_path, state_path = temp / "catalog.json", temp / "state.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog_path, state_path)
+            result = manager.set_provider_enabled("pollinations", True)
+            self.assertFalse(result["saved"])
+            self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+            self.assertFalse(manager.get_provider("pollinations")["enabled"])
+            self.assertTrue(any("official_api_url is required" in error for error in result["errors"]))
+            self.assertTrue(any("capabilities must be a non-empty list" in error for error in result["errors"]))
+
+    def test_huggingface_account_auth_host_is_allowlisted(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        provider = next(item for item in catalog["providers"] if item["id"] == "huggingface")
+        self.assertIn("huggingface.co", provider["allowed_hosts"])
+        endpoint = ConnectionManager.validate_endpoint(
+            "https://huggingface.co/api/whoami-v2",
+            allowed_hosts=set(provider["allowed_hosts"]),
+        )
+        self.assertTrue(endpoint["valid"], endpoint)
+
     def test_pollinations_uses_current_documented_api_auth_and_host(self):
         root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
         catalog = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
@@ -188,6 +267,33 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                 with self.subTest(provider=provider["id"], category=provider["category"]):
                     result = manager.validate_provider_contract(provider["id"], adapter)
                     self.assertTrue(result["valid"], result)
+
+    def test_supported_model_metadata_requires_unique_safe_ids_and_versions(self):
+        provider = {
+            "id": "model_provider", "name": "Model Provider",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "API", "enabled": False,
+            "subscription_required": False,
+            "supported_models": [{"id": "publisher/model-v1", "versions": ["1.0", "1.1"]}],
+        }
+        valid = ConnectionManager.validate_catalog_schema({
+            "version": "3.0", "providers": [provider],
+        })
+        self.assertTrue(valid["valid"], valid["errors"])
+        invalid_records = (
+            [{"id": "../unsafe", "versions": ["1.0"]}],
+            [{"id": "model", "versions": ["1.0", "1.0"]}],
+            [{"id": "model"}, {"id": "MODEL"}],
+            ["model"],
+        )
+        for records in invalid_records:
+            with self.subTest(records=records):
+                candidate = json.loads(json.dumps(provider))
+                candidate["supported_models"] = records
+                result = ConnectionManager.validate_catalog_schema({
+                    "version": "3.0", "providers": [candidate],
+                })
+                self.assertFalse(result["valid"])
 
     def test_capability_identifiers_must_be_bounded_unique_and_normalized(self):
         base = {

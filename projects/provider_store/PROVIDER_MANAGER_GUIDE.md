@@ -5,12 +5,12 @@ This guide describes the current implementation in this branch. It is not a clai
 ## Components
 
 - `connection_manager.py` — provider catalog discovery, registration, enabled/disabled state, callable contracts for every modality present in the 54-provider catalog (including advanced editing, upscaling, transcription, audio, story, and video-editing categories), credential-presence checks, endpoint policy, and verified connection state. Public catalog views rename legacy `status` to `catalog_status`; only a successful probe can set runtime connection state to `CONNECTED`. For API-key probes, `configure_provider(..., authentication_required=True)` must be used only for an endpoint documented to validate that credential; public model-list endpoints cannot prove authentication.
-- `oauth_pkce_manager.py` — user-authorized OAuth 2.0 authorization-code + PKCE flow with state/TTL checks, allowlisted endpoints, bounded HTTP responses, safe status metadata, in-memory token lifecycle, and no token persistence. It is a generic helper; provider-specific OAuth registration/scopes still require explicit configuration.
 - `http_probe.py` — optional standard-library HTTPS probe for explicitly configured endpoints, with mandatory allowlist validation, TLS verification, no automatic redirects, bounded response reads, timeout propagation, provider-specific environment-only API credential headers, and safe HTTP status / `Retry-After` metadata for rate-limit retry decisions. Credentialed probes fail closed unless `authentication_required=True` is persisted for an endpoint documented to require and validate the supplied credential. A generic HTTP 2xx never proves generation capability or account credit balance.
 - `oauth_pkce_manager.py` — OAuth 2.0 authorization-code + PKCE (S256) for public clients, with allowlisted HTTPS authorization/token endpoints, one-time expiring state, bounded token responses, redirect rejection, in-memory-only tokens, and explicit refresh only when a refresh token exists. It does not implement client-secret OAuth or persist tokens across restarts.
   - `begin_pollinations_authorization()` uses Pollinations' documented `enter.pollinations.ai/authorize` and `/api/oauth/token` endpoints, requires a registered exact redirect URI, reads the publishable App Key from `POLLINATIONS_APP_KEY`, and requests `profile usage`. Pollinations does not issue refresh tokens, so its session requires re-authorization after expiry.
 - `routing_manager.py` — priority, free-credit-first, lowest-cost, healthiest-first, and round-robin selection; requires a verified runtime connection by default (catalog labels alone are not evidence), with an explicit catalog-only planning option; optional health, cost, credit, and quota managers; duplicate request reservations fail closed; explicit fallback behavior.
 - `credit_manager.py` — stores verified free-credit snapshots from an injected provider-specific probe, filters by compatible units, and atomically reserves/commits/releases local credit usage to prevent concurrent overspend.
+- `account_balance_probe.py` — bounded HTTPS JSON balance probe that requires an explicit host allowlist, environment-only credentials, a documented auth-protected endpoint, and an explicitly confirmed response field representing available credits. It rejects ambiguous key-budget fields unless the caller has verified the field semantics; no response body or token is returned.
 - `cost_policy.py` — paid-approval guard, required project budgets, idempotent usage reconciliation, estimated-cost reservations, and `finalize_usage()` which atomically validates charge outcomes and idempotency keys against the reloaded ledger before committing usage.
 - `quota_manager.py` — hourly/daily/monthly UTC quota windows and request reserve/commit/release.
 - `health_manager.py` — bounded provider health history, staleness/latency checks, eligibility, and a bounded persisted request-ID ledger so repeated finalization cannot append duplicate health events or silently reuse an ID for a conflicting result.
@@ -35,6 +35,8 @@ This guide describes the current implementation in this branch. It is not a clai
 
 `ConnectionManager.restore_catalog_from_master()` restores the provider catalog only when the target is missing or fails validation. It validates the master copy first, refuses to overwrite an already-valid target, uses the target's interprocess lock, and reports a safe status instead of silently replacing a valid catalog.
 
+Numeric request values are normalized with overflow-safe finite-number checks before they reach cost, credit, routing, connection, health, retry, OAuth, and account-balance policies.
+
 Run from the repository root:
 
 ```python
@@ -55,5 +57,33 @@ python -m compileall -q projects/provider_store tests
 python -c "import json; from pathlib import Path; [json.loads(p.read_text(encoding='utf-8')) for p in Path('projects/provider_store').rglob('*.json')]"
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
+
+For a local Hugging Face credential check, set `HF_TOKEN` in the process environment (never paste it into source code or print it), then run this from the repository root. It checks the documented authenticated identity endpoint, not generation credits or model availability:
+
+```python
+import os
+from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_service import ProviderService
+
+manager = ConnectionManager()
+configured = manager.configure_provider(
+    "huggingface",
+    probe_endpoint="https://huggingface.co/api/whoami-v2",
+    authentication_required=True,
+)
+if configured.get("saved") is not True:
+    print(configured.get("status", "CONFIGURATION_FAILED"))
+else:
+    result = ProviderService(manager).verify_http_provider(
+        "huggingface", environ=os.environ
+    )
+    print({
+        "status": result.get("status"),
+        "verified": result.get("verified"),
+        "health": (result.get("health") or {}).get("status"),
+    })
+```
+
+This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.

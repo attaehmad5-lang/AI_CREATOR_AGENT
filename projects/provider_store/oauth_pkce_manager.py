@@ -20,6 +20,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .connection_manager import ConnectionManager
+from .safe_numbers import finite_number
 
 
 class _RejectOAuthRedirects(HTTPRedirectHandler):
@@ -222,7 +223,8 @@ class ProviderOAuthPKCEManager:
     def _post_form(self, url: str, allowed_hosts: list[str], form: dict[str, str], timeout_seconds: float) -> dict[str, Any]:
         if not self._valid_endpoint(url, allowed_hosts):
             return {"status": "UNSAFE_OAUTH_ENDPOINT"}
-        if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        timeout_value = finite_number(timeout_seconds, minimum=0)
+        if timeout_value is None or timeout_value <= 0:
             return {"status": "INVALID_TIMEOUT"}
         request = Request(
             url,
@@ -231,7 +233,7 @@ class ProviderOAuthPKCEManager:
             method="POST",
         )
         try:
-            response = self.opener.open(request, timeout=float(timeout_seconds))
+            response = self.opener.open(request, timeout=timeout_value)
         except HTTPError as exc:
             status_code = exc.code
             exc.close()
@@ -279,7 +281,8 @@ class ProviderOAuthPKCEManager:
             return {"status": "OAUTH_ACCESS_TOKEN_INVALID", "provider": provider_id}
         if not isinstance(token_type, str) or token_type.casefold() != "bearer":
             return {"status": "OAUTH_TOKEN_TYPE_UNSUPPORTED", "provider": provider_id}
-        if not isinstance(expires_in, (int, float)) or isinstance(expires_in, bool) or not math.isfinite(expires_in) or not 1 <= expires_in <= 31_536_000:
+        expiry_value = finite_number(expires_in, minimum=1, maximum=31_536_000)
+        if expiry_value is None:
             return {"status": "OAUTH_EXPIRY_INVALID", "provider": provider_id}
         try:
             now = float(self.clock())
@@ -308,7 +311,7 @@ class ProviderOAuthPKCEManager:
                 "generation": expected_generation,
                 "refresh_token": refresh_token,
                 "token_type": "Bearer",
-                "expires_at": now + float(expires_in),
+                "expires_at": now + expiry_value,
                 "token_url": pending["token_url"],
                 "allowed_hosts": list(pending["allowed_hosts"]),
                 "client_id": pending["client_id"],
