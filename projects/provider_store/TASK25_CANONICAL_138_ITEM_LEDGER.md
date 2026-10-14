@@ -14,7 +14,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 1 | 🟡 | Provider Registry | PARTIAL | `provider_catalog.json`, `connection_manager.py`, catalog/schema tests; registry lifecycle is not fully integrated with runtime adapters. |
+| 1 | 🟡 | Provider Registry | VERIFIED | `RuntimeProviderRegistry` maps catalog provider IDs to explicitly trusted factories; `UnifiedProviderRegistry` exposes load/unload/batch-load/status; loads delegate to `ConnectionManager` for enabled-state and modality-contract enforcement. Regression coverage in `tests/test_runtime_adapter_registry.py` verifies lifecycle, missing adapters, disabled providers, untrusted catalog module metadata, and unified-facade integration. Live connectivity remains a separate item (#13). |
 | 2 | 🟡 | Provider Registration | PARTIAL | Registration and concurrent-registration tests exist; onboarding and runtime adapter registration remain incomplete. |
 | 3 | 🟡 | Provider Discovery | VERIFIED | Provider discovery by declared catalog metadata is implemented and covered by discovery/capability tests. |
 | 4 | 🟡 | Provider Loading | VERIFIED | Factory-based loading, disabled-provider rejection, contract enforcement and safe failure behavior are tested. |
