@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38617525618](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38617525618): **362 tests passed on Ubuntu and 362 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This run includes the trusted runtime adapter registry, lifecycle/contract checks, factory-replacement concurrency regression, and unified-registry integration tests.
+GitHub Actions run [#38618398348](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38618398348): **373 tests passed on Ubuntu and 373 on Windows, 0 failures on either platform**, in **8 sequential batches of at most 50 tests**. Compilation and provider JSON catalog validation passed on both platforms. The run includes the trusted runtime adapter registry, lifecycle/contract checks, factory-replacement concurrency regression, unified-registry integration, and a corrected invalid-overwrite regression that compares the full original record instead of assuming an absent fixture field.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
