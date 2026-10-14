@@ -8,6 +8,7 @@ from projects.provider_store.runtime_adapter_registry import (
     BUILTIN_PROVIDER_FACTORIES,
     RuntimeProviderRegistry,
 )
+from projects.provider_store.unified_provider_registry import UnifiedProviderRegistry
 
 
 class _ImageAdapter:
@@ -228,6 +229,56 @@ class RuntimeProviderRegistryTests(unittest.TestCase):
         result = self.registry.load("../alpha")
         self.assertEqual(result["status"], "INVALID_PROVIDER_ID")
         self.assertFalse(result["loaded"])
+
+
+
+
+class UnifiedProviderRegistryRuntimeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.catalog_path = self.root / "catalog.json"
+        self.state_path = self.root / "state.json"
+        self.catalog_path.write_text(json.dumps({
+            "version": "3.0",
+            "providers": [_provider("alpha"), _provider("beta")],
+        }), encoding="utf-8")
+        self.state_path.write_text(json.dumps({"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}), encoding="utf-8")
+        self.registry = UnifiedProviderRegistry(
+            catalog_path=str(self.catalog_path),
+            state_path=str(self.state_path),
+            adapter_factories={"alpha": lambda _: _ImageAdapter()},
+        )
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_unified_registry_loads_runtime_adapter_via_public_api(self):
+        result = self.registry.load_runtime_provider("alpha")
+        self.assertEqual(result["status"], "LOADED")
+        self.assertIsInstance(self.registry.runtime.get("alpha"), _ImageAdapter)
+
+    def test_unified_registry_exposes_runtime_coverage(self):
+        status = self.registry.runtime_status()
+        self.assertEqual(status["catalog_provider_count"], 2)
+        self.assertEqual(status["registered_adapter_count"], 1)
+        self.assertEqual(status["enabled_without_adapter"], ["beta"])
+
+    def test_unified_registry_loads_enabled_runtime_adapters_as_a_batch(self):
+        result = self.registry.load_enabled_runtime_providers()
+        self.assertEqual(result["status"], "PARTIAL")
+        self.assertEqual(result["loaded"], ["alpha"])
+
+    def test_unified_registry_unloads_runtime_adapter_via_public_api(self):
+        self.registry.load_runtime_provider("alpha")
+        result = self.registry.unload_runtime_provider("alpha")
+        self.assertEqual(result["status"], "UNLOADED")
+        self.assertIsNone(self.registry.runtime.get("alpha"))
+
+    def test_unified_registry_constructor_rejects_conflicting_manager_and_paths(self):
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+        with self.assertRaises(ValueError):
+            UnifiedProviderRegistry(manager, catalog_path=str(self.catalog_path))
 
 
 if __name__ == "__main__":
