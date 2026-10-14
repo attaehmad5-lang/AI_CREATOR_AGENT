@@ -321,6 +321,33 @@ class ProviderService:
             "status": "INVALID_EXECUTION_LEDGER_RESPONSE", "saved": False,
         }
 
+    def _concurrency_acquire(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self.concurrency_manager.acquire(**kwargs)
+        except Exception as exc:
+            return {"status": "CONCURRENCY_MANAGER_FAILED", "acquired": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_CONCURRENCY_RESPONSE", "acquired": False,
+        }
+
+    def _concurrency_mark_started(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self.concurrency_manager.mark_started(**kwargs)
+        except Exception as exc:
+            return {"status": "CONCURRENCY_MANAGER_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_CONCURRENCY_RESPONSE", "saved": False,
+        }
+
+    def _concurrency_release(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self.concurrency_manager.release(**kwargs)
+        except Exception as exc:
+            return {"status": "CONCURRENCY_MANAGER_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_CONCURRENCY_RESPONSE", "saved": False,
+        }
+
     def execute_routed_request(
         self,
         *,
