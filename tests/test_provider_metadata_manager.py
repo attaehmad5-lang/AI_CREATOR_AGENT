@@ -219,6 +219,36 @@ class ProviderMetadataManagerTests(unittest.TestCase):
                 )
                 self.assertEqual(result["status"], "INVALID_MODEL_PRICING")
 
+    def test_model_traits_do_not_replace_provider_modality_capabilities(self):
+        result = self.metadata.refresh(
+            "metadata_image",
+            lambda *_: [{
+                "id": "model-with-traits",
+                "capabilities": ["tool_calling", "reasoning"],
+            }],
+        )
+        self.assertTrue(result["refreshed"])
+        provider = self.manager.get_provider("metadata_image")
+        self.assertEqual(provider["capabilities"], ["image_generation"])
+        self.assertEqual(
+            provider["models"][0]["capabilities"],
+            ["reasoning", "tool_calling"],
+        )
+
+    def test_pricing_descriptors_are_preserved_without_free_form_payload(self):
+        result = self.metadata.refresh(
+            "metadata_image",
+            lambda *_: [{
+                "id": "priced-model",
+                "pricing": {"price": 0.002, "unit": "image", "type": "fixed"},
+            }],
+        )
+        self.assertTrue(result["refreshed"])
+        model = self.manager.get_provider("metadata_image")["models"][0]
+        self.assertEqual(model["pricing"], {"price": 0.002})
+        self.assertEqual(model["pricing_unit"], "image")
+        self.assertEqual(model["pricing_type"], "fixed")
+
     def test_metadata_clock_must_be_timezone_aware(self):
         self.metadata = ProviderMetadataManager(
             self.manager, clock=lambda: datetime(2026, 10, 14, 12, 0)
