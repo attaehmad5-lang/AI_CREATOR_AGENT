@@ -163,6 +163,16 @@ class ProviderExecutionLedger:
         for key, value in options.items():
             if not isinstance(key, str) or not re.fullmatch(r"[a-z_]{1,40}", key):
                 raise ValueError("invalid routing option name")
+            if isinstance(value, (set, frozenset, list, tuple)):
+                normalized = list(value)
+                if any(item is not None and not isinstance(item, (str, int, float, bool)) for item in normalized):
+                    raise ValueError("routing option collections must contain scalar values")
+                if any(isinstance(item, float) and not math.isfinite(item) for item in normalized):
+                    raise ValueError("routing option numbers must be finite")
+                if isinstance(value, (set, frozenset)):
+                    normalized.sort(key=lambda item: (type(item).__name__, repr(item)))
+                safe_options[key] = normalized
+                continue
             if value is not None and not isinstance(value, (str, int, float, bool)):
                 raise ValueError("routing option values must be scalar")
             if isinstance(value, float) and not math.isfinite(value):
