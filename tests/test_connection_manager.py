@@ -1223,6 +1223,18 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("must-not-persist", repr(result))
         self.assertEqual(self.catalog_path.read_bytes(), before)
 
+    def test_refresh_provider_metadata_rejects_secret_nested_in_pricing(self):
+        self._prepare_metadata_provider()
+        response = self._valid_metadata_response(pricing=[{
+            "currency": "USD", "unit": "per_image", "amount": 0.1,
+            "raw_token": "never-persist-this",
+        }])
+        before = self.catalog_path.read_bytes()
+        result = self.manager.refresh_provider_metadata("public_image", lambda _: response)
+        self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertNotIn("never-persist-this", repr(result))
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
     def test_refresh_provider_metadata_rejects_fields_outside_metadata_allowlist(self):
         self._prepare_metadata_provider()
         response = self._valid_metadata_response(enabled=False)
@@ -1256,7 +1268,6 @@ class ConnectionManagerTests(unittest.TestCase):
             {"currency": "USD", "unit": "free_text", "amount": 0.1},
             {"currency": "USD", "unit": "per_image", "amount": -1},
             {"currency": "USD", "unit": "per_image", "amount": True},
-            {"currency": "USD", "unit": "per_image", "amount": 0.1, "raw_token": "secret"},
         ]
         for price in invalid_prices:
             with self.subTest(price=price):
@@ -1317,6 +1328,7 @@ class ConnectionManagerTests(unittest.TestCase):
         def change_policy_during_probe(_):
             current = self.manager.get_provider("public_image")
             current["allowed_hosts"] = ["new-api.example.com"]
+            current["official_api_url"] = "https://new-api.example.com/docs"
             result = self.manager.register_provider(current, overwrite=True)
             self.assertTrue(result["saved"])
             return response
