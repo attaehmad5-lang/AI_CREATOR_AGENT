@@ -700,6 +700,49 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(second["status"], "DUPLICATE_REQUEST")
         self.assertEqual(len(calls), 1)
 
+    def test_corrupt_execution_ledger_fails_closed_before_routing(self):
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost, quota_manager=self.quota)
+        ledger_path = self.state_path.with_name("provider_execution_ledger.json")
+        ledger_path.write_text("{broken-json", encoding="utf-8")
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="corrupt-ledger-request",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_LEDGER_UNAVAILABLE")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
+    def test_execution_ledger_write_failure_prevents_adapter_invocation(self):
+        class BrokenLedger:
+            def reserve(self, **kwargs):
+                raise OSError("private ledger path")
+            def mark_started(self, **kwargs):
+                raise AssertionError("must not mark started")
+            def finish(self, **kwargs):
+                raise AssertionError("must not finish")
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost, quota_manager=self.quota)
+        service = ProviderService(
+            self.connections, routing_manager=router, execution_ledger=BrokenLedger()
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="ledger-write-error",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_LEDGER_FAILED")
+        self.assertFalse(result["executed"])
+        self.assertNotIn("private ledger path", repr(result))
+        self.assertEqual(calls, [])
+
     def test_execution_fails_closed_without_durable_ledger(self):
         class ConnectionWithoutStatePath:
             def verify_connectivity(self, *args, **kwargs):
