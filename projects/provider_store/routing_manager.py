@@ -183,20 +183,19 @@ class ProviderRoutingManager:
             ):
                 return {"allowed": False, "status": "PROJECT_POLICY_REQUIRED"}
             project_policy = policy_result["policy"]
-            allowed_models = project_policy.get("allowed_models")
-            if allowed_models is not None and (
-                model is None or model not in allowed_models
-            ):
-                return {"allowed": False, "status": "PROJECT_MODEL_NOT_ALLOWED"}
-            allowed_capabilities = project_policy.get("allowed_capabilities")
-            if allowed_capabilities is not None and capability is not None and capability not in allowed_capabilities:
-                return {"allowed": False, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"}
-            max_estimated_cost = project_policy.get("max_estimated_cost")
-            if max_estimated_cost is not None and self._valid_amount(estimated_cost) and estimated_cost > max_estimated_cost:
-                return {"allowed": False, "status": "PROJECT_COST_LIMIT_EXCEEDED"}
-            if project_policy.get("automatic_fallback") is False:
-                automatic_fallback = False
-            require_health_evidence = require_health_evidence or project_policy.get("require_health_evidence") is True
+
+        allowed_models = project_policy.get("allowed_models")
+        if allowed_models is not None and (model is None or model not in allowed_models):
+            return {"allowed": False, "status": "PROJECT_MODEL_NOT_ALLOWED"}
+        allowed_capabilities = project_policy.get("allowed_capabilities")
+        if allowed_capabilities is not None and capability is not None and capability not in allowed_capabilities:
+            return {"allowed": False, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"}
+        max_estimated_cost = project_policy.get("max_estimated_cost")
+        if max_estimated_cost is not None and self._valid_amount(estimated_cost) and estimated_cost > max_estimated_cost:
+            return {"allowed": False, "status": "PROJECT_COST_LIMIT_EXCEEDED"}
+        if project_policy.get("automatic_fallback") is False:
+            automatic_fallback = False
+        require_health_evidence = require_health_evidence or project_policy.get("require_health_evidence") is True
 
         if not self._valid_amount(estimated_cost):
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "INVALID_ESTIMATED_COST"}
