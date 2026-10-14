@@ -140,15 +140,35 @@ class ProviderRoutingManager:
         excluded_providers: set[str] | frozenset[str] | None = None,
         require_health_evidence: bool = False,
         automatic_fallback: bool = True,
+        simulate_only: bool = False,
+        project_policy_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Return the first policy-compliant provider and the decisions that led to it."""
+        """Route normally or perform a no-reservation simulation of a proposed project policy."""
+        if not isinstance(simulate_only, bool):
+            return {"allowed": False, "status": "INVALID_SIMULATION_FLAG"}
+        if project_policy_override is not None and not simulate_only:
+            return {"allowed": False, "status": "POLICY_OVERRIDE_REQUIRES_SIMULATION"}
+        if project_policy_override is not None:
+            try:
+                from .project_policy_manager import ProviderProjectPolicyManager
+                policy_errors = ProviderProjectPolicyManager._validate_policy(project_id, project_policy_override)
+            except Exception:
+                return {"allowed": False, "status": "SIMULATION_POLICY_VALIDATION_FAILED"}
+            if policy_errors:
+                return {
+                    "allowed": False,
+                    "status": "INVALID_SIMULATION_POLICY",
+                    "errors": policy_errors,
+                }
         if not isinstance(category, str) or not category.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_REQUIRED"}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
 
-        project_policy: dict[str, Any] = {}
-        if self.project_policy_manager is not None:
+        project_policy: dict[str, Any] = (
+            dict(project_policy_override) if project_policy_override is not None else {}
+        )
+        if project_policy_override is None and self.project_policy_manager is not None:
             try:
                 policy_result = self.project_policy_manager.get_policy(project_id)
             except Exception as exc:
@@ -472,6 +492,57 @@ class ProviderRoutingManager:
                     continue
                 billing_mode = decision.get("billing_mode")
 
+            if simulate_only:
+                quota_preview = None
+                if self.quota_manager is not None:
+                    check_quota = getattr(self.quota_manager, "check_available", None)
+                    if not callable(check_quota):
+                        decisions.append({
+                            "provider": provider_id,
+                            "status": "READ_ONLY_QUOTA_CHECK_UNAVAILABLE",
+                        })
+                        continue
+                    try:
+                        quota_preview = check_quota(
+                            provider_id=provider_id,
+                            request_id=request_id,
+                        )
+                    except Exception as exc:
+                        decisions.append({
+                            "provider": provider_id,
+                            "status": "QUOTA_PREVIEW_FAILED",
+                            "error_type": type(exc).__name__,
+                        })
+                        continue
+                    if not isinstance(quota_preview, dict) or quota_preview.get("available") is not True:
+                        status = (
+                            quota_preview.get("status", "QUOTA_PREVIEW_REJECTED")
+                            if isinstance(quota_preview, dict) else "INVALID_QUOTA_PREVIEW"
+                        )
+                        decisions.append({"provider": provider_id, "status": status})
+                        continue
+                result = {
+                    "allowed": True,
+                    "status": "SIMULATION_ALLOWED",
+                    "provider": provider_id,
+                    "category": category.strip(),
+                    "strategy": selected_strategy,
+                    "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
+                    "model": model,
+                    "model_version": model_version,
+                    "estimated_cost": cost,
+                    "estimated_cost_unit": estimated_cost_unit.strip(),
+                    "health_verified": self.health_manager is not None,
+                    "simulated": True,
+                    "policy_saved": False,
+                    "reservations_created": False,
+                    "quota_preview": quota_preview,
+                    "prior_decisions": decisions,
+                }
+                if billing_mode is not None:
+                    result["billing_mode"] = billing_mode
+                return result
+
             cost_reserved = False
             cost_reservation_created = False
             credit_reserved = False
@@ -631,6 +702,40 @@ class ProviderRoutingManager:
             "model": model,
             "model_version": model_version,
             "decisions": decisions,
+        }
+
+    def simulate_route(
+        self,
+        *,
+        project_policy: dict[str, Any],
+        **route_options: Any,
+    ) -> dict[str, Any]:
+        """Evaluate a proposed project policy without saving it or creating reservations."""
+        if not isinstance(project_policy, dict):
+            return {
+                "status": "INVALID_SIMULATION_POLICY",
+                "allowed": False,
+                "policy_saved": False,
+                "simulation": {"status": "INVALID_SIMULATION_POLICY", "allowed": False},
+            }
+        if "simulate_only" in route_options or "project_policy_override" in route_options:
+            return {
+                "status": "INVALID_SIMULATION_OPTIONS",
+                "allowed": False,
+                "policy_saved": False,
+                "simulation": {"status": "INVALID_SIMULATION_OPTIONS", "allowed": False},
+            }
+        result = self.route(
+            **route_options,
+            simulate_only=True,
+            project_policy_override=project_policy,
+        )
+        return {
+            "status": "SIMULATION_COMPLETED",
+            "allowed": result.get("allowed") is True,
+            "policy_saved": False,
+            "reservations_created": False,
+            "simulation": result,
         }
 
     def select_fallback(
