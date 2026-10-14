@@ -92,6 +92,7 @@ class ProviderConcurrencyManager:
                 not isinstance(request_id, str)
                 or not _ID_RE.fullmatch(request_id)
                 or not isinstance(lease, dict)
+                or not isinstance(lease.get("status"), str)
                 or lease.get("status") not in _ACTIVE | _TERMINAL
                 or not isinstance(lease.get("provider_id"), str)
                 or not _ID_RE.fullmatch(lease["provider_id"])
@@ -107,7 +108,10 @@ class ProviderConcurrencyManager:
                 except ValueError as exc:
                     raise ValueError("invalid provider concurrency timestamp") from exc
             outcome = lease.get("outcome")
-            if outcome is not None and outcome not in {"completed", "not_started", "unknown", "reconciled"}:
+            if outcome is not None and (
+                not isinstance(outcome, str)
+                or outcome not in {"completed", "not_started", "unknown", "reconciled"}
+            ):
                 raise ValueError("invalid provider concurrency outcome")
         self.data = loaded
 
@@ -212,7 +216,7 @@ class ProviderConcurrencyManager:
     def release(self, *, lease_id: str, outcome: str) -> dict[str, Any]:
         if not isinstance(lease_id, str) or not _ID_RE.fullmatch(lease_id):
             return {"status": "INVALID_LEASE_ID", "saved": False}
-        if outcome not in {"completed", "not_started", "unknown"}:
+        if not isinstance(outcome, str) or outcome not in {"completed", "not_started", "unknown"}:
             return {"status": "INVALID_LEASE_OUTCOME", "saved": False}
         with self._transaction():
             lease = self.data["leases"].get(lease_id)
@@ -250,7 +254,7 @@ class ProviderConcurrencyManager:
             return {"status": "INVALID_LEASE_ID", "saved": False}
         if not isinstance(confirmed, bool) or confirmed is not True:
             return {"status": "CONFIRMATION_REQUIRED", "saved": False}
-        if outcome not in {"completed", "not_running"}:
+        if not isinstance(outcome, str) or outcome not in {"completed", "not_running"}:
             return {"status": "INVALID_RECONCILIATION_OUTCOME", "saved": False}
         with self._transaction():
             lease = self.data["leases"].get(lease_id)
