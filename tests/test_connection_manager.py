@@ -719,6 +719,262 @@ class ConnectionManagerTests(unittest.TestCase):
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertEqual(reloaded.get_provider("local_image")["name"], "Local Image")
 
+    def test_registration_rejects_invalid_catalog_metadata_without_disk_mutation(self):
+        before = self.catalog_path.read_bytes()
+        invalid_cases = [
+            {"auth_type": "MAGIC_BYPASS"},
+            {"connection_type": "UNKNOWN_TRANSPORT"},
+            {"enabled": "yes"},
+            {"allowed_hosts": ["https://api.example.com"]},
+            {"capabilities": ["Image Generation"]},
+            {"secret_ref": "Bearer actual-secret"},
+        ]
+        for index, overrides in enumerate(invalid_cases):
+            with self.subTest(overrides=overrides):
+                provider = {
+                    "id": f"invalid_{index}", "name": "Invalid",
+                    "category": "image", "auth_type": "NONE",
+                    "connection_type": "LOCAL",
+                }
+                provider.update(overrides)
+                result = self.manager.register_provider(provider)
+                self.assertEqual(result["status"], "INVALID_PROVIDER_METADATA")
+                self.assertFalse(result["saved"])
+                self.assertFalse(self.manager.provider_exists(provider["id"]))
+                self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_registration_rejects_v3_enabled_api_without_docs_hosts_and_capabilities(self):
+        catalog_path = self.root / "v3_registration_catalog.json"
+        state_path = self.root / "v3_registration_state.json"
+        catalog_path.write_text(json.dumps({
+            "version": "3.0", "providers": [],
+        }), encoding="utf-8")
+        state_path.write_text(json.dumps({
+            "version": "1.0", "policy": "USER_CONTROLLED", "providers": {},
+        }), encoding="utf-8")
+        manager = ConnectionManager(catalog_path, state_path)
+        result = manager.register_provider({
+            "id": "undocumented_api", "name": "Undocumented API",
+            "category": "image", "auth_type": "API_KEY",
+            "connection_type": "API", "enabled": True,
+            "subscription_required": False,
+        })
+        self.assertEqual(result["status"], "INVALID_PROVIDER_METADATA")
+        self.assertFalse(result["saved"])
+        self.assertEqual(json.loads(catalog_path.read_text(encoding="utf-8"))["providers"], [])
+
+    def test_registration_accepts_valid_v3_api_metadata(self):
+        catalog_path = self.root / "v3_valid_catalog.json"
+        state_path = self.root / "v3_valid_state.json"
+        catalog_path.write_text(json.dumps({"version": "3.0", "providers": []}), encoding="utf-8")
+        state_path.write_text(json.dumps({
+            "version": "1.0", "policy": "USER_CONTROLLED", "providers": {},
+        }), encoding="utf-8")
+        manager = ConnectionManager(catalog_path, state_path)
+        result = manager.register_provider({
+            "id": "documented_api", "name": "Documented API",
+            "category": "image", "auth_type": "API_KEY",
+            "connection_type": "API", "enabled": True,
+            "subscription_required": False,
+            "allowed_hosts": ["api.example.com"],
+            "official_api_url": "https://docs.example.com/api",
+            "capabilities": ["image_generation"],
+        })
+        self.assertEqual(result["status"], "REGISTERED")
+        self.assertTrue(result["saved"])
+        self.assertEqual(manager.get_provider("documented_api")["capabilities"], ["image_generation"])
+
+    def test_registration_deep_copies_metadata_from_caller(self):
+        provider = {
+            "id": "detached_metadata", "name": "Detached",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "LOCAL",
+            "metadata": {"labels": ["safe"]},
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "REGISTERED")
+        provider["metadata"]["labels"].append("caller-mutated")
+        stored = self.manager.get_provider("detached_metadata")
+        self.assertEqual(stored["metadata"]["labels"], ["safe"])
+        self.assertEqual(
+            json.loads(self.catalog_path.read_text(encoding="utf-8"))["providers"][-1]["metadata"]["labels"],
+            ["safe"],
+        )
+
+    def test_registration_rejects_non_json_and_non_finite_metadata(self):
+        for value in (object(), float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=repr(value)):
+                result = self.manager.register_provider({
+                    "id": "not_json", "name": "Not JSON",
+                    "category": "image", "auth_type": "NONE",
+                    "connection_type": "LOCAL", "metadata": {"value": value},
+                })
+                self.assertEqual(result["status"], "INVALID_PROVIDER_METADATA")
+                self.assertFalse(result["saved"])
+                self.assertFalse(self.manager.provider_exists("not_json"))
+
+    def test_registration_requires_boolean_overwrite_and_callable_factory(self):
+        provider = {
+            "id": "factory_validation", "name": "Factory Validation",
+            "category": "image", "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        self.assertEqual(
+            self.manager.register_provider(provider, overwrite="yes")["status"],
+            "INVALID_OVERWRITE_FLAG",
+        )
+        self.assertEqual(
+            self.manager.register_provider(provider, factory=object())["status"],
+            "INVALID_FACTORY",
+        )
+        self.assertFalse(self.manager.provider_exists("factory_validation"))
+
+    def test_registration_binds_factory_without_persisting_callable(self):
+        class Adapter:
+            def generate_image(self, prompt, output_path):
+                return {"ok": True}
+        instance = Adapter()
+        provider = {
+            "id": "factory_bound", "name": "Factory Bound",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "LOCAL", "enabled": True,
+        }
+        result = self.manager.register_provider(provider, factory=lambda metadata: instance)
+        self.assertEqual(result["status"], "REGISTERED")
+        self.assertTrue(result["factory_registered"])
+        loaded = self.manager.load_provider("factory_bound")
+        self.assertEqual(loaded["status"], "LOADED")
+        self.assertIs(self.manager.get_loaded_provider("factory_bound"), instance)
+        serialized = self.catalog_path.read_text(encoding="utf-8")
+        self.assertNotIn('"factory":', serialized.casefold())
+        self.assertNotIn("Adapter", serialized)
+
+    def test_registration_factory_is_process_local_and_missing_factory_fails_closed(self):
+        provider = {
+            "id": "catalog_only", "name": "Catalog Only",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "LOCAL", "enabled": True,
+        }
+        self.assertEqual(self.manager.register_provider(provider)["status"], "REGISTERED")
+        self.assertEqual(self.manager.load_provider("catalog_only")["status"], "FACTORY_NOT_REGISTERED")
+        reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertEqual(reloaded.load_provider("catalog_only")["status"], "FACTORY_NOT_REGISTERED")
+
+    def test_overwrite_rejects_provider_with_loaded_runtime_adapter(self):
+        class Adapter:
+            def generate_image(self, prompt, output_path):
+                return None
+        provider = {
+            "id": "loaded_registration", "name": "Loaded",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "LOCAL", "enabled": True,
+        }
+        self.assertEqual(
+            self.manager.register_provider(provider, factory=lambda _: Adapter())["status"],
+            "REGISTERED",
+        )
+        self.assertEqual(self.manager.load_provider("loaded_registration")["status"], "LOADED")
+        replacement = dict(provider, name="Changed")
+        result = self.manager.register_provider(replacement, overwrite=True, factory=lambda _: Adapter())
+        self.assertEqual(result["status"], "PROVIDER_LOADED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.manager.get_provider("loaded_registration")["name"], "Loaded")
+
+    def test_overwrite_without_factory_clears_stale_registered_factory(self):
+        class Adapter:
+            def generate_image(self, prompt, output_path):
+                return None
+        provider = {
+            "id": "replace_factory", "name": "Original",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "LOCAL", "enabled": True,
+        }
+        self.assertEqual(
+            self.manager.register_provider(provider, factory=lambda _: Adapter())["status"],
+            "REGISTERED",
+        )
+        replacement = dict(provider, name="Replacement")
+        result = self.manager.register_provider(replacement, overwrite=True)
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["factory_registered"])
+        self.assertEqual(self.manager.load_provider("replace_factory")["status"], "FACTORY_NOT_REGISTERED")
+
+    def test_overwrite_replaces_factory_only_after_metadata_persistence(self):
+        class AdapterOne:
+            def generate_image(self, prompt, output_path):
+                return "one"
+        class AdapterTwo:
+            def generate_image(self, prompt, output_path):
+                return "two"
+        provider = {
+            "id": "atomic_factory_replace", "name": "Adapter One",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "LOCAL", "enabled": True,
+        }
+        self.manager.register_provider(provider, factory=lambda _: AdapterOne())
+        import unittest.mock
+        with unittest.mock.patch.object(self.manager, "_atomic_write_json", side_effect=OSError("disk failure")):
+            failed = self.manager.register_provider(
+                dict(provider, name="Adapter Two"), overwrite=True,
+                factory=lambda _: AdapterTwo(),
+            )
+        self.assertEqual(failed["status"], "REGISTRATION_PERSISTENCE_FAILED")
+        self.assertEqual(self.manager.get_provider("atomic_factory_replace")["name"], "Adapter One")
+        self.assertEqual(self.manager.load_provider("atomic_factory_replace")["status"], "LOADED")
+        self.assertEqual(self.manager.get_loaded_provider("atomic_factory_replace").generate_image("", ""), "one")
+
+    def test_registration_failure_status_does_not_expose_persistence_exception_message(self):
+        provider = {
+            "id": "safe_persist_error", "name": "Safe Persist Error",
+            "category": "image", "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        import unittest.mock
+        with unittest.mock.patch.object(
+            self.manager, "_atomic_write_json",
+            side_effect=OSError("private path /secret/token=do-not-leak"),
+        ):
+            result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "REGISTRATION_PERSISTENCE_FAILED")
+        self.assertNotIn("/secret", repr(result))
+        self.assertNotIn("do-not-leak", repr(result))
+        self.assertFalse(self.manager.provider_exists("safe_persist_error"))
+
+    def test_overwrite_invalid_candidate_keeps_original_provider_unchanged(self):
+        original = self.manager.get_provider("public_image")
+        original_disk = self.catalog_path.read_bytes()
+        result = self.manager.register_provider(
+            {
+                "id": "public_image", "name": "Invalid Replacement",
+                "category": "image", "auth_type": "MAGIC_BYPASS",
+                "connection_type": "LOCAL",
+            },
+            overwrite=True,
+        )
+        self.assertEqual(result["status"], "INVALID_PROVIDER_METADATA")
+        self.assertEqual(self.manager.get_provider("public_image"), original)
+        self.assertEqual(self.catalog_path.read_bytes(), original_disk)
+
+    def test_registration_fails_closed_if_catalog_becomes_corrupt_after_initialization(self):
+        provider = {
+            "id": "corrupt_catalog_register", "name": "Corrupt Catalog Register",
+            "category": "image", "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "REGISTRATION_TRANSACTION_FAILED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{not-json")
+        self.assertNotIn("not-json", repr(result))
+
+    def test_registration_returns_safe_catalog_validation_errors(self):
+        result = self.manager.register_provider({
+            "id": "bad_url", "name": "Bad URL", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+            "official_api_url": "http://not-https.example.com",
+        })
+        self.assertEqual(result["status"], "INVALID_PROVIDER_METADATA")
+        self.assertTrue(result["errors"])
+        self.assertNotIn("http://not-https.example.com", repr(result))
+
     def test_register_provider_rejects_duplicate_without_overwrite(self):
         provider = {
             "id": "token_image", "name": "Replacement", "category": "image",

@@ -52,6 +52,93 @@ class ProviderServiceTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_provider_onboarding_preview_has_no_persistence_side_effects(self):
+        provider = {
+            "id": "onboard_preview", "name": "Onboard Preview",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "LOCAL", "metadata": {"region": "global"},
+        }
+        before = self.catalog_path.read_bytes()
+        result = self.service.onboard_provider(provider)
+        self.assertEqual(result["status"], "PREVIEW_READY")
+        self.assertFalse(result["saved"])
+        self.assertTrue(result["preview_only"])
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+        self.assertFalse(self.connections.provider_exists("onboard_preview"))
+
+    def test_provider_onboarding_preview_reports_missing_fields(self):
+        result = self.service.onboard_provider({"id": "missing_fields"})
+        self.assertEqual(result["status"], "REQUIRED_FIELDS_MISSING")
+        self.assertFalse(result["saved"])
+        self.assertEqual(
+            result["preview"]["missing_fields"],
+            ["name", "category", "auth_type", "connection_type"],
+        )
+
+    def test_provider_onboarding_rejects_sensitive_metadata_without_leaking_secret(self):
+        result = self.service.onboard_provider({
+            "id": "secret_onboarding", "name": "Secret Onboarding",
+            "category": "image", "auth_type": "API_KEY",
+            "connection_type": "API", "api_key": "do-not-leak-this",
+        })
+        self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertNotIn("do-not-leak-this", repr(result))
+        self.assertFalse(self.connections.provider_exists("secret_onboarding"))
+
+    def test_provider_onboarding_commit_registers_runtime_factory(self):
+        class Adapter:
+            def generate_image(self, prompt, output_path):
+                return {"ok": True}
+        instance = Adapter()
+        provider = {
+            "id": "onboard_commit", "name": "Onboard Commit",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "LOCAL", "enabled": True,
+        }
+        result = self.service.onboard_provider(
+            provider, factory=lambda _: instance, preview_only=False,
+        )
+        self.assertEqual(result["status"], "ONBOARDED")
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["preview_only"])
+        self.assertEqual(self.connections.load_provider("onboard_commit")["status"], "LOADED")
+        self.assertIs(self.connections.get_loaded_provider("onboard_commit"), instance)
+
+    def test_provider_onboarding_requires_explicit_boolean_preview_flag(self):
+        result = self.service.onboard_provider({
+            "id": "bad_preview_flag", "name": "Bad Preview Flag",
+            "category": "image", "auth_type": "NONE", "connection_type": "LOCAL",
+        }, preview_only="false")
+        self.assertEqual(result["status"], "INVALID_PREVIEW_FLAG")
+        self.assertFalse(self.connections.provider_exists("bad_preview_flag"))
+
+    def test_provider_onboarding_rejects_non_callable_factory_before_preview(self):
+        result = self.service.onboard_provider({
+            "id": "bad_onboard_factory", "name": "Bad Onboard Factory",
+            "category": "image", "auth_type": "NONE", "connection_type": "LOCAL",
+        }, factory=object())
+        self.assertEqual(result["status"], "INVALID_FACTORY")
+        self.assertFalse(self.connections.provider_exists("bad_onboard_factory"))
+
+    def test_provider_onboarding_surfaces_registration_race_without_false_success(self):
+        provider = {
+            "id": "onboard_race", "name": "Onboard Race",
+            "category": "image", "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        original = self.connections.register_provider
+        calls = []
+        def conflicting_register(*args, **kwargs):
+            calls.append(True)
+            return {"status": "ALREADY_EXISTS", "saved": False, "provider": "onboard_race"}
+        self.connections.register_provider = conflicting_register
+        try:
+            result = self.service.onboard_provider(provider, preview_only=False)
+        finally:
+            self.connections.register_provider = original
+        self.assertEqual(calls, [True])
+        self.assertEqual(result["status"], "ALREADY_EXISTS")
+        self.assertFalse(result["saved"])
+
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
         self.assertTrue(result["verified"])

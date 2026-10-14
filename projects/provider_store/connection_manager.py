@@ -5,6 +5,7 @@ unless a separate provider-specific probe has actually succeeded.
 """
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -24,6 +25,7 @@ MODULE_DIR = Path(__file__).resolve().parent
 DEFAULT_CATALOG = MODULE_DIR / "provider_catalog.json"
 MASTER_CATALOG = MODULE_DIR / "provider_catalog_master.json"
 DEFAULT_STATE = MODULE_DIR / "connection_state.json"
+_FACTORY_NOT_GIVEN = object()
 
 
 class ProviderAuthenticationVerificationRequired(PermissionError):
@@ -70,6 +72,8 @@ class ConnectionManager:
         self._lock = threading.RLock()
         # Runtime instances are intentionally process-local and never serialized.
         self._loaded_providers: dict[str, Any] = {}
+        # Factories are runtime-only: never serialize callables or credentials to disk.
+        self._provider_factories: dict[str, Any] = {}
 
     @staticmethod
     def _default_catalog() -> Path:
@@ -648,10 +652,24 @@ class ConnectionManager:
             "contract_version": "1.0",
         }
 
-    def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
-        """Load one validated runtime instance while holding the lifecycle lock."""
+    def load_provider(
+        self, provider_id: str, factory: Any = _FACTORY_NOT_GIVEN
+    ) -> dict[str, Any]:
+        """Load using an explicit factory, or a previously registered process-local factory."""
         with self._lock:
-            return self._load_provider_locked(provider_id, factory)
+            if factory is _FACTORY_NOT_GIVEN:
+                selected_factory = self._provider_factories.get(provider_id)
+                if selected_factory is None:
+                    return {
+                        "status": "FACTORY_NOT_REGISTERED",
+                        "provider": provider_id,
+                        "loaded": False,
+                    }
+            else:
+                # Preserve the explicit-factory API: passing None is invalid, while
+                # omitting the argument opts into the registered-factory registry.
+                selected_factory = factory
+            return self._load_provider_locked(provider_id, selected_factory)
 
     def _load_provider_locked(self, provider_id: str, factory: Any) -> dict[str, Any]:
         provider = self.get_provider(provider_id)
@@ -757,44 +775,186 @@ class ConnectionManager:
             discovered.append(dict(provider))
         return discovered
 
-    def register_provider(
+    def preview_provider_registration(
         self, provider: dict[str, Any], *, overwrite: bool = False
     ) -> dict[str, Any]:
-        """Register validated provider metadata; never accept credentials in catalog data."""
+        """Validate an onboarding submission without persisting catalog or runtime state.
+
+        This is a preview only. register_provider() repeats every check under the
+        persistence lock to protect against concurrent catalog changes.
+        """
         if not isinstance(provider, dict):
-            return {"status": "INVALID_PROVIDER", "reason": "provider must be an object"}
+            return {"status": "INVALID_PROVIDER", "valid": False}
+        if not isinstance(overwrite, bool):
+            return {"status": "INVALID_OVERWRITE_FLAG", "valid": False}
+        required = ("id", "name", "category", "auth_type", "connection_type")
+        missing = [
+            key for key in required
+            if not isinstance(provider.get(key), str) or not provider[key].strip()
+        ]
+        if missing:
+            return {
+                "status": "REQUIRED_FIELDS_MISSING",
+                "valid": False,
+                "missing_fields": missing,
+            }
+        provider_id = provider["id"].strip()
+        if (
+            len(provider_id) > 100
+            or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id)
+        ):
+            return {"status": "INVALID_PROVIDER_ID", "valid": False}
+        if self._contains_credential_value_field(provider):
+            return {"status": "SENSITIVE_METADATA_REJECTED", "valid": False, "provider": provider_id}
+        try:
+            candidate_provider = copy.deepcopy(provider)
+            candidate_provider["id"] = provider_id
+            json.dumps(candidate_provider, allow_nan=False)
+        except (TypeError, ValueError, RecursionError):
+            return {"status": "INVALID_PROVIDER_METADATA", "valid": False, "provider": provider_id}
+
+        try:
+            with self._catalog_transaction():
+                existing = next(
+                    (item for item in self._list_providers_unlocked() if item.get("id") == provider_id),
+                    None,
+                )
+                if existing is not None and not overwrite:
+                    return {"status": "ALREADY_EXISTS", "valid": False, "provider": provider_id}
+                if provider_id in self._loaded_providers:
+                    return {"status": "PROVIDER_LOADED", "valid": False, "provider": provider_id}
+                candidate_catalog = copy.deepcopy(self.catalog)
+                candidates = [
+                    item for item in candidate_catalog["providers"]
+                    if item.get("id") != provider_id
+                ]
+                candidates.append(candidate_provider)
+                candidate_catalog["providers"] = candidates
+                validation = self.validate_catalog_schema(candidate_catalog)
+                if validation.get("valid") is not True:
+                    return {
+                        "status": "INVALID_PROVIDER_METADATA",
+                        "valid": False,
+                        "provider": provider_id,
+                        "errors": list(validation.get("errors", [])),
+                    }
+                return {
+                    "status": "READY_TO_REGISTER",
+                    "valid": True,
+                    "provider": provider_id,
+                    "overwrites_existing": existing is not None,
+                    "metadata": self._sanitize_public_data(candidate_provider),
+                    "note": "Preview only; no catalog, connection, or runtime state was changed.",
+                }
+        except (OSError, TypeError, ValueError, RecursionError) as exc:
+            return {
+                "status": "REGISTRATION_PREVIEW_FAILED",
+                "valid": False,
+                "provider": provider_id,
+                "error_type": type(exc).__name__,
+            }
+
+    def register_provider(
+        self,
+        provider: dict[str, Any],
+        *,
+        overwrite: bool = False,
+        factory: Any = None,
+    ) -> dict[str, Any]:
+        """Register schema-valid metadata and optionally a process-local adapter factory.
+
+        Registration never persists callables or credential values. Candidate catalog
+        validation happens under the catalog transaction, before any disk mutation.
+        """
+        if not isinstance(provider, dict):
+            return {"status": "INVALID_PROVIDER", "reason": "provider must be an object", "saved": False}
+        if not isinstance(overwrite, bool):
+            return {"status": "INVALID_OVERWRITE_FLAG", "saved": False}
+        if factory is not None and not callable(factory):
+            return {"status": "INVALID_FACTORY", "saved": False}
         required = ("id", "name", "category", "auth_type", "connection_type")
         if any(not isinstance(provider.get(key), str) or not provider[key].strip() for key in required):
             return {
                 "status": "INVALID_PROVIDER",
                 "reason": "required non-empty string fields: " + ", ".join(required),
+                "saved": False,
             }
         provider_id = provider["id"].strip()
-        if any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id):
-            return {"status": "INVALID_PROVIDER", "reason": "provider id contains unsupported characters"}
-
-        # Metadata may name an environment variable, but must never contain a secret value.
+        if (
+            len(provider_id) > 100
+            or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id)
+        ):
+            return {"status": "INVALID_PROVIDER", "reason": "provider id contains unsupported characters", "saved": False}
         if self._contains_credential_value_field(provider):
-            return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id}
+            return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id, "saved": False}
 
-        with self._catalog_transaction():
-            providers = self._list_providers_unlocked()
-            existing = next((item for item in providers if item.get("id") == provider_id), None)
-            if existing is not None and not overwrite:
-                return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
-            safe_provider = dict(provider)
+        try:
+            safe_provider = copy.deepcopy(provider)
             safe_provider["id"] = provider_id
-            updated = [item for item in providers if item.get("id") != provider_id]
-            updated.append(safe_provider)
-            new_catalog = dict(self.catalog)
-            new_catalog["providers"] = updated
-            self._atomic_write_json(self.catalog_path, new_catalog)
-            self.catalog = new_catalog
+            # Validate JSON compatibility before entering persistence code; NaN/Infinity
+            # and arbitrary Python objects must not reach the durable catalog.
+            json.dumps(safe_provider, allow_nan=False)
+        except (TypeError, ValueError, RecursionError):
+            return {"status": "INVALID_PROVIDER_METADATA", "provider": provider_id, "saved": False}
+
+        try:
+            with self._catalog_transaction():
+                providers = self._list_providers_unlocked()
+                existing = next((item for item in providers if item.get("id") == provider_id), None)
+                if existing is not None and not overwrite:
+                    return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
+                if provider_id in self._loaded_providers:
+                    return {
+                        "status": "PROVIDER_LOADED",
+                        "provider": provider_id,
+                        "saved": False,
+                        "reason": "unload the runtime adapter before replacing provider metadata",
+                    }
+    
+                updated = [item for item in providers if item.get("id") != provider_id]
+                updated.append(safe_provider)
+                new_catalog = copy.deepcopy(self.catalog)
+                new_catalog["providers"] = updated
+                validation = self.validate_catalog_schema(new_catalog)
+                if validation.get("valid") is not True:
+                    return {
+                        "status": "INVALID_PROVIDER_METADATA",
+                        "provider": provider_id,
+                        "saved": False,
+                        "errors": list(validation.get("errors", [])),
+                    }
+                try:
+                    json.dumps(new_catalog, allow_nan=False)
+                    self._atomic_write_json(self.catalog_path, new_catalog)
+                except (OSError, TypeError, ValueError, RecursionError) as exc:
+                    return {
+                        "status": "REGISTRATION_PERSISTENCE_FAILED",
+                        "provider": provider_id,
+                        "saved": False,
+                        "error_type": type(exc).__name__,
+                    }
+                self.catalog = new_catalog
+                if factory is not None:
+                    self._provider_factories[provider_id] = factory
+                elif existing is not None:
+                    # An overwrite without a replacement factory must not keep a stale
+                    # factory bound to the previous provider configuration.
+                    self._provider_factories.pop(provider_id, None)
+                return {
+                    "status": "REGISTERED",
+                    "provider": provider_id,
+                    "saved": True,
+                    "overwritten": existing is not None,
+                    "factory_registered": factory is not None,
+                }
+    
+    
+        except (OSError, TypeError, ValueError, RecursionError) as exc:
             return {
-                "status": "REGISTERED",
+                "status": "REGISTRATION_TRANSACTION_FAILED",
                 "provider": provider_id,
-                "saved": True,
-                "overwritten": existing is not None,
+                "saved": False,
+                "error_type": type(exc).__name__,
             }
 
     @staticmethod

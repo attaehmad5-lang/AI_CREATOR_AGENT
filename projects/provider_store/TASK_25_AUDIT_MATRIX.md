@@ -10,7 +10,7 @@ GitHub Actions code-verification run [#38434905299](https://github.com/attaehmad
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
-| A / 1–8 | Basic Provider Management | PARTIAL | Registry, registration, discovery and schema tests exist; runtime enablement now validates the full candidate catalog and rejects deprecated or under-documented enabled API providers. Full unload/adapter lifecycle remains incomplete. |
+| A / 1–8 | Basic Provider Management | PARTIAL | Feature #2 Provider Registration is VERIFIED in PR #14 with side-effect-free onboarding preview, atomic candidate-catalog validation, optional process-local factory registration and 350 passing tests on each OS in batches of 50. Registry-wide lifecycle, metadata refresh and other A-section items still require their own evidence. |
 | B / 9–16 | Authentication and Connection | PARTIAL | Credential references, OAuth PKCE helper, endpoint/model config, and bounded HTTPS probes exist; provider-specific live auth and scopes are not verified. |
 | C / 17–24 | Multimodal Provider Support | PARTIAL | Image providers and modality contracts are cataloged; real adapters and end-to-end tests for all modalities remain open. |
 | D / 25–32 | Routing and Selection | PARTIAL | Primary/fallback, PRIMARY_ONLY, automatic-fallback on/off, credit/cost/health and declared model/version routing are tested; enabled providers still lack verified live model catalogs and complete project-policy routing remains open. |
