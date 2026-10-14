@@ -385,7 +385,7 @@ class ProviderService:
                 "request_id": request_id,
                 **trace_fields,
             }
-        claim = self.execution_ledger.reserve(
+        claim = self._ledger_reserve(
             request_id=request_id,
             project_id=project_id,
             category=category,
@@ -416,7 +416,7 @@ class ProviderService:
             **route_options,
         )
         if not isinstance(route, dict) or route.get("allowed") is not True:
-            finished = self.execution_ledger.finish(
+            finished = self._ledger_finish(
                 request_id=request_id, status="REJECTED", result_status="ROUTING_REJECTED"
             )
             if not isinstance(finished, dict) or finished.get("saved") is not True:
@@ -424,12 +424,12 @@ class ProviderService:
             return {"status": "ROUTING_REJECTED", "executed": False, "route": route, **trace_fields}
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
-            self.execution_ledger.finish(
+            self._ledger_finish(
                 request_id=request_id, status="REJECTED", result_status="INVALID_ROUTE_PROVIDER"
             )
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route, **trace_fields}
 
-        started_claim = self.execution_ledger.mark_started(
+        started_claim = self._ledger_mark_started(
             request_id=request_id, provider_id=provider_id
         )
         if not isinstance(started_claim, dict) or started_claim.get("saved") is not True:
@@ -459,7 +459,7 @@ class ProviderService:
         except Exception as exc:
             # The adapter may have transmitted the request before failing. Do not
             # release reservations, and persist an ambiguous terminal state to block replay.
-            self.execution_ledger.finish(
+            self._ledger_finish(
                 request_id=request_id, status="UNKNOWN",
                 result_status="EXECUTION_OUTCOME_UNKNOWN", provider_id=provider_id,
             )
@@ -474,7 +474,7 @@ class ProviderService:
                 "error_type": type(exc).__name__,
             }
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
-            self.execution_ledger.finish(
+            self._ledger_finish(
                 request_id=request_id, status="UNKNOWN",
                 result_status="EXECUTION_OUTCOME_UNKNOWN", provider_id=provider_id,
             )
@@ -501,7 +501,7 @@ class ProviderService:
                     and adapter_result.get("actual_credit_amount") > 0
                 )
             ):
-                self.execution_ledger.finish(
+                self._ledger_finish(
                     request_id=request_id, status="UNKNOWN",
                     result_status="INCONSISTENT_START_RESULT", provider_id=provider_id,
                 )
@@ -518,7 +518,7 @@ class ProviderService:
                 project_id=project_id, provider_id=provider_id, request_id=request_id
             )
             unstarted_status = "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED"
-            finished = self.execution_ledger.finish(
+            finished = self._ledger_finish(
                 request_id=request_id, status="NOT_STARTED",
                 result_status=unstarted_status, provider_id=provider_id,
             )
@@ -624,7 +624,7 @@ class ProviderService:
             else "FAILED" if status in {"OUTPUT_VALIDATION_FAILED", "EXECUTION_FAILED"}
             else "FINALIZATION_PARTIAL"
         )
-        ledger_finish = self.execution_ledger.finish(
+        ledger_finish = self._ledger_finish(
             request_id=request_id,
             status=ledger_state,
             result_status=status,
