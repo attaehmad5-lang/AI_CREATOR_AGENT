@@ -769,6 +769,93 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(nested_result["status"], "SENSITIVE_METADATA_REJECTED")
         self.assertFalse(self.manager.provider_exists("unsafe_nested"))
 
+    def test_register_provider_rejects_non_boolean_overwrite_flag(self):
+        provider = {
+            "id": "new_provider", "name": "New Provider", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        result = self.manager.register_provider(provider, overwrite="false")
+        self.assertEqual(result["status"], "INVALID_OVERWRITE_FLAG")
+        self.assertFalse(result["saved"])
+        self.assertFalse(self.manager.provider_exists("new_provider"))
+
+    def test_register_provider_rejects_ids_longer_than_catalog_limit(self):
+        provider = {
+            "id": "p" * 101, "name": "Too Long", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "INVALID_PROVIDER")
+        self.assertFalse(result["saved"])
+
+    def test_register_provider_validates_capabilities_before_persisting(self):
+        provider = {
+            "id": "invalid_capability", "name": "Invalid Capability", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+            "capabilities": ["Not A Safe Capability"],
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+        self.assertFalse(result["saved"])
+        self.assertFalse(self.manager.provider_exists("invalid_capability"))
+        persisted = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        self.assertNotIn("invalid_capability", {item["id"] for item in persisted["providers"]})
+
+    def test_register_provider_deep_copies_nested_metadata(self):
+        provider = {
+            "id": "metadata_provider", "name": "Metadata Provider", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+            "metadata": {"labels": ["trusted"]},
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "REGISTERED")
+        provider["metadata"]["labels"].append("mutated-after-registration")
+        self.assertEqual(
+            self.manager.get_provider("metadata_provider")["metadata"]["labels"],
+            ["trusted"],
+        )
+        persisted = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        saved = next(item for item in persisted["providers"] if item["id"] == "metadata_provider")
+        self.assertEqual(saved["metadata"]["labels"], ["trusted"])
+
+    def test_register_provider_rejects_invalid_v3_catalog_candidate_without_mutation(self):
+        catalog_path = self.root / "strict_catalog.json"
+        state_path = self.root / "strict_state.json"
+        catalog_path.write_text(json.dumps({
+            "version": "3.0",
+            "providers": [{
+                "id": "local_base", "name": "Local Base", "category": "image",
+                "auth_type": "NONE", "connection_type": "LOCAL",
+                "enabled": False, "subscription_required": False,
+            }],
+        }), encoding="utf-8")
+        state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        manager = ConnectionManager(catalog_path, state_path)
+        before = catalog_path.read_text(encoding="utf-8")
+        result = manager.register_provider({
+            "id": "incomplete_api", "name": "Incomplete API", "category": "image",
+            "auth_type": "API_KEY", "connection_type": "API",
+            "enabled": True, "subscription_required": False,
+        })
+        self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+        self.assertFalse(result["saved"])
+        self.assertTrue(result["errors"])
+        self.assertEqual(catalog_path.read_text(encoding="utf-8"), before)
+        self.assertIsNone(manager.get_provider("incomplete_api"))
+
+    def test_register_provider_overwrite_keeps_old_record_if_candidate_invalid(self):
+        provider = {
+            "id": "token_image", "name": "Updated Name", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API",
+            "capabilities": ["Invalid Capability"],
+        }
+        result = self.manager.register_provider(provider, overwrite=True)
+        self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.manager.get_provider("token_image")["name"], "token_image")
+        reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertEqual(reloaded.get_provider("token_image")["name"], "token_image")
+
     def test_register_provider_rejects_invalid_id(self):
         provider = {
             "id": "../unsafe", "name": "Unsafe", "category": "image",
