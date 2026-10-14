@@ -228,6 +228,16 @@ class ProviderExecutionLedger:
                         "provider_id": existing.get("provider_id"),
                         "trace_id": existing.get("trace_id"),
                     }
+                if existing.get("status") == "UNKNOWN":
+                    return {
+                        "status": "REQUEST_OUTCOME_UNKNOWN",
+                        "reserved": False,
+                        "existing_status": "UNKNOWN",
+                        "result_status": existing.get("result_status"),
+                        "provider_id": existing.get("provider_id"),
+                        "trace_id": existing.get("trace_id"),
+                        "executed": False,
+                    }
                 return {
                     "status": "DUPLICATE_REQUEST",
                     "reserved": False,
@@ -296,6 +306,10 @@ class ProviderExecutionLedger:
                 if record.get("status") == status and record.get("result_status") == result_status:
                     return {"status": "ALREADY_FINISHED", "saved": True, "duplicate": True}
                 return {"status": "REQUEST_TERMINAL_CONFLICT", "saved": False}
+            if record["status"] == "RESERVED" and status not in {"REJECTED", "NOT_STARTED"}:
+                return {"status": "INVALID_STATE_TRANSITION", "saved": False}
+            if record["status"] == "STARTED" and status == "REJECTED":
+                return {"status": "INVALID_STATE_TRANSITION", "saved": False}
             record["status"] = status
             record["result_status"] = result_status
             if provider_id is not None:
