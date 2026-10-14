@@ -1,6 +1,8 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Lock
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.error import HTTPError
@@ -264,6 +266,30 @@ class ProviderMetadataManagerTests(unittest.TestCase):
         self.assertEqual(after["status"], before["status"])
         self.assertEqual(after["name"], before["name"])
         self.assertEqual(after["id"], before["id"])
+
+    def test_concurrent_refreshes_do_not_overwrite_a_newer_revision(self):
+        barrier = Barrier(2)
+        lock = Lock()
+        next_id = [0]
+
+        def fetcher(endpoint, query, timeout):
+            barrier.wait(timeout=5)
+            with lock:
+                model_id = f"concurrent-model-{next_id[0]}"
+                next_id[0] += 1
+            return [{"id": model_id, "pipeline_tag": "text-to-image"}]
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(self.metadata.refresh, "metadata_image", fetcher)
+                for _ in range(2)
+            ]
+            results = [future.result(timeout=10) for future in futures]
+        statuses = sorted(result["status"] for result in results)
+        self.assertEqual(statuses, ["METADATA_REFRESHED", "METADATA_REVISION_CONFLICT"])
+        stored = self.manager.get_provider("metadata_image")
+        self.assertIn(stored["models"][0]["id"], {"concurrent-model-0", "concurrent-model-1"})
+        self.assertEqual(stored["metadata_status"], "VERIFIED")
 
     def test_metadata_update_rejects_unknown_fields(self):
         result = self.manager.update_provider_metadata(
