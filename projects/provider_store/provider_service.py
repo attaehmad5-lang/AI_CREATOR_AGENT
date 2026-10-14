@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from typing import Any
+from pathlib import Path
 import re
 import time
 
+from .execution_ledger import ProviderExecutionLedger
 from .safe_numbers import finite_number
 from .trace_context import TraceContext, TraceContextError
 
@@ -23,6 +25,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        execution_ledger: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -34,6 +37,9 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (execution_ledger, "reserve", "execution_ledger"),
+            (execution_ledger, "mark_started", "execution_ledger"),
+            (execution_ledger, "finish", "execution_ledger"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -46,6 +52,14 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        if execution_ledger is not None:
+            self.execution_ledger = execution_ledger
+        else:
+            state_path = getattr(connection_manager, "state_path", None)
+            self.execution_ledger = (
+                ProviderExecutionLedger(Path(state_path).with_name("provider_execution_ledger.json"))
+                if isinstance(state_path, (str, Path)) else None
+            )
 
     def verify_provider(
         self,
