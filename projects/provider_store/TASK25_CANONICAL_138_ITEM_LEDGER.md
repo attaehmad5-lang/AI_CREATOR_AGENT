@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38613325666](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38613325666): **336 tests passed on Ubuntu and 330 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38614022219](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38614022219): **340 tests passed on Ubuntu and 330 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -170,7 +170,7 @@ GitHub Actions run [#38613325666](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 336-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
+| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 340-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
 | 98 | 🟢 | Mock Provider Fallback Integration Test | VERIFIED | Mock/fallback integration regression coverage passes in the cross-platform suite. |
 | 99 | 🔴 | PRIMARY_ONLY and Fallback-Disabled Regression Tests | VERIFIED | PRIMARY_ONLY and automatic-fallback-disabled regression cases now have explicit tests. |
 | 100 | 🟡 | Retry, Backoff and Timeout Tests | VERIFIED | Retry, backoff, Retry-After, timeout and invalid numeric inputs are covered by regression tests. |
@@ -181,7 +181,7 @@ GitHub Actions run [#38613325666](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 336 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 340 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
@@ -218,7 +218,7 @@ GitHub Actions run [#38613325666](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 129 | 🟡 | Plugin-based provider adapters | PARTIAL | Compatibility facades exist; a safe plugin lifecycle and isolation model is incomplete. |
-| 130 | 🟡 | Versioned provider adapter interface | PARTIAL | Capability/contract validation exists; explicit adapter API version negotiation is incomplete. |
+| 130 | 🟡 | Versioned provider adapter interface | PARTIAL | Optional MAJOR.MINOR `adapter_api_version` defaults to 1.0 for legacy entries; runtime validates catalog/instance versions and blocks loading/enabling unsupported versions. Multi-version negotiation and migration remain open. Evidence: `tests/test_connection_manager.py::test_provider_contract_rejects_unsupported_adapter_api_version`, `test_catalog_declared_adapter_version_must_match_supported_runtime`, `test_runtime_enablement_rejects_unsupported_adapter_api_version`. |
 | 131 | 🟡 | Validated metadata کے ساتھ capability discovery | PARTIAL | Validated capability metadata and discovery exist; live provider metadata trust is incomplete. |
 | 132 | 🟡 | نئے providers کو محفوظ طریقے سے شامل کرنے کا workflow | PARTIAL | Catalog registration/schema validation exists; complete onboarding, approval and probe workflow is incomplete. |
 | 133 | 🔴 | Self-hosted اور local models کی support، جہاں ممکن ہو | OPEN | Local/self-hosted provider lifecycle and modality verification are not complete. |
