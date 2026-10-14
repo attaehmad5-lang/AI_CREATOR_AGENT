@@ -653,7 +653,14 @@ class ProviderService:
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id
             )
-            unstarted_status = "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED"
+            concurrency_release = self._concurrency_release(
+                lease_id=lease_id, outcome="not_started"
+            )
+            unstarted_status = (
+                "RESERVATION_RELEASE_FAILED" if released.get("released") is not True
+                else "CONCURRENCY_LEASE_RELEASE_FAILED" if concurrency_release.get("saved") is not True
+                else "EXECUTION_NOT_STARTED"
+            )
             finished = self._ledger_finish(
                 request_id=request_id, status="NOT_STARTED",
                 result_status=unstarted_status, provider_id=provider_id,
@@ -666,6 +673,7 @@ class ProviderService:
                 "provider": provider_id,
                 "request_id": request_id,
                 **trace_fields,
+                "concurrency": concurrency_release,
                 "release": released,
                 "safe_to_retry": False,
             }
