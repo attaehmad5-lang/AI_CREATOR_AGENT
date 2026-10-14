@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38617047870](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38617047870): **354 tests passed on Ubuntu and 354 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The complete suite ran sequentially in batches of 50; all 8 batches passed on each platform. Coverage includes canonical item #73 request-ID generation, W3C trace propagation, trace-context validation, and trace-linked idempotent health records.
+GitHub Actions run [#38618540821](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38618540821): **388 tests passed on Ubuntu and 388 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The complete suite ran sequentially in batches of 50; all 8 batches passed on each platform. Coverage includes canonical items #73–#74: request/trace ID propagation, durable at-most-once execution claims, duplicate and conflicting-request rejection, ambiguous-outcome blocking, and thread/process concurrency.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -132,7 +132,7 @@ GitHub Actions run [#38617047870](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 73 | 🔴 | Unique Request ID and Trace ID | VERIFIED | `TraceContext` generates a request ID when omitted, validates W3C Trace Context v00, creates outbound child-span headers, propagates IDs to adapters/results, and persists trace IDs in idempotent health records. Tests cover malformed/conflicting context and persisted-state validation; CI run #38617047870 passed 354 tests on Ubuntu and Windows. |
-| 74 | 🔴 | Idempotency and Duplicate Prevention | PARTIAL | Manager-level idempotency is tested; full external-provider request idempotency is not verified. |
+| 74 | 🔴 | Idempotency and Duplicate Prevention | VERIFIED | `ProviderExecutionLedger` atomically claims request IDs before routing, fingerprints project/category/cost/routing constraints, blocks duplicate and concurrent adapter invocations, propagates `idempotency_key`, and records terminal/ambiguous outcomes. Tests cover thread/process races, conflict detection, corrupted storage, safe state transitions, and service replay behavior; CI run #38618540821 passed 388 tests on Ubuntu and Windows. Provider-side exactly-once behavior is not assumed; adapters must use the key where the provider supports it. |
 | 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | Cross-process reservations and locking are tested; worker pools and provider-specific concurrency limits are incomplete. |
 | 76 | 🔴 | Queue, Backpressure and Overload Handling | OPEN | Queue/backpressure orchestration is not implemented end-to-end. |
 | 77 | 🔴 | Async/Long-Running Job and Polling Support | OPEN | Asynchronous job lifecycle/polling is not implemented end-to-end. |

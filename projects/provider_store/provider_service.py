@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from typing import Any
+from pathlib import Path
 import re
 import time
 
+from .execution_ledger import ProviderExecutionLedger
 from .safe_numbers import finite_number
 from .trace_context import TraceContext, TraceContextError
 
@@ -23,6 +25,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        execution_ledger: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -34,6 +37,9 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (execution_ledger, "reserve", "execution_ledger"),
+            (execution_ledger, "mark_started", "execution_ledger"),
+            (execution_ledger, "finish", "execution_ledger"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -46,6 +52,21 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.execution_ledger_error: str | None = None
+        if execution_ledger is not None:
+            self.execution_ledger = execution_ledger
+        else:
+            state_path = getattr(connection_manager, "state_path", None)
+            if isinstance(state_path, (str, Path)):
+                try:
+                    self.execution_ledger = ProviderExecutionLedger(
+                        Path(state_path).with_name("provider_execution_ledger.json")
+                    )
+                except Exception as exc:
+                    self.execution_ledger = None
+                    self.execution_ledger_error = type(exc).__name__
+            else:
+                self.execution_ledger = None
 
     def verify_provider(
         self,
@@ -253,6 +274,33 @@ class ProviderService:
             return default
         return value
 
+    def _ledger_reserve(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self.execution_ledger.reserve(**kwargs)
+        except Exception as exc:
+            return {"status": "EXECUTION_LEDGER_FAILED", "reserved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_EXECUTION_LEDGER_RESPONSE", "reserved": False,
+        }
+
+    def _ledger_mark_started(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self.execution_ledger.mark_started(**kwargs)
+        except Exception as exc:
+            return {"status": "EXECUTION_LEDGER_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_EXECUTION_LEDGER_RESPONSE", "saved": False,
+        }
+
+    def _ledger_finish(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self.execution_ledger.finish(**kwargs)
+        except Exception as exc:
+            return {"status": "EXECUTION_LEDGER_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_EXECUTION_LEDGER_RESPONSE", "saved": False,
+        }
+
     def execute_routed_request(
         self,
         *,
@@ -300,6 +348,65 @@ class ProviderService:
             "traceparent": trace_context.traceparent,
         }
 
+        if self.execution_ledger is None:
+            return {
+                "status": "EXECUTION_LEDGER_UNAVAILABLE",
+                "executed": False,
+                "request_id": request_id,
+                **trace_fields,
+            }
+        fingerprint_options: dict[str, Any] = {
+            "modality": modality,
+            "estimated_cost_unit": estimated_cost_unit,
+        }
+        for key in (
+            "model", "model_version", "capability", "strategy",
+            "automatic_fallback", "require_health_evidence",
+        ):
+            if key in route_options:
+                fingerprint_options[key] = route_options[key]
+        for key in ("paid_approved_providers", "excluded_providers"):
+            value = route_options.get(key)
+            if isinstance(value, (set, frozenset, list, tuple)):
+                fingerprint_options[key] = value
+            elif key in route_options:
+                fingerprint_options[key] = value
+        try:
+            fingerprint = ProviderExecutionLedger.fingerprint_request(
+                project_id=project_id,
+                category=category,
+                estimated_cost=estimated_cost,
+                routing_options=fingerprint_options,
+            )
+        except (TypeError, ValueError):
+            return {
+                "status": "INVALID_REQUEST_FINGERPRINT",
+                "executed": False,
+                "request_id": request_id,
+                **trace_fields,
+            }
+        claim = self._ledger_reserve(
+            request_id=request_id,
+            project_id=project_id,
+            category=category,
+            estimated_cost=estimated_cost,
+            trace_id=trace_context.trace_id,
+            fingerprint=fingerprint,
+        )
+        if not isinstance(claim, dict) or claim.get("reserved") is not True:
+            claim_status = claim.get("status", "EXECUTION_LEDGER_FAILED") if isinstance(claim, dict) else "EXECUTION_LEDGER_FAILED"
+            return {
+                "status": claim_status,
+                "executed": False,
+                "duplicate": claim_status == "DUPLICATE_REQUEST",
+                "request_id": request_id,
+                "trace_id": claim.get("trace_id", trace_context.trace_id) if isinstance(claim, dict) else trace_context.trace_id,
+                "previous_status": claim.get("existing_status") if isinstance(claim, dict) else None,
+                "previous_result": claim.get("result_status") if isinstance(claim, dict) else None,
+                "provider": claim.get("provider_id") if isinstance(claim, dict) else None,
+                "safe_to_retry": False,
+            }
+
         route = self.route_request(
             category=category,
             project_id=project_id,
@@ -309,14 +416,40 @@ class ProviderService:
             **route_options,
         )
         if not isinstance(route, dict) or route.get("allowed") is not True:
+            finished = self._ledger_finish(
+                request_id=request_id, status="REJECTED", result_status="ROUTING_REJECTED"
+            )
+            if not isinstance(finished, dict) or finished.get("saved") is not True:
+                return {"status": "EXECUTION_LEDGER_FINISH_FAILED", "executed": False, "route": route, **trace_fields}
             return {"status": "ROUTING_REJECTED", "executed": False, "route": route, **trace_fields}
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
+            self._ledger_finish(
+                request_id=request_id, status="REJECTED", result_status="INVALID_ROUTE_PROVIDER"
+            )
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route, **trace_fields}
+
+        started_claim = self._ledger_mark_started(
+            request_id=request_id, provider_id=provider_id
+        )
+        if not isinstance(started_claim, dict) or started_claim.get("saved") is not True:
+            released = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            return {
+                "status": "EXECUTION_LEDGER_START_FAILED",
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                **trace_fields,
+                "release": released,
+                "safe_to_retry": False,
+            }
 
         options = dict(adapter_options or {})
         options["provider_id"] = provider_id
         options["request_id"] = request_id
+        options["idempotency_key"] = request_id
         options["trace_id"] = trace_context.trace_id
         options["traceparent"] = trace_context.traceparent
         options["trace_headers"] = trace_context.headers
@@ -325,7 +458,11 @@ class ProviderService:
             adapter_result = adapter(**options)
         except Exception as exc:
             # The adapter may have transmitted the request before failing. Do not
-            # release cost, quota, or credit reservations on this ambiguous outcome.
+            # release reservations, and persist an ambiguous terminal state to block replay.
+            self._ledger_finish(
+                request_id=request_id, status="UNKNOWN",
+                result_status="EXECUTION_OUTCOME_UNKNOWN", provider_id=provider_id,
+            )
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
@@ -333,9 +470,14 @@ class ProviderService:
                 "request_id": request_id,
                 **trace_fields,
                 "reservations_retained": True,
+                "safe_to_retry": False,
                 "error_type": type(exc).__name__,
             }
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
+            self._ledger_finish(
+                request_id=request_id, status="UNKNOWN",
+                result_status="EXECUTION_OUTCOME_UNKNOWN", provider_id=provider_id,
+            )
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
@@ -343,6 +485,7 @@ class ProviderService:
                 "request_id": request_id,
                 **trace_fields,
                 "reservations_retained": True,
+                "safe_to_retry": False,
             }
         if adapter_result["started"] is False:
             if (
@@ -358,6 +501,10 @@ class ProviderService:
                     and adapter_result.get("actual_credit_amount") > 0
                 )
             ):
+                self._ledger_finish(
+                    request_id=request_id, status="UNKNOWN",
+                    result_status="INCONSISTENT_START_RESULT", provider_id=provider_id,
+                )
                 return {
                     "status": "INCONSISTENT_START_RESULT",
                     "executed": False,
@@ -365,17 +512,26 @@ class ProviderService:
                     "request_id": request_id,
                     **trace_fields,
                     "reservations_retained": True,
+                    "safe_to_retry": False,
                 }
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id
             )
+            unstarted_status = "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED"
+            finished = self._ledger_finish(
+                request_id=request_id, status="NOT_STARTED",
+                result_status=unstarted_status, provider_id=provider_id,
+            )
+            if not isinstance(finished, dict) or finished.get("saved") is not True:
+                unstarted_status = "EXECUTION_LEDGER_FINISH_FAILED"
             return {
-                "status": "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED",
+                "status": unstarted_status,
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
                 **trace_fields,
                 "release": released,
+                "safe_to_retry": False,
             }
 
         accounting_required = False
@@ -463,6 +619,31 @@ class ProviderService:
             status = "EXECUTION_SUCCEEDED"
         else:
             status = "EXECUTION_FINALIZATION_PARTIAL"
+        ledger_state = (
+            "COMPLETED" if status == "EXECUTION_SUCCEEDED"
+            else "FAILED" if status in {"OUTPUT_VALIDATION_FAILED", "EXECUTION_FAILED"}
+            else "FINALIZATION_PARTIAL"
+        )
+        ledger_finish = self._ledger_finish(
+            request_id=request_id,
+            status=ledger_state,
+            result_status=status,
+            provider_id=provider_id,
+        )
+        if not isinstance(ledger_finish, dict) or ledger_finish.get("saved") is not True:
+            return {
+                "status": "EXECUTION_LEDGER_FINALIZATION_FAILED",
+                "original_status": status,
+                "executed": True,
+                "provider": provider_id,
+                "request_id": request_id,
+                **trace_fields,
+                "billing_mode": route.get("billing_mode"),
+                "output": output_validation,
+                "finalization": finalization,
+                "retry_decision": retry,
+                "safe_to_retry": False,
+            }
         return {
             "status": status,
             "executed": True,
@@ -473,6 +654,7 @@ class ProviderService:
             "output": output_validation,
             "finalization": finalization,
             "retry_decision": retry,
+            "idempotency_status": "RECORDED",
         }
 
     def retry_decision(self, **failure: Any) -> dict[str, Any]:
