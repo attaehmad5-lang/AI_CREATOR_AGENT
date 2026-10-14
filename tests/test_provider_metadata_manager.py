@@ -377,6 +377,11 @@ class ProviderMetadataManagerTests(unittest.TestCase):
             "metadata_auth_scheme": "",
         }
         self.assertTrue(self.manager.register_provider(provider)["saved"])
+        raw_catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            next(item for item in raw_catalog["providers"] if item["id"] == "metadata_image")["status"],
+            "READY",
+        )
         secret = "private-elevenlabs-token"
         manager = ProviderMetadataManager(
             self.manager, clock=lambda: self.now[0],
@@ -464,6 +469,23 @@ class ProviderMetadataManagerTests(unittest.TestCase):
         result = ConnectionManager.validate_catalog_schema(catalog)
         self.assertFalse(result["valid"])
         self.assertTrue(any("unsupported fields" in error for error in result["errors"]))
+
+    def test_builtin_metadata_sources_are_allowlisted_and_use_secret_references_only(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        catalog = json.loads((repo_root / "projects" / "provider_store" / "provider_catalog.json").read_text(encoding="utf-8"))
+        providers = catalog["providers"]
+        configured = [provider for provider in providers if "metadata_endpoint" in provider]
+        self.assertGreaterEqual(len(configured), 4)
+        for provider in configured:
+            with self.subTest(provider=provider["id"]):
+                endpoint = provider["metadata_endpoint"]
+                host = endpoint.split("/")[2].casefold()
+                self.assertIn(host, {value.casefold() for value in provider["allowed_hosts"]})
+                self.assertNotIn("?", endpoint)
+                self.assertNotIn("#", endpoint)
+                if "metadata_auth_env" in provider:
+                    self.assertRegex(provider["metadata_auth_env"], r"^[A-Z][A-Z0-9_]{0,79}$")
+                    self.assertNotIn("metadata_auth_value", provider)
 
     def test_constructor_rejects_invalid_size_limits(self):
         for kwargs in (
