@@ -65,6 +65,12 @@ class UnifiedProviderRegistry:
                 "adapter_registered": False,
                 "adapter_status": "NOT_REQUESTED",
             }
+        if provider_id in self.runtime.registered_ids() and not overwrite:
+            return {
+                **registration,
+                "adapter_registered": True,
+                "adapter_status": "FACTORY_ALREADY_REGISTERED",
+            }
         factory_result = self.runtime.register_factory(
             provider_id, adapter_factory, replace=overwrite
         )
