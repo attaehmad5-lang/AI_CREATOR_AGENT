@@ -2,6 +2,7 @@ import json
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
@@ -52,6 +53,37 @@ class ConnectionManagerTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def _prepare_metadata_provider(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        provider = next(item for item in catalog["providers"] if item["id"] == "public_image")
+        provider.update({
+            "name": "Public Image",
+            "connection_type": "API",
+            "allowed_hosts": ["api.example.com"],
+            "official_api_url": "https://api.example.com/docs",
+            "capabilities": ["image_generation"],
+            "subscription_required": False,
+        })
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        self.manager = ConnectionManager(self.catalog_path, self.state_path)
+        return provider
+
+    @staticmethod
+    def _valid_metadata_response(**overrides):
+        response = {
+            "source_url": "https://api.example.com/v1/metadata",
+            "provider_version": "2026.10",
+            "capabilities": ["image_generation", "image_editing"],
+            "supported_models": [{"id": "model-v1", "versions": ["1.0", "1.1"]}],
+            "pricing": [{
+                "model_id": "model-v1", "currency": "USD",
+                "unit": "per_image", "amount": 0.025,
+            }],
+            "description": "Official provider metadata",
+        }
+        response.update(overrides)
+        return response
 
     def test_concurrent_connection_state_updates_across_processes_preserve_records(self):
         catalog_path = self.root / "process_state_catalog.json"
@@ -769,6 +801,96 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(nested_result["status"], "SENSITIVE_METADATA_REJECTED")
         self.assertFalse(self.manager.provider_exists("unsafe_nested"))
 
+    def test_register_provider_rejects_non_boolean_overwrite_flag(self):
+        provider = {
+            "id": "new_provider", "name": "New Provider", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        result = self.manager.register_provider(provider, overwrite="false")
+        self.assertEqual(result["status"], "INVALID_OVERWRITE_FLAG")
+        self.assertFalse(result["saved"])
+        self.assertFalse(self.manager.provider_exists("new_provider"))
+
+    def test_register_provider_rejects_ids_longer_than_catalog_limit(self):
+        provider = {
+            "id": "p" * 101, "name": "Too Long", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "INVALID_PROVIDER")
+        self.assertFalse(result["saved"])
+
+    def test_register_provider_validates_capabilities_before_persisting(self):
+        provider = {
+            "id": "invalid_capability", "name": "Invalid Capability", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+            "capabilities": ["Not A Safe Capability"],
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+        self.assertFalse(result["saved"])
+        self.assertFalse(self.manager.provider_exists("invalid_capability"))
+        persisted = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        self.assertNotIn("invalid_capability", {item["id"] for item in persisted["providers"]})
+
+    def test_register_provider_deep_copies_nested_metadata(self):
+        provider = {
+            "id": "metadata_provider", "name": "Metadata Provider", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+            "metadata": {"labels": ["trusted"]},
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "REGISTERED")
+        provider["metadata"]["labels"].append("mutated-after-registration")
+        self.assertEqual(
+            self.manager.get_provider("metadata_provider")["metadata"]["labels"],
+            ["trusted"],
+        )
+        persisted = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        saved = next(item for item in persisted["providers"] if item["id"] == "metadata_provider")
+        self.assertEqual(saved["metadata"]["labels"], ["trusted"])
+
+    def test_register_provider_rejects_invalid_v3_catalog_candidate_without_mutation(self):
+        catalog_path = self.root / "strict_catalog.json"
+        state_path = self.root / "strict_state.json"
+        catalog_path.write_text(json.dumps({
+            "version": "3.0",
+            "providers": [{
+                "id": "local_base", "name": "Local Base", "category": "image",
+                "auth_type": "NONE", "connection_type": "LOCAL",
+                "enabled": False, "subscription_required": False,
+            }],
+        }), encoding="utf-8")
+        state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        manager = ConnectionManager(catalog_path, state_path)
+        before = catalog_path.read_text(encoding="utf-8")
+        result = manager.register_provider({
+            "id": "incomplete_api", "name": "Incomplete API", "category": "image",
+            "auth_type": "API_KEY", "connection_type": "API",
+            "enabled": True, "subscription_required": False,
+        })
+        self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+        self.assertFalse(result["saved"])
+        self.assertTrue(result["errors"])
+        self.assertEqual(catalog_path.read_text(encoding="utf-8"), before)
+        self.assertIsNone(manager.get_provider("incomplete_api"))
+
+    def test_register_provider_overwrite_keeps_old_record_if_candidate_invalid(self):
+        provider = {
+            "id": "token_image", "name": "Updated Name", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API",
+            "capabilities": ["Invalid Capability"],
+        }
+        before = self.manager.get_provider("token_image")
+        before_disk = self.catalog_path.read_bytes()
+        result = self.manager.register_provider(provider, overwrite=True)
+        self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.manager.get_provider("token_image"), before)
+        self.assertEqual(self.catalog_path.read_bytes(), before_disk)
+        reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertEqual(reloaded.get_provider("token_image"), before)
+
     def test_register_provider_rejects_invalid_id(self):
         provider = {
             "id": "../unsafe", "name": "Unsafe", "category": "image",
@@ -1028,6 +1150,241 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(metadata["catalog_status"], "CONNECTED")
         self.assertNotIn("status", metadata)
         self.assertNotEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
+
+    def test_refresh_provider_metadata_updates_version_capabilities_models_and_pricing(self):
+        self._prepare_metadata_provider()
+        result = self.manager.refresh_provider_metadata(
+            "public_image", lambda provider: self._valid_metadata_response()
+        )
+        self.assertEqual(result["status"], "METADATA_REFRESHED")
+        self.assertTrue(result["saved"])
+        metadata = self.manager.get_provider_metadata("public_image")
+        self.assertEqual(metadata["provider_version"], "2026.10")
+        self.assertEqual(metadata["capabilities"], ["image_generation", "image_editing"])
+        self.assertEqual(metadata["supported_models"][0]["versions"], ["1.0", "1.1"])
+        self.assertEqual(metadata["pricing"][0]["amount"], 0.025)
+        self.assertEqual(metadata["pricing"][0]["source_url"], "https://api.example.com/v1/metadata")
+        self.assertEqual(metadata["pricing"][0]["observed_at"], metadata["metadata_observed_at"])
+        self.assertEqual(metadata["metadata_source"], "https://api.example.com/v1/metadata")
+        self.assertTrue(metadata["metadata_observed_at"])
+
+    def test_refresh_provider_metadata_probe_failure_does_not_mutate_catalog(self):
+        self._prepare_metadata_provider()
+        before = self.catalog_path.read_bytes()
+        result = self.manager.refresh_provider_metadata(
+            "public_image", lambda _: (_ for _ in ()).throw(TimeoutError("private detail"))
+        )
+        self.assertEqual(result["status"], "METADATA_PROBE_FAILED")
+        self.assertEqual(result["error_type"], "TimeoutError")
+        self.assertNotIn("private detail", repr(result))
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_refresh_provider_metadata_rejects_non_mapping_response(self):
+        self._prepare_metadata_provider()
+        result = self.manager.refresh_provider_metadata("public_image", lambda _: ["bad"])
+        self.assertEqual(result["status"], "INVALID_METADATA_RESPONSE")
+        self.assertFalse(result["saved"])
+
+    def test_refresh_provider_metadata_requires_a_source_url(self):
+        self._prepare_metadata_provider()
+        response = self._valid_metadata_response()
+        response.pop("source_url")
+        result = self.manager.refresh_provider_metadata("public_image", lambda _: response)
+        self.assertEqual(result["status"], "METADATA_SOURCE_REQUIRED")
+        self.assertFalse(result["saved"])
+
+    def test_refresh_provider_metadata_rejects_http_or_unallowlisted_source(self):
+        self._prepare_metadata_provider()
+        for source in ("http://api.example.com/metadata", "https://evil.example.com/metadata"):
+            with self.subTest(source=source):
+                response = self._valid_metadata_response(source_url=source)
+                before = self.catalog_path.read_bytes()
+                result = self.manager.refresh_provider_metadata("public_image", lambda _, r=response: r)
+                self.assertEqual(result["status"], "INVALID_METADATA_SOURCE")
+                self.assertFalse(result["saved"])
+                self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_refresh_provider_metadata_rejects_embedded_source_credentials(self):
+        self._prepare_metadata_provider()
+        result = self.manager.refresh_provider_metadata(
+            "public_image",
+            lambda _: self._valid_metadata_response(source_url="https://user:password@api.example.com/metadata"),
+        )
+        self.assertEqual(result["status"], "INVALID_METADATA_SOURCE")
+        self.assertFalse(result["saved"])
+
+    def test_refresh_provider_metadata_rejects_secret_bearing_payload(self):
+        self._prepare_metadata_provider()
+        response = self._valid_metadata_response()
+        response["access_token"] = "must-not-persist"
+        before = self.catalog_path.read_bytes()
+        result = self.manager.refresh_provider_metadata("public_image", lambda _: response)
+        self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertNotIn("must-not-persist", repr(result))
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_catalog_schema_requires_pricing_provenance_and_allowlisted_source(self):
+        provider = {
+            "id": "priced_provider", "name": "Priced Provider", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+            "enabled": False, "subscription_required": False,
+            "allowed_hosts": ["api.example.com"],
+            "pricing": [{"currency": "USD", "unit": "per_image", "amount": 0.1}],
+        }
+        missing_provenance = ConnectionManager.validate_catalog_schema({
+            "version": "3.0", "providers": [provider],
+        })
+        self.assertFalse(missing_provenance["valid"])
+        self.assertTrue(any("source_url is required" in error for error in missing_provenance["errors"]))
+        self.assertTrue(any("observed_at is required" in error for error in missing_provenance["errors"]))
+
+        provider["pricing"] = [{
+            "currency": "USD", "unit": "per_image", "amount": 0.1,
+            "source_url": "https://evil.example.com/pricing",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        }]
+        off_host = ConnectionManager.validate_catalog_schema({
+            "version": "3.0", "providers": [provider],
+        })
+        self.assertFalse(off_host["valid"])
+        self.assertTrue(any("host is not allowlisted" in error for error in off_host["errors"]))
+
+    def test_refresh_provider_metadata_rejects_secret_nested_in_pricing(self):
+        self._prepare_metadata_provider()
+        response = self._valid_metadata_response(pricing=[{
+            "currency": "USD", "unit": "per_image", "amount": 0.1,
+            "raw_token": "never-persist-this",
+        }])
+        before = self.catalog_path.read_bytes()
+        result = self.manager.refresh_provider_metadata("public_image", lambda _: response)
+        self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertNotIn("never-persist-this", repr(result))
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_refresh_provider_metadata_rejects_fields_outside_metadata_allowlist(self):
+        self._prepare_metadata_provider()
+        response = self._valid_metadata_response(enabled=False)
+        result = self.manager.refresh_provider_metadata("public_image", lambda _: response)
+        self.assertEqual(result["status"], "UNSUPPORTED_METADATA_FIELDS")
+        self.assertEqual(result["fields"], ["enabled"])
+        self.assertTrue(self.manager.is_provider_enabled("public_image"))
+
+    def test_refresh_provider_metadata_rejects_invalid_capabilities_without_partial_write(self):
+        self._prepare_metadata_provider()
+        response = self._valid_metadata_response(capabilities=["Image Generation"])
+        before = self.catalog_path.read_bytes()
+        result = self.manager.refresh_provider_metadata("public_image", lambda _: response)
+        self.assertEqual(result["status"], "INVALID_PROVIDER_METADATA")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_refresh_provider_metadata_rejects_invalid_model_versions(self):
+        self._prepare_metadata_provider()
+        response = self._valid_metadata_response(
+            supported_models=[{"id": "model-v1", "versions": ["1.0", "1.0"]}]
+        )
+        result = self.manager.refresh_provider_metadata("public_image", lambda _: response)
+        self.assertEqual(result["status"], "INVALID_PROVIDER_METADATA")
+        self.assertFalse(result["saved"])
+
+    def test_refresh_provider_metadata_rejects_invalid_pricing_values(self):
+        self._prepare_metadata_provider()
+        invalid_prices = [
+            {"currency": "usd", "unit": "per_image", "amount": 0.1},
+            {"currency": "USD", "unit": "free_text", "amount": 0.1},
+            {"currency": "USD", "unit": "per_image", "amount": -1},
+            {"currency": "USD", "unit": "per_image", "amount": True},
+        ]
+        for price in invalid_prices:
+            with self.subTest(price=price):
+                response = self._valid_metadata_response(pricing=[price])
+                before = self.catalog_path.read_bytes()
+                result = self.manager.refresh_provider_metadata("public_image", lambda _, r=response: r)
+                self.assertEqual(result["status"], "INVALID_PROVIDER_METADATA")
+                self.assertFalse(result["saved"])
+                self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_refresh_provider_metadata_rejects_pricing_source_outside_allowlist(self):
+        self._prepare_metadata_provider()
+        response = self._valid_metadata_response(pricing=[{
+            "currency": "USD", "unit": "per_image", "amount": 0.1,
+            "source_url": "https://evil.example.com/pricing",
+        }])
+        result = self.manager.refresh_provider_metadata("public_image", lambda _: response)
+        self.assertEqual(result["status"], "INVALID_PRICING_SOURCE")
+        self.assertFalse(result["saved"])
+
+    def test_refresh_provider_metadata_rejects_invalid_or_future_timestamps(self):
+        self._prepare_metadata_provider()
+        invalid_times = [
+            "not-a-timestamp",
+            datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        ]
+        for observed_at in invalid_times:
+            with self.subTest(observed_at=observed_at):
+                result = self.manager.refresh_provider_metadata(
+                    "public_image",
+                    lambda _, timestamp=observed_at: self._valid_metadata_response(observed_at=timestamp),
+                )
+                self.assertEqual(result["status"], "INVALID_METADATA_TIMESTAMP")
+                self.assertFalse(result["saved"])
+
+    def test_refresh_provider_metadata_rejects_stale_snapshots(self):
+        self._prepare_metadata_provider()
+        older = datetime.now(timezone.utc) - timedelta(minutes=5)
+        first = self._valid_metadata_response(observed_at=older.isoformat())
+        self.assertEqual(
+            self.manager.refresh_provider_metadata("public_image", lambda _: first)["status"],
+            "METADATA_REFRESHED",
+        )
+        before = self.catalog_path.read_bytes()
+        stale = self._valid_metadata_response(
+            observed_at=(older - timedelta(minutes=1)).isoformat(),
+            provider_version="older-version",
+        )
+        result = self.manager.refresh_provider_metadata("public_image", lambda _: stale)
+        self.assertEqual(result["status"], "METADATA_SNAPSHOT_NOT_NEWER")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_refresh_provider_metadata_uses_latest_host_policy_after_probe(self):
+        self._prepare_metadata_provider()
+        response = self._valid_metadata_response()
+        def change_policy_during_probe(_):
+            current = self.manager.get_provider("public_image")
+            current["allowed_hosts"] = ["new-api.example.com"]
+            current["official_api_url"] = "https://new-api.example.com/docs"
+            result = self.manager.register_provider(current, overwrite=True)
+            self.assertTrue(result["saved"])
+            return response
+        result = self.manager.refresh_provider_metadata("public_image", change_policy_during_probe)
+        self.assertEqual(result["status"], "METADATA_SOURCE_POLICY_CHANGED")
+        self.assertFalse(result["saved"])
+
+    def test_refresh_provider_metadata_does_not_mutate_probe_input(self):
+        provider = self._prepare_metadata_provider()
+        original_name = provider["name"]
+        def probe(metadata):
+            metadata["name"] = "caller-side mutation"
+            return self._valid_metadata_response(provider_version="v2")
+        result = self.manager.refresh_provider_metadata("public_image", probe)
+        self.assertEqual(result["status"], "METADATA_REFRESHED")
+        self.assertEqual(self.manager.get_provider("public_image")["name"], original_name)
+
+    def test_refresh_provider_metadata_accepts_official_docs_host_alongside_api_allowlist(self):
+        self._prepare_metadata_provider()
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        provider = next(item for item in catalog["providers"] if item["id"] == "public_image")
+        provider["official_api_url"] = "https://docs.example.com/provider"
+        provider["allowed_hosts"] = ["api.example.com"]
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        self.manager = ConnectionManager(self.catalog_path, self.state_path)
+        result = self.manager.refresh_provider_metadata(
+            "public_image",
+            lambda _: self._valid_metadata_response(source_url="https://docs.example.com/metadata"),
+        )
+        self.assertEqual(result["status"], "METADATA_REFRESHED")
 
     def test_metadata_returns_none_for_unknown_provider(self):
         self.assertIsNone(self.manager.get_provider_metadata("not_registered"))

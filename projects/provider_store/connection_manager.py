@@ -5,6 +5,7 @@ unless a separate provider-specific probe has actually succeeded.
 """
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -12,7 +13,7 @@ import re
 import tempfile
 import threading
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -273,6 +274,14 @@ class ConnectionManager:
                     for key in ("name", "category", "auth_type", "connection_type"):
                         if key in provider and not isinstance(provider[key], str):
                             errors.append(f"providers[{index}].{key} must be a string")
+                    if "name" in provider and (
+                        not isinstance(provider["name"], str)
+                        or not provider["name"].strip()
+                        or len(provider["name"]) > 200
+                        or any(ord(char) < 32 and char not in "\t\n\r" for char in provider["name"])
+                        or any(ord(char) == 127 for char in provider["name"])
+                    ):
+                        errors.append(f"providers[{index}].name must be safe non-empty text of at most 200 characters")
                     auth_types = {
                         "NONE", "API_KEY", "API_TOKEN", "ACCOUNT", "MANUAL",
                         "MANUAL_CONNECT", "OAUTH_BROWSER", "ACCOUNT_OR_API", "ACCOUNT_OR_LOCAL",
@@ -490,6 +499,146 @@ class ConnectionManager:
                                         or len({version.casefold() for version in versions if isinstance(version, str)}) != len(versions)
                                     ):
                                         errors.append(f"{prefix}.versions must contain unique safe version identifiers")
+                    if "provider_version" in provider and (
+                        not isinstance(provider["provider_version"], str)
+                        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}", provider["provider_version"])
+                    ):
+                        errors.append(f"providers[{index}].provider_version must be a safe version identifier")
+                    if "description" in provider and (
+                        not isinstance(provider["description"], str)
+                        or len(provider["description"]) > 4000
+                        or any(ord(char) < 32 and char not in "\t\n\r" for char in provider["description"])
+                        or any(ord(char) == 127 for char in provider["description"])
+                    ):
+                        errors.append(f"providers[{index}].description must be safe text of at most 4000 characters")
+                    if "metadata_source" in provider:
+                        raw_source = provider["metadata_source"]
+                        try:
+                            parsed_source = urlsplit(raw_source) if isinstance(raw_source, str) else None
+                            _ = parsed_source.port if parsed_source is not None else None
+                        except ValueError:
+                            parsed_source = None
+                        if (
+                            not isinstance(raw_source, str) or not raw_source.strip()
+                            or len(raw_source) > 2048
+                            or parsed_source is None or parsed_source.scheme != "https"
+                            or not parsed_source.hostname
+                            or parsed_source.username is not None or parsed_source.password is not None
+                            or parsed_source.query or parsed_source.fragment
+                            or any(ord(char) < 32 or ord(char) == 127 for char in raw_source)
+                        ):
+                            errors.append(f"providers[{index}].metadata_source must be a safe HTTPS URL")
+                        elif parsed_source.hostname:
+                            raw_source_hosts = provider.get("allowed_hosts")
+                            source_hosts = {
+                                host.casefold().rstrip(".")
+                                for host in raw_source_hosts
+                                if isinstance(host, str)
+                            } if isinstance(raw_source_hosts, list) else set()
+                            official_url = provider.get("official_api_url")
+                            try:
+                                official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
+                            except ValueError:
+                                official_host = None
+                            if official_host:
+                                source_hosts.add(official_host.casefold().rstrip("."))
+                            if parsed_source.hostname.casefold().rstrip(".") not in source_hosts:
+                                errors.append(f"providers[{index}].metadata_source host is not allowlisted")
+                    if "metadata_observed_at" in provider:
+                        raw_observed_at = provider["metadata_observed_at"]
+                        try:
+                            parsed_observed_at = datetime.fromisoformat(
+                                raw_observed_at.replace("Z", "+00:00")
+                            ) if isinstance(raw_observed_at, str) else None
+                        except ValueError:
+                            parsed_observed_at = None
+                        if (
+                            parsed_observed_at is None
+                            or parsed_observed_at.tzinfo is None
+                            or parsed_observed_at.utcoffset() is None
+                        ):
+                            errors.append(f"providers[{index}].metadata_observed_at must be a timezone-aware ISO timestamp")
+                    if ("metadata_source" in provider) != ("metadata_observed_at" in provider):
+                        errors.append(f"providers[{index}] metadata_source and metadata_observed_at must be provided together")
+                    if "pricing" in provider:
+                        pricing = provider["pricing"]
+                        valid_units = {
+                            "per_image", "per_video_second", "per_audio_second", "per_second",
+                            "per_minute", "per_1k_tokens", "per_1k_characters", "per_request",
+                        }
+                        if not isinstance(pricing, list) or len(pricing) > 100:
+                            errors.append(f"providers[{index}].pricing must be a list of at most 100 entries")
+                        else:
+                            for price_index, price in enumerate(pricing):
+                                prefix = f"providers[{index}].pricing[{price_index}]"
+                                if not isinstance(price, dict):
+                                    errors.append(f"{prefix} must be an object")
+                                    continue
+                                if set(price) - {"model_id", "currency", "unit", "amount", "source_url", "observed_at"}:
+                                    errors.append(f"{prefix} contains unsupported pricing fields")
+                                currency = price.get("currency")
+                                if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
+                                    errors.append(f"{prefix}.currency must be a three-letter uppercase currency code")
+                                unit = price.get("unit")
+                                if not isinstance(unit, str) or unit not in valid_units:
+                                    errors.append(f"{prefix}.unit is unsupported")
+                                if finite_number(price.get("amount"), minimum=0) is None:
+                                    errors.append(f"{prefix}.amount must be a finite non-negative number")
+                                if "model_id" in price and (
+                                    not isinstance(price["model_id"], str)
+                                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}", price["model_id"])
+                                ):
+                                    errors.append(f"{prefix}.model_id must be a safe model identifier")
+                                if "source_url" not in price:
+                                    errors.append(f"{prefix}.source_url is required for pricing provenance")
+                                else:
+                                    raw_price_source = price["source_url"]
+                                    try:
+                                        parsed_price_source = urlsplit(raw_price_source) if isinstance(raw_price_source, str) else None
+                                        _ = parsed_price_source.port if parsed_price_source is not None else None
+                                    except ValueError:
+                                        parsed_price_source = None
+                                    if (
+                                        not isinstance(raw_price_source, str) or not raw_price_source.strip()
+                                        or len(raw_price_source) > 2048 or parsed_price_source is None
+                                        or parsed_price_source.scheme != "https" or not parsed_price_source.hostname
+                                        or parsed_price_source.username is not None or parsed_price_source.password is not None
+                                        or parsed_price_source.query or parsed_price_source.fragment
+                                        or any(ord(char) < 32 or ord(char) == 127 for char in raw_price_source)
+                                    ):
+                                        errors.append(f"{prefix}.source_url must be a safe HTTPS URL")
+                                    elif parsed_price_source.hostname:
+                                        raw_price_hosts = provider.get("allowed_hosts")
+                                        price_hosts = {
+                                            host.casefold().rstrip(".")
+                                            for host in raw_price_hosts
+                                            if isinstance(host, str)
+                                        } if isinstance(raw_price_hosts, list) else set()
+                                        official_url = provider.get("official_api_url")
+                                        try:
+                                            official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
+                                        except ValueError:
+                                            official_host = None
+                                        if official_host:
+                                            price_hosts.add(official_host.casefold().rstrip("."))
+                                        if parsed_price_source.hostname.casefold().rstrip(".") not in price_hosts:
+                                            errors.append(f"{prefix}.source_url host is not allowlisted")
+                                if "observed_at" not in price:
+                                    errors.append(f"{prefix}.observed_at is required for pricing provenance")
+                                else:
+                                    raw_price_time = price["observed_at"]
+                                    try:
+                                        parsed_price_time = datetime.fromisoformat(
+                                            raw_price_time.replace("Z", "+00:00")
+                                        ) if isinstance(raw_price_time, str) else None
+                                    except ValueError:
+                                        parsed_price_time = None
+                                    if (
+                                        parsed_price_time is None or parsed_price_time.tzinfo is None
+                                        or parsed_price_time.utcoffset() is None
+                                        or parsed_price_time > datetime.now(timezone.utc) + timedelta(minutes=5)
+                                    ):
+                                        errors.append(f"{prefix}.observed_at must be a valid timezone-aware ISO timestamp")
                     if ConnectionManager._contains_credential_value_field(provider):
                         errors.append(f"providers[{index}] contains a forbidden credential value field")
         result = {"valid": not errors, "errors": errors, "provider_count": len(catalog.get("providers", [])) if isinstance(catalog, dict) and isinstance(catalog.get("providers"), list) else 0}
@@ -541,6 +690,180 @@ class ConnectionManager:
                 continue
             safe[key] = value
         return safe
+
+    def refresh_provider_metadata(self, provider_id: str, probe: Any) -> dict[str, Any]:
+        """Refresh approved capability/model/version/pricing metadata from a trusted probe.
+
+        The probe must return a mapping with a source_url and at least one approved
+        metadata field. The source URL must be HTTPS and match the provider's
+        explicit host allowlist (or the official API documentation host). Runtime
+        credentials, enablement, auth configuration, endpoints, and connection
+        state cannot be changed by this operation.
+        """
+        from urllib.parse import urlsplit
+
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER_ID", "provider": provider_id, "saved": False}
+        if not callable(probe):
+            return {"status": "INVALID_METADATA_PROBE", "provider": provider_id, "saved": False}
+        initial = self.get_provider(provider_id)
+        if initial is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+        started_at = datetime.now(timezone.utc)
+        try:
+            response = probe(copy.deepcopy(initial))
+        except Exception as exc:
+            return {
+                "status": "METADATA_PROBE_FAILED",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(response, dict):
+            return {"status": "INVALID_METADATA_RESPONSE", "provider": provider_id, "saved": False}
+        if self._contains_credential_value_field(response):
+            return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id, "saved": False}
+        allowed_fields = {
+            "name", "description", "provider_version", "capabilities",
+            "supported_models", "pricing",
+        }
+        allowed_response_fields = allowed_fields | {"source_url", "observed_at"}
+        unsupported = sorted(set(response) - allowed_response_fields)
+        if unsupported:
+            return {
+                "status": "UNSUPPORTED_METADATA_FIELDS",
+                "provider": provider_id,
+                "saved": False,
+                "fields": unsupported,
+            }
+        updated_fields = sorted(set(response) & allowed_fields)
+        if not updated_fields:
+            return {"status": "EMPTY_METADATA_RESPONSE", "provider": provider_id, "saved": False}
+        source_url = response.get("source_url")
+        if not isinstance(source_url, str) or not source_url.strip():
+            return {"status": "METADATA_SOURCE_REQUIRED", "provider": provider_id, "saved": False}
+        try:
+            parsed_source = urlsplit(source_url)
+            _ = parsed_source.port
+        except ValueError:
+            return {"status": "INVALID_METADATA_SOURCE", "provider": provider_id, "saved": False}
+        allowed_hosts = initial.get("allowed_hosts")
+        allowed_hosts = list(allowed_hosts) if isinstance(allowed_hosts, list) else []
+        official_url = initial.get("official_api_url")
+        try:
+            official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
+        except ValueError:
+            official_host = None
+        if official_host and official_host.casefold() not in {host.casefold() for host in allowed_hosts if isinstance(host, str)}:
+            allowed_hosts.append(official_host)
+        source_validation = self.validate_endpoint(
+            source_url,
+            allowed_hosts=set(allowed_hosts),
+        )
+        if not source_validation.get("valid"):
+            return {
+                "status": "INVALID_METADATA_SOURCE",
+                "provider": provider_id,
+                "saved": False,
+                "reason": source_validation.get("status", "SOURCE_NOT_ALLOWED"),
+            }
+        observed_raw = response.get("observed_at", started_at.isoformat())
+        try:
+            observed_at = datetime.fromisoformat(
+                observed_raw.replace("Z", "+00:00")
+            ) if isinstance(observed_raw, str) else None
+        except ValueError:
+            observed_at = None
+        now = datetime.now(timezone.utc)
+        if (
+            observed_at is None
+            or observed_at.tzinfo is None
+            or observed_at.utcoffset() is None
+            or observed_at > now.replace(microsecond=0) + timedelta(minutes=5)
+        ):
+            return {"status": "INVALID_METADATA_TIMESTAMP", "provider": provider_id, "saved": False}
+        observed_at = observed_at.astimezone(timezone.utc)
+        normalized_time = observed_at.isoformat()
+        metadata = {key: copy.deepcopy(response[key]) for key in updated_fields}
+        if "pricing" in metadata and isinstance(metadata["pricing"], list):
+            for price in metadata["pricing"]:
+                if isinstance(price, dict):
+                    price.setdefault("source_url", source_url)
+                    price.setdefault("observed_at", normalized_time)
+                    price_source = price.get("source_url")
+                    price_source_validation = self.validate_endpoint(
+                        price_source, allowed_hosts=set(allowed_hosts)
+                    ) if isinstance(price_source, str) else {"valid": False}
+                    if not price_source_validation.get("valid"):
+                        return {
+                            "status": "INVALID_PRICING_SOURCE",
+                            "provider": provider_id,
+                            "saved": False,
+                        }
+        # Validate and persist against the latest catalog while holding the same
+        # interprocess transaction as registration/enablement.
+        with self._catalog_transaction():
+            providers = self._list_providers_unlocked()
+            index = next(
+                (i for i, item in enumerate(providers) if item.get("id") == provider_id),
+                None,
+            )
+            if index is None:
+                return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+            current = copy.deepcopy(providers[index])
+            current_hosts = current.get("allowed_hosts")
+            current_hosts = list(current_hosts) if isinstance(current_hosts, list) else []
+            official_url = current.get("official_api_url")
+            try:
+                official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
+            except ValueError:
+                official_host = None
+            if official_host and official_host.casefold() not in {host.casefold() for host in current_hosts if isinstance(host, str)}:
+                current_hosts.append(official_host)
+            current_source_validation = self.validate_endpoint(
+                source_url, allowed_hosts=set(current_hosts)
+            )
+            if not current_source_validation.get("valid"):
+                return {
+                    "status": "METADATA_SOURCE_POLICY_CHANGED",
+                    "provider": provider_id,
+                    "saved": False,
+                }
+            previous_raw = current.get("metadata_observed_at")
+            if previous_raw is not None:
+                try:
+                    previous = datetime.fromisoformat(previous_raw.replace("Z", "+00:00"))
+                except (AttributeError, ValueError):
+                    return {"status": "INVALID_EXISTING_METADATA_TIMESTAMP", "provider": provider_id, "saved": False}
+                if previous.tzinfo is None or previous.utcoffset() is None:
+                    return {"status": "INVALID_EXISTING_METADATA_TIMESTAMP", "provider": provider_id, "saved": False}
+                if observed_at <= previous.astimezone(timezone.utc):
+                    return {"status": "METADATA_SNAPSHOT_NOT_NEWER", "provider": provider_id, "saved": False}
+            current.update(metadata)
+            current["metadata_source"] = source_url
+            current["metadata_observed_at"] = normalized_time
+            updated = [copy.deepcopy(item) for item in providers]
+            updated[index] = current
+            new_catalog = copy.deepcopy(self.catalog)
+            new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation.get("valid"):
+                return {
+                    "status": "INVALID_PROVIDER_METADATA",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
+            self._atomic_write_json(self.catalog_path, new_catalog)
+            self.catalog = new_catalog
+        return {
+            "status": "METADATA_REFRESHED",
+            "provider": provider_id,
+            "saved": True,
+            "source_url": source_url,
+            "observed_at": normalized_time,
+            "updated_fields": updated_fields,
+        }
 
     def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
         """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
@@ -760,34 +1083,50 @@ class ConnectionManager:
     def register_provider(
         self, provider: dict[str, Any], *, overwrite: bool = False
     ) -> dict[str, Any]:
-        """Register validated provider metadata; never accept credentials in catalog data."""
+        """Register metadata only after validating the complete resulting catalog."""
         if not isinstance(provider, dict):
             return {"status": "INVALID_PROVIDER", "reason": "provider must be an object"}
+        if not isinstance(overwrite, bool):
+            return {"status": "INVALID_OVERWRITE_FLAG", "saved": False}
         required = ("id", "name", "category", "auth_type", "connection_type")
         if any(not isinstance(provider.get(key), str) or not provider[key].strip() for key in required):
             return {
                 "status": "INVALID_PROVIDER",
                 "reason": "required non-empty string fields: " + ", ".join(required),
+                "saved": False,
             }
         provider_id = provider["id"].strip()
-        if any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id):
-            return {"status": "INVALID_PROVIDER", "reason": "provider id contains unsupported characters"}
+        if (
+            len(provider_id) > 100
+            or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id)
+        ):
+            return {"status": "INVALID_PROVIDER", "reason": "provider id contains unsupported characters or exceeds 100 characters", "saved": False}
 
-        # Metadata may name an environment variable, but must never contain a secret value.
+        # Catalogs may hold environment-variable references, never secret values.
         if self._contains_credential_value_field(provider):
-            return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id}
+            return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id, "saved": False}
 
         with self._catalog_transaction():
             providers = self._list_providers_unlocked()
             existing = next((item for item in providers if item.get("id") == provider_id), None)
             if existing is not None and not overwrite:
                 return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
-            safe_provider = dict(provider)
+            if existing is not None and provider_id in self._loaded_providers:
+                return {"status": "PROVIDER_ALREADY_LOADED", "provider": provider_id, "saved": False}
+            safe_provider = copy.deepcopy(provider)
             safe_provider["id"] = provider_id
-            updated = [item for item in providers if item.get("id") != provider_id]
+            updated = [copy.deepcopy(item) for item in providers if item.get("id") != provider_id]
             updated.append(safe_provider)
-            new_catalog = dict(self.catalog)
+            new_catalog = copy.deepcopy(self.catalog)
             new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation.get("valid"):
+                return {
+                    "status": "INVALID_PROVIDER_CATALOG",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
             return {
