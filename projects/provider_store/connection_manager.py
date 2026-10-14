@@ -789,6 +789,8 @@ class ConnectionManager:
             existing = next((item for item in providers if item.get("id") == provider_id), None)
             if existing is not None and not overwrite:
                 return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
+            if existing is not None and provider_id in self._loaded_providers:
+                return {"status": "PROVIDER_ALREADY_LOADED", "provider": provider_id, "saved": False}
             safe_provider = copy.deepcopy(provider)
             safe_provider["id"] = provider_id
             updated = [copy.deepcopy(item) for item in providers if item.get("id") != provider_id]
