@@ -81,7 +81,8 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["simulation"]["quota_preview"]["available"])
         self.assertEqual(quota.data["requests"], {})
         self.assertFalse(quota.path.exists())
-        self.assertEqual(cost.ledger["projects"]["film"]["reservations"], {})
+        self.assertEqual(cost.ledger["projects"], {})
+        self.assertFalse(cost.ledger_path.exists())
 
     def test_policy_simulation_rejects_invalid_policy_and_normal_route_rejects_override(self):
         router = ProviderRoutingManager(self.connections)
