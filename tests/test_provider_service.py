@@ -578,6 +578,199 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "INVALID_TRACE_ID")
         self.assertFalse(result["finalized"])
 
+    def test_execution_ledger_prevents_duplicate_adapter_invocation(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
+        )
+        output = self.root / "idempotent-output.txt"
+        output.write_text("idempotent output", encoding="utf-8")
+        calls = []
+        def adapter(**kwargs):
+            calls.append(kwargs)
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": output,
+            }
+
+        first = service.execute_routed_request(
+            category="image", project_id="film", request_id="once-only-73",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=adapter, modality="text",
+            adapter_options={"idempotency_key": "caller-cannot-override"},
+        )
+        second = service.execute_routed_request(
+            category="image", project_id="film", request_id="once-only-73",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=adapter, modality="text",
+        )
+        self.assertEqual(first["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(first["idempotency_status"], "RECORDED")
+        self.assertEqual(second["status"], "DUPLICATE_REQUEST")
+        self.assertFalse(second["executed"])
+        self.assertEqual(second["trace_id"], first["trace_id"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["idempotency_key"], "once-only-73")
+        self.assertEqual(calls[0]["request_id"], "once-only-73")
+
+    def test_request_id_reuse_with_changed_cost_is_rejected_before_adapter(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
+        )
+        output = self.root / "fingerprint-output.txt"
+        output.write_text("fingerprint output", encoding="utf-8")
+        calls = []
+        def adapter(**kwargs):
+            calls.append(kwargs)
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": output,
+            }
+        first = service.execute_routed_request(
+            category="image", project_id="film", request_id="conflicting-request",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=adapter, modality="text",
+        )
+        second = service.execute_routed_request(
+            category="image", project_id="film", request_id="conflicting-request",
+            estimated_cost=2.0, paid_approved_providers={"image"},
+            adapter=adapter, modality="text",
+        )
+        self.assertEqual(first["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(second["status"], "REQUEST_ID_CONFLICT")
+        self.assertEqual(len(calls), 1)
+
+    def test_ambiguous_adapter_exception_is_not_replayed(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        calls = []
+        def adapter(**kwargs):
+            calls.append(kwargs)
+            raise TimeoutError("remote request may have started")
+        first = service.execute_routed_request(
+            category="image", project_id="film", request_id="ambiguous-request",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=adapter, modality="image",
+        )
+        second = service.execute_routed_request(
+            category="image", project_id="film", request_id="ambiguous-request",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=adapter, modality="image",
+        )
+        self.assertEqual(first["status"], "EXECUTION_OUTCOME_UNKNOWN")
+        self.assertEqual(second["status"], "REQUEST_OUTCOME_UNKNOWN")
+        self.assertFalse(second["safe_to_retry"])
+        self.assertEqual(len(calls), 1)
+
+    def test_unstarted_execution_request_is_not_invoked_twice(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        calls = []
+        def adapter(**kwargs):
+            calls.append(kwargs)
+            return {"started": False, "success": False}
+        first = service.execute_routed_request(
+            category="image", project_id="film", request_id="not-started-once",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=adapter, modality="image",
+        )
+        second = service.execute_routed_request(
+            category="image", project_id="film", request_id="not-started-once",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=adapter, modality="image",
+        )
+        self.assertEqual(first["status"], "EXECUTION_NOT_STARTED")
+        self.assertEqual(second["status"], "DUPLICATE_REQUEST")
+        self.assertEqual(len(calls), 1)
+
+    def test_execution_fails_closed_without_durable_ledger(self):
+        class ConnectionWithoutStatePath:
+            def verify_connectivity(self, *args, **kwargs):
+                return {"status": "CONNECTED", "verified": True}
+        service = ProviderService(ConnectionWithoutStatePath())
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="ledger-required",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_LEDGER_UNAVAILABLE")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
+    def test_invalid_request_fingerprint_fails_before_routing(self):
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost, quota_manager=self.quota)
+        service = ProviderService(self.connections, routing_manager=router, cost_policy=self.cost, quota_manager=self.quota)
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="bad-fingerprint",
+            estimated_cost=0.0, model={"unhashable": "input"},
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "INVALID_REQUEST_FINGERPRINT")
+        self.assertEqual(calls, [])
+
+    def test_concurrent_duplicate_execution_calls_adapter_once(self):
+        from threading import Event
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
+        )
+        output = self.root / "concurrent-idempotent.txt"
+        output.write_text("concurrent output", encoding="utf-8")
+        entered = Event()
+        release = Event()
+        calls = []
+        def adapter(**kwargs):
+            calls.append(kwargs)
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("test synchronization timed out")
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": output,
+            }
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first_future = pool.submit(
+                service.execute_routed_request,
+                category="image", project_id="film", request_id="concurrent-same-id",
+                estimated_cost=1.0, paid_approved_providers={"image"},
+                adapter=adapter, modality="text",
+            )
+            self.assertTrue(entered.wait(5))
+            second = service.execute_routed_request(
+                category="image", project_id="film", request_id="concurrent-same-id",
+                estimated_cost=1.0, paid_approved_providers={"image"},
+                adapter=adapter, modality="text",
+            )
+            release.set()
+            first = first_future.result(timeout=10)
+        self.assertEqual(first["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(second["status"], "REQUEST_OUTCOME_UNKNOWN")
+        self.assertEqual(len(calls), 1)
+
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
