@@ -334,7 +334,7 @@ class ProviderService:
         for key in ("paid_approved_providers", "excluded_providers"):
             value = route_options.get(key)
             if isinstance(value, (set, frozenset, list, tuple)):
-                fingerprint_options[key] = sorted(value)
+                fingerprint_options[key] = value
             elif key in route_options:
                 fingerprint_options[key] = value
         try:
