@@ -471,7 +471,7 @@ class ProviderServiceTests(unittest.TestCase):
 
         result = self.service.execute_routed_request(
             category="image", project_id="film", request_id="trace-job-73",
-            traceparent=incoming, estimated_cost=0.0, adapter=adapter, modality="text",
+            traceparent=incoming, estimated_cost=1.0, adapter=adapter, modality="text", paid_approved_providers={"image"},
             adapter_options={
                 "trace_id": "f" * 32,
                 "traceparent": "caller-controlled-invalid",
@@ -504,12 +504,12 @@ class ProviderServiceTests(unittest.TestCase):
         output.write_text("trace output", encoding="utf-8")
         result = self.service.execute_routed_request(
             category="image", project_id="film", request_id="generated-trace-job",
-            estimated_cost=0.0,
+            estimated_cost=1.0,
             adapter=lambda **kwargs: captured.update(kwargs) or {
                 "started": True, "success": True, "actual_cost": 0.0,
                 "charge_outcome": "not_incurred", "output_path": output,
             },
-            modality="text",
+            modality="text", paid_approved_providers={"image"},
         )
         self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
         self.assertRegex(result["trace_id"], r"^[0-9a-f]{32}$")
@@ -528,12 +528,12 @@ class ProviderServiceTests(unittest.TestCase):
         output.write_text("auto request output", encoding="utf-8")
         captured = {}
         result = service.execute_routed_request(
-            category="image", project_id="film", estimated_cost=0.0,
+            category="image", project_id="film", estimated_cost=1.0,
             adapter=lambda **kwargs: captured.update(kwargs) or {
                 "started": True, "success": True, "actual_cost": 0.0,
                 "charge_outcome": "not_incurred", "output_path": output,
             },
-            modality="text",
+            modality="text", paid_approved_providers={"image"},
         )
         self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
         self.assertRegex(result["request_id"], r"^req-[0-9a-f]{32}$")
