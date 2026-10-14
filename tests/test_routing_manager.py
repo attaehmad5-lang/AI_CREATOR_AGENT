@@ -44,6 +44,62 @@ class ProviderRoutingManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_policy_simulation_uses_proposed_policy_without_creating_reservations(self):
+        cost = ProviderCostPolicy(
+            self.root / "simulation-cost.json",
+            project_budgets={"film": 10.0},
+        )
+        quota = ProviderQuotaManager(
+            self.root / "simulation-quota.json",
+            limits={"primary": {"daily": 2}, "fallback": {"daily": 2}},
+        )
+        router = ProviderRoutingManager(
+            self.connections,
+            cost_policy=cost,
+            quota_manager=quota,
+        )
+        result = router.simulate_route(
+            project_policy={
+                "allowed_providers": ["fallback"],
+                "denied_providers": [],
+                "max_estimated_cost": 2.0,
+                "automatic_fallback": False,
+            },
+            category="image",
+            project_id="film",
+            estimated_cost=1.0,
+            request_id="simulation-request-1",
+            paid_approved_providers={"fallback"},
+        )
+        self.assertEqual(result["status"], "SIMULATION_COMPLETED")
+        self.assertTrue(result["allowed"])
+        self.assertFalse(result["policy_saved"])
+        self.assertFalse(result["reservations_created"])
+        self.assertEqual(result["simulation"]["status"], "SIMULATION_ALLOWED")
+        self.assertEqual(result["simulation"]["provider"], "fallback")
+        self.assertFalse(result["simulation"]["automatic_fallback"])
+        self.assertTrue(result["simulation"]["quota_preview"]["available"])
+        self.assertEqual(quota.data["requests"], {})
+        self.assertFalse(quota.path.exists())
+        self.assertEqual(cost.ledger["projects"]["film"]["reservations"], {})
+
+    def test_policy_simulation_rejects_invalid_policy_and_normal_route_rejects_override(self):
+        router = ProviderRoutingManager(self.connections)
+        invalid = router.simulate_route(
+            project_policy={"unknown_setting": True},
+            category="image",
+            project_id="film",
+        )
+        self.assertFalse(invalid["allowed"])
+        self.assertEqual(invalid["simulation"]["status"], "INVALID_SIMULATION_POLICY")
+        normal = router.route(
+            category="image",
+            project_id="film",
+            project_policy_override={"allowed_providers": ["fallback"]},
+        )
+        self.assertFalse(normal["allowed"])
+        self.assertEqual(normal["status"], "POLICY_OVERRIDE_REQUIRES_SIMULATION")
+
     def test_routing_rejects_unverified_provider_even_if_catalog_label_says_connected(self):
         self.connections.set_state("primary", "READY")
         router = ProviderRoutingManager(self.connections)
