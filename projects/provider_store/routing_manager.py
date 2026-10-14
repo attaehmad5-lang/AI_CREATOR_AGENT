@@ -435,8 +435,10 @@ class ProviderRoutingManager:
         elif selected_strategy == "ROUND_ROBIN" and candidates:
             candidates.sort(key=self._priority)
             with self._lock:
-                start = self._round_robin_counters.get(category.strip().casefold(), 0) % len(candidates)
-                self._round_robin_counters[category.strip().casefold()] = start + 1
+                key = category.strip().casefold()
+                start = self._round_robin_counters.get(key, 0) % len(candidates)
+                if not simulate_only:
+                    self._round_robin_counters[key] = start + 1
             candidates = candidates[start:] + candidates[:start]
         else:
             candidates.sort(key=self._priority)
