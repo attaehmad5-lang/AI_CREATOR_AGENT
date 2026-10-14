@@ -502,6 +502,24 @@ class ConnectionManager:
                             or header.casefold() not in safe_auth_headers
                         ):
                             errors.append(f"providers[{index}].auth_header_name is not permitted")
+                    if "metadata_auth_header" in provider and (
+                        not isinstance(provider["metadata_auth_header"], str)
+                        or provider["metadata_auth_header"].casefold() not in {
+                            "authorization", "x-api-key", "api-key", "xi-api-key",
+                            "x-goog-api-key", "cartesia-api-key", "x-auth-token", "x-key",
+                        }
+                    ):
+                        errors.append(f"providers[{index}].metadata_auth_header is not permitted")
+                    if "metadata_auth_scheme" in provider and (
+                        not isinstance(provider["metadata_auth_scheme"], str)
+                        or provider["metadata_auth_scheme"].casefold() not in {"", "bearer", "key", "token"}
+                    ):
+                        errors.append(f"providers[{index}].metadata_auth_scheme is not permitted")
+                    if (
+                        ("metadata_auth_header" in provider or "metadata_auth_scheme" in provider)
+                        and "metadata_auth_env" not in provider
+                    ):
+                        errors.append(f"providers[{index}] metadata auth headers require metadata_auth_env")
                     if "auth_scheme" in provider and (
                         not isinstance(provider["auth_scheme"], str)
                         or provider["auth_scheme"].casefold() not in {"", "bearer", "key", "token", "basic"}
@@ -538,7 +556,7 @@ class ConnectionManager:
                         errors.append(
                             f"providers[{index}] cannot require a subscription and declare zero_cost_allowed"
                         )
-                    for reference_key in ("token_env", "token_expiry_env", "api_key_env", "credential_env"):
+                    for reference_key in ("token_env", "token_expiry_env", "api_key_env", "credential_env", "metadata_auth_env"):
                         if reference_key in provider and (
                             not isinstance(provider[reference_key], str)
                             or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", provider[reference_key])
