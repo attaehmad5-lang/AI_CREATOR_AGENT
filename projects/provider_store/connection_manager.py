@@ -13,7 +13,7 @@ import re
 import tempfile
 import threading
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -274,6 +274,14 @@ class ConnectionManager:
                     for key in ("name", "category", "auth_type", "connection_type"):
                         if key in provider and not isinstance(provider[key], str):
                             errors.append(f"providers[{index}].{key} must be a string")
+                    if "name" in provider and (
+                        not isinstance(provider["name"], str)
+                        or not provider["name"].strip()
+                        or len(provider["name"]) > 200
+                        or any(ord(char) < 32 and char not in "\t\n\r" for char in provider["name"])
+                        or any(ord(char) == 127 for char in provider["name"])
+                    ):
+                        errors.append(f"providers[{index}].name must be safe non-empty text of at most 200 characters")
                     auth_types = {
                         "NONE", "API_KEY", "API_TOKEN", "ACCOUNT", "MANUAL",
                         "MANUAL_CONNECT", "OAUTH_BROWSER", "ACCOUNT_OR_API", "ACCOUNT_OR_LOCAL",
@@ -695,7 +703,6 @@ class ConnectionManager:
         source_url = response.get("source_url")
         if not isinstance(source_url, str) or not source_url.strip():
             return {"status": "METADATA_SOURCE_REQUIRED", "provider": provider_id, "saved": False}
-        from urllib.parse import urlsplit
         try:
             parsed_source = urlsplit(source_url)
             _ = parsed_source.port
@@ -732,7 +739,7 @@ class ConnectionManager:
             observed_at is None
             or observed_at.tzinfo is None
             or observed_at.utcoffset() is None
-            or observed_at > now.replace(microsecond=0) + __import__("datetime").timedelta(minutes=5)
+            or observed_at > now.replace(microsecond=0) + timedelta(minutes=5)
         ):
             return {"status": "INVALID_METADATA_TIMESTAMP", "provider": provider_id, "saved": False}
         observed_at = observed_at.astimezone(timezone.utc)
@@ -743,6 +750,16 @@ class ConnectionManager:
                 if isinstance(price, dict):
                     price.setdefault("source_url", source_url)
                     price.setdefault("observed_at", normalized_time)
+                    price_source = price.get("source_url")
+                    price_source_validation = self.validate_endpoint(
+                        price_source, allowed_hosts=set(allowed_hosts)
+                    ) if isinstance(price_source, str) else {"valid": False}
+                    if not price_source_validation.get("valid"):
+                        return {
+                            "status": "INVALID_PRICING_SOURCE",
+                            "provider": provider_id,
+                            "saved": False,
+                        }
         # Validate and persist against the latest catalog while holding the same
         # interprocess transaction as registration/enablement.
         with self._catalog_transaction():
@@ -754,6 +771,23 @@ class ConnectionManager:
             if index is None:
                 return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
             current = copy.deepcopy(providers[index])
+            current_hosts = current.get("allowed_hosts")
+            if not isinstance(current_hosts, list) or not current_hosts:
+                official_url = current.get("official_api_url")
+                try:
+                    official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
+                except ValueError:
+                    official_host = None
+                current_hosts = [official_host] if official_host else []
+            current_source_validation = self.validate_endpoint(
+                source_url, allowed_hosts=set(current_hosts)
+            )
+            if not current_source_validation.get("valid"):
+                return {
+                    "status": "METADATA_SOURCE_POLICY_CHANGED",
+                    "provider": provider_id,
+                    "saved": False,
+                }
             previous_raw = current.get("metadata_observed_at")
             if previous_raw is not None:
                 try:
