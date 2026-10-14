@@ -711,7 +711,9 @@ class ConnectionManager:
             return {"status": "INVALID_METADATA_UPDATE", "provider": provider_id, "saved": False}
         try:
             with self._catalog_transaction():
-                providers = self._list_providers_unlocked()
+                providers = self.catalog.get("providers")
+                if not isinstance(providers, list):
+                    return {"status": "INVALID_PROVIDER_CATALOG", "provider": provider_id, "saved": False}
                 index = next((i for i, item in enumerate(providers) if item.get("id") == provider_id), None)
                 if index is None:
                     return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
@@ -986,7 +988,9 @@ class ConnectionManager:
             return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id, "saved": False}
 
         with self._catalog_transaction():
-            providers = self._list_providers_unlocked()
+            providers = self.catalog.get("providers")
+            if not isinstance(providers, list):
+                return {"status": "INVALID_PROVIDER_CATALOG", "provider": provider_id, "saved": False}
             existing = next((item for item in providers if item.get("id") == provider_id), None)
             if existing is not None and not overwrite:
                 return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
