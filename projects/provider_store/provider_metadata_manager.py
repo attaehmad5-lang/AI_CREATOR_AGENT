@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -63,6 +64,7 @@ class ProviderMetadataManager:
         clock: Callable[[], datetime] | None = None,
         max_response_bytes: int = 2_000_000,
         max_models: int = 500,
+        environ: dict[str, str] | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "get_provider", None)) or not callable(
             getattr(connection_manager, "register_provider", None)
@@ -76,10 +78,13 @@ class ProviderMetadataManager:
             raise ValueError("max_response_bytes must be between 1024 and 20000000")
         if not isinstance(max_models, int) or isinstance(max_models, bool) or not 1 <= max_models <= 5000:
             raise ValueError("max_models must be between 1 and 5000")
+        if environ is not None and not isinstance(environ, dict):
+            raise ValueError("environ must be a dictionary of environment-variable values")
         self.connection_manager = connection_manager
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.max_response_bytes = max_response_bytes
         self.max_models = max_models
+        self.environ = os.environ if environ is None else environ
 
     @staticmethod
     def _endpoint(provider: dict[str, Any]) -> tuple[str | None, dict[str, str], str | None]:
@@ -213,15 +218,34 @@ class ProviderMetadataManager:
         endpoint, query, endpoint_error = self._endpoint(provider)
         if endpoint_error:
             return {"status": endpoint_error, "provider": provider_id, "refreshed": False}
+        token_env = provider.get("metadata_auth_env")
+        request_headers = {
+            "Accept": "application/json",
+            "User-Agent": "AI_CREATOR_AGENT-MetadataRefresh/1.0",
+        }
+        if token_env is not None:
+            if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
+                return {"status": "INVALID_METADATA_CREDENTIAL_REFERENCE", "provider": provider_id, "refreshed": False}
+            token = self.environ.get(token_env)
+            if not isinstance(token, str) or not token.strip():
+                return {"status": "METADATA_CREDENTIAL_MISSING", "provider": provider_id, "refreshed": False}
+            header = provider.get("metadata_auth_header", "Authorization")
+            scheme = provider.get("metadata_auth_scheme", "Bearer")
+            if not isinstance(header, str) or header.casefold() not in {
+                "authorization", "x-api-key", "api-key", "xi-api-key", "x-goog-api-key",
+                "cartesia-api-key", "x-auth-token", "x-key",
+            }:
+                return {"status": "INVALID_METADATA_AUTH_HEADER", "provider": provider_id, "refreshed": False}
+            if not isinstance(scheme, str) or scheme.casefold() not in {"", "bearer", "key", "token"}:
+                return {"status": "INVALID_METADATA_AUTH_SCHEME", "provider": provider_id, "refreshed": False}
+            request_headers[header] = f"{scheme} {token}" if scheme else token
+
         transport = opener or build_opener(_RejectMetadataRedirects())
 
         def fetch(url: str, params: dict[str, str], timeout: float) -> Any:
             parsed = urlsplit(url)
             final_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(params), ""))
-            request = Request(final_url, headers={
-                "Accept": "application/json",
-                "User-Agent": "AI_CREATOR_AGENT-MetadataRefresh/1.0",
-            }, method="GET")
+            request = Request(final_url, headers=request_headers, method="GET")
             try:
                 response = transport.open(request, timeout=timeout)
             except HTTPError as exc:
