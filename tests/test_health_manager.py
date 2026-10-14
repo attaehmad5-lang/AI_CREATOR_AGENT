@@ -111,6 +111,49 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertTrue(self.manager.is_eligible("image")["eligible"])
         self.assertEqual(self.manager.data["providers"]["image"]["status"], "HEALTHY")
 
+    def test_unhealthy_provider_requires_consecutive_successes_before_readmission(self):
+        manager = ProviderHealthManager(
+            self.path,
+            history_limit=20,
+            failure_threshold=2,
+            recovery_success_threshold=2,
+            clock=lambda: self.now[0],
+        )
+        manager.record_result("image", success=False, error_code="TIMEOUT")
+        manager.record_result("image", success=False, error_code="TIMEOUT")
+        self.assertEqual(manager.is_eligible("image")["status"], "UNHEALTHY")
+
+        first = manager.record_result("image", success=True, latency_ms=10)
+        self.assertEqual(first["status"], "RECOVERING")
+        self.assertFalse(manager.is_eligible("image")["eligible"])
+        self.assertEqual(manager.is_eligible("image")["status"], "RECOVERING")
+
+        # A failed recovery attempt resets the success sequence and keeps quarantine.
+        failed_recovery = manager.record_result("image", success=False, error_code="TIMEOUT")
+        self.assertEqual(failed_recovery["status"], "UNHEALTHY")
+        self.assertEqual(manager.data["providers"]["image"]["consecutive_successes"], 0)
+
+        self.assertEqual(manager.record_result("image", success=True)["status"], "RECOVERING")
+        self.assertEqual(manager.record_result("image", success=True)["status"], "HEALTHY")
+        self.assertTrue(manager.is_eligible("image")["eligible"])
+
+    def test_active_probe_does_not_claim_verified_during_recovery_window(self):
+        manager = ProviderHealthManager(
+            self.path,
+            failure_threshold=2,
+            recovery_success_threshold=2,
+            clock=lambda: self.now[0],
+        )
+        manager.record_result("image", success=False, error_code="TIMEOUT")
+        manager.record_result("image", success=False, error_code="TIMEOUT")
+        first = manager.active_probe("image", lambda **kwargs: True)
+        self.assertEqual(first["status"], "RECOVERING")
+        self.assertFalse(first["verified"])
+        self.assertTrue(first["recovery_pending"])
+        second = manager.active_probe("image", lambda **kwargs: True)
+        self.assertEqual(second["status"], "HEALTHY")
+        self.assertTrue(second["verified"])
+
     def test_stale_health_is_excluded(self):
         self.manager.record_result("image", success=True, latency_ms=10)
         self.now[0] += timedelta(seconds=301)
@@ -150,6 +193,10 @@ class ProviderHealthManagerTests(unittest.TestCase):
             ProviderHealthManager(self.path, history_limit=True)
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path, failure_threshold=1.5)
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=0)
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=True)
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path, clock="not-callable")
         self.assertEqual(
