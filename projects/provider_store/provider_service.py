@@ -276,7 +276,7 @@ class ProviderService:
 
     def _ledger_reserve(self, **kwargs: Any) -> dict[str, Any]:
         try:
-            result = self._ledger_reserve(**kwargs)
+            result = self.execution_ledger.reserve(**kwargs)
         except Exception as exc:
             return {"status": "EXECUTION_LEDGER_FAILED", "reserved": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {
@@ -285,7 +285,7 @@ class ProviderService:
 
     def _ledger_mark_started(self, **kwargs: Any) -> dict[str, Any]:
         try:
-            result = self._ledger_mark_started(**kwargs)
+            result = self.execution_ledger.mark_started(**kwargs)
         except Exception as exc:
             return {"status": "EXECUTION_LEDGER_FAILED", "saved": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {
@@ -294,7 +294,7 @@ class ProviderService:
 
     def _ledger_finish(self, **kwargs: Any) -> dict[str, Any]:
         try:
-            result = self._ledger_finish(**kwargs)
+            result = self.execution_ledger.finish(**kwargs)
         except Exception as exc:
             return {"status": "EXECUTION_LEDGER_FAILED", "saved": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {
