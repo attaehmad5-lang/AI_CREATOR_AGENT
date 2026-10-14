@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
+from .safe_numbers import finite_number
 
 _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,200}\Z")
 _ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,200}\Z")
@@ -44,12 +45,7 @@ def _valid_trace_id(value: Any) -> bool:
 
 
 def _valid_amount(value: Any) -> bool:
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and value >= 0
-    )
+    return finite_number(value, minimum=0) is not None
 
 
 class ProviderExecutionLedger:
@@ -158,6 +154,13 @@ class ProviderExecutionLedger:
         routing_options: dict[str, Any] | None = None,
     ) -> str:
         options = {} if routing_options is None else routing_options
+        if not isinstance(project_id, str) or not _ID_RE.fullmatch(project_id):
+            raise ValueError("project_id is invalid")
+        if not isinstance(category, str) or not _ID_RE.fullmatch(category):
+            raise ValueError("category is invalid")
+        normalized_cost = finite_number(estimated_cost, minimum=0)
+        if normalized_cost is None:
+            raise ValueError("estimated_cost is invalid")
         if not isinstance(options, dict):
             raise ValueError("routing_options must be an object")
         safe_options: dict[str, str | int | float | bool | None] = {}
@@ -183,7 +186,7 @@ class ProviderExecutionLedger:
             {
                 "project_id": project_id,
                 "category": category,
-                "estimated_cost": float(estimated_cost),
+                "estimated_cost": normalized_cost,
                 "routing_options": safe_options,
             },
             sort_keys=True,
