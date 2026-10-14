@@ -878,6 +878,35 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertEqual(result["contract_version"], "1.0")
 
+    def test_provider_contract_rejects_unsupported_adapter_api_version(self):
+        class FutureAdapter:
+            API_VERSION = "2.0"
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        contract = self.manager.validate_provider_contract("public_image", FutureAdapter())
+        self.assertEqual(contract["status"], "ADAPTER_API_VERSION_UNSUPPORTED")
+        self.assertFalse(contract["valid"])
+        loaded = self.manager.load_provider("public_image", lambda metadata: FutureAdapter())
+        self.assertEqual(loaded["status"], "ADAPTER_API_VERSION_UNSUPPORTED")
+        self.assertFalse(loaded["loaded"])
+
+    def test_catalog_declared_adapter_version_must_match_supported_runtime(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"][0]["adapter_api_version"] = "2.0"
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+
+        class ImageProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        contract = manager.validate_provider_contract("public_image", ImageProvider())
+        self.assertEqual(contract["status"], "ADAPTER_API_VERSION_UNSUPPORTED")
+        self.assertEqual(contract["supported_adapter_api_version"], "1.0")
+        self.assertEqual(contract["declared_adapter_api_version"], "2.0")
+
     def test_provider_contract_rejects_missing_method_and_prevents_loading(self):
         instance = object()
         contract = self.manager.validate_provider_contract("public_image", instance)
