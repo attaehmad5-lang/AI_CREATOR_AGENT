@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38618398348](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38618398348): **373 tests passed on Ubuntu and 373 on Windows, 0 failures on either platform**, in **8 sequential batches of at most 50 tests**. Compilation and provider JSON catalog validation passed on both platforms. The run includes the trusted runtime adapter registry, lifecycle/contract checks, factory-replacement concurrency regression, unified-registry integration, and a corrected invalid-overwrite regression that compares the full original record instead of assuming an absent fixture field.
+GitHub Actions run [#38618654235](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38618654235): **373 tests passed on Ubuntu and 373 on Windows, 0 failures on either platform**, in **8 sequential batches of at most 50 tests**. Compilation and provider JSON catalog validation passed on both platforms. Coverage includes trusted runtime registry lifecycle, concurrent factory replacement, strict candidate-catalog validation during registration, nested-metadata isolation, and unified registration with optional adapter binding.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -15,7 +15,7 @@ GitHub Actions run [#38618398348](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 1 | 🟡 | Provider Registry | VERIFIED | `RuntimeProviderRegistry` maps catalog provider IDs to explicitly trusted factories; `UnifiedProviderRegistry` exposes load/unload/batch-load/status; loads delegate to `ConnectionManager` for enabled-state and modality-contract enforcement. Regression coverage in `tests/test_runtime_adapter_registry.py` verifies lifecycle, missing adapters, disabled providers, untrusted catalog module metadata, and unified-facade integration. Live connectivity remains a separate item (#13). |
-| 2 | 🟡 | Provider Registration | PARTIAL | Registration and concurrent-registration tests exist; onboarding and runtime adapter registration remain incomplete. |
+| 2 | 🟡 | Provider Registration | VERIFIED | `ConnectionManager.register_provider` validates the entire candidate catalog before persistence, deep-copies nested metadata, rejects invalid overwrite flags/IDs/secret values, and prevents overwriting a loaded adapter. `UnifiedProviderRegistry.register_provider` supports metadata onboarding plus an optional trusted adapter factory and explicitly reports partial binding failures. Regression coverage includes strict v3 catalogs, invalid metadata, mutation isolation, duplicate/overwrite safety, and factory binding. |
 | 3 | 🟡 | Provider Discovery | VERIFIED | Provider discovery by declared catalog metadata is implemented and covered by discovery/capability tests. |
 | 4 | 🟡 | Provider Loading | VERIFIED | Factory-based loading, disabled-provider rejection, contract enforcement and safe failure behavior are tested. |
 | 5 | 🔴 | Provider Unloading | VERIFIED | `unload_provider()` calls close/shutdown, preserves instances if cleanup fails, and has lifecycle regression tests. |
