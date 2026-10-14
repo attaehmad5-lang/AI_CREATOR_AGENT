@@ -963,7 +963,7 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "REGISTRATION_TRANSACTION_FAILED")
         self.assertFalse(result["saved"])
         self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{not-json")
-        self.assertNotIn("corrupt_catalog_register", repr(result))
+        self.assertNotIn("not-json", repr(result))
 
     def test_registration_returns_safe_catalog_validation_errors(self):
         result = self.manager.register_provider({
