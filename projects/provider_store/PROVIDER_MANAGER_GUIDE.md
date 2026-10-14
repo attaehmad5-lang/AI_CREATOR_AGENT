@@ -19,6 +19,7 @@ The central catalog is the source of provider metadata. Runtime Python factories
 - `routing_manager.py` — priority, free-credit-first, lowest-cost, healthiest-first, and round-robin selection; requires a verified runtime connection by default (catalog labels alone are not evidence), with an explicit catalog-only planning option; optional health, cost, credit, and quota managers; duplicate request reservations fail closed; explicit fallback behavior.
 - `credit_manager.py` — stores verified free-credit snapshots from an injected provider-specific probe, filters by compatible units, and atomically reserves/commits/releases local credit usage to prevent concurrent overspend.
 - `account_balance_probe.py` — bounded HTTPS JSON balance probe that requires an explicit host allowlist, environment-only credentials, a documented auth-protected endpoint, and an explicitly confirmed response field representing available credits. It rejects ambiguous key-budget fields unless the caller has verified the field semantics; no response body or token is returned.
+- `provider_metadata_manager.py` — bounded, allowlisted HTTPS model metadata refresh; it stores only normalized model IDs, versions, declared capabilities, numeric pricing and safe pricing descriptors, plus a revision hash and observation timestamp. Raw response bodies are never persisted or returned. Metadata changes use a metadata-only catalog transaction and are rejected while the provider adapter is loaded.
 - `cost_policy.py` — paid-approval guard, required project budgets, idempotent usage reconciliation, estimated-cost reservations, and `finalize_usage()` which atomically validates charge outcomes and idempotency keys against the reloaded ledger before committing usage.
 - `quota_manager.py` — hourly/daily/monthly UTC quota windows and request reserve/commit/release.
 - `health_manager.py` — bounded provider health history, staleness/latency checks, eligibility, and a bounded persisted request-ID ledger so repeated finalization cannot append duplicate health events or silently reuse an ID for a conflicting result.
@@ -38,6 +39,27 @@ The central catalog is the source of provider metadata. Runtime Python factories
 6. **Output validation is not full decoding.** Signatures and basic content checks detect many mismatches, but do not replace media decoding, malware scanning, or semantic quality checks.
 7. **Persistence limits.** Shared JSON state for provider connection/catalog, health, credits, cost budgets, and quotas uses atomic replacement plus OS-level interprocess lock files and reload-before-mutate. This prevents lost read-modify-write updates across local processes when every writer uses these manager APIs. It is not a single transaction across multiple manager files, and it does not coordinate separate devices, containers with non-shared lock semantics, or external writers bypassing these APIs. Routing compensates reservations created by the current attempt when a later quota step rejects the route, and fails closed if that compensation fails; this reduces orphaned reservations but does not make the separate JSON files one atomic transaction. SQLite or a transactional database is preferred for production multi-worker coordination.
 8. **Secrets stay outside the catalog.** Store environment-variable names or references, not credential values. Returned provider metadata and state views redact credential-like fields.
+
+## Provider metadata refresh
+
+The catalog currently configures public metadata endpoints for Hugging Face model discovery (`https://huggingface.co/api/models`, filtered to text-to-image models served by Inference Providers) and Pollinations image/video model discovery (`https://gen.pollinations.ai/image/models`). The refresh manager validates each endpoint against the provider's host allowlist, bounds responses, rejects redirects, and stores only normalized fields. **Only 2 of 54 providers currently have a configured metadata source**; the other providers are not treated as refreshed, and their provider-specific pricing/model semantics still need to be configured and verified.
+
+Run a live check only from a networked environment; CI intentionally uses deterministic mock responses and does not claim live-provider availability:
+
+```python
+from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_metadata_manager import ProviderMetadataManager
+
+manager = ProviderMetadataManager(ConnectionManager())
+for provider_id in ("huggingface", "pollinations"):
+    result = manager.refresh_http(provider_id)
+    print({
+        "provider": provider_id,
+        "status": result.get("status"),
+        "model_count": result.get("model_count"),
+        "revision": result.get("revision"),
+    })
+```
 
 ## Explicit catalog recovery
 
