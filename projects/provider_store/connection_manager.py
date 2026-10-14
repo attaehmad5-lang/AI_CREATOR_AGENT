@@ -32,6 +32,8 @@ class ProviderAuthenticationVerificationRequired(PermissionError):
 
 
 class ConnectionManager:
+    SUPPORTED_ADAPTER_API_VERSION = "1.0"
+
     VALID_STATES = {
         "LOCKED",
         "CONNECTING",
@@ -598,6 +600,39 @@ class ConnectionManager:
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+        declared_version = provider.get("adapter_api_version", self.SUPPORTED_ADAPTER_API_VERSION)
+        if not isinstance(declared_version, str) or declared_version != self.SUPPORTED_ADAPTER_API_VERSION:
+            return {
+                "status": "ADAPTER_API_VERSION_UNSUPPORTED",
+                "provider": provider_id,
+                "valid": False,
+                "supported_adapter_api_version": self.SUPPORTED_ADAPTER_API_VERSION,
+                "declared_adapter_api_version": declared_version if isinstance(declared_version, str) else None,
+                "contract_version": "1.0",
+            }
+        instance_version = self.SUPPORTED_ADAPTER_API_VERSION
+        for attr in ("adapter_api_version", "API_VERSION"):
+            try:
+                value = getattr(instance, attr, None)
+            except Exception:
+                return {
+                    "status": "ADAPTER_VERSION_LOOKUP_FAILED",
+                    "provider": provider_id,
+                    "valid": False,
+                    "contract_version": "1.0",
+                }
+            if value is not None:
+                instance_version = value
+                break
+        if not isinstance(instance_version, str) or instance_version != self.SUPPORTED_ADAPTER_API_VERSION:
+            return {
+                "status": "ADAPTER_API_VERSION_UNSUPPORTED",
+                "provider": provider_id,
+                "valid": False,
+                "supported_adapter_api_version": self.SUPPORTED_ADAPTER_API_VERSION,
+                "declared_adapter_api_version": instance_version if isinstance(instance_version, str) else None,
+                "contract_version": "1.0",
+            }
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
         contracts: dict[str, tuple[tuple[str, ...], ...]] = {
             "image": (("generate_image",),),
@@ -646,6 +681,7 @@ class ConnectionManager:
             "valid": not missing,
             "missing_methods": missing,
             "contract_version": "1.0",
+            "adapter_api_version": self.SUPPORTED_ADAPTER_API_VERSION,
         }
 
     def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
@@ -677,7 +713,7 @@ class ConnectionManager:
         contract = self.validate_provider_contract(provider_id, instance)
         if not contract["valid"]:
             return {
-                "status": "CONTRACT_VIOLATION",
+                "status": contract.get("status") if contract.get("status") == "ADAPTER_API_VERSION_UNSUPPORTED" else "CONTRACT_VIOLATION",
                 "provider": provider_id,
                 "loaded": False,
                 "contract_status": contract["status"],
