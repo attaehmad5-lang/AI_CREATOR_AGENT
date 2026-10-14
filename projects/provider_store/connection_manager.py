@@ -529,11 +529,12 @@ class ConnectionManager:
                         ):
                             errors.append(f"providers[{index}].metadata_source must be a safe HTTPS URL")
                         elif parsed_source.hostname:
+                            raw_source_hosts = provider.get("allowed_hosts")
                             source_hosts = {
                                 host.casefold().rstrip(".")
-                                for host in provider.get("allowed_hosts", [])
-                                if isinstance(provider.get("allowed_hosts"), list) and isinstance(host, str)
-                            }
+                                for host in raw_source_hosts
+                                if isinstance(host, str)
+                            } if isinstance(raw_source_hosts, list) else set()
                             official_url = provider.get("official_api_url")
                             try:
                                 official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
@@ -607,11 +608,12 @@ class ConnectionManager:
                                     ):
                                         errors.append(f"{prefix}.source_url must be a safe HTTPS URL")
                                     elif parsed_price_source.hostname:
+                                        raw_price_hosts = provider.get("allowed_hosts")
                                         price_hosts = {
                                             host.casefold().rstrip(".")
-                                            for host in provider.get("allowed_hosts", [])
-                                            if isinstance(provider.get("allowed_hosts"), list) and isinstance(host, str)
-                                        }
+                                            for host in raw_price_hosts
+                                            if isinstance(host, str)
+                                        } if isinstance(raw_price_hosts, list) else set()
                                         official_url = provider.get("official_api_url")
                                         try:
                                             official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
