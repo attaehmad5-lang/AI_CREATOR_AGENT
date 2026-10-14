@@ -185,13 +185,17 @@
       "subscription_required": true,
       "enabled": false,
       "subscription_url": "https://elevenlabs.io",
-      "official_api_url": "https://elevenlabs.io/docs/api-reference",
+      "official_api_url": "https://elevenlabs.io/docs/api-reference/models/list",
       "allowed_hosts": [
         "api.elevenlabs.io"
       ],
       "token_env": "ELEVENLABS_API_KEY",
       "auth_header_name": "xi-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "metadata_endpoint": "https://api.elevenlabs.io/v1/models",
+      "metadata_auth_env": "ELEVENLABS_API_KEY",
+      "metadata_auth_header": "xi-api-key",
+      "metadata_auth_scheme": ""
     },
     {
       "id": "openai_voice",
@@ -816,7 +820,12 @@
       ],
       "token_env": "ELEVENLABS_API_KEY",
       "auth_header_name": "xi-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "metadata_endpoint": "https://api.elevenlabs.io/v1/models",
+      "metadata_auth_env": "ELEVENLABS_API_KEY",
+      "metadata_auth_header": "xi-api-key",
+      "metadata_auth_scheme": "",
+      "official_api_url": "https://elevenlabs.io/docs/api-reference/models/list"
     },
     {
       "id": "playht_advanced_audio",
