@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -159,6 +160,43 @@ class RuntimeProviderRegistryTests(unittest.TestCase):
         self.assertEqual(result["status"], "FACTORY_REGISTERED")
         self.assertTrue(result["registered"])
         self.assertIs(self.registry._factories["alpha"], replacement)
+
+    def test_concurrent_factory_replacement_cannot_race_runtime_load(self):
+        factory_started = threading.Event()
+        allow_factory_finish = threading.Event()
+        replace_started = threading.Event()
+        outcomes = {}
+
+        def slow_factory(_):
+            factory_started.set()
+            if not allow_factory_finish.wait(timeout=5):
+                raise TimeoutError("test factory gate timed out")
+            return _ImageAdapter()
+
+        self.registry.register_factory("alpha", slow_factory, replace=True)
+
+        def load_worker():
+            outcomes["load"] = self.registry.load("alpha")
+
+        def replace_worker():
+            replace_started.set()
+            outcomes["replace"] = self.registry.register_factory(
+                "alpha", lambda _: _ImageAdapter(), replace=True
+            )
+
+        loader = threading.Thread(target=load_worker)
+        loader.start()
+        self.assertTrue(factory_started.wait(timeout=5))
+        replacer = threading.Thread(target=replace_worker)
+        replacer.start()
+        self.assertTrue(replace_started.wait(timeout=5))
+        allow_factory_finish.set()
+        loader.join(timeout=5)
+        replacer.join(timeout=5)
+        self.assertFalse(loader.is_alive())
+        self.assertFalse(replacer.is_alive())
+        self.assertEqual(outcomes["load"]["status"], "LOADED")
+        self.assertEqual(outcomes["replace"]["status"], "PROVIDER_ALREADY_LOADED")
 
     def test_factory_cannot_be_replaced_while_provider_is_loaded(self):
         self.assertEqual(self.registry.load("alpha")["status"], "LOADED")
