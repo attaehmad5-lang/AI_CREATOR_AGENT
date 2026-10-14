@@ -404,6 +404,7 @@ class ConnectionManager:
                                     or not str(query_value).strip()
                                     or len(str(query_value)) > 200
                                     or any(ord(char) < 32 or ord(char) == 127 for char in str(query_value))
+                                    or any(marker in str(query_value).casefold() for marker in ("token=", "api_key=", "password=", "secret=", "bearer "))
                                 ):
                                     errors.append(f"providers[{index}].metadata_query contains an invalid key/value")
                     if "models" in provider:
