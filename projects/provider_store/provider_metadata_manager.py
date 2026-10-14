@@ -152,17 +152,18 @@ class ProviderMetadataManager:
             for model in normalized
             for capability in model.get("capabilities", [])
         })
-        updated = dict(provider)
-        updated["models"] = normalized
-        updated["metadata_source"] = endpoint
-        updated["metadata_observed_at"] = observed.isoformat()
-        updated["metadata_revision"] = revision
-        updated["metadata_status"] = "VERIFIED"
+        updates: dict[str, Any] = {
+            "models": normalized,
+            "metadata_source": endpoint,
+            "metadata_observed_at": observed.isoformat(),
+            "metadata_revision": revision,
+            "metadata_status": "VERIFIED",
+        }
         if capabilities:
-            updated["capabilities"] = capabilities
+            updates["capabilities"] = capabilities
 
         try:
-            result = self.connection_manager.register_provider(updated, overwrite=True)
+            result = self.connection_manager.update_provider_metadata(provider_id, updates)
         except Exception as exc:
             return {
                 "status": "METADATA_PERSISTENCE_FAILED",
@@ -278,6 +279,7 @@ class ProviderMetadataManager:
                 or not raw_id.strip()
                 or len(raw_id) > 300
                 or any(ord(char) < 32 or ord(char) == 127 for char in raw_id)
+                or any(marker in raw_id.casefold() for marker in ("token=", "api_key=", "password=", "secret=", "bearer "))
             ):
                 return [], "INVALID_METADATA_MODEL_ID"
             model_id = raw_id.strip()
@@ -315,6 +317,7 @@ class ProviderMetadataManager:
                 or not raw_version.strip()
                 or len(raw_version) > 120
                 or any(ord(char) < 32 or ord(char) == 127 for char in raw_version)
+                or any(marker in raw_version.casefold() for marker in ("token=", "api_key=", "password=", "secret=", "bearer "))
             ):
                 return [], "INVALID_MODEL_VERSION"
 
