@@ -578,11 +578,14 @@ class ProviderService:
         try:
             adapter_result = adapter(**options)
         except Exception as exc:
-            # The adapter may have transmitted the request before failing. Do not
-            # release reservations, and persist an ambiguous terminal state to block replay.
+            # The adapter may have transmitted the request before failing. Keep both
+            # accounting reservations and the concurrency lease until explicit reconciliation.
             self._ledger_finish(
                 request_id=request_id, status="UNKNOWN",
                 result_status="EXECUTION_OUTCOME_UNKNOWN", provider_id=provider_id,
+            )
+            concurrency_release = self._concurrency_release(
+                lease_id=lease_id, outcome="unknown"
             )
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
@@ -590,6 +593,8 @@ class ProviderService:
                 "provider": provider_id,
                 "request_id": request_id,
                 **trace_fields,
+                "concurrency": concurrency_release,
+                "concurrency_lease_retained": concurrency_release.get("retained") is True,
                 "reservations_retained": True,
                 "safe_to_retry": False,
                 "error_type": type(exc).__name__,
@@ -599,12 +604,17 @@ class ProviderService:
                 request_id=request_id, status="UNKNOWN",
                 result_status="EXECUTION_OUTCOME_UNKNOWN", provider_id=provider_id,
             )
+            concurrency_release = self._concurrency_release(
+                lease_id=lease_id, outcome="unknown"
+            )
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
                 **trace_fields,
+                "concurrency": concurrency_release,
+                "concurrency_lease_retained": concurrency_release.get("retained") is True,
                 "reservations_retained": True,
                 "safe_to_retry": False,
             }
@@ -626,12 +636,17 @@ class ProviderService:
                     request_id=request_id, status="UNKNOWN",
                     result_status="INCONSISTENT_START_RESULT", provider_id=provider_id,
                 )
+                concurrency_release = self._concurrency_release(
+                    lease_id=lease_id, outcome="unknown"
+                )
                 return {
                     "status": "INCONSISTENT_START_RESULT",
                     "executed": False,
                     "provider": provider_id,
                     "request_id": request_id,
                     **trace_fields,
+                    "concurrency": concurrency_release,
+                    "concurrency_lease_retained": concurrency_release.get("retained") is True,
                     "reservations_retained": True,
                     "safe_to_retry": False,
                 }
