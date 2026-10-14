@@ -870,6 +870,17 @@ class ConnectionManagerTests(unittest.TestCase):
             "NOT_FOUND",
         )
 
+    def test_runtime_enablement_rejects_unsupported_adapter_api_version(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"][0]["enabled"] = False
+        catalog["providers"][0]["adapter_api_version"] = "2.0"
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+        result = manager.set_provider_enabled("public_image", True)
+        self.assertEqual(result["status"], "ADAPTER_API_VERSION_UNSUPPORTED")
+        self.assertFalse(result["saved"])
+        self.assertFalse(manager.get_provider("public_image")["enabled"])
+
     def test_provider_contract_accepts_required_modality_method(self):
         class ImageProvider:
             def generate_image(self, prompt, output_path):
