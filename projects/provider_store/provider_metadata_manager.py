@@ -25,6 +25,11 @@ class _RejectMetadataRedirects(HTTPRedirectHandler):
         return None
 
 
+_MODALITY_CAPABILITIES = {
+    "image_generation", "image_editing", "image_upscaling", "video_generation",
+    "speech_generation", "transcription", "text_generation",
+}
+
 _CAPABILITY_ALIASES = {
     "text-to-image": "image_generation",
     "image-generation": "image_generation",
@@ -42,6 +47,10 @@ _CAPABILITY_ALIASES = {
     "text-generation": "text_generation",
     "conversational": "text_generation",
     "text_generation": "text_generation",
+    "image": "image_generation",
+    "video": "video_generation",
+    "audio": "speech_generation",
+    "text": "text_generation",
 }
 
 
@@ -151,6 +160,7 @@ class ProviderMetadataManager:
             capability
             for model in normalized
             for capability in model.get("capabilities", [])
+            if capability in _MODALITY_CAPABILITIES
         })
         updates: dict[str, Any] = {
             "models": normalized,
@@ -292,6 +302,8 @@ class ProviderMetadataManager:
                 raw_capabilities = item.get("tasks")
             if raw_capabilities is None and isinstance(item.get("pipeline_tag"), str):
                 raw_capabilities = [item["pipeline_tag"]]
+            if raw_capabilities is None and isinstance(item.get("output_modalities"), list):
+                raw_capabilities = item["output_modalities"]
             if raw_capabilities is None:
                 raw_capabilities = []
             if not isinstance(raw_capabilities, list) or len(raw_capabilities) > 50:
@@ -302,11 +314,14 @@ class ProviderMetadataManager:
                     return [], "INVALID_MODEL_CAPABILITIES"
                 capability = _CAPABILITY_ALIASES.get(raw_capability.strip().casefold())
                 if capability is None:
-                    # Preserve only already-normalized, schema-safe capability IDs.
+                    # Keep safe provider-specific traits on the model record, but never
+                    # infer provider-wide modalities from unknown feature labels.
                     if re.fullmatch(r"[a-z][a-z0-9_]{0,79}", raw_capability):
                         capability = raw_capability
-                    else:
+                    elif re.fullmatch(r"[a-z][a-z0-9-]{0,79}", raw_capability):
                         continue
+                    else:
+                        return [], "INVALID_MODEL_CAPABILITIES"
                 capabilities.add(capability)
 
             raw_version = item.get("version")
@@ -322,13 +337,31 @@ class ProviderMetadataManager:
                 return [], "INVALID_MODEL_VERSION"
 
             raw_pricing = item.get("pricing")
+            if raw_pricing is None and "price" in item:
+                raw_pricing = {"price": item["price"]}
             pricing: dict[str, float] = {}
+            pricing_descriptors: dict[str, str] = {}
             if raw_pricing is not None:
                 if not isinstance(raw_pricing, dict) or len(raw_pricing) > 20:
                     return [], "INVALID_MODEL_PRICING"
+                descriptor_keys = {
+                    "unit": "pricing_unit",
+                    "type": "pricing_type",
+                    "currency": "pricing_currency",
+                    "description": "pricing_description",
+                }
                 for key, value in raw_pricing.items():
                     if not isinstance(key, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", key):
                         return [], "INVALID_MODEL_PRICING"
+                    if key in descriptor_keys:
+                        if (
+                            not isinstance(value, str) or not value.strip() or len(value) > 120
+                            or any(ord(char) < 32 or ord(char) == 127 for char in value)
+                            or any(marker in value.casefold() for marker in ("token=", "api_key=", "password=", "secret=", "bearer "))
+                        ):
+                            return [], "INVALID_MODEL_PRICING"
+                        pricing_descriptors[descriptor_keys[key]] = value.strip()
+                        continue
                     amount = finite_number(value, minimum=0)
                     if amount is None:
                         return [], "INVALID_MODEL_PRICING"
@@ -341,6 +374,7 @@ class ProviderMetadataManager:
                 record["capabilities"] = sorted(capabilities)
             if pricing:
                 record["pricing"] = pricing
+            record.update(pricing_descriptors)
             normalized.append(record)
 
         normalized.sort(key=lambda record: record["id"].casefold())
