@@ -524,9 +524,25 @@ class ConnectionManager:
                             or parsed_source is None or parsed_source.scheme != "https"
                             or not parsed_source.hostname
                             or parsed_source.username is not None or parsed_source.password is not None
+                            or parsed_source.query or parsed_source.fragment
                             or any(ord(char) < 32 or ord(char) == 127 for char in raw_source)
                         ):
                             errors.append(f"providers[{index}].metadata_source must be a safe HTTPS URL")
+                        elif parsed_source.hostname:
+                            source_hosts = {
+                                host.casefold().rstrip(".")
+                                for host in provider.get("allowed_hosts", [])
+                                if isinstance(provider.get("allowed_hosts"), list) and isinstance(host, str)
+                            }
+                            official_url = provider.get("official_api_url")
+                            try:
+                                official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
+                            except ValueError:
+                                official_host = None
+                            if official_host:
+                                source_hosts.add(official_host.casefold().rstrip("."))
+                            if parsed_source.hostname.casefold().rstrip(".") not in source_hosts:
+                                errors.append(f"providers[{index}].metadata_source host is not allowlisted")
                     if "metadata_observed_at" in provider:
                         raw_observed_at = provider["metadata_observed_at"]
                         try:
@@ -572,7 +588,9 @@ class ConnectionManager:
                                     or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}", price["model_id"])
                                 ):
                                     errors.append(f"{prefix}.model_id must be a safe model identifier")
-                                if "source_url" in price:
+                                if "source_url" not in price:
+                                    errors.append(f"{prefix}.source_url is required for pricing provenance")
+                                else:
                                     raw_price_source = price["source_url"]
                                     try:
                                         parsed_price_source = urlsplit(raw_price_source) if isinstance(raw_price_source, str) else None
@@ -584,10 +602,28 @@ class ConnectionManager:
                                         or len(raw_price_source) > 2048 or parsed_price_source is None
                                         or parsed_price_source.scheme != "https" or not parsed_price_source.hostname
                                         or parsed_price_source.username is not None or parsed_price_source.password is not None
+                                        or parsed_price_source.query or parsed_price_source.fragment
                                         or any(ord(char) < 32 or ord(char) == 127 for char in raw_price_source)
                                     ):
                                         errors.append(f"{prefix}.source_url must be a safe HTTPS URL")
-                                if "observed_at" in price:
+                                    elif parsed_price_source.hostname:
+                                        price_hosts = {
+                                            host.casefold().rstrip(".")
+                                            for host in provider.get("allowed_hosts", [])
+                                            if isinstance(provider.get("allowed_hosts"), list) and isinstance(host, str)
+                                        }
+                                        official_url = provider.get("official_api_url")
+                                        try:
+                                            official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
+                                        except ValueError:
+                                            official_host = None
+                                        if official_host:
+                                            price_hosts.add(official_host.casefold().rstrip("."))
+                                        if parsed_price_source.hostname.casefold().rstrip(".") not in price_hosts:
+                                            errors.append(f"{prefix}.source_url host is not allowlisted")
+                                if "observed_at" not in price:
+                                    errors.append(f"{prefix}.observed_at is required for pricing provenance")
+                                else:
                                     raw_price_time = price["observed_at"]
                                     try:
                                         parsed_price_time = datetime.fromisoformat(
@@ -598,8 +634,9 @@ class ConnectionManager:
                                     if (
                                         parsed_price_time is None or parsed_price_time.tzinfo is None
                                         or parsed_price_time.utcoffset() is None
+                                        or parsed_price_time > datetime.now(timezone.utc) + timedelta(minutes=5)
                                     ):
-                                        errors.append(f"{prefix}.observed_at must be a timezone-aware ISO timestamp")
+                                        errors.append(f"{prefix}.observed_at must be a valid timezone-aware ISO timestamp")
                     if ConnectionManager._contains_credential_value_field(provider):
                         errors.append(f"providers[{index}] contains a forbidden credential value field")
         result = {"valid": not errors, "errors": errors, "provider_count": len(catalog.get("providers", [])) if isinstance(catalog, dict) and isinstance(catalog.get("providers"), list) else 0}
