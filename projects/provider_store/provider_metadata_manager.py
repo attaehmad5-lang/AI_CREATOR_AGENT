@@ -326,7 +326,14 @@ class ProviderMetadataManager:
             if raw_capabilities is None and isinstance(item.get("output_modalities"), list):
                 raw_capabilities = item["output_modalities"]
             if raw_capabilities is None:
-                raw_capabilities = []
+                derived = []
+                if item.get("can_do_text_to_speech") is True:
+                    derived.append("speech_generation")
+                if item.get("can_do_voice_conversion") is True:
+                    derived.append("voice_conversion")
+                if item.get("can_do_voice_cloning") is True:
+                    derived.append("voice_cloning")
+                raw_capabilities = derived
             if not isinstance(raw_capabilities, list) or len(raw_capabilities) > 50:
                 return [], "INVALID_MODEL_CAPABILITIES"
             capabilities: set[str] = set()
