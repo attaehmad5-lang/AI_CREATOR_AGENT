@@ -402,6 +402,13 @@ class ProviderService:
                 "request_id": request_id,
                 **trace_fields,
             }
+        if self.concurrency_manager is None:
+            return {
+                "status": "CONCURRENCY_MANAGER_UNAVAILABLE",
+                "executed": False,
+                "request_id": request_id,
+                **trace_fields,
+            }
         fingerprint_options: dict[str, Any] = {
             "modality": modality,
             "estimated_cost_unit": estimated_cost_unit,
@@ -476,10 +483,56 @@ class ProviderService:
             )
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route, **trace_fields}
 
+        concurrency = self._concurrency_acquire(
+            provider_id=provider_id, project_id=project_id, request_id=request_id
+        )
+        if not isinstance(concurrency, dict) or concurrency.get("acquired") is not True:
+            concurrency_status = (
+                concurrency.get("status", "CONCURRENCY_MANAGER_FAILED")
+                if isinstance(concurrency, dict) else "CONCURRENCY_MANAGER_FAILED"
+            )
+            released = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            final_status = concurrency_status if released.get("released") is True else "RESERVATION_RELEASE_FAILED"
+            finished = self._ledger_finish(
+                request_id=request_id, status="REJECTED", result_status=final_status,
+                provider_id=provider_id,
+            )
+            if not isinstance(finished, dict) or finished.get("saved") is not True:
+                final_status = "EXECUTION_LEDGER_FINISH_FAILED"
+            return {
+                "status": final_status,
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                **trace_fields,
+                "concurrency": concurrency,
+                "release": released,
+            }
+        lease_id = concurrency.get("lease_id")
+        if not isinstance(lease_id, str) or not lease_id.strip():
+            self._concurrency_release(lease_id=request_id, outcome="not_started")
+            released = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            self._ledger_finish(
+                request_id=request_id, status="REJECTED", result_status="INVALID_CONCURRENCY_LEASE"
+            )
+            return {
+                "status": "INVALID_CONCURRENCY_LEASE",
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                **trace_fields,
+                "release": released,
+            }
+
         started_claim = self._ledger_mark_started(
             request_id=request_id, provider_id=provider_id
         )
         if not isinstance(started_claim, dict) or started_claim.get("saved") is not True:
+            concurrency_release = self._concurrency_release(lease_id=lease_id, outcome="not_started")
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id
             )
@@ -489,6 +542,27 @@ class ProviderService:
                 "provider": provider_id,
                 "request_id": request_id,
                 **trace_fields,
+                "concurrency": concurrency_release,
+                "release": released,
+                "safe_to_retry": False,
+            }
+        concurrency_started = self._concurrency_mark_started(lease_id=lease_id)
+        if not isinstance(concurrency_started, dict) or concurrency_started.get("saved") is not True:
+            concurrency_release = self._concurrency_release(lease_id=lease_id, outcome="not_started")
+            released = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            self._ledger_finish(
+                request_id=request_id, status="NOT_STARTED",
+                result_status="CONCURRENCY_LEASE_START_FAILED", provider_id=provider_id,
+            )
+            return {
+                "status": "CONCURRENCY_LEASE_START_FAILED",
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                **trace_fields,
+                "concurrency": concurrency_release,
                 "release": released,
                 "safe_to_retry": False,
             }
