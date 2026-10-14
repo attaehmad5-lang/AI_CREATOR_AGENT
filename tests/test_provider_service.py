@@ -469,7 +469,7 @@ class ProviderServiceTests(unittest.TestCase):
                 "charge_outcome": "not_incurred", "output_path": output,
             }
 
-        result = self.service.execute_routed_request(
+        result = service.execute_routed_request(
             category="image", project_id="film", request_id="trace-job-73",
             traceparent=incoming, estimated_cost=1.0, adapter=adapter, modality="text", paid_approved_providers={"image"},
             adapter_options={
@@ -502,7 +502,7 @@ class ProviderServiceTests(unittest.TestCase):
         captured = {}
         output = self.root / "generated-trace-output.txt"
         output.write_text("trace output", encoding="utf-8")
-        result = self.service.execute_routed_request(
+        result = service.execute_routed_request(
             category="image", project_id="film", request_id="generated-trace-job",
             estimated_cost=1.0,
             adapter=lambda **kwargs: captured.update(kwargs) or {
