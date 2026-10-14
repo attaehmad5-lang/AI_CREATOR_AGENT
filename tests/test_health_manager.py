@@ -88,6 +88,65 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertFalse(conflict["saved"])
         self.assertEqual(len(self.manager.data["providers"]["image"]["history"]), 1)
 
+    def test_trace_id_is_persisted_and_survives_reload(self):
+        trace_id = "0123456789abcdef0123456789abcdef"
+        result = self.manager.record_result(
+            "image", success=True, request_id="trace-health-1", trace_id=trace_id
+        )
+        self.assertTrue(result["saved"])
+        event = self.manager.data["providers"]["image"]["history"][-1]
+        self.assertEqual(event["trace_id"], trace_id)
+        self.assertEqual(
+            self.manager.data["providers"]["image"]["request_events"]["trace-health-1"]["trace_id"],
+            trace_id,
+        )
+        loaded = ProviderHealthManager(self.path, clock=lambda: self.now[0])
+        self.assertEqual(
+            loaded.data["providers"]["image"]["history"][-1]["trace_id"], trace_id
+        )
+
+    def test_invalid_trace_ids_are_rejected_without_writing(self):
+        for trace_id in ("0" * 32, "A" * 32, "x" * 32, "1" * 31, "1" * 33, 123):
+            with self.subTest(trace_id=repr(trace_id)):
+                result = self.manager.record_result(
+                    "image", success=True, trace_id=trace_id
+                )
+                self.assertEqual(result["status"], "INVALID_TRACE_ID")
+                self.assertFalse(result["saved"])
+        self.assertNotIn("image", self.manager.data["providers"])
+
+    def test_same_request_with_different_trace_id_is_a_conflict(self):
+        first = self.manager.record_result(
+            "image", success=True, request_id="trace-idempotency", trace_id="1" * 32
+        )
+        duplicate = self.manager.record_result(
+            "image", success=True, request_id="trace-idempotency", trace_id="1" * 32
+        )
+        conflict = self.manager.record_result(
+            "image", success=True, request_id="trace-idempotency", trace_id="2" * 32
+        )
+        self.assertTrue(first["saved"])
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(conflict["status"], "HEALTH_EVENT_ID_CONFLICT")
+        self.assertFalse(conflict["saved"])
+        self.assertEqual(len(self.manager.data["providers"]["image"]["history"]), 1)
+
+    def test_malformed_persisted_trace_id_is_rejected(self):
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "providers": {
+                "image": {
+                    "status": "HEALTHY", "consecutive_failures": 0,
+                    "history": [{
+                        "success": True, "timestamp": "2026-01-01T00:00:00+00:00",
+                        "trace_id": "bad-trace-id",
+                    }],
+                },
+            },
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path)
+
     def test_success_and_failure_history_persist(self):
         self.manager.record_result("image", success=True, latency_ms=42)
         self.manager.record_result("image", success=False, error_code="HTTP_503")
