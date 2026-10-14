@@ -845,7 +845,8 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(loaded["status"], "LOADED")
         self.assertIs(self.manager.get_loaded_provider("factory_bound"), instance)
         serialized = self.catalog_path.read_text(encoding="utf-8")
-        self.assertNotIn("factory", serialized.casefold())
+        self.assertNotIn('"factory":', serialized.casefold())
+        self.assertNotIn("Adapter", serialized)
 
     def test_registration_factory_is_process_local_and_missing_factory_fails_closed(self):
         provider = {
