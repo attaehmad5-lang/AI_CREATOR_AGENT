@@ -763,6 +763,24 @@ class ProviderService:
             status = "EXECUTION_SUCCEEDED"
         else:
             status = "EXECUTION_FINALIZATION_PARTIAL"
+        concurrency_release = self._concurrency_release(
+            lease_id=lease_id, outcome="completed"
+        )
+        if not isinstance(concurrency_release, dict) or concurrency_release.get("saved") is not True:
+            return {
+                "status": "EXECUTION_CONCURRENCY_RELEASE_FAILED",
+                "original_status": status,
+                "executed": True,
+                "provider": provider_id,
+                "request_id": request_id,
+                **trace_fields,
+                "concurrency": concurrency_release,
+                "billing_mode": route.get("billing_mode"),
+                "output": output_validation,
+                "finalization": finalization,
+                "retry_decision": retry,
+                "safe_to_retry": False,
+            }
         ledger_state = (
             "COMPLETED" if status == "EXECUTION_SUCCEEDED"
             else "FAILED" if status in {"OUTPUT_VALIDATION_FAILED", "EXECUTION_FAILED"}
@@ -786,6 +804,7 @@ class ProviderService:
                 "output": output_validation,
                 "finalization": finalization,
                 "retry_decision": retry,
+                "concurrency": concurrency_release,
                 "safe_to_retry": False,
             }
         return {
@@ -798,6 +817,7 @@ class ProviderService:
             "output": output_validation,
             "finalization": finalization,
             "retry_decision": retry,
+            "concurrency": concurrency_release,
             "idempotency_status": "RECORDED",
         }
 
