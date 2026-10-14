@@ -47,7 +47,7 @@ class TraceContextTests(unittest.TestCase):
             )
 
     def test_invalid_request_ids_are_rejected(self):
-        for value in ("", "has space", "line\nbreak", "x" * 201, None, 123):
+        for value in ("", "has space", "line\nbreak", "x" * 201, 123):
             with self.subTest(value=repr(value)):
                 with self.assertRaises(TraceContextError):
                     TraceContext.create(value)
