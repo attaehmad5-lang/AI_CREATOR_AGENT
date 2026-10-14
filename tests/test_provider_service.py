@@ -447,6 +447,93 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
+    def test_execute_propagates_w3c_trace_context_to_adapter_and_health(self):
+        captured = {}
+        parent_trace = "0123456789abcdef0123456789abcdef"
+        incoming = f"00-{parent_trace}-0123456789abcdef-01"
+        output = self.root / "trace-output.txt"
+        output.write_text("trace test output", encoding="utf-8")
+
+        def adapter(**kwargs):
+            captured.update(kwargs)
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": output,
+            }
+
+        result = self.service.execute_routed_request(
+            category="image", project_id="film", request_id="trace-job-73",
+            traceparent=incoming, estimated_cost=0.0, adapter=adapter, modality="text",
+            adapter_options={
+                "trace_id": "f" * 32,
+                "traceparent": "caller-controlled-invalid",
+                "trace_headers": {"Authorization": "should-not-survive"},
+            },
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(result["trace_id"], parent_trace)
+        self.assertTrue(result["traceparent"].startswith(f"00-{parent_trace}-"))
+        self.assertEqual(captured["trace_id"], parent_trace)
+        self.assertEqual(captured["request_id"], "trace-job-73")
+        self.assertEqual(captured["trace_headers"]["x-request-id"], "trace-job-73")
+        self.assertEqual(captured["trace_headers"]["traceparent"], captured["traceparent"])
+        self.assertNotEqual(captured["traceparent"], incoming)
+        event = self.health.data["providers"]["image"]["history"][-1]
+        self.assertEqual(event["trace_id"], parent_trace)
+        self.assertEqual(event["request_id"], "trace-job-73")
+
+    def test_execute_generates_trace_context_when_caller_has_none(self):
+        captured = {}
+        output = self.root / "generated-trace-output.txt"
+        output.write_text("trace output", encoding="utf-8")
+        result = self.service.execute_routed_request(
+            category="image", project_id="film", request_id="generated-trace-job",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: captured.update(kwargs) or {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": output,
+            },
+            modality="text",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertRegex(result["trace_id"], r"^[0-9a-f]{32}$")
+        self.assertEqual(captured["trace_id"], result["trace_id"])
+        self.assertEqual(captured["traceparent"], result["traceparent"])
+
+    def test_execute_rejects_malformed_trace_context_before_routing_or_adapter(self):
+        calls = []
+        result = self.service.execute_routed_request(
+            category="image", project_id="film", request_id="bad-trace-job",
+            traceparent="invalid-traceparent", estimated_cost=0.0,
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
+            modality="text",
+        )
+        self.assertEqual(result["status"], "INVALID_TRACE_CONTEXT")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+        self.assertNotIn("bad-trace-job", self.cost.ledger.get("projects", {}).get("film", {}).get("requests", {}))
+
+    def test_execute_rejects_conflicting_trace_ids_before_execution(self):
+        calls = []
+        result = self.service.execute_routed_request(
+            category="image", project_id="film", request_id="conflict-trace-job",
+            trace_id="1" * 32,
+            traceparent="00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
+            modality="text",
+        )
+        self.assertEqual(result["status"], "INVALID_TRACE_CONTEXT")
+        self.assertEqual(calls, [])
+
+    def test_finalization_rejects_invalid_trace_id(self):
+        result = self.service.finalize_started_request(
+            project_id="film", provider_id="image", request_id="invalid-trace-finalize",
+            estimated_cost=0.0, actual_cost=0.0, success=True, trace_id="not-a-trace-id",
+        )
+        self.assertEqual(result["status"], "INVALID_TRACE_ID")
+        self.assertFalse(result["finalized"])
+
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
