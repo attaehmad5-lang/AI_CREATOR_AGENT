@@ -47,6 +47,8 @@ class TraceContext:
         trace_id: Any = None,
         traceparent: Any = None,
     ) -> "TraceContext":
+        if request_id is None:
+            request_id = "req-" + uuid.uuid4().hex
         if not isinstance(request_id, str) or not _REQUEST_ID_RE.fullmatch(request_id):
             raise TraceContextError("invalid request ID")
         if trace_id is not None and (
