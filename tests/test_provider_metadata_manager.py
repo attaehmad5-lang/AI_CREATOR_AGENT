@@ -336,6 +336,63 @@ class ProviderMetadataManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "METADATA_FETCH_FAILED")
         self.assertEqual(len(opener.calls), 1)
 
+    def test_refresh_http_uses_environment_only_provider_auth_header(self):
+        provider = {
+            "id": "elevenlabs_test", "name": "ElevenLabs Test",
+            "category": "voice", "auth_type": "API_KEY",
+            "connection_type": "API", "enabled": True,
+            "subscription_required": False,
+            "allowed_hosts": ["api.elevenlabs.io"],
+            "official_api_url": "https://elevenlabs.io/docs/api-reference/models/list",
+            "capabilities": ["speech_generation"],
+            "metadata_endpoint": "https://api.elevenlabs.io/v1/models",
+            "metadata_auth_env": "ELEVENLABS_API_KEY",
+            "metadata_auth_header": "xi-api-key",
+            "metadata_auth_scheme": "",
+        }
+        self.assertTrue(self.manager.register_provider(provider)["saved"])
+        secret = "private-elevenlabs-token"
+        manager = ProviderMetadataManager(
+            self.manager, clock=lambda: self.now[0],
+            environ={"ELEVENLABS_API_KEY": secret},
+        )
+        response = _Response(body=json.dumps([{
+            "model_id": "eleven_multilingual_v2",
+            "can_do_text_to_speech": True,
+            "can_do_voice_conversion": True,
+            "token_cost_factor": 1.1,
+        }]).encode("utf-8"))
+        opener = _Opener(response=response)
+        result = manager.refresh_http("elevenlabs_test", opener=opener)
+        self.assertTrue(result["refreshed"])
+        request, _ = opener.calls[0]
+        self.assertEqual(request.get_header("Xi-api-key"), secret)
+        self.assertNotIn(secret, repr(result))
+        self.assertNotIn(secret, repr(self.manager.get_provider("elevenlabs_test")))
+        model = self.manager.get_provider("elevenlabs_test")["models"][0]
+        self.assertEqual(model["capabilities"], ["speech_generation", "voice_conversion"])
+
+    def test_refresh_http_missing_metadata_credential_fails_before_network(self):
+        provider = {
+            "id": "elevenlabs_missing_token", "name": "ElevenLabs Missing Token",
+            "category": "voice", "auth_type": "API_KEY",
+            "connection_type": "API", "enabled": True,
+            "subscription_required": False,
+            "allowed_hosts": ["api.elevenlabs.io"],
+            "official_api_url": "https://elevenlabs.io/docs/api-reference/models/list",
+            "capabilities": ["speech_generation"],
+            "metadata_endpoint": "https://api.elevenlabs.io/v1/models",
+            "metadata_auth_env": "ELEVENLABS_API_KEY",
+            "metadata_auth_header": "xi-api-key",
+            "metadata_auth_scheme": "",
+        }
+        self.assertTrue(self.manager.register_provider(provider)["saved"])
+        manager = ProviderMetadataManager(self.manager, environ={})
+        opener = _Opener()
+        result = manager.refresh_http("elevenlabs_missing_token", opener=opener)
+        self.assertEqual(result["status"], "METADATA_CREDENTIAL_MISSING")
+        self.assertEqual(opener.calls, [])
+
     def test_refresh_http_rejects_invalid_timeout_and_opener(self):
         for timeout in ("five", True, float("nan"), float("inf"), -1):
             with self.subTest(timeout=timeout):
