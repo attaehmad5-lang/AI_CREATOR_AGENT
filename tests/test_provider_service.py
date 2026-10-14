@@ -516,6 +516,34 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(captured["trace_id"], result["trace_id"])
         self.assertEqual(captured["traceparent"], result["traceparent"])
 
+    def test_execute_generates_unique_request_id_when_omitted(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
+        )
+        output = self.root / "auto-request-output.txt"
+        output.write_text("auto request output", encoding="utf-8")
+        captured = {}
+        result = service.execute_routed_request(
+            category="image", project_id="film", estimated_cost=0.0,
+            adapter=lambda **kwargs: captured.update(kwargs) or {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": output,
+            },
+            modality="text",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertRegex(result["request_id"], r"^req-[0-9a-f]{32}$")
+        self.assertEqual(captured["request_id"], result["request_id"])
+        self.assertEqual(captured["trace_id"], result["trace_id"])
+        self.assertEqual(
+            self.health.data["providers"]["image"]["history"][-1]["request_id"],
+            result["request_id"],
+        )
+
     def test_execute_rejects_malformed_trace_context_before_routing_or_adapter(self):
         calls = []
         result = self.service.execute_routed_request(
