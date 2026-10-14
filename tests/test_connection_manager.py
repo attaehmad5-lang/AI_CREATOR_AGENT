@@ -953,6 +953,18 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.get_provider("public_image"), original)
         self.assertEqual(self.catalog_path.read_bytes(), original_disk)
 
+    def test_registration_fails_closed_if_catalog_becomes_corrupt_after_initialization(self):
+        provider = {
+            "id": "corrupt_catalog_register", "name": "Corrupt Catalog Register",
+            "category": "image", "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "REGISTRATION_TRANSACTION_FAILED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{not-json")
+        self.assertNotIn("corrupt_catalog_register", repr(result))
+
     def test_registration_returns_safe_catalog_validation_errors(self):
         result = self.manager.register_provider({
             "id": "bad_url", "name": "Bad URL", "category": "image",
