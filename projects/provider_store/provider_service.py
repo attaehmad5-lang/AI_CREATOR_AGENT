@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import time
 
+from .concurrency_manager import ProviderConcurrencyManager
 from .execution_ledger import ProviderExecutionLedger
 from .safe_numbers import finite_number
 from .trace_context import TraceContext, TraceContextError
@@ -26,6 +27,7 @@ class ProviderService:
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
         execution_ledger: Any | None = None,
+        concurrency_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -40,6 +42,9 @@ class ProviderService:
             (execution_ledger, "reserve", "execution_ledger"),
             (execution_ledger, "mark_started", "execution_ledger"),
             (execution_ledger, "finish", "execution_ledger"),
+            (concurrency_manager, "acquire", "concurrency_manager"),
+            (concurrency_manager, "mark_started", "concurrency_manager"),
+            (concurrency_manager, "release", "concurrency_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -52,6 +57,21 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.concurrency_manager_error: str | None = None
+        if concurrency_manager is not None:
+            self.concurrency_manager = concurrency_manager
+        else:
+            state_path = getattr(connection_manager, "state_path", None)
+            if isinstance(state_path, (str, Path)):
+                try:
+                    self.concurrency_manager = ProviderConcurrencyManager(
+                        Path(state_path).with_name("provider_concurrency.json")
+                    )
+                except Exception as exc:
+                    self.concurrency_manager = None
+                    self.concurrency_manager_error = type(exc).__name__
+            else:
+                self.concurrency_manager = None
         self.execution_ledger_error: str | None = None
         if execution_ledger is not None:
             self.execution_ledger = execution_ledger
