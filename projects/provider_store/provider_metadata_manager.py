@@ -107,6 +107,7 @@ class ProviderMetadataManager:
                 or not str(value).strip()
                 or len(str(value)) > 200
                 or any(ord(char) < 32 or ord(char) == 127 for char in str(value))
+                or any(marker in str(value).casefold() for marker in ("token=", "api_key=", "password=", "secret=", "bearer "))
             ):
                 return None, {}, "INVALID_METADATA_QUERY"
             normalized_query[key] = str(value)
@@ -202,14 +203,11 @@ class ProviderMetadataManager:
         opener: Any = None,
     ) -> dict[str, Any]:
         """Fetch a configured public JSON metadata endpoint with bounded HTTPS transport."""
-        if (
-            not isinstance(timeout_seconds, (int, float))
-            or isinstance(timeout_seconds, bool)
-            or not math.isfinite(timeout_seconds)
-            or timeout_seconds <= 0
-            or timeout_seconds > 120
-        ):
+        timeout = finite_number(timeout_seconds, minimum=0)
+        if timeout is None or timeout <= 0 or timeout > 120:
             return {"status": "INVALID_TIMEOUT", "provider": provider_id, "refreshed": False}
+        if opener is not None and not callable(getattr(opener, "open", None)):
+            return {"status": "INVALID_OPENER", "provider": provider_id, "refreshed": False}
         provider = self.connection_manager.get_provider(provider_id)
         if not isinstance(provider, dict):
             return {"status": "NOT_FOUND", "provider": provider_id, "refreshed": False}
@@ -262,7 +260,7 @@ class ProviderMetadataManager:
                 if callable(close):
                     close()
 
-        return self.refresh(provider_id, fetch, timeout_seconds=timeout_seconds)
+        return self.refresh(provider_id, fetch, timeout_seconds=timeout)
 
     def _normalize_payload(self, payload: Any) -> tuple[list[dict[str, Any]], str | None]:
         if isinstance(payload, dict):
