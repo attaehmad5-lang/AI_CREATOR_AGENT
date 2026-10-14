@@ -61,6 +61,8 @@ class ProviderService:
         """
         if not isinstance(preview_only, bool):
             return {"status": "INVALID_PREVIEW_FLAG", "saved": False}
+        if factory is not None and not callable(factory):
+            return {"status": "INVALID_FACTORY", "saved": False}
         preview_method = getattr(self.connection_manager, "preview_provider_registration", None)
         register_method = getattr(self.connection_manager, "register_provider", None)
         if not callable(preview_method) or not callable(register_method):
