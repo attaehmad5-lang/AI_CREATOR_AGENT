@@ -42,7 +42,9 @@ class ProviderQuotaManager:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "requests": {}}
-        self._reload_state()
+        # Constructor reads share the writer lock to avoid Windows replacement races.
+        with self._transaction():
+            pass
 
     def _reload_state(self) -> None:
         """Reload the latest atomically written state while holding the process lock."""

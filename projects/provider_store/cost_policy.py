@@ -35,7 +35,9 @@ class ProviderCostPolicy:
             if not isinstance(project_id, str) or not project_id.strip() or not self._valid_amount(budget):
                 raise ValueError("project budgets require non-empty project IDs and finite non-negative amounts")
         self.ledger: dict[str, Any] = {"version": "1.0", "projects": {}}
-        self._reload_ledger()
+        # Constructor reads share the writer lock to avoid Windows replacement races.
+        with self._transaction():
+            pass
 
     def _reload_ledger(self) -> None:
         """Reload persistent usage state after acquiring the interprocess lock."""

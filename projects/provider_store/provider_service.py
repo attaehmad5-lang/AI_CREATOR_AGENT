@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import time
 
+from .concurrency_manager import ProviderConcurrencyManager
 from .execution_ledger import ProviderExecutionLedger
 from .safe_numbers import finite_number
 from .trace_context import TraceContext, TraceContextError
@@ -26,6 +27,7 @@ class ProviderService:
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
         execution_ledger: Any | None = None,
+        concurrency_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -40,6 +42,9 @@ class ProviderService:
             (execution_ledger, "reserve", "execution_ledger"),
             (execution_ledger, "mark_started", "execution_ledger"),
             (execution_ledger, "finish", "execution_ledger"),
+            (concurrency_manager, "acquire", "concurrency_manager"),
+            (concurrency_manager, "mark_started", "concurrency_manager"),
+            (concurrency_manager, "release", "concurrency_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -52,6 +57,21 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.concurrency_manager_error: str | None = None
+        if concurrency_manager is not None:
+            self.concurrency_manager = concurrency_manager
+        else:
+            state_path = getattr(connection_manager, "state_path", None)
+            if isinstance(state_path, (str, Path)):
+                try:
+                    self.concurrency_manager = ProviderConcurrencyManager(
+                        Path(state_path).with_name("provider_concurrency.json")
+                    )
+                except Exception as exc:
+                    self.concurrency_manager = None
+                    self.concurrency_manager_error = type(exc).__name__
+            else:
+                self.concurrency_manager = None
         self.execution_ledger_error: str | None = None
         if execution_ledger is not None:
             self.execution_ledger = execution_ledger
@@ -301,6 +321,33 @@ class ProviderService:
             "status": "INVALID_EXECUTION_LEDGER_RESPONSE", "saved": False,
         }
 
+    def _concurrency_acquire(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self.concurrency_manager.acquire(**kwargs)
+        except Exception as exc:
+            return {"status": "CONCURRENCY_MANAGER_FAILED", "acquired": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_CONCURRENCY_RESPONSE", "acquired": False,
+        }
+
+    def _concurrency_mark_started(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self.concurrency_manager.mark_started(**kwargs)
+        except Exception as exc:
+            return {"status": "CONCURRENCY_MANAGER_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_CONCURRENCY_RESPONSE", "saved": False,
+        }
+
+    def _concurrency_release(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self.concurrency_manager.release(**kwargs)
+        except Exception as exc:
+            return {"status": "CONCURRENCY_MANAGER_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_CONCURRENCY_RESPONSE", "saved": False,
+        }
+
     def execute_routed_request(
         self,
         *,
@@ -351,6 +398,13 @@ class ProviderService:
         if self.execution_ledger is None:
             return {
                 "status": "EXECUTION_LEDGER_UNAVAILABLE",
+                "executed": False,
+                "request_id": request_id,
+                **trace_fields,
+            }
+        if self.concurrency_manager is None:
+            return {
+                "status": "CONCURRENCY_MANAGER_UNAVAILABLE",
                 "executed": False,
                 "request_id": request_id,
                 **trace_fields,
@@ -429,10 +483,56 @@ class ProviderService:
             )
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route, **trace_fields}
 
+        concurrency = self._concurrency_acquire(
+            provider_id=provider_id, project_id=project_id, request_id=request_id
+        )
+        if not isinstance(concurrency, dict) or concurrency.get("acquired") is not True:
+            concurrency_status = (
+                concurrency.get("status", "CONCURRENCY_MANAGER_FAILED")
+                if isinstance(concurrency, dict) else "CONCURRENCY_MANAGER_FAILED"
+            )
+            released = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            final_status = concurrency_status if released.get("released") is True else "RESERVATION_RELEASE_FAILED"
+            finished = self._ledger_finish(
+                request_id=request_id, status="REJECTED", result_status=final_status,
+                provider_id=provider_id,
+            )
+            if not isinstance(finished, dict) or finished.get("saved") is not True:
+                final_status = "EXECUTION_LEDGER_FINISH_FAILED"
+            return {
+                "status": final_status,
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                **trace_fields,
+                "concurrency": concurrency,
+                "release": released,
+            }
+        lease_id = concurrency.get("lease_id")
+        if not isinstance(lease_id, str) or not lease_id.strip():
+            self._concurrency_release(lease_id=request_id, outcome="not_started")
+            released = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            self._ledger_finish(
+                request_id=request_id, status="REJECTED", result_status="INVALID_CONCURRENCY_LEASE"
+            )
+            return {
+                "status": "INVALID_CONCURRENCY_LEASE",
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                **trace_fields,
+                "release": released,
+            }
+
         started_claim = self._ledger_mark_started(
             request_id=request_id, provider_id=provider_id
         )
         if not isinstance(started_claim, dict) or started_claim.get("saved") is not True:
+            concurrency_release = self._concurrency_release(lease_id=lease_id, outcome="not_started")
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id
             )
@@ -442,6 +542,27 @@ class ProviderService:
                 "provider": provider_id,
                 "request_id": request_id,
                 **trace_fields,
+                "concurrency": concurrency_release,
+                "release": released,
+                "safe_to_retry": False,
+            }
+        concurrency_started = self._concurrency_mark_started(lease_id=lease_id)
+        if not isinstance(concurrency_started, dict) or concurrency_started.get("saved") is not True:
+            concurrency_release = self._concurrency_release(lease_id=lease_id, outcome="not_started")
+            released = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            self._ledger_finish(
+                request_id=request_id, status="NOT_STARTED",
+                result_status="CONCURRENCY_LEASE_START_FAILED", provider_id=provider_id,
+            )
+            return {
+                "status": "CONCURRENCY_LEASE_START_FAILED",
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                **trace_fields,
+                "concurrency": concurrency_release,
                 "release": released,
                 "safe_to_retry": False,
             }
@@ -457,11 +578,14 @@ class ProviderService:
         try:
             adapter_result = adapter(**options)
         except Exception as exc:
-            # The adapter may have transmitted the request before failing. Do not
-            # release reservations, and persist an ambiguous terminal state to block replay.
+            # The adapter may have transmitted the request before failing. Keep both
+            # accounting reservations and the concurrency lease until explicit reconciliation.
             self._ledger_finish(
                 request_id=request_id, status="UNKNOWN",
                 result_status="EXECUTION_OUTCOME_UNKNOWN", provider_id=provider_id,
+            )
+            concurrency_release = self._concurrency_release(
+                lease_id=lease_id, outcome="unknown"
             )
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
@@ -469,6 +593,8 @@ class ProviderService:
                 "provider": provider_id,
                 "request_id": request_id,
                 **trace_fields,
+                "concurrency": concurrency_release,
+                "concurrency_lease_retained": concurrency_release.get("retained") is True,
                 "reservations_retained": True,
                 "safe_to_retry": False,
                 "error_type": type(exc).__name__,
@@ -478,12 +604,17 @@ class ProviderService:
                 request_id=request_id, status="UNKNOWN",
                 result_status="EXECUTION_OUTCOME_UNKNOWN", provider_id=provider_id,
             )
+            concurrency_release = self._concurrency_release(
+                lease_id=lease_id, outcome="unknown"
+            )
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
                 **trace_fields,
+                "concurrency": concurrency_release,
+                "concurrency_lease_retained": concurrency_release.get("retained") is True,
                 "reservations_retained": True,
                 "safe_to_retry": False,
             }
@@ -505,19 +636,31 @@ class ProviderService:
                     request_id=request_id, status="UNKNOWN",
                     result_status="INCONSISTENT_START_RESULT", provider_id=provider_id,
                 )
+                concurrency_release = self._concurrency_release(
+                    lease_id=lease_id, outcome="unknown"
+                )
                 return {
                     "status": "INCONSISTENT_START_RESULT",
                     "executed": False,
                     "provider": provider_id,
                     "request_id": request_id,
                     **trace_fields,
+                    "concurrency": concurrency_release,
+                    "concurrency_lease_retained": concurrency_release.get("retained") is True,
                     "reservations_retained": True,
                     "safe_to_retry": False,
                 }
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id
             )
-            unstarted_status = "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED"
+            concurrency_release = self._concurrency_release(
+                lease_id=lease_id, outcome="not_started"
+            )
+            unstarted_status = (
+                "RESERVATION_RELEASE_FAILED" if released.get("released") is not True
+                else "CONCURRENCY_LEASE_RELEASE_FAILED" if concurrency_release.get("saved") is not True
+                else "EXECUTION_NOT_STARTED"
+            )
             finished = self._ledger_finish(
                 request_id=request_id, status="NOT_STARTED",
                 result_status=unstarted_status, provider_id=provider_id,
@@ -530,6 +673,7 @@ class ProviderService:
                 "provider": provider_id,
                 "request_id": request_id,
                 **trace_fields,
+                "concurrency": concurrency_release,
                 "release": released,
                 "safe_to_retry": False,
             }
@@ -619,6 +763,24 @@ class ProviderService:
             status = "EXECUTION_SUCCEEDED"
         else:
             status = "EXECUTION_FINALIZATION_PARTIAL"
+        concurrency_release = self._concurrency_release(
+            lease_id=lease_id, outcome="completed"
+        )
+        if not isinstance(concurrency_release, dict) or concurrency_release.get("saved") is not True:
+            return {
+                "status": "EXECUTION_CONCURRENCY_RELEASE_FAILED",
+                "original_status": status,
+                "executed": True,
+                "provider": provider_id,
+                "request_id": request_id,
+                **trace_fields,
+                "concurrency": concurrency_release,
+                "billing_mode": route.get("billing_mode"),
+                "output": output_validation,
+                "finalization": finalization,
+                "retry_decision": retry,
+                "safe_to_retry": False,
+            }
         ledger_state = (
             "COMPLETED" if status == "EXECUTION_SUCCEEDED"
             else "FAILED" if status in {"OUTPUT_VALIDATION_FAILED", "EXECUTION_FAILED"}
@@ -642,6 +804,7 @@ class ProviderService:
                 "output": output_validation,
                 "finalization": finalization,
                 "retry_decision": retry,
+                "concurrency": concurrency_release,
                 "safe_to_retry": False,
             }
         return {
@@ -654,6 +817,7 @@ class ProviderService:
             "output": output_validation,
             "finalization": finalization,
             "retry_decision": retry,
+            "concurrency": concurrency_release,
             "idempotency_status": "RECORDED",
         }
 

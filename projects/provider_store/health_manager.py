@@ -39,7 +39,9 @@ class ProviderHealthManager:
         self._lock = threading.RLock()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}}
-        self._reload_state()
+        # Constructor reads share the writer lock to avoid Windows replacement races.
+        with self._transaction():
+            pass
 
     @staticmethod
     def _parse_timestamp(value: Any) -> datetime:
