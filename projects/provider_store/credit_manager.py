@@ -33,7 +33,10 @@ class ProviderCreditManager:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}, "reservations": {}, "usage": {}}
-        self._reload_state()
+        # Initial reads must use the same process lock as writers. Loading outside
+        # the lock races atomic replacement on Windows during multiprocess startup.
+        with self._transaction():
+            pass
 
     def _reload_state(self) -> None:
         """Reload current credit snapshots while holding the interprocess lock."""
