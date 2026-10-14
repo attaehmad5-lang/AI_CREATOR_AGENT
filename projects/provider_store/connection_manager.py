@@ -354,7 +354,7 @@ class ConnectionManager:
                             errors.append(
                                 f"providers[{index}].capabilities must be a non-empty list for enabled API providers"
                             )
-                    for url_field in ("official_api_url", "subscription_url"):
+                    for url_field in ("official_api_url", "subscription_url", "metadata_endpoint"):
                         if url_field in provider:
                             raw_url = provider[url_field]
                             try:
@@ -372,10 +372,112 @@ class ConnectionManager:
                                 or not parsed_url.hostname
                                 or parsed_url.username is not None
                                 or parsed_url.password is not None
+                                or (url_field == "metadata_endpoint" and (parsed_url.query or parsed_url.fragment))
                             ):
                                 errors.append(
                                     f"providers[{index}].{url_field} must be a safe HTTPS URL without embedded credentials"
                                 )
+                            elif url_field == "metadata_endpoint":
+                                allowed_hosts = provider.get("allowed_hosts")
+                                if (
+                                    not isinstance(allowed_hosts, list)
+                                    or parsed_url.hostname.casefold() not in {
+                                        host.casefold().rstrip(".")
+                                        for host in allowed_hosts if isinstance(host, str)
+                                    }
+                                ):
+                                    errors.append(
+                                        f"providers[{index}].metadata_endpoint host must be in allowed_hosts"
+                                    )
+                    if "metadata_query" in provider:
+                        metadata_query = provider["metadata_query"]
+                        if not isinstance(metadata_query, dict) or len(metadata_query) > 20:
+                            errors.append(f"providers[{index}].metadata_query must be an object with at most 20 entries")
+                        else:
+                            for query_key, query_value in metadata_query.items():
+                                if (
+                                    not isinstance(query_key, str)
+                                    or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", query_key)
+                                    or any(part in query_key.casefold() for part in ("token", "key", "secret", "password", "credential"))
+                                    or not isinstance(query_value, (str, int))
+                                    or isinstance(query_value, bool)
+                                    or not str(query_value).strip()
+                                    or len(str(query_value)) > 200
+                                    or any(ord(char) < 32 or ord(char) == 127 for char in str(query_value))
+                                ):
+                                    errors.append(f"providers[{index}].metadata_query contains an invalid key/value")
+                    if "models" in provider:
+                        models = provider["models"]
+                        if not isinstance(models, list) or not models or len(models) > 500:
+                            errors.append(f"providers[{index}].models must be a non-empty list of at most 500 models")
+                        else:
+                            seen_model_ids: set[str] = set()
+                            for model_index, model in enumerate(models):
+                                if not isinstance(model, dict) or not set(model).issubset({"id", "version", "capabilities", "pricing"}):
+                                    errors.append(f"providers[{index}].models[{model_index}] contains unsupported fields")
+                                    continue
+                                model_id = model.get("id")
+                                if (
+                                    not isinstance(model_id, str)
+                                    or not model_id.strip()
+                                    or len(model_id) > 300
+                                    or any(ord(char) < 32 or ord(char) == 127 for char in model_id)
+                                    or any(marker in model_id.casefold() for marker in ("token=", "api_key=", "password=", "secret=", "bearer "))
+                                    or model_id in seen_model_ids
+                                ):
+                                    errors.append(f"providers[{index}].models[{model_index}].id is invalid or duplicated")
+                                elif isinstance(model_id, str):
+                                    seen_model_ids.add(model_id)
+                                if "version" in model and (
+                                    not isinstance(model["version"], str)
+                                    or not model["version"].strip()
+                                    or len(model["version"]) > 120
+                                    or any(ord(char) < 32 or ord(char) == 127 for char in model["version"])
+                                ):
+                                    errors.append(f"providers[{index}].models[{model_index}].version is invalid")
+                                if "capabilities" in model:
+                                    caps = model["capabilities"]
+                                    if (
+                                        not isinstance(caps, list)
+                                        or len(caps) > 50
+                                        or any(not isinstance(cap, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", cap) for cap in caps)
+                                        or len({cap for cap in caps if isinstance(cap, str)}) != len(caps)
+                                    ):
+                                        errors.append(f"providers[{index}].models[{model_index}].capabilities is invalid")
+                                if "pricing" in model:
+                                    pricing = model["pricing"]
+                                    if not isinstance(pricing, dict) or len(pricing) > 20:
+                                        errors.append(f"providers[{index}].models[{model_index}].pricing is invalid")
+                                    else:
+                                        for price_key, price_value in pricing.items():
+                                            amount = finite_number(price_value, minimum=0)
+                                            if (
+                                                not isinstance(price_key, str)
+                                                or not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", price_key)
+                                                or amount is None
+                                            ):
+                                                errors.append(f"providers[{index}].models[{model_index}].pricing is invalid")
+                    if "metadata_source" in provider:
+                        if (
+                            not isinstance(provider["metadata_source"], str)
+                            or provider.get("metadata_source") != provider.get("metadata_endpoint")
+                        ):
+                            errors.append(f"providers[{index}].metadata_source must match metadata_endpoint")
+                    if "metadata_observed_at" in provider:
+                        raw_observed = provider["metadata_observed_at"]
+                        try:
+                            parsed_observed = datetime.fromisoformat(raw_observed.replace("Z", "+00:00")) if isinstance(raw_observed, str) else None
+                        except ValueError:
+                            parsed_observed = None
+                        if parsed_observed is None or parsed_observed.tzinfo is None or parsed_observed.utcoffset() is None:
+                            errors.append(f"providers[{index}].metadata_observed_at must be timezone-aware ISO datetime")
+                    if "metadata_revision" in provider and (
+                        not isinstance(provider["metadata_revision"], str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", provider["metadata_revision"])
+                    ):
+                        errors.append(f"providers[{index}].metadata_revision must be a lowercase SHA-256 hex digest")
+                    if "metadata_status" in provider and provider["metadata_status"] not in {"VERIFIED", "STALE", "UNAVAILABLE"}:
+                        errors.append(f"providers[{index}].metadata_status is unsupported")
                     if "auth_header_name" in provider:
                         safe_auth_headers = {
                             "authorization", "x-api-key", "api-key", "xi-api-key",
@@ -542,6 +644,60 @@ class ConnectionManager:
                 continue
             safe[key] = value
         return safe
+
+    def update_provider_metadata(
+        self, provider_id: str, updates: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Atomically update only validated metadata fields without replacing provider identity."""
+        allowed_fields = {
+            "models", "capabilities", "metadata_source", "metadata_observed_at",
+            "metadata_revision", "metadata_status",
+        }
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER_ID", "saved": False}
+        if (
+            not isinstance(updates, dict)
+            or not updates
+            or not set(updates).issubset(allowed_fields)
+            or self._contains_credential_value_field(updates)
+        ):
+            return {"status": "INVALID_METADATA_UPDATE", "provider": provider_id, "saved": False}
+        try:
+            json.dumps(updates, allow_nan=False)
+        except (TypeError, ValueError, RecursionError):
+            return {"status": "INVALID_METADATA_UPDATE", "provider": provider_id, "saved": False}
+        try:
+            with self._catalog_transaction():
+                providers = self._list_providers_unlocked()
+                index = next((i for i, item in enumerate(providers) if item.get("id") == provider_id), None)
+                if index is None:
+                    return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+                if provider_id in self._loaded_providers:
+                    return {"status": "PROVIDER_ALREADY_LOADED", "provider": provider_id, "saved": False}
+                updated_provider = copy.deepcopy(providers[index])
+                updated_provider.update(copy.deepcopy(updates))
+                updated = [copy.deepcopy(item) for item in providers]
+                updated[index] = updated_provider
+                new_catalog = copy.deepcopy(self.catalog)
+                new_catalog["providers"] = updated
+                validation = self.validate_catalog_schema(new_catalog)
+                if validation.get("valid") is not True:
+                    return {
+                        "status": "INVALID_PROVIDER_CATALOG",
+                        "provider": provider_id,
+                        "saved": False,
+                        "errors": list(validation.get("errors", [])),
+                    }
+                self._atomic_write_json(self.catalog_path, new_catalog)
+                self.catalog = new_catalog
+                return {"status": "METADATA_UPDATED", "provider": provider_id, "saved": True}
+        except (OSError, TypeError, ValueError, RecursionError) as exc:
+            return {
+                "status": "METADATA_PERSISTENCE_FAILED",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
 
     def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
         """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
