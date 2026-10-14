@@ -52,14 +52,21 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.execution_ledger_error: str | None = None
         if execution_ledger is not None:
             self.execution_ledger = execution_ledger
         else:
             state_path = getattr(connection_manager, "state_path", None)
-            self.execution_ledger = (
-                ProviderExecutionLedger(Path(state_path).with_name("provider_execution_ledger.json"))
-                if isinstance(state_path, (str, Path)) else None
-            )
+            if isinstance(state_path, (str, Path)):
+                try:
+                    self.execution_ledger = ProviderExecutionLedger(
+                        Path(state_path).with_name("provider_execution_ledger.json")
+                    )
+                except Exception as exc:
+                    self.execution_ledger = None
+                    self.execution_ledger_error = type(exc).__name__
+            else:
+                self.execution_ledger = None
 
     def verify_provider(
         self,
@@ -266,6 +273,33 @@ class ProviderService:
         if any(term in lowered for term in ("token", "secret", "password", "credential", "authorization", "bearer")):
             return default
         return value
+
+    def _ledger_reserve(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self._ledger_reserve(**kwargs)
+        except Exception as exc:
+            return {"status": "EXECUTION_LEDGER_FAILED", "reserved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_EXECUTION_LEDGER_RESPONSE", "reserved": False,
+        }
+
+    def _ledger_mark_started(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self._ledger_mark_started(**kwargs)
+        except Exception as exc:
+            return {"status": "EXECUTION_LEDGER_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_EXECUTION_LEDGER_RESPONSE", "saved": False,
+        }
+
+    def _ledger_finish(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            result = self._ledger_finish(**kwargs)
+        except Exception as exc:
+            return {"status": "EXECUTION_LEDGER_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_EXECUTION_LEDGER_RESPONSE", "saved": False,
+        }
 
     def execute_routed_request(
         self,
