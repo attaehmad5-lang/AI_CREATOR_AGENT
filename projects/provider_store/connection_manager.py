@@ -413,7 +413,7 @@ class ConnectionManager:
                         else:
                             seen_model_ids: set[str] = set()
                             for model_index, model in enumerate(models):
-                                if not isinstance(model, dict) or not set(model).issubset({"id", "version", "capabilities", "pricing"}):
+                                if not isinstance(model, dict) or not set(model).issubset({"id", "version", "capabilities", "pricing", "pricing_unit", "pricing_type", "pricing_currency", "pricing_description"}):
                                     errors.append(f"providers[{index}].models[{model_index}] contains unsupported fields")
                                     continue
                                 model_id = model.get("id")
@@ -444,6 +444,15 @@ class ConnectionManager:
                                         or len({cap for cap in caps if isinstance(cap, str)}) != len(caps)
                                     ):
                                         errors.append(f"providers[{index}].models[{model_index}].capabilities is invalid")
+                                for descriptor_key in ("pricing_unit", "pricing_type", "pricing_currency", "pricing_description"):
+                                    if descriptor_key in model and (
+                                        not isinstance(model[descriptor_key], str)
+                                        or not model[descriptor_key].strip()
+                                        or len(model[descriptor_key]) > 120
+                                        or any(ord(char) < 32 or ord(char) == 127 for char in model[descriptor_key])
+                                        or any(marker in model[descriptor_key].casefold() for marker in ("token=", "api_key=", "password=", "secret=", "bearer "))
+                                    ):
+                                        errors.append(f"providers[{index}].models[{model_index}].{descriptor_key} is invalid")
                                 if "pricing" in model:
                                     pricing = model["pricing"]
                                     if not isinstance(pricing, dict) or len(pricing) > 20:
