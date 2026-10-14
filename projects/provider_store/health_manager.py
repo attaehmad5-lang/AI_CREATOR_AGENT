@@ -89,6 +89,13 @@ class ProviderHealthManager:
                     or not isinstance(request_event.get("success"), bool)
                 ):
                     raise ValueError("Invalid provider health request event")
+                request_trace_id = request_event.get("trace_id")
+                if request_trace_id is not None and (
+                    not isinstance(request_trace_id, str)
+                    or not re.fullmatch(r"[0-9a-f]{32}", request_trace_id)
+                    or not any(char != "0" for char in request_trace_id)
+                ):
+                    raise ValueError("Invalid provider health request trace ID")
                 request_error = request_event.get("error_code")
                 if request_error is not None and (
                     not isinstance(request_error, str)
@@ -99,6 +106,13 @@ class ProviderHealthManager:
                 if not isinstance(event, dict) or not isinstance(event.get("success"), bool):
                     raise ValueError("Invalid provider health history event")
                 self._parse_timestamp(event.get("timestamp"))
+                event_trace_id = event.get("trace_id")
+                if event_trace_id is not None and (
+                    not isinstance(event_trace_id, str)
+                    or not re.fullmatch(r"[0-9a-f]{32}", event_trace_id)
+                    or not any(char != "0" for char in event_trace_id)
+                ):
+                    raise ValueError("Invalid provider health event trace ID")
                 latency = event.get("latency_ms")
                 if latency is not None and finite_number(latency, minimum=0) is None:
                     raise ValueError("Invalid provider health latency")
@@ -133,6 +147,7 @@ class ProviderHealthManager:
         latency_ms: float | None = None,
         error_code: str | None = None,
         request_id: str | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER", "saved": False}
@@ -143,6 +158,12 @@ class ProviderHealthManager:
             or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", request_id)
         ):
             return {"status": "INVALID_REQUEST_ID", "saved": False}
+        if trace_id is not None and (
+            not isinstance(trace_id, str)
+            or not re.fullmatch(r"[0-9a-f]{32}", trace_id)
+            or not any(char != "0" for char in trace_id)
+        ):
+            return {"status": "INVALID_TRACE_ID", "saved": False}
         latency_value = None if latency_ms is None else finite_number(latency_ms, minimum=0)
         if latency_ms is not None and latency_value is None:
             return {"status": "INVALID_LATENCY", "saved": False}
@@ -168,6 +189,7 @@ class ProviderHealthManager:
                 if (
                     previous.get("success") is success
                     and previous.get("error_code") == normalized_error
+                    and previous.get("trace_id") == trace_id
                 ):
                     return {
                         "provider": provider_id,
@@ -192,9 +214,12 @@ class ProviderHealthManager:
                 request_events[request_id] = {
                     "success": success,
                     "error_code": normalized_error,
+                    "trace_id": trace_id,
                 }
                 while len(request_events) > 1000:
                     request_events.pop(next(iter(request_events)))
+            if trace_id is not None:
+                event["trace_id"] = trace_id
             if latency_ms is not None:
                 event["latency_ms"] = round(float(latency_ms), 2)
             if normalized_error is not None:
