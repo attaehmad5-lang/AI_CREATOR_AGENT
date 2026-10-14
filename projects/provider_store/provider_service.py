@@ -258,7 +258,7 @@ class ProviderService:
         *,
         category: str,
         project_id: str,
-        request_id: str,
+        request_id: str | None = None,
         estimated_cost: float,
         adapter: Any,
         modality: str,
@@ -278,7 +278,9 @@ class ProviderService:
             return {"status": "INVALID_ADAPTER", "executed": False}
         if not isinstance(adapter_options, (dict, type(None))):
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
-        if not isinstance(request_id, str) or not request_id.strip():
+        if request_id is not None and (
+            not isinstance(request_id, str) or not request_id.strip()
+        ):
             return {"status": "INVALID_REQUEST_ID", "executed": False}
         if not isinstance(category, str) or not category.strip():
             return {"status": "INVALID_CATEGORY", "executed": False}
@@ -292,6 +294,7 @@ class ProviderService:
             )
         except TraceContextError:
             return {"status": "INVALID_TRACE_CONTEXT", "executed": False}
+        request_id = trace_context.request_id
         trace_fields = {
             "trace_id": trace_context.trace_id,
             "traceparent": trace_context.traceparent,
