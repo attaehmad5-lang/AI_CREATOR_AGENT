@@ -578,6 +578,141 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "INVALID_TRACE_ID")
         self.assertFalse(result["finalized"])
 
+    def test_provider_concurrency_limit_rejects_before_adapter_and_releases_reservations(self):
+        from projects.provider_store.concurrency_manager import ProviderConcurrencyManager
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost, quota_manager=self.quota)
+        concurrency = ProviderConcurrencyManager(
+            self.root / "limited-concurrency.json",
+            default_provider_limit=1, global_limit=10, project_limit=5,
+        )
+        concurrency.acquire(provider_id="image", project_id="film", request_id="existing-worker")
+        concurrency.mark_started(lease_id="existing-worker")
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota, concurrency_manager=concurrency,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="blocked-by-provider-limit",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "PROVIDER_CONCURRENCY_LIMIT_REACHED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+        self.assertTrue(result["release"]["released"])
+        self.assertEqual(concurrency.summary()["STARTED"], 1)
+        self.assertEqual(concurrency.get("blocked-by-provider-limit")["status"], "NOT_FOUND")
+
+    def test_known_provider_completion_releases_concurrency_lease(self):
+        from projects.provider_store.concurrency_manager import ProviderConcurrencyManager
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost, quota_manager=self.quota)
+        concurrency = ProviderConcurrencyManager(
+            self.root / "completion-concurrency.json",
+            default_provider_limit=1, global_limit=10, project_limit=5,
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
+            concurrency_manager=concurrency,
+        )
+        output = self.root / "concurrency-completed.txt"
+        output.write_text("done", encoding="utf-8")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="concurrency-completed",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": output,
+            },
+            modality="text",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(result["concurrency"]["status"], "LEASE_RELEASED")
+        self.assertEqual(concurrency.summary()["STARTED"], 0)
+        self.assertEqual(concurrency.summary()["COMPLETED"], 1)
+
+    def test_ambiguous_execution_retains_provider_slot_until_reconciliation(self):
+        from projects.provider_store.concurrency_manager import ProviderConcurrencyManager
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost, quota_manager=self.quota)
+        concurrency = ProviderConcurrencyManager(
+            self.root / "unknown-concurrency.json",
+            default_provider_limit=1, global_limit=10, project_limit=5,
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota, concurrency_manager=concurrency,
+        )
+        calls = []
+        def uncertain(**kwargs):
+            calls.append(kwargs)
+            raise TimeoutError("provider response was lost")
+        first = service.execute_routed_request(
+            category="image", project_id="film", request_id="unknown-concurrency-1",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=uncertain, modality="image",
+        )
+        second = service.execute_routed_request(
+            category="image", project_id="film", request_id="unknown-concurrency-2",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=uncertain, modality="image",
+        )
+        self.assertEqual(first["status"], "EXECUTION_OUTCOME_UNKNOWN")
+        self.assertTrue(first["concurrency_lease_retained"])
+        self.assertEqual(second["status"], "PROVIDER_CONCURRENCY_LIMIT_REACHED")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(concurrency.summary()["UNKNOWN"], 1)
+        reconciled = concurrency.reconcile(
+            lease_id="unknown-concurrency-1", outcome="not_running", confirmed=True
+        )
+        self.assertTrue(reconciled["saved"])
+
+    def test_confirmed_unstarted_request_releases_provider_slot(self):
+        from projects.provider_store.concurrency_manager import ProviderConcurrencyManager
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost, quota_manager=self.quota)
+        concurrency = ProviderConcurrencyManager(
+            self.root / "unstarted-concurrency.json",
+            default_provider_limit=1, global_limit=10, project_limit=5,
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota, concurrency_manager=concurrency,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="concurrency-not-started",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=lambda **kwargs: {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
+        self.assertEqual(result["concurrency"]["status"], "LEASE_RELEASED")
+        self.assertEqual(concurrency.summary()["RESERVED"], 0)
+        self.assertEqual(concurrency.summary()["NOT_STARTED"], 1)
+
+    def test_execution_fails_closed_when_concurrency_manager_is_unavailable(self):
+        class ConnectionWithoutStatePath:
+            def verify_connectivity(self, *args, **kwargs):
+                return {"status": "CONNECTED", "verified": True}
+        class FakeLedger:
+            def reserve(self, **kwargs):
+                return {"status": "RESERVED", "reserved": True}
+            def mark_started(self, **kwargs):
+                raise AssertionError("must not start without concurrency manager")
+            def finish(self, **kwargs):
+                raise AssertionError("must not finish without concurrency manager")
+        service = ProviderService(ConnectionWithoutStatePath(), execution_ledger=FakeLedger())
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="no-concurrency-manager",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "CONCURRENCY_MANAGER_UNAVAILABLE")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
     def test_execution_ledger_prevents_duplicate_adapter_invocation(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
