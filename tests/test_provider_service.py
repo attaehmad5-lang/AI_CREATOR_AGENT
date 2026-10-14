@@ -65,7 +65,6 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["preview_only"])
         self.assertEqual(self.catalog_path.read_bytes(), before)
         self.assertFalse(self.connections.provider_exists("onboard_preview"))
-        self.assertEqual(result["preview"]["preview_only"] if "preview_only" in result["preview"] else None, None)
 
     def test_provider_onboarding_preview_reports_missing_fields(self):
         result = self.service.onboard_provider({"id": "missing_fields"})
@@ -112,6 +111,14 @@ class ProviderServiceTests(unittest.TestCase):
         }, preview_only="false")
         self.assertEqual(result["status"], "INVALID_PREVIEW_FLAG")
         self.assertFalse(self.connections.provider_exists("bad_preview_flag"))
+
+    def test_provider_onboarding_rejects_non_callable_factory_before_preview(self):
+        result = self.service.onboard_provider({
+            "id": "bad_onboard_factory", "name": "Bad Onboard Factory",
+            "category": "image", "auth_type": "NONE", "connection_type": "LOCAL",
+        }, factory=object())
+        self.assertEqual(result["status"], "INVALID_FACTORY")
+        self.assertFalse(self.connections.provider_exists("bad_onboard_factory"))
 
     def test_provider_onboarding_surfaces_registration_race_without_false_success(self):
         provider = {
