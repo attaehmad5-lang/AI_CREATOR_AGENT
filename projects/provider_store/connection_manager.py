@@ -760,6 +760,13 @@ class ConnectionManager:
     def register_provider(
         self, provider: dict[str, Any], *, overwrite: bool = False
     ) -> dict[str, Any]:
+        """Serialize registration with runtime loading/unloading lifecycle changes."""
+        with self._lock:
+            return self._register_provider_locked(provider, overwrite=overwrite)
+
+    def _register_provider_locked(
+        self, provider: dict[str, Any], *, overwrite: bool = False
+    ) -> dict[str, Any]:
         """Register validated provider metadata; never accept credentials in catalog data."""
         if not isinstance(provider, dict):
             return {"status": "INVALID_PROVIDER", "reason": "provider must be an object"}
