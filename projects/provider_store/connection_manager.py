@@ -292,6 +292,11 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].connection_type is unsupported")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
+                    if "adapter_api_version" in provider and (
+                        not isinstance(provider["adapter_api_version"], str)
+                        or not re.fullmatch(r"[0-9]+\\.[0-9]+", provider["adapter_api_version"])
+                    ):
+                        errors.append(f"providers[{index}].adapter_api_version must use MAJOR.MINOR format")
                     if "allowed_hosts" in provider:
                         hosts = provider["allowed_hosts"]
                         if not isinstance(hosts, list) or not hosts or len(hosts) > 100:
