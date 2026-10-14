@@ -232,7 +232,7 @@ class ProviderConcurrencyManager:
                 lease["updated_at"] = _now()
                 self._save()
                 return {"status": "LEASE_RETAINED_UNKNOWN", "saved": True, "retained": True}
-            if outcome == "completed" and lease["status"] not in {"STARTED", "UNKNOWN"}:
+            if outcome == "completed" and lease["status"] != "STARTED":
                 return {"status": "INVALID_LEASE_TRANSITION", "saved": False}
             if outcome == "not_started" and lease["status"] not in {"RESERVED", "STARTED"}:
                 return {"status": "INVALID_LEASE_TRANSITION", "saved": False}
