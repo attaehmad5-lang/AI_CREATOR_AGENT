@@ -102,6 +102,7 @@ class ProviderExecutionLedger:
                 not isinstance(request_id, str)
                 or not _REQUEST_ID_RE.fullmatch(request_id)
                 or not isinstance(record, dict)
+                or not isinstance(record.get("status"), str)
                 or record.get("status") not in _ALL_STATES
                 or not isinstance(record.get("fingerprint"), str)
                 or not re.fullmatch(r"[0-9a-f]{64}", record["fingerprint"])
@@ -279,7 +280,7 @@ class ProviderExecutionLedger:
     ) -> dict[str, Any]:
         if not isinstance(request_id, str) or not _REQUEST_ID_RE.fullmatch(request_id):
             return {"status": "INVALID_REQUEST_ID", "saved": False}
-        if status not in _TERMINAL_STATES:
+        if not isinstance(status, str) or status not in _TERMINAL_STATES:
             return {"status": "INVALID_TERMINAL_STATUS", "saved": False}
         if not isinstance(result_status, str) or not re.fullmatch(r"[A-Z0-9_.:-]{1,80}", result_status):
             return {"status": "INVALID_RESULT_STATUS", "saved": False}
