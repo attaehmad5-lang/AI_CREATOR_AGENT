@@ -122,12 +122,15 @@ class RuntimeProviderRegistry:
             return {"status": "INVALID_PROVIDER_ID", "provider": provider_id, "loaded": False}
         with self._lock:
             factory = self._factories.get(provider_id)
-        if factory is None:
-            provider = self.connection_manager.get_provider(provider_id)
-            if provider is None:
-                return {"status": "NOT_FOUND", "provider": provider_id, "loaded": False}
-            return {"status": "ADAPTER_NOT_REGISTERED", "provider": provider_id, "loaded": False}
-        return self.connection_manager.load_provider(provider_id, factory)
+            if factory is None:
+                provider = self.connection_manager.get_provider(provider_id)
+                if provider is None:
+                    return {"status": "NOT_FOUND", "provider": provider_id, "loaded": False}
+                return {"status": "ADAPTER_NOT_REGISTERED", "provider": provider_id, "loaded": False}
+            # Keep the factory mapping stable through instance construction and
+            # contract validation; otherwise a concurrent replace/unregister could
+            # race a load and leave a runtime instance from a stale factory.
+            return self.connection_manager.load_provider(provider_id, factory)
 
     def load_all_enabled(self) -> dict[str, Any]:
         """Attempt all enabled catalog entries in stable ID order; never invent adapters."""
