@@ -22,7 +22,15 @@
       "capabilities": [
         "image_generation"
       ],
-      "official_api_url": "https://huggingface.co/docs/inference-providers/main/index"
+      "official_api_url": "https://huggingface.co/docs/inference-providers/main/index",
+      "metadata_endpoint": "https://huggingface.co/api/models",
+      "metadata_query": {
+        "inference_provider": "all",
+        "pipeline_tag": "text-to-image",
+        "limit": 100,
+        "sort": "downloads",
+        "direction": "-1"
+      }
     },
     {
       "id": "pollinations",
@@ -42,7 +50,8 @@
         "image_generation"
       ],
       "official_api_url": "https://gen.pollinations.ai/docs",
-      "token_env": "POLLINATIONS_API_KEY"
+      "token_env": "POLLINATIONS_API_KEY",
+      "metadata_endpoint": "https://gen.pollinations.ai/image/models"
     },
     {
       "id": "openai_image",
