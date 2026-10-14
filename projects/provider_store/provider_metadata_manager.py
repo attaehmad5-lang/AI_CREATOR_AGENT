@@ -178,7 +178,12 @@ class ProviderMetadataManager:
             updates["capabilities"] = capabilities
 
         try:
-            result = self.connection_manager.update_provider_metadata(provider_id, updates)
+            result = self.connection_manager.update_provider_metadata(
+                provider_id,
+                updates,
+                expected_revision=provider.get("metadata_revision"),
+                check_revision=True,
+            )
         except Exception as exc:
             return {
                 "status": "METADATA_PERSISTENCE_FAILED",
