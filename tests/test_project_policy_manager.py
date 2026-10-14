@@ -66,6 +66,52 @@ class ProviderProjectPolicyManagerTests(unittest.TestCase):
         for project_id, policy in policies:
             self.assertEqual(reloaded.get_policy(project_id)["policy"], policy)
 
+    def test_policy_simulation_validates_without_saving_proposed_policy(self):
+        class RoutingStub:
+            def __init__(self):
+                self.calls = []
+
+            def simulate_route(self, *, project_policy, **route_request):
+                self.calls.append((project_policy, route_request))
+                return {
+                    "status": "SIMULATION_COMPLETED",
+                    "allowed": project_policy.get("allowed_providers") == ["provider-a"],
+                }
+
+        router = RoutingStub()
+        result = self.manager.simulate_policy(
+            "film-project",
+            {"allowed_providers": ["provider-a"]},
+            router,
+            route_request={"project_id": "film-project", "category": "image"},
+        )
+        self.assertEqual(result["status"], "POLICY_SIMULATION_COMPLETED")
+        self.assertTrue(result["allowed"])
+        self.assertFalse(result["policy_saved"])
+        self.assertEqual(len(router.calls), 1)
+        self.assertFalse(self.path.exists())
+        self.assertEqual(
+            self.manager.get_policy("film-project")["status"],
+            "PROJECT_POLICY_NOT_FOUND",
+        )
+
+    def test_policy_simulation_rejects_invalid_or_mismatched_request(self):
+        class RoutingStub:
+            def simulate_route(self, **kwargs):
+                raise AssertionError("invalid simulation must not invoke routing")
+
+        invalid = self.manager.simulate_policy(
+            "film-project", {"unknown": True}, RoutingStub(),
+            route_request={"project_id": "film-project", "category": "image"},
+        )
+        self.assertEqual(invalid["status"], "INVALID_PROJECT_POLICY")
+        mismatch = self.manager.simulate_policy(
+            "film-project", {"allowed_providers": ["provider-a"]}, RoutingStub(),
+            route_request={"project_id": "another-project", "category": "image"},
+        )
+        self.assertEqual(mismatch["status"], "INVALID_SIMULATION_REQUEST")
+        self.assertFalse(self.path.exists())
+
     def test_remove_policy_and_missing_policy_are_explicit(self):
         self.manager.set_policy("film-project", {"allowed_providers": ["huggingface"]})
         self.assertTrue(self.manager.remove_policy("film-project")["removed"])
