@@ -37,6 +37,50 @@ class UnifiedProviderRegistry:
             self.connection_manager, factories=adapter_factories
         )
 
+    def register_provider(
+        self,
+        provider: dict[str, Any],
+        *,
+        adapter_factory: Callable[[dict[str, Any]], Any] | None = None,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Onboard validated metadata and optionally bind a trusted runtime factory.
+
+        Catalog metadata is persisted first. Runtime factories are process-local;
+        if factory binding fails, the result explicitly reports that the provider
+        record was saved without an adapter rather than pretending the operation
+        was atomic across persistent and in-memory state.
+        """
+        if not isinstance(provider, dict):
+            return {"status": "INVALID_PROVIDER", "saved": False}
+        if adapter_factory is not None and not callable(adapter_factory):
+            return {"status": "INVALID_FACTORY", "saved": False, "adapter_registered": False}
+        provider_id = provider.get("id")
+        registration = self.connection_manager.register_provider(provider, overwrite=overwrite)
+        if registration.get("saved") is not True:
+            return registration
+        if adapter_factory is None:
+            return {
+                **registration,
+                "adapter_registered": False,
+                "adapter_status": "NOT_REQUESTED",
+            }
+        factory_result = self.runtime.register_factory(
+            provider_id, adapter_factory, replace=overwrite
+        )
+        if factory_result.get("registered") is not True:
+            return {
+                **registration,
+                "status": "REGISTERED_WITHOUT_ADAPTER",
+                "adapter_registered": False,
+                "adapter_status": factory_result.get("status", "FACTORY_REGISTRATION_FAILED"),
+            }
+        return {
+            **registration,
+            "adapter_registered": True,
+            "adapter_status": factory_result["status"],
+        }
+
     def load_runtime_provider(self, provider_id: str) -> dict[str, Any]:
         """Load a trusted runtime adapter through the canonical registry lifecycle."""
         return self.runtime.load(provider_id)
