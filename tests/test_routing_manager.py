@@ -81,7 +81,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertFalse(result["simulation"]["automatic_fallback"])
         self.assertTrue(result["simulation"]["quota_preview"]["available"])
         self.assertEqual(quota.data["requests"], {})
-        self.assertFalse(quota.path.exists())
+        self.assertFalse(quota.state_path.exists())
         self.assertEqual(cost.ledger["projects"], {})
         self.assertFalse(cost.ledger_path.exists())
         self.assertEqual(router._round_robin_counters, {})
