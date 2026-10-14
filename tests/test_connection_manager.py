@@ -849,12 +849,15 @@ class ConnectionManagerTests(unittest.TestCase):
             "auth_type": "API_TOKEN", "connection_type": "API",
             "capabilities": ["Invalid Capability"],
         }
+        before = self.manager.get_provider("token_image")
+        before_disk = self.catalog_path.read_bytes()
         result = self.manager.register_provider(provider, overwrite=True)
         self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
         self.assertFalse(result["saved"])
-        self.assertEqual(self.manager.get_provider("token_image")["name"], "token_image")
+        self.assertEqual(self.manager.get_provider("token_image"), before)
+        self.assertEqual(self.catalog_path.read_bytes(), before_disk)
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
-        self.assertEqual(reloaded.get_provider("token_image")["name"], "token_image")
+        self.assertEqual(reloaded.get_provider("token_image"), before)
 
     def test_register_provider_rejects_invalid_id(self):
         provider = {
