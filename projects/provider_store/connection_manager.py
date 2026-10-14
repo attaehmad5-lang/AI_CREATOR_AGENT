@@ -818,54 +818,64 @@ class ConnectionManager:
         except (TypeError, ValueError, RecursionError):
             return {"status": "INVALID_PROVIDER_METADATA", "provider": provider_id, "saved": False}
 
-        with self._catalog_transaction():
-            providers = self._list_providers_unlocked()
-            existing = next((item for item in providers if item.get("id") == provider_id), None)
-            if existing is not None and not overwrite:
-                return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
-            if provider_id in self._loaded_providers:
+        try:
+            with self._catalog_transaction():
+                providers = self._list_providers_unlocked()
+                existing = next((item for item in providers if item.get("id") == provider_id), None)
+                if existing is not None and not overwrite:
+                    return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
+                if provider_id in self._loaded_providers:
+                    return {
+                        "status": "PROVIDER_LOADED",
+                        "provider": provider_id,
+                        "saved": False,
+                        "reason": "unload the runtime adapter before replacing provider metadata",
+                    }
+    
+                updated = [item for item in providers if item.get("id") != provider_id]
+                updated.append(safe_provider)
+                new_catalog = copy.deepcopy(self.catalog)
+                new_catalog["providers"] = updated
+                validation = self.validate_catalog_schema(new_catalog)
+                if validation.get("valid") is not True:
+                    return {
+                        "status": "INVALID_PROVIDER_METADATA",
+                        "provider": provider_id,
+                        "saved": False,
+                        "errors": list(validation.get("errors", [])),
+                    }
+                try:
+                    json.dumps(new_catalog, allow_nan=False)
+                    self._atomic_write_json(self.catalog_path, new_catalog)
+                except (OSError, TypeError, ValueError, RecursionError) as exc:
+                    return {
+                        "status": "REGISTRATION_PERSISTENCE_FAILED",
+                        "provider": provider_id,
+                        "saved": False,
+                        "error_type": type(exc).__name__,
+                    }
+                self.catalog = new_catalog
+                if factory is not None:
+                    self._provider_factories[provider_id] = factory
+                elif existing is not None:
+                    # An overwrite without a replacement factory must not keep a stale
+                    # factory bound to the previous provider configuration.
+                    self._provider_factories.pop(provider_id, None)
                 return {
-                    "status": "PROVIDER_LOADED",
+                    "status": "REGISTERED",
                     "provider": provider_id,
-                    "saved": False,
-                    "reason": "unload the runtime adapter before replacing provider metadata",
+                    "saved": True,
+                    "overwritten": existing is not None,
+                    "factory_registered": factory is not None,
                 }
-
-            updated = [item for item in providers if item.get("id") != provider_id]
-            updated.append(safe_provider)
-            new_catalog = copy.deepcopy(self.catalog)
-            new_catalog["providers"] = updated
-            validation = self.validate_catalog_schema(new_catalog)
-            if validation.get("valid") is not True:
-                return {
-                    "status": "INVALID_PROVIDER_METADATA",
-                    "provider": provider_id,
-                    "saved": False,
-                    "errors": list(validation.get("errors", [])),
-                }
-            try:
-                json.dumps(new_catalog, allow_nan=False)
-                self._atomic_write_json(self.catalog_path, new_catalog)
-            except (OSError, TypeError, ValueError, RecursionError) as exc:
-                return {
-                    "status": "REGISTRATION_PERSISTENCE_FAILED",
-                    "provider": provider_id,
-                    "saved": False,
-                    "error_type": type(exc).__name__,
-                }
-            self.catalog = new_catalog
-            if factory is not None:
-                self._provider_factories[provider_id] = factory
-            elif existing is not None:
-                # An overwrite without a replacement factory must not keep a stale
-                # factory bound to the previous provider configuration.
-                self._provider_factories.pop(provider_id, None)
+    
+    
+        except (OSError, TypeError, ValueError, RecursionError) as exc:
             return {
-                "status": "REGISTERED",
+                "status": "REGISTRATION_TRANSACTION_FAILED",
                 "provider": provider_id,
-                "saved": True,
-                "overwritten": existing is not None,
-                "factory_registered": factory is not None,
+                "saved": False,
+                "error_type": type(exc).__name__,
             }
 
     @staticmethod
