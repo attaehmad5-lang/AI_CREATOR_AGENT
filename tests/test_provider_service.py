@@ -448,6 +448,14 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
     def test_execute_propagates_w3c_trace_context_to_adapter_and_health(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
         captured = {}
         parent_trace = "0123456789abcdef0123456789abcdef"
         incoming = f"00-{parent_trace}-0123456789abcdef-01"
@@ -483,6 +491,14 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(event["request_id"], "trace-job-73")
 
     def test_execute_generates_trace_context_when_caller_has_none(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
         captured = {}
         output = self.root / "generated-trace-output.txt"
         output.write_text("trace output", encoding="utf-8")
