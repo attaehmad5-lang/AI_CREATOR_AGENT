@@ -32,6 +32,8 @@ class ProviderAuthenticationVerificationRequired(PermissionError):
 
 
 class ConnectionManager:
+    SUPPORTED_ADAPTER_API_VERSION = "1.0"
+
     VALID_STATES = {
         "LOCKED",
         "CONNECTING",
@@ -290,6 +292,11 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].connection_type is unsupported")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
+                    if "adapter_api_version" in provider and (
+                        not isinstance(provider["adapter_api_version"], str)
+                        or not re.fullmatch(r"[0-9]+\.[0-9]+", provider["adapter_api_version"])
+                    ):
+                        errors.append(f"providers[{index}].adapter_api_version must use MAJOR.MINOR format")
                     if "allowed_hosts" in provider:
                         hosts = provider["allowed_hosts"]
                         if not isinstance(hosts, list) or not hosts or len(hosts) > 100:
@@ -559,6 +566,13 @@ class ConnectionManager:
             if index is None:
                 return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
             updated = [dict(item) for item in providers]
+            if enabled and updated[index].get("adapter_api_version", self.SUPPORTED_ADAPTER_API_VERSION) != self.SUPPORTED_ADAPTER_API_VERSION:
+                return {
+                    "status": "ADAPTER_API_VERSION_UNSUPPORTED",
+                    "provider": provider_id,
+                    "saved": False,
+                    "supported_adapter_api_version": self.SUPPORTED_ADAPTER_API_VERSION,
+                }
             updated[index]["enabled"] = enabled
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
@@ -598,6 +612,39 @@ class ConnectionManager:
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+        declared_version = provider.get("adapter_api_version", self.SUPPORTED_ADAPTER_API_VERSION)
+        if not isinstance(declared_version, str) or declared_version != self.SUPPORTED_ADAPTER_API_VERSION:
+            return {
+                "status": "ADAPTER_API_VERSION_UNSUPPORTED",
+                "provider": provider_id,
+                "valid": False,
+                "supported_adapter_api_version": self.SUPPORTED_ADAPTER_API_VERSION,
+                "declared_adapter_api_version": declared_version if isinstance(declared_version, str) else None,
+                "contract_version": "1.0",
+            }
+        instance_version = self.SUPPORTED_ADAPTER_API_VERSION
+        for attr in ("adapter_api_version", "API_VERSION"):
+            try:
+                value = getattr(instance, attr, None)
+            except Exception:
+                return {
+                    "status": "ADAPTER_VERSION_LOOKUP_FAILED",
+                    "provider": provider_id,
+                    "valid": False,
+                    "contract_version": "1.0",
+                }
+            if value is not None:
+                instance_version = value
+                break
+        if not isinstance(instance_version, str) or instance_version != self.SUPPORTED_ADAPTER_API_VERSION:
+            return {
+                "status": "ADAPTER_API_VERSION_UNSUPPORTED",
+                "provider": provider_id,
+                "valid": False,
+                "supported_adapter_api_version": self.SUPPORTED_ADAPTER_API_VERSION,
+                "declared_adapter_api_version": instance_version if isinstance(instance_version, str) else None,
+                "contract_version": "1.0",
+            }
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
         contracts: dict[str, tuple[tuple[str, ...], ...]] = {
             "image": (("generate_image",),),
@@ -646,6 +693,7 @@ class ConnectionManager:
             "valid": not missing,
             "missing_methods": missing,
             "contract_version": "1.0",
+            "adapter_api_version": self.SUPPORTED_ADAPTER_API_VERSION,
         }
 
     def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
@@ -677,7 +725,7 @@ class ConnectionManager:
         contract = self.validate_provider_contract(provider_id, instance)
         if not contract["valid"]:
             return {
-                "status": "CONTRACT_VIOLATION",
+                "status": contract.get("status") if contract.get("status") == "ADAPTER_API_VERSION_UNSUPPORTED" else "CONTRACT_VIOLATION",
                 "provider": provider_id,
                 "loaded": False,
                 "contract_status": contract["status"],
@@ -760,6 +808,13 @@ class ConnectionManager:
     def register_provider(
         self, provider: dict[str, Any], *, overwrite: bool = False
     ) -> dict[str, Any]:
+        """Serialize registration with runtime loading/unloading lifecycle changes."""
+        with self._lock:
+            return self._register_provider_locked(provider, overwrite=overwrite)
+
+    def _register_provider_locked(
+        self, provider: dict[str, Any], *, overwrite: bool = False
+    ) -> dict[str, Any]:
         """Register validated provider metadata; never accept credentials in catalog data."""
         if not isinstance(provider, dict):
             return {"status": "INVALID_PROVIDER", "reason": "provider must be an object"}
@@ -782,12 +837,27 @@ class ConnectionManager:
             existing = next((item for item in providers if item.get("id") == provider_id), None)
             if existing is not None and not overwrite:
                 return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
+            if existing is not None and provider_id in self._loaded_providers:
+                return {
+                    "status": "PROVIDER_LOADED",
+                    "provider": provider_id,
+                    "saved": False,
+                    "reason": "unload the runtime adapter before replacing provider metadata",
+                }
             safe_provider = dict(provider)
             safe_provider["id"] = provider_id
             updated = [item for item in providers if item.get("id") != provider_id]
             updated.append(safe_provider)
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation.get("valid"):
+                return {
+                    "status": "INVALID_PROVIDER_CATALOG",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
             return {

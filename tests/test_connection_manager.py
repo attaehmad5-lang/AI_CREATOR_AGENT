@@ -719,6 +719,49 @@ class ConnectionManagerTests(unittest.TestCase):
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertEqual(reloaded.get_provider("local_image")["name"], "Local Image")
 
+    def test_register_provider_validates_candidate_catalog_before_persisting(self):
+        before = self.catalog_path.read_text(encoding="utf-8")
+        result = self.manager.register_provider({
+            "id": "unsafe_endpoint", "name": "Unsafe Endpoint",
+            "category": "image", "auth_type": "NONE", "connection_type": "API",
+            "enabled": False, "subscription_required": False,
+            "allowed_hosts": ["api.example.com"],
+            "official_api_url": "http://api.example.com/docs",
+        })
+        self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), before)
+        reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertIsNone(reloaded.get_provider("unsafe_endpoint"))
+
+    def test_register_provider_cannot_overwrite_loaded_adapter(self):
+        class ImageAdapter:
+            def generate_image(self, prompt):
+                return {"ok": True}
+
+            def close(self):
+                self.closed = True
+
+        adapter = ImageAdapter()
+        loaded = self.manager.load_provider("public_image", lambda provider: adapter)
+        self.assertTrue(loaded["loaded"])
+        original = dict(self.manager.get_provider("public_image"))
+        original_name = original.get("name")
+        replacement = {
+            "id": "public_image", "name": "Replacement Name",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "LOCAL", "enabled": True,
+        }
+        blocked = self.manager.register_provider(replacement, overwrite=True)
+        self.assertEqual(blocked["status"], "PROVIDER_LOADED")
+        self.assertFalse(blocked["saved"])
+        self.assertEqual(self.manager.get_provider("public_image").get("name"), original_name)
+        self.assertIs(self.manager.get_loaded_provider("public_image"), adapter)
+        self.assertTrue(self.manager.unload_provider("public_image")["unloaded"])
+        replaced = self.manager.register_provider(replacement, overwrite=True)
+        self.assertEqual(replaced["status"], "REGISTERED")
+        self.assertEqual(self.manager.get_provider("public_image")["name"], "Replacement Name")
+
     def test_register_provider_rejects_duplicate_without_overwrite(self):
         provider = {
             "id": "token_image", "name": "Replacement", "category": "image",
@@ -827,6 +870,17 @@ class ConnectionManagerTests(unittest.TestCase):
             "NOT_FOUND",
         )
 
+    def test_runtime_enablement_rejects_unsupported_adapter_api_version(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"][0]["enabled"] = False
+        catalog["providers"][0]["adapter_api_version"] = "2.0"
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+        result = manager.set_provider_enabled("public_image", True)
+        self.assertEqual(result["status"], "ADAPTER_API_VERSION_UNSUPPORTED")
+        self.assertFalse(result["saved"])
+        self.assertFalse(manager.get_provider("public_image")["enabled"])
+
     def test_provider_contract_accepts_required_modality_method(self):
         class ImageProvider:
             def generate_image(self, prompt, output_path):
@@ -834,6 +888,35 @@ class ConnectionManagerTests(unittest.TestCase):
         result = self.manager.validate_provider_contract("public_image", ImageProvider())
         self.assertTrue(result["valid"])
         self.assertEqual(result["contract_version"], "1.0")
+
+    def test_provider_contract_rejects_unsupported_adapter_api_version(self):
+        class FutureAdapter:
+            API_VERSION = "2.0"
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        contract = self.manager.validate_provider_contract("public_image", FutureAdapter())
+        self.assertEqual(contract["status"], "ADAPTER_API_VERSION_UNSUPPORTED")
+        self.assertFalse(contract["valid"])
+        loaded = self.manager.load_provider("public_image", lambda metadata: FutureAdapter())
+        self.assertEqual(loaded["status"], "ADAPTER_API_VERSION_UNSUPPORTED")
+        self.assertFalse(loaded["loaded"])
+
+    def test_catalog_declared_adapter_version_must_match_supported_runtime(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"][0]["adapter_api_version"] = "2.0"
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+
+        class ImageProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        contract = manager.validate_provider_contract("public_image", ImageProvider())
+        self.assertEqual(contract["status"], "ADAPTER_API_VERSION_UNSUPPORTED")
+        self.assertEqual(contract["supported_adapter_api_version"], "1.0")
+        self.assertEqual(contract["declared_adapter_api_version"], "2.0")
 
     def test_provider_contract_rejects_missing_method_and_prevents_loading(self):
         instance = object()

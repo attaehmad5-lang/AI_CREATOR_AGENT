@@ -100,6 +100,25 @@ class ProviderCatalogValidationTests(unittest.TestCase):
                 self.assertFalse(result["valid"])
                 self.assertTrue(any(field in error and "required" in error for error in result["errors"]))
 
+    def test_catalog_rejects_malformed_adapter_api_version(self):
+        for version in ("v1", "1", "1.0.0", "", True, None):
+            with self.subTest(version=version):
+                result = ConnectionManager.validate_catalog_schema({
+                    "version": "3.0",
+                    "providers": [{
+                        "id": "versioned", "name": "Versioned",
+                        "category": "image", "auth_type": "NONE",
+                        "connection_type": "LOCAL", "enabled": False,
+                        "subscription_required": False,
+                        "adapter_api_version": version,
+                    }],
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any(
+                    "adapter_api_version must use MAJOR.MINOR format" in error
+                    for error in result["errors"]
+                ))
+
     def test_schema_rejects_enabled_api_provider_without_allowlist(self):
         result = ConnectionManager.validate_catalog_schema({
             "version": "3.0",

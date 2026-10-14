@@ -34,6 +34,31 @@ class ProviderQuotaManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_read_only_quota_check_does_not_create_reservations(self):
+        preview = self.manager.check_available(
+            provider_id="image", request_id="simulation-1"
+        )
+        self.assertEqual(preview["status"], "AVAILABLE")
+        self.assertTrue(preview["available"])
+        self.assertEqual(preview["usage"]["hourly"], 0)
+        self.assertEqual(self.manager.data["requests"], {})
+        self.assertFalse(self.path.exists())
+
+    def test_read_only_quota_check_reports_exhaustion_and_duplicate_ids(self):
+        self.manager.reserve(provider_id="image", request_id="job-1")
+        self.manager.reserve(provider_id="image", request_id="job-2")
+        exhausted = self.manager.check_available(
+            provider_id="image", request_id="simulation-3"
+        )
+        self.assertEqual(exhausted["status"], "QUOTA_EXCEEDED")
+        self.assertFalse(exhausted["available"])
+        duplicate = self.manager.check_available(
+            provider_id="image", request_id="job-1"
+        )
+        self.assertEqual(duplicate["status"], "REQUEST_ID_ALREADY_EXISTS")
+        self.assertFalse(duplicate["available"])
+        self.assertEqual(set(self.manager.data["requests"]), {"job-1", "job-2"})
+
     def test_reserve_commit_and_duplicate_requests_are_idempotent(self):
         first = self.manager.reserve(provider_id="image", request_id="job-1")
         duplicate = self.manager.reserve(provider_id="image", request_id="job-1")

@@ -1,12 +1,12 @@
 # Task #25 — Canonical 138-Item Verification Ledger
 
-**Overall status: IN PROGRESS — do not mark Task #25 complete and do not merge PR #7 without explicit approval.**
+**Overall status: IN PROGRESS — do not mark Task #25 complete. PR #1 and PR #7 are merged; draft PR #11 remains unmerged pending review.**
 
 This file preserves the user's original A–P headings, feature numbers, feature names and baseline status markers. The **Baseline** column is the user's original 🟢/🟡/🔴 status; it is not the current implementation result. **Current audit** is independently evidence-based. A green baseline does not automatically mean the feature is verified today.
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38614022219](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38614022219): **340 tests passed on Ubuntu and 340 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -15,7 +15,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 1 | 🟡 | Provider Registry | PARTIAL | `provider_catalog.json`, `connection_manager.py`, catalog/schema tests; registry lifecycle is not fully integrated with runtime adapters. |
-| 2 | 🟡 | Provider Registration | PARTIAL | Registration and concurrent-registration tests exist; onboarding and runtime adapter registration remain incomplete. |
+| 2 | 🟡 | Provider Registration | PARTIAL | Registration now validates the full candidate catalog before persistence, rejects unsafe metadata without corrupting existing state, serializes with runtime adapter lifecycle, and blocks replacement while an adapter is loaded; complete onboarding/approval workflow remains open. Regression coverage: `tests/test_connection_manager.py::test_register_provider_validates_candidate_catalog_before_persisting`, `test_register_provider_cannot_overwrite_loaded_adapter`. |
 | 3 | 🟡 | Provider Discovery | VERIFIED | Provider discovery by declared catalog metadata is implemented and covered by discovery/capability tests. |
 | 4 | 🟡 | Provider Loading | VERIFIED | Factory-based loading, disabled-provider rejection, contract enforcement and safe failure behavior are tested. |
 | 5 | 🔴 | Provider Unloading | VERIFIED | `unload_provider()` calls close/shutdown, preserves instances if cleanup fails, and has lifecycle regression tests. |
@@ -170,7 +170,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 303-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
+| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 340-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
 | 98 | 🟢 | Mock Provider Fallback Integration Test | VERIFIED | Mock/fallback integration regression coverage passes in the cross-platform suite. |
 | 99 | 🔴 | PRIMARY_ONLY and Fallback-Disabled Regression Tests | VERIFIED | PRIMARY_ONLY and automatic-fallback-disabled regression cases now have explicit tests. |
 | 100 | 🟡 | Retry, Backoff and Timeout Tests | VERIFIED | Retry, backoff, Retry-After, timeout and invalid numeric inputs are covered by regression tests. |
@@ -181,7 +181,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 303 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 340 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
@@ -218,12 +218,12 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 129 | 🟡 | Plugin-based provider adapters | PARTIAL | Compatibility facades exist; a safe plugin lifecycle and isolation model is incomplete. |
-| 130 | 🟡 | Versioned provider adapter interface | PARTIAL | Capability/contract validation exists; explicit adapter API version negotiation is incomplete. |
+| 130 | 🟡 | Versioned provider adapter interface | PARTIAL | Optional MAJOR.MINOR `adapter_api_version` defaults to 1.0 for legacy entries; runtime validates catalog/instance versions and blocks loading/enabling unsupported versions. Multi-version negotiation and migration remain open. Evidence: `tests/test_connection_manager.py::test_provider_contract_rejects_unsupported_adapter_api_version`, `test_catalog_declared_adapter_version_must_match_supported_runtime`, `test_runtime_enablement_rejects_unsupported_adapter_api_version`. |
 | 131 | 🟡 | Validated metadata کے ساتھ capability discovery | PARTIAL | Validated capability metadata and discovery exist; live provider metadata trust is incomplete. |
 | 132 | 🟡 | نئے providers کو محفوظ طریقے سے شامل کرنے کا workflow | PARTIAL | Catalog registration/schema validation exists; complete onboarding, approval and probe workflow is incomplete. |
 | 133 | 🔴 | Self-hosted اور local models کی support، جہاں ممکن ہو | OPEN | Local/self-hosted provider lifecycle and modality verification are not complete. |
 | 134 | 🔴 | Model deprecation اور end-of-life handling | PARTIAL | Catalog schema records a validated deprecation reason/date and rejects deprecated providers that are enabled; OpenAI Sora is marked deprecated and disabled. General deprecation discovery, replacement migration, and EOL routing remain open. Evidence: `tests/test_provider_catalogs.py::test_deprecated_provider_requires_reason_date_and_stays_disabled`. |
-| 135 | 🔴 | Provider policy activation سے پہلے simulation | OPEN | Policy simulation/dry-run before activation is not implemented. |
+| 135 | 🔴 | Provider policy activation سے پہلے simulation | PARTIAL | `ProviderProjectPolicyManager.simulate_policy()` and `ProviderRoutingManager.simulate_route()` validate and evaluate a proposed project policy without saving it, creating cost/credit/quota reservations, or advancing round-robin state. Read-only quota preview and no-persistence tests pass. Full admin approval/activation integration and broader policy coverage remain open. Evidence: `tests/test_project_policy_manager.py::test_policy_simulation_validates_without_saving_proposed_policy`, `tests/test_routing_manager.py::test_policy_simulation_uses_proposed_policy_without_creating_reservations`. |
 | 136 | 🟡 | Backward compatibility اور automated contract checks | PARTIAL | Compatibility facades and contract tests exist; full versioned compatibility checks remain open. |
 | 137 | 🔴 | Provider configuration اور policy کے لیے admin controls | OPEN | Complete administrative controls and authorization are not implemented. |
 | 138 | 🔴 | Documentation، diagnostics and maintenance tooling | PARTIAL | Provider guide and diagnostics exist; complete diagnostics/maintenance workflows remain open. |
@@ -232,6 +232,6 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 1. Every one of the 138 items must be reviewed against its original wording; do not infer or rename features.
 2. Any `PARTIAL` or `OPEN` item must remain uncompleted until its implementation, tests and required live/operational evidence exist.
-3. The 303 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
+3. The 330 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
 4. The account-balance adapter is generic. It must be configured only with a provider-documented endpoint and a field representing actual available credits; never mistake a per-key budget cap for free credits.
 5. Task #29 Generation State Manager remains paused and must not be started as a separate task during this Task #25 work.
