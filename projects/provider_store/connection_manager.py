@@ -709,13 +709,14 @@ class ConnectionManager:
         except ValueError:
             return {"status": "INVALID_METADATA_SOURCE", "provider": provider_id, "saved": False}
         allowed_hosts = initial.get("allowed_hosts")
-        if not isinstance(allowed_hosts, list) or not allowed_hosts:
-            official_url = initial.get("official_api_url")
-            try:
-                official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
-            except ValueError:
-                official_host = None
-            allowed_hosts = [official_host] if official_host else []
+        allowed_hosts = list(allowed_hosts) if isinstance(allowed_hosts, list) else []
+        official_url = initial.get("official_api_url")
+        try:
+            official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
+        except ValueError:
+            official_host = None
+        if official_host and official_host.casefold() not in {host.casefold() for host in allowed_hosts if isinstance(host, str)}:
+            allowed_hosts.append(official_host)
         source_validation = self.validate_endpoint(
             source_url,
             allowed_hosts=set(allowed_hosts),
@@ -772,13 +773,14 @@ class ConnectionManager:
                 return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
             current = copy.deepcopy(providers[index])
             current_hosts = current.get("allowed_hosts")
-            if not isinstance(current_hosts, list) or not current_hosts:
-                official_url = current.get("official_api_url")
-                try:
-                    official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
-                except ValueError:
-                    official_host = None
-                current_hosts = [official_host] if official_host else []
+            current_hosts = list(current_hosts) if isinstance(current_hosts, list) else []
+            official_url = current.get("official_api_url")
+            try:
+                official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
+            except ValueError:
+                official_host = None
+            if official_host and official_host.casefold() not in {host.casefold() for host in current_hosts if isinstance(host, str)}:
+                current_hosts.append(official_host)
             current_source_validation = self.validate_endpoint(
                 source_url, allowed_hosts=set(current_hosts)
             )
