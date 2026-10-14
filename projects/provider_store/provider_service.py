@@ -46,6 +46,70 @@ class ProviderService:
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
 
+    def onboard_provider(
+        self,
+        provider: dict[str, Any],
+        *,
+        factory: Any = None,
+        overwrite: bool = False,
+        preview_only: bool = True,
+    ) -> dict[str, Any]:
+        """Run the provider onboarding preview or commit a validated registration.
+
+        Preview mode is the default and has no persistence/runtime side effects.
+        Commit mode repeats validation atomically in ConnectionManager before writing.
+        """
+        if not isinstance(preview_only, bool):
+            return {"status": "INVALID_PREVIEW_FLAG", "saved": False}
+        preview_method = getattr(self.connection_manager, "preview_provider_registration", None)
+        register_method = getattr(self.connection_manager, "register_provider", None)
+        if not callable(preview_method) or not callable(register_method):
+            return {"status": "ONBOARDING_UNSUPPORTED", "saved": False}
+        try:
+            preview = preview_method(provider, overwrite=overwrite)
+        except Exception as exc:
+            return {
+                "status": "ONBOARDING_PREVIEW_FAILED",
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(preview, dict) or preview.get("valid") is not True:
+            if isinstance(preview, dict):
+                return {
+                    "status": preview.get("status", "INVALID_PROVIDER_METADATA"),
+                    "saved": False,
+                    "preview": preview,
+                }
+            return {"status": "INVALID_PREVIEW_RESULT", "saved": False}
+        if preview_only:
+            return {
+                "status": "PREVIEW_READY",
+                "saved": False,
+                "preview_only": True,
+                "preview": preview,
+            }
+        try:
+            if factory is None:
+                registration = register_method(provider, overwrite=overwrite)
+            else:
+                registration = register_method(provider, overwrite=overwrite, factory=factory)
+        except Exception as exc:
+            return {
+                "status": "ONBOARDING_REGISTRATION_FAILED",
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(registration, dict):
+            return {"status": "INVALID_REGISTRATION_RESULT", "saved": False}
+        saved = registration.get("saved") is True
+        return {
+            "status": "ONBOARDED" if saved else registration.get("status", "REGISTRATION_FAILED"),
+            "saved": saved,
+            "preview_only": False,
+            "provider": registration.get("provider", preview.get("provider")),
+            "registration": registration,
+        }
+
     def verify_provider(
         self,
         provider_id: str,
