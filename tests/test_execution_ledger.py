@@ -156,6 +156,28 @@ class ProviderExecutionLedgerTests(unittest.TestCase):
         self.assertEqual(duplicate["status"], "ALREADY_FINISHED")
         self.assertTrue(duplicate["duplicate"])
 
+    def test_finish_enforces_reserved_and_started_transitions(self):
+        self.reserve()
+        invalid = self.ledger.finish(
+            request_id="request-1", status="COMPLETED",
+            result_status="EXECUTION_SUCCEEDED",
+        )
+        self.assertEqual(invalid["status"], "INVALID_STATE_TRANSITION")
+        self.assertEqual(self.ledger.get("request-1")["request"]["status"], "RESERVED")
+        self.ledger.mark_started(request_id="request-1", provider_id="image")
+        invalid_reject = self.ledger.finish(
+            request_id="request-1", status="REJECTED",
+            result_status="ROUTING_REJECTED", provider_id="image",
+        )
+        self.assertEqual(invalid_reject["status"], "INVALID_STATE_TRANSITION")
+        valid_unknown = self.ledger.finish(
+            request_id="request-1", status="UNKNOWN",
+            result_status="EXECUTION_OUTCOME_UNKNOWN", provider_id="image",
+        )
+        self.assertTrue(valid_unknown["saved"])
+        replay = self.reserve()
+        self.assertEqual(replay["status"], "REQUEST_OUTCOME_UNKNOWN")
+
     def test_finish_rejects_conflicting_terminal_result(self):
         self.reserve()
         self.ledger.mark_started(request_id="request-1", provider_id="image")
