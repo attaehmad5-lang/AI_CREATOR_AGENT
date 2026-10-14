@@ -6,6 +6,7 @@ import re
 import time
 
 from .safe_numbers import finite_number
+from .trace_context import TraceContext, TraceContextError
 
 
 class ProviderService:
@@ -264,6 +265,8 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        trace_id: str | None = None,
+        traceparent: str | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
@@ -283,6 +286,16 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        try:
+            trace_context = TraceContext.create(
+                request_id, trace_id=trace_id, traceparent=traceparent
+            )
+        except TraceContextError:
+            return {"status": "INVALID_TRACE_CONTEXT", "executed": False}
+        trace_fields = {
+            "trace_id": trace_context.trace_id,
+            "traceparent": trace_context.traceparent,
+        }
 
         route = self.route_request(
             category=category,
@@ -293,14 +306,17 @@ class ProviderService:
             **route_options,
         )
         if not isinstance(route, dict) or route.get("allowed") is not True:
-            return {"status": "ROUTING_REJECTED", "executed": False, "route": route}
+            return {"status": "ROUTING_REJECTED", "executed": False, "route": route, **trace_fields}
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
-            return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+            return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route, **trace_fields}
 
         options = dict(adapter_options or {})
         options["provider_id"] = provider_id
         options["request_id"] = request_id
+        options["trace_id"] = trace_context.trace_id
+        options["traceparent"] = trace_context.traceparent
+        options["trace_headers"] = trace_context.headers
         started_at = time.monotonic()
         try:
             adapter_result = adapter(**options)
@@ -312,6 +328,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                **trace_fields,
                 "reservations_retained": True,
                 "error_type": type(exc).__name__,
             }
@@ -321,6 +338,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                **trace_fields,
                 "reservations_retained": True,
             }
         if adapter_result["started"] is False:
@@ -342,6 +360,7 @@ class ProviderService:
                     "executed": False,
                     "provider": provider_id,
                     "request_id": request_id,
+                    **trace_fields,
                     "reservations_retained": True,
                 }
             released = self.release_unstarted_request(
@@ -352,6 +371,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                **trace_fields,
                 "release": released,
             }
 
@@ -420,6 +440,7 @@ class ProviderService:
             billing_mode=route.get("billing_mode"),
             credit_outcome=credit_outcome,
             actual_credit_amount=actual_credit_amount,
+            trace_id=trace_context.trace_id,
         )
         retry = None
         if not final_success and self.retry_policy is not None:
@@ -444,6 +465,7 @@ class ProviderService:
             "executed": True,
             "provider": provider_id,
             "request_id": request_id,
+            **trace_fields,
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "finalization": finalization,
@@ -483,6 +505,7 @@ class ProviderService:
         billing_mode: str | None = None,
         credit_outcome: str = "used",
         actual_credit_amount: float | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         """Account for a started request without assuming ambiguous failures were free.
 
@@ -495,6 +518,12 @@ class ProviderService:
             return {"status": "INVALID_USAGE_RECORD", "finalized": False}
         if not isinstance(success, bool):
             return {"status": "INVALID_EXECUTION_RESULT", "finalized": False}
+        if trace_id is not None and (
+            not isinstance(trace_id, str)
+            or not re.fullmatch(r"[0-9a-f]{32}", trace_id)
+            or not any(char != "0" for char in trace_id)
+        ):
+            return {"status": "INVALID_TRACE_ID", "finalized": False}
         if not isinstance(charge_outcome, str) or charge_outcome not in {"unknown", "incurred", "not_incurred"}:
             return {"status": "INVALID_CHARGE_OUTCOME", "finalized": False}
         if billing_mode is not None and (
@@ -671,6 +700,7 @@ class ProviderService:
                     latency_ms=latency_ms,
                     error_code=None if success else (error_code or "EXECUTION_FAILED"),
                     request_id=request_id,
+                    trace_id=trace_id,
                 )
             except Exception as exc:
                 health_result = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
