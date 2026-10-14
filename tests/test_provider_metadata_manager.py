@@ -336,6 +336,16 @@ class ProviderMetadataManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "METADATA_FETCH_FAILED")
         self.assertEqual(len(opener.calls), 1)
 
+    def test_refresh_http_rejects_invalid_timeout_and_opener(self):
+        for timeout in ("five", True, float("nan"), float("inf"), -1):
+            with self.subTest(timeout=timeout):
+                result = self.metadata.refresh_http("metadata_image", timeout_seconds=timeout)
+                self.assertEqual(result["status"], "INVALID_TIMEOUT")
+        self.assertEqual(
+            self.metadata.refresh_http("metadata_image", opener=object())["status"],
+            "INVALID_OPENER",
+        )
+
     def test_refresh_http_rejects_invalid_content_length(self):
         response = _Response(headers={"Content-Length": "invalid"})
         result = self.metadata.refresh_http("metadata_image", opener=_Opener(response=response))
@@ -349,12 +359,14 @@ class ProviderMetadataManagerTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("metadata_endpoint host" in error for error in result["errors"]))
 
-    def test_catalog_schema_rejects_sensitive_metadata_query_keys(self):
-        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
-        catalog["providers"][0]["metadata_query"] = {"api_key": "secret"}
-        result = ConnectionManager.validate_catalog_schema(catalog)
-        self.assertFalse(result["valid"])
-        self.assertTrue(any("metadata_query" in error for error in result["errors"]))
+    def test_catalog_schema_rejects_sensitive_metadata_query_keys_and_values(self):
+        for query in ({"api_key": "secret"}, {"search": "token=secret"}, {"filter": "Bearer secret"}):
+            with self.subTest(query=query):
+                catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+                catalog["providers"][0]["metadata_query"] = query
+                result = ConnectionManager.validate_catalog_schema(catalog)
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("metadata_query" in error for error in result["errors"]))
 
     def test_catalog_schema_rejects_invalid_metadata_revision(self):
         catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
