@@ -734,6 +734,29 @@ class ConnectionManagerTests(unittest.TestCase):
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertIsNone(reloaded.get_provider("unsafe_endpoint"))
 
+    def test_register_provider_cannot_overwrite_loaded_adapter(self):
+        class ImageAdapter:
+            def generate_image(self, prompt):
+                return {"ok": True}
+
+            def close(self):
+                self.closed = True
+
+        adapter = ImageAdapter()
+        loaded = self.manager.load_provider("public_image", lambda provider: adapter)
+        self.assertTrue(loaded["loaded"])
+        replacement = dict(self.manager.get_provider("public_image"))
+        replacement["name"] = "Replacement Name"
+        blocked = self.manager.register_provider(replacement, overwrite=True)
+        self.assertEqual(blocked["status"], "PROVIDER_LOADED")
+        self.assertFalse(blocked["saved"])
+        self.assertEqual(self.manager.get_provider("public_image")["name"], "public_image")
+        self.assertIs(self.manager.get_loaded_provider("public_image"), adapter)
+        self.assertTrue(self.manager.unload_provider("public_image")["unloaded"])
+        replaced = self.manager.register_provider(replacement, overwrite=True)
+        self.assertEqual(replaced["status"], "REGISTERED")
+        self.assertEqual(self.manager.get_provider("public_image")["name"], "Replacement Name")
+
     def test_register_provider_rejects_duplicate_without_overwrite(self):
         provider = {
             "id": "token_image", "name": "Replacement", "category": "image",
