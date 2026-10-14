@@ -92,6 +92,50 @@ class ProviderQuotaManager:
             result = result.replace(tzinfo=timezone.utc)
         return result.astimezone(timezone.utc)
 
+    def check_available(self, *, provider_id: str, request_id: str) -> dict[str, Any]:
+        """Read-only quota preview; never creates a reservation or changes persisted state."""
+        if (
+            not isinstance(provider_id, str) or not provider_id.strip()
+            or not isinstance(request_id, str) or not request_id.strip()
+        ):
+            return {"status": "INVALID_REQUEST", "available": False}
+        if provider_id not in self.limits:
+            return {"status": "NO_QUOTA_POLICY", "provider": provider_id, "available": True}
+        with self._transaction():
+            existing = self.data["requests"].get(request_id)
+            if existing is not None:
+                return {
+                    "status": "REQUEST_ID_ALREADY_EXISTS",
+                    "provider": provider_id,
+                    "request_id": request_id,
+                    "existing_status": existing.get("status") if isinstance(existing, dict) else "INVALID",
+                    "available": False,
+                }
+            now = self.clock().astimezone(timezone.utc)
+            usage = {
+                period: self._count_in_period(provider_id, period, now)
+                for period in self.limits[provider_id]
+            }
+            for period, limit in self.limits[provider_id].items():
+                if usage[period] >= limit:
+                    return {
+                        "status": "QUOTA_EXCEEDED",
+                        "provider": provider_id,
+                        "period": period,
+                        "limit": limit,
+                        "used": usage[period],
+                        "usage": usage,
+                        "available": False,
+                    }
+            return {
+                "status": "AVAILABLE",
+                "provider": provider_id,
+                "request_id": request_id,
+                "usage": usage,
+                "limits": dict(self.limits[provider_id]),
+                "available": True,
+            }
+
     def reserve(self, *, provider_id: str, request_id: str) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip() or not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST", "reserved": False}
