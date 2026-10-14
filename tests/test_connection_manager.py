@@ -1223,6 +1223,32 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("must-not-persist", repr(result))
         self.assertEqual(self.catalog_path.read_bytes(), before)
 
+    def test_catalog_schema_requires_pricing_provenance_and_allowlisted_source(self):
+        provider = {
+            "id": "priced_provider", "name": "Priced Provider", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+            "enabled": False, "subscription_required": False,
+            "allowed_hosts": ["api.example.com"],
+            "pricing": [{"currency": "USD", "unit": "per_image", "amount": 0.1}],
+        }
+        missing_provenance = ConnectionManager.validate_catalog_schema({
+            "version": "3.0", "providers": [provider],
+        })
+        self.assertFalse(missing_provenance["valid"])
+        self.assertTrue(any("source_url is required" in error for error in missing_provenance["errors"]))
+        self.assertTrue(any("observed_at is required" in error for error in missing_provenance["errors"]))
+
+        provider["pricing"] = [{
+            "currency": "USD", "unit": "per_image", "amount": 0.1,
+            "source_url": "https://evil.example.com/pricing",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        }]
+        off_host = ConnectionManager.validate_catalog_schema({
+            "version": "3.0", "providers": [provider],
+        })
+        self.assertFalse(off_host["valid"])
+        self.assertTrue(any("host is not allowlisted" in error for error in off_host["errors"]))
+
     def test_refresh_provider_metadata_rejects_secret_nested_in_pricing(self):
         self._prepare_metadata_provider()
         response = self._valid_metadata_response(pricing=[{
