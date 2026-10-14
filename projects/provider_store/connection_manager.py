@@ -566,6 +566,13 @@ class ConnectionManager:
             if index is None:
                 return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
             updated = [dict(item) for item in providers]
+            if enabled and updated[index].get("adapter_api_version", self.SUPPORTED_ADAPTER_API_VERSION) != self.SUPPORTED_ADAPTER_API_VERSION:
+                return {
+                    "status": "ADAPTER_API_VERSION_UNSUPPORTED",
+                    "provider": provider_id,
+                    "saved": False,
+                    "supported_adapter_api_version": self.SUPPORTED_ADAPTER_API_VERSION,
+                }
             updated[index]["enabled"] = enabled
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
