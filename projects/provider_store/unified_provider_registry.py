@@ -1,10 +1,11 @@
 """Unified provider registry backed by the central validated catalog."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from .connection_manager import ConnectionManager
 from .provider_store_manager import ProviderStoreManager
+from .runtime_adapter_registry import RuntimeProviderRegistry
 
 
 ADVANCED_CATEGORIES = {
@@ -24,6 +25,7 @@ class UnifiedProviderRegistry:
         *,
         catalog_path: str | None = None,
         state_path: str | None = None,
+        adapter_factories: dict[str, Callable[[dict[str, Any]], Any]] | None = None,
     ) -> None:
         if connection_manager is not None and (catalog_path is not None or state_path is not None):
             raise ValueError("pass either connection_manager or explicit paths, not both")
@@ -31,6 +33,25 @@ class UnifiedProviderRegistry:
             catalog_path, state_path, connection_manager=connection_manager
         )
         self.connection_manager = self.store.manager
+        self.runtime = RuntimeProviderRegistry(
+            self.connection_manager, factories=adapter_factories
+        )
+
+    def load_runtime_provider(self, provider_id: str) -> dict[str, Any]:
+        """Load a trusted runtime adapter through the canonical registry lifecycle."""
+        return self.runtime.load(provider_id)
+
+    def load_enabled_runtime_providers(self) -> dict[str, Any]:
+        """Load every enabled provider that has an explicitly registered adapter."""
+        return self.runtime.load_all_enabled()
+
+    def unload_runtime_provider(self, provider_id: str) -> dict[str, Any]:
+        """Release a process-local runtime adapter through its lifecycle manager."""
+        return self.runtime.unload(provider_id)
+
+    def runtime_status(self) -> dict[str, Any]:
+        """Report catalog/adapter coverage without implying unprobed connectivity."""
+        return self.runtime.status()
 
     @property
     def core(self) -> dict[str, Any]:
