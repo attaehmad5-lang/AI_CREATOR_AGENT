@@ -775,6 +775,85 @@ class ConnectionManager:
             discovered.append(dict(provider))
         return discovered
 
+    def preview_provider_registration(
+        self, provider: dict[str, Any], *, overwrite: bool = False
+    ) -> dict[str, Any]:
+        """Validate an onboarding submission without persisting catalog or runtime state.
+
+        This is a preview only. register_provider() repeats every check under the
+        persistence lock to protect against concurrent catalog changes.
+        """
+        if not isinstance(provider, dict):
+            return {"status": "INVALID_PROVIDER", "valid": False}
+        if not isinstance(overwrite, bool):
+            return {"status": "INVALID_OVERWRITE_FLAG", "valid": False}
+        required = ("id", "name", "category", "auth_type", "connection_type")
+        missing = [
+            key for key in required
+            if not isinstance(provider.get(key), str) or not provider[key].strip()
+        ]
+        if missing:
+            return {
+                "status": "REQUIRED_FIELDS_MISSING",
+                "valid": False,
+                "missing_fields": missing,
+            }
+        provider_id = provider["id"].strip()
+        if (
+            len(provider_id) > 100
+            or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id)
+        ):
+            return {"status": "INVALID_PROVIDER_ID", "valid": False}
+        if self._contains_credential_value_field(provider):
+            return {"status": "SENSITIVE_METADATA_REJECTED", "valid": False, "provider": provider_id}
+        try:
+            candidate_provider = copy.deepcopy(provider)
+            candidate_provider["id"] = provider_id
+            json.dumps(candidate_provider, allow_nan=False)
+        except (TypeError, ValueError, RecursionError):
+            return {"status": "INVALID_PROVIDER_METADATA", "valid": False, "provider": provider_id}
+
+        try:
+            with self._catalog_transaction():
+                existing = next(
+                    (item for item in self._list_providers_unlocked() if item.get("id") == provider_id),
+                    None,
+                )
+                if existing is not None and not overwrite:
+                    return {"status": "ALREADY_EXISTS", "valid": False, "provider": provider_id}
+                if provider_id in self._loaded_providers:
+                    return {"status": "PROVIDER_LOADED", "valid": False, "provider": provider_id}
+                candidate_catalog = copy.deepcopy(self.catalog)
+                candidates = [
+                    item for item in candidate_catalog["providers"]
+                    if item.get("id") != provider_id
+                ]
+                candidates.append(candidate_provider)
+                candidate_catalog["providers"] = candidates
+                validation = self.validate_catalog_schema(candidate_catalog)
+                if validation.get("valid") is not True:
+                    return {
+                        "status": "INVALID_PROVIDER_METADATA",
+                        "valid": False,
+                        "provider": provider_id,
+                        "errors": list(validation.get("errors", [])),
+                    }
+                return {
+                    "status": "READY_TO_REGISTER",
+                    "valid": True,
+                    "provider": provider_id,
+                    "overwrites_existing": existing is not None,
+                    "metadata": self._sanitize_public_data(candidate_provider),
+                    "note": "Preview only; no catalog, connection, or runtime state was changed.",
+                }
+        except (OSError, TypeError, ValueError, RecursionError) as exc:
+            return {
+                "status": "REGISTRATION_PREVIEW_FAILED",
+                "valid": False,
+                "provider": provider_id,
+                "error_type": type(exc).__name__,
+            }
+
     def register_provider(
         self,
         provider: dict[str, Any],
