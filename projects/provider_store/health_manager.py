@@ -301,7 +301,15 @@ class ProviderHealthManager:
             }
         if not isinstance(recorded, dict) or recorded.get("saved") is not True:
             return {"provider": provider_id, "status": "HEALTH_RECORD_FAILED", "verified": False}
-        return {"provider": provider_id, "status": "HEALTHY", "verified": True, "latency_ms": round(latency, 2)}
+        health_status = recorded.get("status", "UNKNOWN")
+        healthy = health_status == "HEALTHY"
+        return {
+            "provider": provider_id,
+            "status": health_status,
+            "verified": healthy,
+            "recovery_pending": health_status == "RECOVERING",
+            "latency_ms": round(latency, 2),
+        }
 
     def is_eligible(
         self,
