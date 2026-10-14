@@ -25,6 +25,7 @@ MODULE_DIR = Path(__file__).resolve().parent
 DEFAULT_CATALOG = MODULE_DIR / "provider_catalog.json"
 MASTER_CATALOG = MODULE_DIR / "provider_catalog_master.json"
 DEFAULT_STATE = MODULE_DIR / "connection_state.json"
+_FACTORY_NOT_GIVEN = object()
 
 
 class ProviderAuthenticationVerificationRequired(PermissionError):
@@ -651,18 +652,23 @@ class ConnectionManager:
             "contract_version": "1.0",
         }
 
-    def load_provider(self, provider_id: str, factory: Any = None) -> dict[str, Any]:
-        """Load one validated runtime instance using an explicit or registered factory."""
+    def load_provider(
+        self, provider_id: str, factory: Any = _FACTORY_NOT_GIVEN
+    ) -> dict[str, Any]:
+        """Load using an explicit factory, or a previously registered process-local factory."""
         with self._lock:
-            selected_factory = factory
-            if selected_factory is None:
+            if factory is _FACTORY_NOT_GIVEN:
                 selected_factory = self._provider_factories.get(provider_id)
-            if selected_factory is None:
-                return {
-                    "status": "FACTORY_NOT_REGISTERED",
-                    "provider": provider_id,
-                    "loaded": False,
-                }
+                if selected_factory is None:
+                    return {
+                        "status": "FACTORY_NOT_REGISTERED",
+                        "provider": provider_id,
+                        "loaded": False,
+                    }
+            else:
+                # Preserve the explicit-factory API: passing None is invalid, while
+                # omitting the argument opts into the registered-factory registry.
+                selected_factory = factory
             return self._load_provider_locked(provider_id, selected_factory)
 
     def _load_provider_locked(self, provider_id: str, factory: Any) -> dict[str, Any]:
