@@ -161,6 +161,75 @@ class ProviderProjectPolicyManager:
                 return {"status": "PROJECT_POLICY_NOT_FOUND", "project_id": project_id, "policy": None}
             return {"status": "PROJECT_POLICY_FOUND", "project_id": project_id, "policy": copy.deepcopy(policy)}
 
+    def simulate_policy(
+        self,
+        project_id: str,
+        proposed_policy: dict[str, Any],
+        routing_manager: Any,
+        *,
+        route_request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate and simulate a proposed policy without persisting it or spending quota."""
+        errors = self._validate_policy(project_id, proposed_policy)
+        if errors:
+            return {
+                "status": "INVALID_PROJECT_POLICY",
+                "project_id": project_id,
+                "policy_saved": False,
+                "allowed": False,
+                "errors": errors,
+            }
+        if not isinstance(route_request, dict):
+            return {
+                "status": "INVALID_SIMULATION_REQUEST",
+                "project_id": project_id,
+                "policy_saved": False,
+                "allowed": False,
+            }
+        options = dict(route_request)
+        if (
+            options.get("project_id") != project_id
+            or any(key in options for key in ("project_policy", "project_policy_override", "simulate_only"))
+        ):
+            return {
+                "status": "INVALID_SIMULATION_REQUEST",
+                "project_id": project_id,
+                "policy_saved": False,
+                "allowed": False,
+            }
+        simulate = getattr(routing_manager, "simulate_route", None)
+        if not callable(simulate):
+            return {
+                "status": "SIMULATION_UNAVAILABLE",
+                "project_id": project_id,
+                "policy_saved": False,
+                "allowed": False,
+            }
+        try:
+            result = simulate(project_policy=copy.deepcopy(proposed_policy), **options)
+        except Exception as exc:
+            return {
+                "status": "SIMULATION_FAILED",
+                "project_id": project_id,
+                "policy_saved": False,
+                "allowed": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {
+                "status": "INVALID_SIMULATION_RESULT",
+                "project_id": project_id,
+                "policy_saved": False,
+                "allowed": False,
+            }
+        return {
+            "status": "POLICY_SIMULATION_COMPLETED",
+            "project_id": project_id,
+            "policy_saved": False,
+            "allowed": result.get("allowed") is True,
+            "simulation": result,
+        }
+
     def remove_policy(self, project_id: str) -> dict[str, Any]:
         if not isinstance(project_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", project_id):
             return {"status": "INVALID_PROJECT_ID", "removed": False}
