@@ -491,6 +491,107 @@ class ConnectionManager:
                                         or len({version.casefold() for version in versions if isinstance(version, str)}) != len(versions)
                                     ):
                                         errors.append(f"{prefix}.versions must contain unique safe version identifiers")
+                    if "provider_version" in provider and (
+                        not isinstance(provider["provider_version"], str)
+                        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,99}", provider["provider_version"])
+                    ):
+                        errors.append(f"providers[{index}].provider_version must be a safe version identifier")
+                    if "description" in provider and (
+                        not isinstance(provider["description"], str)
+                        or len(provider["description"]) > 4000
+                        or any(ord(char) < 32 and char not in "\t\n\r" for char in provider["description"])
+                        or any(ord(char) == 127 for char in provider["description"])
+                    ):
+                        errors.append(f"providers[{index}].description must be safe text of at most 4000 characters")
+                    if "metadata_source" in provider:
+                        raw_source = provider["metadata_source"]
+                        try:
+                            parsed_source = urlsplit(raw_source) if isinstance(raw_source, str) else None
+                            _ = parsed_source.port if parsed_source is not None else None
+                        except ValueError:
+                            parsed_source = None
+                        if (
+                            not isinstance(raw_source, str) or not raw_source.strip()
+                            or len(raw_source) > 2048
+                            or parsed_source is None or parsed_source.scheme != "https"
+                            or not parsed_source.hostname
+                            or parsed_source.username is not None or parsed_source.password is not None
+                            or any(ord(char) < 32 or ord(char) == 127 for char in raw_source)
+                        ):
+                            errors.append(f"providers[{index}].metadata_source must be a safe HTTPS URL")
+                    if "metadata_observed_at" in provider:
+                        raw_observed_at = provider["metadata_observed_at"]
+                        try:
+                            parsed_observed_at = datetime.fromisoformat(
+                                raw_observed_at.replace("Z", "+00:00")
+                            ) if isinstance(raw_observed_at, str) else None
+                        except ValueError:
+                            parsed_observed_at = None
+                        if (
+                            parsed_observed_at is None
+                            or parsed_observed_at.tzinfo is None
+                            or parsed_observed_at.utcoffset() is None
+                        ):
+                            errors.append(f"providers[{index}].metadata_observed_at must be a timezone-aware ISO timestamp")
+                    if ("metadata_source" in provider) != ("metadata_observed_at" in provider):
+                        errors.append(f"providers[{index}] metadata_source and metadata_observed_at must be provided together")
+                    if "pricing" in provider:
+                        pricing = provider["pricing"]
+                        valid_units = {
+                            "per_image", "per_video_second", "per_audio_second", "per_second",
+                            "per_minute", "per_1k_tokens", "per_1k_characters", "per_request",
+                        }
+                        if not isinstance(pricing, list) or len(pricing) > 100:
+                            errors.append(f"providers[{index}].pricing must be a list of at most 100 entries")
+                        else:
+                            for price_index, price in enumerate(pricing):
+                                prefix = f"providers[{index}].pricing[{price_index}]"
+                                if not isinstance(price, dict):
+                                    errors.append(f"{prefix} must be an object")
+                                    continue
+                                if set(price) - {"model_id", "currency", "unit", "amount", "source_url", "observed_at"}:
+                                    errors.append(f"{prefix} contains unsupported pricing fields")
+                                currency = price.get("currency")
+                                if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
+                                    errors.append(f"{prefix}.currency must be a three-letter uppercase currency code")
+                                unit = price.get("unit")
+                                if not isinstance(unit, str) or unit not in valid_units:
+                                    errors.append(f"{prefix}.unit is unsupported")
+                                if finite_number(price.get("amount"), minimum=0) is None:
+                                    errors.append(f"{prefix}.amount must be a finite non-negative number")
+                                if "model_id" in price and (
+                                    not isinstance(price["model_id"], str)
+                                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}", price["model_id"])
+                                ):
+                                    errors.append(f"{prefix}.model_id must be a safe model identifier")
+                                if "source_url" in price:
+                                    raw_price_source = price["source_url"]
+                                    try:
+                                        parsed_price_source = urlsplit(raw_price_source) if isinstance(raw_price_source, str) else None
+                                        _ = parsed_price_source.port if parsed_price_source is not None else None
+                                    except ValueError:
+                                        parsed_price_source = None
+                                    if (
+                                        not isinstance(raw_price_source, str) or not raw_price_source.strip()
+                                        or len(raw_price_source) > 2048 or parsed_price_source is None
+                                        or parsed_price_source.scheme != "https" or not parsed_price_source.hostname
+                                        or parsed_price_source.username is not None or parsed_price_source.password is not None
+                                        or any(ord(char) < 32 or ord(char) == 127 for char in raw_price_source)
+                                    ):
+                                        errors.append(f"{prefix}.source_url must be a safe HTTPS URL")
+                                if "observed_at" in price:
+                                    raw_price_time = price["observed_at"]
+                                    try:
+                                        parsed_price_time = datetime.fromisoformat(
+                                            raw_price_time.replace("Z", "+00:00")
+                                        ) if isinstance(raw_price_time, str) else None
+                                    except ValueError:
+                                        parsed_price_time = None
+                                    if (
+                                        parsed_price_time is None or parsed_price_time.tzinfo is None
+                                        or parsed_price_time.utcoffset() is None
+                                    ):
+                                        errors.append(f"{prefix}.observed_at must be a timezone-aware ISO timestamp")
                     if ConnectionManager._contains_credential_value_field(provider):
                         errors.append(f"providers[{index}] contains a forbidden credential value field")
         result = {"valid": not errors, "errors": errors, "provider_count": len(catalog.get("providers", [])) if isinstance(catalog, dict) and isinstance(catalog.get("providers"), list) else 0}
