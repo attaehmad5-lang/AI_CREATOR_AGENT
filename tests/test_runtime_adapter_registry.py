@@ -17,7 +17,7 @@ class _ImageAdapter:
 
 
 class _BadAdapter:
-    def generate_video(self, prompt, output_path):
+    def generate_image(self, prompt, output_path):
         return {"status": "COMPLETED", "output": output_path}
 
 
