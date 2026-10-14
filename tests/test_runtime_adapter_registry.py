@@ -354,8 +354,8 @@ class UnifiedProviderRegistryRuntimeTests(unittest.TestCase):
             _provider("future_provider"), adapter_factory=lambda _: _ImageAdapter()
         )
         self.assertTrue(result["saved"])
-        self.assertEqual(result["status"], "REGISTERED_WITHOUT_ADAPTER")
-        self.assertFalse(result["adapter_registered"])
+        self.assertEqual(result["status"], "REGISTERED")
+        self.assertTrue(result["adapter_registered"])
         self.assertEqual(result["adapter_status"], "FACTORY_ALREADY_REGISTERED")
         self.assertIsNotNone(self.registry.get_provider("future_provider"))
 
