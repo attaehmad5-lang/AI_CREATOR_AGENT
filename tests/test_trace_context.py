@@ -14,6 +14,12 @@ class TraceContextTests(unittest.TestCase):
         self.assertNotEqual(first.trace_id, second.trace_id)
         self.assertNotEqual(first.span_id, second.span_id)
 
+    def test_missing_request_id_generates_unique_request_ids(self):
+        first = TraceContext.create(None)
+        second = TraceContext.create(None)
+        self.assertRegex(first.request_id, r"^req-[0-9a-f]{32}$")
+        self.assertNotEqual(first.request_id, second.request_id)
+
     def test_traceparent_has_w3c_v00_shape(self):
         context = TraceContext.create("req-1")
         self.assertRegex(context.traceparent, r"^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$")
