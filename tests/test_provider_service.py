@@ -42,6 +42,9 @@ class ProviderServiceTests(unittest.TestCase):
         self.retry = RetryPolicy(random_fn=lambda: 0)
         self.service = ProviderService(
             self.connections,
+            routing_manager=ProviderRoutingManager(
+                self.connections, cost_policy=self.cost, quota_manager=self.quota
+            ),
             health_manager=self.health,
             retry_policy=self.retry,
             output_validator=self.validator,
