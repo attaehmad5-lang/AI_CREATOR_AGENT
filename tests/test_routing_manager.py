@@ -53,10 +53,17 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             self.root / "simulation-quota.json",
             limits={"primary": {"daily": 2}, "fallback": {"daily": 2}},
         )
+        policy_path = self.root / "simulation-policy.json"
+        policies = ProviderProjectPolicyManager(policy_path)
+        self.assertTrue(policies.set_policy(
+            "film", {"allowed_providers": ["primary"]}
+        )["saved"])
+        policy_before = policy_path.read_text(encoding="utf-8")
         router = ProviderRoutingManager(
             self.connections,
             cost_policy=cost,
             quota_manager=quota,
+            project_policy_manager=policies,
         )
         result = router.simulate_route(
             project_policy={
@@ -85,6 +92,11 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(cost.ledger["projects"], {})
         self.assertFalse(cost.ledger_path.exists())
         self.assertEqual(router._round_robin_counters, {})
+        self.assertEqual(policy_path.read_text(encoding="utf-8"), policy_before)
+        self.assertEqual(
+            policies.get_policy("film")["policy"]["allowed_providers"],
+            ["primary"],
+        )
 
     def test_policy_simulation_rejects_invalid_policy_and_normal_route_rejects_override(self):
         router = ProviderRoutingManager(self.connections)
