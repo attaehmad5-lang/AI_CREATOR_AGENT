@@ -677,7 +677,12 @@ class ConnectionManager:
         return safe
 
     def update_provider_metadata(
-        self, provider_id: str, updates: dict[str, Any]
+        self,
+        provider_id: str,
+        updates: dict[str, Any],
+        *,
+        expected_revision: str | None = None,
+        check_revision: bool = False,
     ) -> dict[str, Any]:
         """Atomically update only validated metadata fields without replacing provider identity."""
         allowed_fields = {
@@ -686,6 +691,13 @@ class ConnectionManager:
         }
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER_ID", "saved": False}
+        if not isinstance(check_revision, bool):
+            return {"status": "INVALID_REVISION_CHECK_FLAG", "provider": provider_id, "saved": False}
+        if expected_revision is not None and (
+            not isinstance(expected_revision, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_revision)
+        ):
+            return {"status": "INVALID_EXPECTED_METADATA_REVISION", "provider": provider_id, "saved": False}
         if (
             not isinstance(updates, dict)
             or not updates
@@ -705,6 +717,8 @@ class ConnectionManager:
                     return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
                 if provider_id in self._loaded_providers:
                     return {"status": "PROVIDER_ALREADY_LOADED", "provider": provider_id, "saved": False}
+                if check_revision and providers[index].get("metadata_revision") != expected_revision:
+                    return {"status": "METADATA_REVISION_CONFLICT", "provider": provider_id, "saved": False}
                 updated_provider = copy.deepcopy(providers[index])
                 updated_provider.update(copy.deepcopy(updates))
                 updated = [copy.deepcopy(item) for item in providers]
