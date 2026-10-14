@@ -124,6 +124,7 @@ class ProviderConcurrencyManagerTests(unittest.TestCase):
         self.assertTrue(unknown["retained"])
         blocked = self.manager.acquire(provider_id="image", project_id="film", request_id="job-2")
         self.assertEqual(blocked["status"], "PROVIDER_CONCURRENCY_LIMIT_REACHED")
+        self.assertFalse(self.manager.release(lease_id="job-1", outcome="completed")["saved"])
         self.assertFalse(self.manager.reconcile(lease_id="job-1", outcome="not_running", confirmed=False)["saved"])
         reconciled = self.manager.reconcile(lease_id="job-1", outcome="not_running", confirmed=True)
         self.assertEqual(reconciled["status"], "LEASE_RECONCILED")
