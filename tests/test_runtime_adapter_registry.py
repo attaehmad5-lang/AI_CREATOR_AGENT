@@ -313,6 +313,63 @@ class UnifiedProviderRegistryRuntimeTests(unittest.TestCase):
         self.assertEqual(result["status"], "UNLOADED")
         self.assertIsNone(self.registry.runtime.get("alpha"))
 
+    def test_unified_registry_registers_metadata_and_trusted_adapter_together(self):
+        result = self.registry.register_provider(
+            _provider("new_image"),
+            adapter_factory=lambda _: _ImageAdapter(),
+        )
+        self.assertEqual(result["status"], "REGISTERED")
+        self.assertTrue(result["saved"])
+        self.assertTrue(result["adapter_registered"])
+        self.assertEqual(result["adapter_status"], "FACTORY_REGISTERED")
+        loaded = self.registry.load_runtime_provider("new_image")
+        self.assertEqual(loaded["status"], "LOADED")
+
+    def test_unified_registry_supports_metadata_only_registration_explicitly(self):
+        result = self.registry.register_provider(_provider("metadata_only"))
+        self.assertEqual(result["status"], "REGISTERED")
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["adapter_registered"])
+        self.assertEqual(result["adapter_status"], "NOT_REQUESTED")
+        self.assertEqual(
+            self.registry.load_runtime_provider("metadata_only")["status"],
+            "ADAPTER_NOT_REGISTERED",
+        )
+
+    def test_unified_registry_rejects_invalid_factory_before_persisting_provider(self):
+        result = self.registry.register_provider(
+            _provider("invalid_factory"), adapter_factory="module.Class"
+        )
+        self.assertEqual(result["status"], "INVALID_FACTORY")
+        self.assertFalse(result["saved"])
+        self.assertIsNone(self.registry.get_provider("invalid_factory"))
+
+    def test_unified_registry_reports_adapter_binding_failure_without_claiming_success(self):
+        self.registry = UnifiedProviderRegistry(
+            catalog_path=str(self.catalog_path),
+            state_path=str(self.state_path),
+            adapter_factories={"future_provider": lambda _: _ImageAdapter()},
+        )
+        result = self.registry.register_provider(
+            _provider("future_provider"), adapter_factory=lambda _: _ImageAdapter()
+        )
+        self.assertTrue(result["saved"])
+        self.assertEqual(result["status"], "REGISTERED_WITHOUT_ADAPTER")
+        self.assertFalse(result["adapter_registered"])
+        self.assertEqual(result["adapter_status"], "FACTORY_ALREADY_REGISTERED")
+        self.assertIsNotNone(self.registry.get_provider("future_provider"))
+
+    def test_unified_registry_rejects_overwrite_while_runtime_adapter_is_loaded(self):
+        self.registry.load_runtime_provider("alpha")
+        result = self.registry.register_provider(
+            _provider("alpha", extra={"name": "Changed"}),
+            adapter_factory=lambda _: _ImageAdapter(),
+            overwrite=True,
+        )
+        self.assertEqual(result["status"], "PROVIDER_ALREADY_LOADED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.registry.get_provider("alpha")["name"], "Alpha")
+
     def test_unified_registry_constructor_rejects_conflicting_manager_and_paths(self):
         manager = ConnectionManager(self.catalog_path, self.state_path)
         with self.assertRaises(ValueError):
