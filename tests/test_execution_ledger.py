@@ -100,6 +100,16 @@ class ProviderExecutionLedgerTests(unittest.TestCase):
         second = self.fingerprint(options={"model": "image-v2"})
         self.assertNotEqual(first, second)
 
+    def test_fingerprint_rejects_invalid_identity_and_overflow_cost(self):
+        with self.assertRaises(ValueError):
+            self.ledger.fingerprint_request(
+                project_id="", category="image", estimated_cost=1.0
+            )
+        with self.assertRaises(ValueError):
+            self.ledger.fingerprint_request(
+                project_id="film", category="image", estimated_cost=10**1000
+            )
+
     def test_fingerprint_rejects_unsupported_nested_values(self):
         with self.assertRaises(ValueError):
             self.fingerprint(options={"model": {"secret": "x"}})
