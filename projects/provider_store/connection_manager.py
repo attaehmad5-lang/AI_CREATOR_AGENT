@@ -476,7 +476,10 @@ class ConnectionManager:
                         or not re.fullmatch(r"[0-9a-f]{64}", provider["metadata_revision"])
                     ):
                         errors.append(f"providers[{index}].metadata_revision must be a lowercase SHA-256 hex digest")
-                    if "metadata_status" in provider and provider["metadata_status"] not in {"VERIFIED", "STALE", "UNAVAILABLE"}:
+                    if "metadata_status" in provider and (
+                        not isinstance(provider["metadata_status"], str)
+                        or provider["metadata_status"] not in {"VERIFIED", "STALE", "UNAVAILABLE"}
+                    ):
                         errors.append(f"providers[{index}].metadata_status is unsupported")
                     if "auth_header_name" in provider:
                         safe_auth_headers = {
