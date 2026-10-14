@@ -747,8 +747,11 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(loaded["loaded"])
         original = dict(self.manager.get_provider("public_image"))
         original_name = original.get("name")
-        replacement = dict(original)
-        replacement["name"] = "Replacement Name"
+        replacement = {
+            "id": "public_image", "name": "Replacement Name",
+            "category": "image", "auth_type": "NONE",
+            "connection_type": "LOCAL", "enabled": True,
+        }
         blocked = self.manager.register_provider(replacement, overwrite=True)
         self.assertEqual(blocked["status"], "PROVIDER_LOADED")
         self.assertFalse(blocked["saved"])
