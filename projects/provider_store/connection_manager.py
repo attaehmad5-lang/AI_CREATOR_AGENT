@@ -5,6 +5,7 @@ unless a separate provider-specific probe has actually succeeded.
 """
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -760,34 +761,48 @@ class ConnectionManager:
     def register_provider(
         self, provider: dict[str, Any], *, overwrite: bool = False
     ) -> dict[str, Any]:
-        """Register validated provider metadata; never accept credentials in catalog data."""
+        """Register metadata only after validating the complete resulting catalog."""
         if not isinstance(provider, dict):
             return {"status": "INVALID_PROVIDER", "reason": "provider must be an object"}
+        if not isinstance(overwrite, bool):
+            return {"status": "INVALID_OVERWRITE_FLAG", "saved": False}
         required = ("id", "name", "category", "auth_type", "connection_type")
         if any(not isinstance(provider.get(key), str) or not provider[key].strip() for key in required):
             return {
                 "status": "INVALID_PROVIDER",
                 "reason": "required non-empty string fields: " + ", ".join(required),
+                "saved": False,
             }
         provider_id = provider["id"].strip()
-        if any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id):
-            return {"status": "INVALID_PROVIDER", "reason": "provider id contains unsupported characters"}
+        if (
+            len(provider_id) > 100
+            or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id)
+        ):
+            return {"status": "INVALID_PROVIDER", "reason": "provider id contains unsupported characters or exceeds 100 characters", "saved": False}
 
-        # Metadata may name an environment variable, but must never contain a secret value.
+        # Catalogs may hold environment-variable references, never secret values.
         if self._contains_credential_value_field(provider):
-            return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id}
+            return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id, "saved": False}
 
         with self._catalog_transaction():
             providers = self._list_providers_unlocked()
             existing = next((item for item in providers if item.get("id") == provider_id), None)
             if existing is not None and not overwrite:
                 return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
-            safe_provider = dict(provider)
+            safe_provider = copy.deepcopy(provider)
             safe_provider["id"] = provider_id
-            updated = [item for item in providers if item.get("id") != provider_id]
+            updated = [copy.deepcopy(item) for item in providers if item.get("id") != provider_id]
             updated.append(safe_provider)
-            new_catalog = dict(self.catalog)
+            new_catalog = copy.deepcopy(self.catalog)
             new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation.get("valid"):
+                return {
+                    "status": "INVALID_PROVIDER_CATALOG",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
             return {
