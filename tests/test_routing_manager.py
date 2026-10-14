@@ -69,6 +69,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             project_id="film",
             estimated_cost=1.0,
             request_id="simulation-request-1",
+            strategy="ROUND_ROBIN",
             paid_approved_providers={"fallback"},
         )
         self.assertEqual(result["status"], "SIMULATION_COMPLETED")
@@ -83,6 +84,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertFalse(quota.path.exists())
         self.assertEqual(cost.ledger["projects"], {})
         self.assertFalse(cost.ledger_path.exists())
+        self.assertEqual(router._round_robin_counters, {})
 
     def test_policy_simulation_rejects_invalid_policy_and_normal_route_rejects_override(self):
         router = ProviderRoutingManager(self.connections)
