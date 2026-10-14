@@ -113,7 +113,12 @@ class RuntimeProviderRegistry:
 
     def load(self, provider_id: str) -> dict[str, Any]:
         """Load through ConnectionManager so enabled checks and modality contracts always apply."""
-        if not isinstance(provider_id, str) or not provider_id:
+        if (
+            not isinstance(provider_id, str)
+            or not provider_id
+            or len(provider_id) > 100
+            or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in provider_id)
+        ):
             return {"status": "INVALID_PROVIDER_ID", "provider": provider_id, "loaded": False}
         with self._lock:
             factory = self._factories.get(provider_id)
