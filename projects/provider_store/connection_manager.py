@@ -644,6 +644,152 @@ class ConnectionManager:
             safe[key] = value
         return safe
 
+    def refresh_provider_metadata(self, provider_id: str, probe: Any) -> dict[str, Any]:
+        """Refresh approved capability/model/version/pricing metadata from a trusted probe.
+
+        The probe must return a mapping with a source_url and at least one approved
+        metadata field. The source URL must be HTTPS and match the provider's
+        explicit host allowlist (or the official API documentation host). Runtime
+        credentials, enablement, auth configuration, endpoints, and connection
+        state cannot be changed by this operation.
+        """
+        from urllib.parse import urlsplit
+
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER_ID", "provider": provider_id, "saved": False}
+        if not callable(probe):
+            return {"status": "INVALID_METADATA_PROBE", "provider": provider_id, "saved": False}
+        initial = self.get_provider(provider_id)
+        if initial is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+        started_at = datetime.now(timezone.utc)
+        try:
+            response = probe(copy.deepcopy(initial))
+        except Exception as exc:
+            return {
+                "status": "METADATA_PROBE_FAILED",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(response, dict):
+            return {"status": "INVALID_METADATA_RESPONSE", "provider": provider_id, "saved": False}
+        if self._contains_credential_value_field(response):
+            return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id, "saved": False}
+        allowed_fields = {
+            "name", "description", "provider_version", "capabilities",
+            "supported_models", "pricing",
+        }
+        allowed_response_fields = allowed_fields | {"source_url", "observed_at"}
+        unsupported = sorted(set(response) - allowed_response_fields)
+        if unsupported:
+            return {
+                "status": "UNSUPPORTED_METADATA_FIELDS",
+                "provider": provider_id,
+                "saved": False,
+                "fields": unsupported,
+            }
+        updated_fields = sorted(set(response) & allowed_fields)
+        if not updated_fields:
+            return {"status": "EMPTY_METADATA_RESPONSE", "provider": provider_id, "saved": False}
+        source_url = response.get("source_url")
+        if not isinstance(source_url, str) or not source_url.strip():
+            return {"status": "METADATA_SOURCE_REQUIRED", "provider": provider_id, "saved": False}
+        from urllib.parse import urlsplit
+        try:
+            parsed_source = urlsplit(source_url)
+            _ = parsed_source.port
+        except ValueError:
+            return {"status": "INVALID_METADATA_SOURCE", "provider": provider_id, "saved": False}
+        allowed_hosts = initial.get("allowed_hosts")
+        if not isinstance(allowed_hosts, list) or not allowed_hosts:
+            official_url = initial.get("official_api_url")
+            try:
+                official_host = urlsplit(official_url).hostname if isinstance(official_url, str) else None
+            except ValueError:
+                official_host = None
+            allowed_hosts = [official_host] if official_host else []
+        source_validation = self.validate_endpoint(
+            source_url,
+            allowed_hosts=set(allowed_hosts),
+        )
+        if not source_validation.get("valid"):
+            return {
+                "status": "INVALID_METADATA_SOURCE",
+                "provider": provider_id,
+                "saved": False,
+                "reason": source_validation.get("status", "SOURCE_NOT_ALLOWED"),
+            }
+        observed_raw = response.get("observed_at", started_at.isoformat())
+        try:
+            observed_at = datetime.fromisoformat(
+                observed_raw.replace("Z", "+00:00")
+            ) if isinstance(observed_raw, str) else None
+        except ValueError:
+            observed_at = None
+        now = datetime.now(timezone.utc)
+        if (
+            observed_at is None
+            or observed_at.tzinfo is None
+            or observed_at.utcoffset() is None
+            or observed_at > now.replace(microsecond=0) + __import__("datetime").timedelta(minutes=5)
+        ):
+            return {"status": "INVALID_METADATA_TIMESTAMP", "provider": provider_id, "saved": False}
+        observed_at = observed_at.astimezone(timezone.utc)
+        normalized_time = observed_at.isoformat()
+        metadata = {key: copy.deepcopy(response[key]) for key in updated_fields}
+        if "pricing" in metadata and isinstance(metadata["pricing"], list):
+            for price in metadata["pricing"]:
+                if isinstance(price, dict):
+                    price.setdefault("source_url", source_url)
+                    price.setdefault("observed_at", normalized_time)
+        # Validate and persist against the latest catalog while holding the same
+        # interprocess transaction as registration/enablement.
+        with self._catalog_transaction():
+            providers = self._list_providers_unlocked()
+            index = next(
+                (i for i, item in enumerate(providers) if item.get("id") == provider_id),
+                None,
+            )
+            if index is None:
+                return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+            current = copy.deepcopy(providers[index])
+            previous_raw = current.get("metadata_observed_at")
+            if previous_raw is not None:
+                try:
+                    previous = datetime.fromisoformat(previous_raw.replace("Z", "+00:00"))
+                except (AttributeError, ValueError):
+                    return {"status": "INVALID_EXISTING_METADATA_TIMESTAMP", "provider": provider_id, "saved": False}
+                if previous.tzinfo is None or previous.utcoffset() is None:
+                    return {"status": "INVALID_EXISTING_METADATA_TIMESTAMP", "provider": provider_id, "saved": False}
+                if observed_at <= previous.astimezone(timezone.utc):
+                    return {"status": "METADATA_SNAPSHOT_NOT_NEWER", "provider": provider_id, "saved": False}
+            current.update(metadata)
+            current["metadata_source"] = source_url
+            current["metadata_observed_at"] = normalized_time
+            updated = [copy.deepcopy(item) for item in providers]
+            updated[index] = current
+            new_catalog = copy.deepcopy(self.catalog)
+            new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation.get("valid"):
+                return {
+                    "status": "INVALID_PROVIDER_METADATA",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
+            self._atomic_write_json(self.catalog_path, new_catalog)
+            self.catalog = new_catalog
+        return {
+            "status": "METADATA_REFRESHED",
+            "provider": provider_id,
+            "saved": True,
+            "source_url": source_url,
+            "observed_at": normalized_time,
+            "updated_fields": updated_fields,
+        }
+
     def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
         """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
         with self._lock:
