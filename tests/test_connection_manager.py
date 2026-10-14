@@ -719,6 +719,21 @@ class ConnectionManagerTests(unittest.TestCase):
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertEqual(reloaded.get_provider("local_image")["name"], "Local Image")
 
+    def test_register_provider_validates_candidate_catalog_before_persisting(self):
+        before = self.catalog_path.read_text(encoding="utf-8")
+        result = self.manager.register_provider({
+            "id": "unsafe_endpoint", "name": "Unsafe Endpoint",
+            "category": "image", "auth_type": "NONE", "connection_type": "API",
+            "enabled": False, "subscription_required": False,
+            "allowed_hosts": ["api.example.com"],
+            "official_api_url": "http://api.example.com/docs",
+        })
+        self.assertEqual(result["status"], "INVALID_PROVIDER_CATALOG")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), before)
+        reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertIsNone(reloaded.get_provider("unsafe_endpoint"))
+
     def test_register_provider_rejects_duplicate_without_overwrite(self):
         provider = {
             "id": "token_image", "name": "Replacement", "category": "image",
