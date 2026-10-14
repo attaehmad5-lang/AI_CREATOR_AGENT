@@ -6,7 +6,7 @@ The exact canonical feature names, original baseline markers and item-by-item ev
 
 ## Latest code verification
 
-GitHub Actions code-verification run [#38614022219](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38614022219) completed successfully on Python 3.13: **340 tests passed on Ubuntu and 330 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This run includes bounded Retry-After metadata handling, overflow-safe retry backoff, fail-closed OAuth provider lookup, validated deprecation metadata including malformed-input rejection, and candidate-catalog validation before enablement.
+GitHub Actions code-verification run [#38614022219](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38614022219) completed successfully on Python 3.13: **340 tests passed on Ubuntu and 340 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This run includes bounded Retry-After metadata handling, overflow-safe retry backoff, fail-closed OAuth provider lookup, validated deprecation metadata including malformed-input rejection, and candidate-catalog validation before enablement.
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
@@ -25,7 +25,7 @@ GitHub Actions code-verification run [#38614022219](https://github.com/attaehmad
 | M / 97–110 | Testing, Audit and Release Readiness | PARTIAL | 340 tests pass on Windows and Ubuntu; full 138-item coverage, all-modality end-to-end tests, complete failure injection, secret scanning and release PASS remain open. |
 | N / 111–118 | High-Advanced Routing Intelligence | PARTIAL | Cost/health/capability routing foundations exist; confidence-aware, adaptive, region-aware and A/B routing with approval gates remain open. |
 | O / 119–128 | Enterprise and Large-Production Resiliency | OPEN/PARTIAL | Some quotas, health and restore primitives exist; tenant isolation, fair scheduling, regional outage/degraded mode, capacity tests, SLOs and incident runbooks are not complete. |
-| P / 129–138 | Future-Ready Extensibility | PARTIAL | Capability contracts and compatibility facades exist; plugin lifecycle, self-hosted providers, deprecation handling, policy simulation and admin controls remain open. |
+| P / 129–138 | Future-Ready Extensibility | PARTIAL | Versioned adapter compatibility and no-side-effect proposed-policy simulation now have regression coverage; plugin isolation/lifecycle, self-hosted providers, automated deprecation migration, and authorized admin/activation workflows remain open. |
 
 ## Completion gates
 
