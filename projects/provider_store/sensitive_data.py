@@ -133,7 +133,7 @@ class SensitiveDataGuard:
     """Explicit block-or-redact policy wrapper for data before provider transmission."""
 
     def __init__(self, *, mode: str = "block", scanner: SensitiveDataScanner | None = None) -> None:
-        if mode not in {"block", "redact"}:
+        if not isinstance(mode, str) or mode not in {"block", "redact"}:
             raise ValueError("mode must be 'block' or 'redact'")
         if scanner is not None and not isinstance(scanner, SensitiveDataScanner):
             raise ValueError("scanner must be a SensitiveDataScanner")
