@@ -505,7 +505,6 @@ class ProviderServiceTests(unittest.TestCase):
             self.connections, routing_manager=router, health_manager=self.health,
         )
         called = []
-        self._prepare_execution_health()
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="health-evidence-missing",
             estimated_cost=0.0,
