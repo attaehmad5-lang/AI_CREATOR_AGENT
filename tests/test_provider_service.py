@@ -12,6 +12,7 @@ from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.metrics_manager import ProviderMetricsManager
+from projects.provider_store.execution_limiter import ProviderExecutionLimiter
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 
@@ -533,6 +534,39 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
         self.assertEqual(result["metrics"]["status"], "METRICS_RECORD_FAILED")
         self.assertNotIn("private metrics storage path", repr(result))
+
+    def test_execution_capacity_rejection_releases_unstarted_reservations(self):
+        limiter = ProviderExecutionLimiter({"image": 1}, max_waiting_per_provider=0)
+        started = __import__("threading").Event()
+        release = __import__("threading").Event()
+        def occupy():
+            started.set()
+            release.wait(2)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            holder = pool.submit(limiter.run, "image", occupy)
+            self.assertTrue(started.wait(1))
+            router = ProviderRoutingManager(
+                self.connections, cost_policy=self.cost, quota_manager=self.quota
+            )
+            service = ProviderService(
+                self.connections, routing_manager=router, health_manager=self.health,
+                retry_policy=self.retry, output_validator=self.validator,
+                cost_policy=self.cost, quota_manager=self.quota,
+                execution_limiter=limiter,
+            )
+            called = []
+            result = service.execute_routed_request(
+                category="image", project_id="film", request_id="limit-rejected",
+                estimated_cost=0.0, adapter=lambda **kwargs: called.append(True),
+                modality="image",
+            )
+            self.assertEqual(result["status"], "EXECUTION_CAPACITY_REJECTED")
+            self.assertFalse(result["executed"])
+            self.assertTrue(result["release"]["released"])
+            self.assertEqual(called, [])
+            self.assertEqual(self.quota.usage(provider_id="image")["daily"], 0)
+            release.set()
+            holder.result(timeout=2)
 
     def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
         router = ProviderRoutingManager(
