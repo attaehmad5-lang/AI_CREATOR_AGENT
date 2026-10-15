@@ -22,6 +22,9 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        access_controller: Any | None = None,
+        sensitive_data_guard: Any | None = None,
+        data_retention_policy: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -42,9 +45,42 @@ class ProviderService:
         self.health_manager = health_manager
         self.retry_policy = retry_policy
         self.output_validator = output_validator
-        self.cost_policy = cost_policy
-        self.quota_manager = quota_manager
+        self.cost_policy = cost_policy or getattr(routing_manager, "cost_policy", None)
+        self.quota_manager = quota_manager or getattr(routing_manager, "quota_manager", None)
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        if sensitive_data_guard is not None and not callable(getattr(sensitive_data_guard, "sanitize", None)):
+            raise ValueError("sensitive_data_guard must support sanitize")
+        self.sensitive_data_guard = sensitive_data_guard
+        if data_retention_policy is not None and not callable(getattr(data_retention_policy, "evaluate", None)):
+            raise ValueError("data_retention_policy must support evaluate")
+        self.data_retention_policy = data_retention_policy
+        if access_controller is not None and not callable(
+            getattr(access_controller, "authorize", None)
+        ):
+            raise ValueError("access_controller must support authorize")
+        self.access_controller = access_controller
+
+    def _authorize_if_configured(
+        self, principal: Any, action: str, access_resource: Any,
+        *, target_provider_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return a deny decision when configured access control lacks valid scope."""
+        if self.access_controller is None:
+            return None
+        if not isinstance(principal, dict) or not isinstance(access_resource, dict):
+            return {"allowed": False, "status": "ACCESS_CONTEXT_REQUIRED"}
+        if target_provider_id is not None and access_resource.get("provider_id") != target_provider_id:
+            return {"allowed": False, "status": "ACCESS_RESOURCE_MISMATCH"}
+        try:
+            decision = self.access_controller.authorize(principal, action, access_resource)
+        except Exception as exc:
+            return {"allowed": False, "status": "ACCESS_POLICY_FAILED", "error_type": type(exc).__name__}
+        if not isinstance(decision, dict) or decision.get("allowed") is not True:
+            return {
+                "allowed": False, "status": "ACCESS_DENIED",
+                "authorization": decision if isinstance(decision, dict) else None,
+            }
+        return decision
 
     def verify_provider(
         self,
@@ -53,8 +89,17 @@ class ProviderService:
         *,
         timeout_seconds: float = 5.0,
         environ: dict[str, str] | None = None,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Verify connection using an injected provider-specific probe and record health."""
+        authorization = self._authorize_if_configured(principal, "provider:connect", access_resource, target_provider_id=provider_id)
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {
+                "status": authorization.get("status", "ACCESS_DENIED"),
+                "provider": provider_id, "verified": False,
+                "authorization": authorization.get("authorization"),
+            }
         try:
             connection = self.connection_manager.verify_connectivity(
                 provider_id, probe, timeout_seconds=timeout_seconds, environ=environ
@@ -93,6 +138,8 @@ class ProviderService:
         environ: dict[str, str] | None = None,
         opener: Any = None,
         max_response_bytes: int = 4096,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Verify a configured allowlisted HTTPS endpoint using the built-in safe probe.
 
@@ -119,6 +166,8 @@ class ProviderService:
             probe,
             timeout_seconds=timeout_seconds,
             environ=environ,
+            principal=principal,
+            access_resource=access_resource,
         )
 
     def verify_oauth_provider(
@@ -130,6 +179,8 @@ class ProviderService:
         environ: dict[str, str] | None = None,
         opener: Any = None,
         max_response_bytes: int = 4096,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Verify a provider using an access token held only by an OAuth manager in memory.
 
@@ -138,6 +189,13 @@ class ProviderService:
         Token refresh is explicit: call the OAuth manager's refresh method only when the
         provider supports it and the user-authorized session allows it.
         """
+        authorization = self._authorize_if_configured(principal, "provider:connect", access_resource)
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {
+                "status": authorization.get("status", "ACCESS_DENIED"),
+                "provider": provider_id, "verified": False,
+                "authorization": authorization.get("authorization"),
+            }
         if not callable(getattr(oauth_manager, "get_access_token", None)):
             return {"status": "OAUTH_MANAGER_INVALID", "provider": provider_id, "verified": False}
         try:
@@ -177,6 +235,8 @@ class ProviderService:
             environ=ephemeral_environment,
             opener=opener,
             max_response_bytes=max_response_bytes,
+            principal=principal,
+            access_resource=access_resource,
         )
 
     def verify_manual_provider(
@@ -186,8 +246,17 @@ class ProviderService:
         probe: Any,
         *,
         timeout_seconds: float = 5.0,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Verify an externally authorized account session and record safe health metadata."""
+        authorization = self._authorize_if_configured(principal, "provider:connect", access_resource)
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {
+                "status": authorization.get("status", "ACCESS_DENIED"),
+                "provider": provider_id, "verified": False,
+                "authorization": authorization.get("authorization"),
+            }
         try:
             connection = self.connection_manager.verify_manual_connection(
                 provider_id, manual_session, probe, timeout_seconds=timeout_seconds
@@ -221,16 +290,108 @@ class ProviderService:
             "health": health,
         }
 
+    def configure_provider(
+        self, provider_id: str, *, principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None, **configuration: Any,
+    ) -> dict[str, Any]:
+        """Configure a provider only after optional tenant-scoped authorization."""
+        authorization = self._authorize_if_configured(
+            principal, "provider:configure", access_resource, target_provider_id=provider_id
+        )
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {"status": authorization.get("status", "ACCESS_DENIED"), "saved": False}
+        method = getattr(self.connection_manager, "configure_provider", None)
+        if not callable(method):
+            return {"status": "CONFIGURATION_MANAGER_UNAVAILABLE", "saved": False}
+        try:
+            result = method(provider_id, **configuration)
+        except Exception as exc:
+            return {"status": "CONFIGURATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_CONFIGURATION_RESPONSE", "saved": False}
+
+    def set_provider_enabled(
+        self, provider_id: str, enabled: bool, *,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Enable/disable a provider only after optional tenant-scoped authorization."""
+        if not isinstance(enabled, bool):
+            return {"status": "INVALID_ENABLED_VALUE", "saved": False}
+        action = "provider:enable" if enabled else "provider:disable"
+        authorization = self._authorize_if_configured(
+            principal, action, access_resource, target_provider_id=provider_id
+        )
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {"status": authorization.get("status", "ACCESS_DENIED"), "saved": False}
+        method = getattr(self.connection_manager, "set_provider_enabled", None)
+        if not callable(method):
+            return {"status": "PROVIDER_LIFECYCLE_UNAVAILABLE", "saved": False}
+        try:
+            result = method(provider_id, enabled)
+        except Exception as exc:
+            return {"status": "PROVIDER_LIFECYCLE_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_LIFECYCLE_RESPONSE", "saved": False}
+
+    def register_provider(
+        self, provider: dict[str, Any], *, overwrite: bool = False,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Register provider metadata only after optional tenant-scoped authorization."""
+        provider_id = provider.get("id") if isinstance(provider, dict) else None
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER", "saved": False}
+        authorization = self._authorize_if_configured(
+            principal, "provider:register", access_resource,
+            target_provider_id=provider_id,
+        )
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {"status": authorization.get("status", "ACCESS_DENIED"), "saved": False}
+        method = getattr(self.connection_manager, "register_provider", None)
+        if not callable(method):
+            return {"status": "PROVIDER_REGISTRY_UNAVAILABLE", "saved": False}
+        try:
+            result = method(provider, overwrite=overwrite)
+        except Exception as exc:
+            return {"status": "PROVIDER_REGISTRATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_REGISTRATION_RESPONSE", "saved": False}
+
     def route_request(self, **route_options: Any) -> dict[str, Any]:
+        authorization = None
+        if self.access_controller is not None:
+            # principal must come from the trusted authentication boundary, never
+            # directly from an untrusted request body. Authorization happens before
+            # routing can create cost, credit, or quota reservations.
+            principal = route_options.pop("principal", None)
+            access_resource = route_options.pop("access_resource", None)
+            if not isinstance(principal, dict) or not isinstance(access_resource, dict):
+                return {"allowed": False, "status": "ACCESS_CONTEXT_REQUIRED"}
+            try:
+                authorization = self.access_controller.authorize(
+                    principal, "provider:route", access_resource
+                )
+            except Exception as exc:
+                return {
+                    "allowed": False, "status": "ACCESS_POLICY_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+                return {
+                    "allowed": False, "status": "ACCESS_DENIED",
+                    "authorization": authorization if isinstance(authorization, dict) else None,
+                }
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
             return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
-        }
+        if not isinstance(result, dict):
+            return {"allowed": False, "status": "INVALID_ROUTING_RESPONSE"}
+        if authorization is not None:
+            result = dict(result)
+            result["authorization"] = authorization
+        return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
         if self.output_validator is None:
@@ -264,6 +425,10 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        data_categories: list[str] | tuple[str, ...] | None = None,
+        data_purpose: str = "generation",
+        retention_days: int = 0,
+        training_opt_in: bool = False,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
@@ -283,6 +448,49 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        if self.data_retention_policy is not None:
+            if data_categories is None:
+                data_categories = ["public"]
+            if (
+                not isinstance(data_categories, (list, tuple)) or not data_categories
+                or any(not isinstance(item, str) for item in data_categories)
+            ):
+                return {"status": "INVALID_DATA_CATEGORIES", "executed": False}
+            valid_categories = getattr(self.data_retention_policy, "CATEGORIES", None)
+            if valid_categories is not None and any(item not in valid_categories for item in data_categories):
+                return {"status": "INVALID_DATA_CATEGORIES", "executed": False}
+            if "credentials" in data_categories:
+                return {"status": "CREDENTIAL_DATA_FORBIDDEN", "executed": False}
+            if not isinstance(data_purpose, str) or not data_purpose.strip() or len(data_purpose) > 80:
+                return {"status": "INVALID_DATA_PURPOSE", "executed": False}
+            if (
+                not isinstance(retention_days, int) or isinstance(retention_days, bool)
+                or not 0 <= retention_days <= 3650
+            ):
+                return {"status": "INVALID_RETENTION_PERIOD", "executed": False}
+            if not isinstance(training_opt_in, bool):
+                return {"status": "INVALID_TRAINING_CONSENT", "executed": False}
+
+        safe_adapter_options = dict(adapter_options or {})
+        privacy_status = None
+        if self.sensitive_data_guard is not None:
+            try:
+                privacy = self.sensitive_data_guard.sanitize(safe_adapter_options)
+            except Exception as exc:
+                return {
+                    "status": "PRIVACY_GUARD_FAILED", "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(privacy, dict) or privacy.get("allowed") is not True or "value" not in privacy:
+                return {
+                    "status": privacy.get("status", "PRIVACY_GUARD_FAILED") if isinstance(privacy, dict) else "PRIVACY_GUARD_FAILED",
+                    "executed": False,
+                    "privacy_scan": privacy.get("scan") if isinstance(privacy, dict) else None,
+                }
+            if not isinstance(privacy["value"], dict):
+                return {"status": "PRIVACY_GUARD_FAILED", "executed": False}
+            safe_adapter_options = privacy["value"]
+            privacy_status = privacy.get("status", "CLEAR")
 
         route = self.route_request(
             category=category,
@@ -298,7 +506,40 @@ class ProviderService:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
 
-        options = dict(adapter_options or {})
+        data_policy_result = None
+        if self.data_retention_policy is not None:
+            try:
+                data_policy_result = self.data_retention_policy.evaluate(
+                    provider_id,
+                    data_categories=data_categories,
+                    purpose=data_purpose,
+                    retention_days=retention_days,
+                    training_opt_in=training_opt_in,
+                )
+            except Exception as exc:
+                data_policy_result = {
+                    "allowed": False, "status": "DATA_POLICY_EVALUATION_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if (
+                not isinstance(data_policy_result, dict)
+                or data_policy_result.get("allowed") is not True
+                or data_policy_result.get("status") != "DATA_POLICY_ALLOWED"
+            ):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                released = isinstance(release, dict) and release.get("released") is True
+                return {
+                    "status": "DATA_POLICY_REJECTED" if released else "DATA_POLICY_REJECTED_RELEASE_FAILED",
+                    "executed": False,
+                    "provider": provider_id,
+                    "request_id": request_id,
+                    "data_policy": data_policy_result,
+                    "release": release,
+                }
+
+        options = dict(safe_adapter_options)
         options["provider_id"] = provider_id
         options["request_id"] = request_id
         started_at = time.monotonic()
@@ -448,6 +689,8 @@ class ProviderService:
             "output": output_validation,
             "finalization": finalization,
             "retry_decision": retry,
+            "privacy_status": privacy_status,
+            "data_policy_status": data_policy_result.get("status") if isinstance(data_policy_result, dict) else None,
         }
 
     def retry_decision(self, **failure: Any) -> dict[str, Any]:
