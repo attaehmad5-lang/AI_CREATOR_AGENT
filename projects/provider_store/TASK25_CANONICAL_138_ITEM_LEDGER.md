@@ -85,7 +85,7 @@ Region routing, adapter versioning, policy simulation, concurrent routing and lo
 | 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
 | 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
-| 47 | 🔴 | Provider Recovery Detection | OPEN | Automatic recovery detection and controlled re-admission are not fully integrated. |
+| 47 | 🔴 | Provider Recovery Detection | VERIFIED | `ProviderHealthManager` tracks consecutive recovery successes, persists `RECOVERING` state, keeps recovering providers ineligible until the configured threshold (default 2) is met, then records `last_recovered_at` and a recovery event. Covered by `test_unhealthy_provider_requires_consecutive_successes_before_readmission` and `test_recovering_state_survives_reload_and_is_not_eligible`. |
 | 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale health exclusion and malformed persisted-state checks exist; full health/consistency reconciliation is not complete. |
 
 ## G — Output and Asset Safety
