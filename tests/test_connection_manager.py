@@ -835,6 +835,56 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertEqual(result["contract_version"], "1.0")
 
+    def test_adapter_api_version_negotiation_runs_50_combinations(self):
+        expected_versions = [None, "1.0", "2.0", "v1", 1, "", "1.1", "1.0.0", "0.9", "99.0"]
+        actual_versions = [None, "1.0", "2.0", "v1", 1]
+        checks = 0
+        for expected in expected_versions:
+            for actual in actual_versions:
+                with self.subTest(expected=expected, actual=actual):
+                    catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+                    if expected is None:
+                        catalog["providers"][0].pop("adapter_api_version", None)
+                    else:
+                        catalog["providers"][0]["adapter_api_version"] = expected
+                    self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+                    manager = ConnectionManager(self.catalog_path, self.state_path)
+                    attrs = {"generate_image": lambda self, *args, **kwargs: None}
+                    if actual is not None:
+                        attrs["adapter_api_version"] = actual
+                    adapter = type("VersionedAdapter", (), attrs)()
+                    result = manager.validate_provider_contract("public_image", adapter)
+                    if expected is None:
+                        self.assertTrue(result["valid"])
+                    elif not isinstance(expected, str) or not __import__("re").fullmatch(r"[0-9]+[.][0-9]+", expected):
+                        self.assertEqual(result["status"], "INVALID_ADAPTER_API_VERSION")
+                    elif expected != "1.0":
+                        self.assertEqual(result["status"], "UNSUPPORTED_ADAPTER_API_VERSION")
+                    elif actual is None:
+                        self.assertEqual(result["status"], "ADAPTER_API_VERSION_REQUIRED")
+                    elif actual != "1.0":
+                        self.assertEqual(result["status"], "ADAPTER_API_VERSION_MISMATCH")
+                    else:
+                        self.assertTrue(result["valid"])
+                    checks += 1
+        self.assertEqual(checks, 50)
+
+    def test_loading_rejects_adapter_api_version_mismatch(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"][0]["adapter_api_version"] = "1.0"
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+
+        class WrongVersionAdapter:
+            API_VERSION = "2.0"
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = manager.load_provider("public_image", lambda metadata: WrongVersionAdapter())
+        self.assertEqual(result["status"], "CONTRACT_VIOLATION")
+        self.assertEqual(result["contract_status"], "ADAPTER_API_VERSION_MISMATCH")
+        self.assertIsNone(manager.get_loaded_provider("public_image"))
+
     def test_provider_contract_rejects_missing_method_and_prevents_loading(self):
         instance = object()
         contract = self.manager.validate_provider_contract("public_image", instance)
