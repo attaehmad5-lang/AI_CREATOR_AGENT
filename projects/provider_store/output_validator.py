@@ -303,7 +303,7 @@ class ProviderOutputValidator:
             return None
         stsd = moov.find(b"stsd")
         codec = None
-        if stsd >= 0 and stsd + 24 <= len(moov):
+        if stsd >= 0 and stsd + 20 <= len(moov):
             entry_type = moov[stsd + 16:stsd + 20]
             try:
                 codec = entry_type.decode("ascii").casefold()
