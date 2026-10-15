@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38757042004](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38757042004): **332 tests passed on Ubuntu and 332 on Windows, 0 failures**. The batch includes a 50-case health freshness boundary matrix and service execution health-gate regressions. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -81,7 +81,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 41 | 🟢 | Provider Health State Tracking | VERIFIED | Persistent provider health states are stored and covered by state/reload tests. |
 | 42 | 🟢 | Basic Success/Failure History | VERIFIED | Success/failure history persistence, bounded history and idempotent request recording are tested. |
-| 43 | 🟡 | Health Check Before Generation | PARTIAL | Health eligibility hooks exist; not every generation path enforces a fresh check. |
+| 43 | 🟡 | Health Check Before Generation | PARTIAL | `execute_routed_request` now requires the same health manager in service and router and forces health evidence before routing/adapter execution; missing/mismatched managers fail closed. A 50-case freshness-boundary matrix and service integration tests pass. Active network probes on every provider, health freshness policy configuration, and all alternate generation paths remain open. Evidence: `tests/test_health_manager.py::test_health_freshness_boundary_matrix_50_cases`, three health-gate tests in `tests/test_provider_service.py`. |
 | 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
 | 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
