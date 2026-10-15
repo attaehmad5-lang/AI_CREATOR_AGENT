@@ -75,9 +75,13 @@ class OpenAICompatibleTextAdapter:
 
     @staticmethod
     def _validate_endpoint(endpoint: str, allowed_hosts: list[str] | None) -> str:
-        if not isinstance(endpoint, str) or len(endpoint) > 2048:
+        if (
+            not isinstance(endpoint, str) or len(endpoint) > 2048
+            or endpoint != endpoint.strip()
+            or any(ord(character) < 32 or ord(character) == 127 for character in endpoint)
+        ):
             raise ValueError("endpoint is invalid")
-        parsed = urlsplit(endpoint.strip())
+        parsed = urlsplit(endpoint)
         if parsed.username is not None or parsed.password is not None or parsed.fragment:
             raise ValueError("endpoint credentials and fragments are forbidden")
         if not parsed.hostname or parsed.query:
