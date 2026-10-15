@@ -898,6 +898,28 @@
         "video_restoration",
         "audio_editing"
       ]
+    },
+    {
+      "id": "ollama_local",
+      "name": "Ollama Local (OpenAI-Compatible)",
+      "category": "text",
+      "status": "DISABLED",
+      "auth_type": "NONE",
+      "connection_type": "LOCAL",
+      "subscription_required": false,
+      "enabled": false,
+      "allowed_hosts": [
+        "localhost",
+        "127.0.0.1"
+      ],
+      "capabilities": [
+        "text_generation"
+      ],
+      "adapter_api_version": "1.0",
+      "official_api_url": "https://github.com/ollama/ollama/blob/main/docs/openai.md",
+      "local_only": true,
+      "endpoint_required": true,
+      "model_required": true
     }
   ]
 }
