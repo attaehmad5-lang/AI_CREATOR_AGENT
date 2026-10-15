@@ -120,8 +120,8 @@ GitHub Actions run [#38791171237](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 65 | 🟡 | Secrets Manager Integration | PARTIAL | Environment variable references are supported; managed secret vault/rotation integration is not complete. |
 | 66 | 🟡 | Secret/Token Leak Prevention in Logs | PARTIAL | Credential redaction and no-response-body probes are tested; full application log scan is pending. |
-| 67 | 🔴 | Least-Privilege Access Control | OPEN | Role/permission-based access control is not fully implemented. |
-| 68 | 🔴 | Provider Permissions and Allowed Operations | PARTIAL | Catalog capabilities and OAuth scope checks exist; operation-level authorization coverage is incomplete. |
+| 67 | 🔴 | Least-Privilege Access Control | PARTIAL | New `ProviderOperationPolicy` applies deny-by-default subject/project/operation/provider grants, rejects wildcards, and is enforced by routing before reservation side effects. Authenticated identity integration and full role/tenant lifecycle remain open. |
+| 68 | 🔴 | Provider Permissions and Allowed Operations | PARTIAL | Explicit operation-level provider allowlists now filter routing candidates and fail closed on missing identities or grants; capability-level and provider-specific OAuth permission enforcement still need integration/live evidence. |
 | 69 | 🔴 | Sensitive-Data Detection and Privacy Enforcement | OPEN | Sensitive-data detection and policy enforcement are not complete. |
 | 70 | 🔴 | Data Retention and Provider Data-Handling Rules | OPEN | Provider-specific retention/data-handling policy enforcement is not complete. |
 | 71 | 🔴 | Provider Endpoint Allowlisting and Network Security | PARTIAL | HTTPS host allowlists, redirect rejection and bounded reads are tested; deployment threat-model review remains open. |
