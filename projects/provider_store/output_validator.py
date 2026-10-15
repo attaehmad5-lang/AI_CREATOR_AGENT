@@ -93,7 +93,7 @@ class ProviderOutputValidator:
                 return None
             return int.from_bytes(payload[6:8], "little"), int.from_bytes(payload[8:10], "little")
         if mime == "image/jpeg":
-            if len(payload) < 4 or payload[:2] != b"\\xff\\xd8":
+            if len(payload) < 4 or payload[:2] != bytes((255, 216)):
                 return None
             index = 2
             sof_markers = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
@@ -137,7 +137,7 @@ class ProviderOutputValidator:
                 width = 1 + b1 + ((b2 & 0x3F) << 8)
                 height = 1 + (b2 >> 6) + (b3 << 2) + ((b4 & 0x0F) << 10)
                 return width, height
-            if chunk_type == b"VP8 " and len(payload) >= 30 and payload[23:26] == b"\\x9d\\x01\\x2a":
+            if chunk_type == b"VP8 " and len(payload) >= 30 and payload[23:26] == bytes((157, 1, 42)):
                 width = int.from_bytes(payload[26:28], "little") & 0x3FFF
                 height = int.from_bytes(payload[28:30], "little") & 0x3FFF
                 return width, height
