@@ -4,7 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from projects.provider_store.access_control import ProviderAccessController
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.data_retention import ProviderDataRetentionPolicy
+from projects.provider_store.execution_queue import BoundedExecutionQueue
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
@@ -13,6 +16,7 @@ from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
+from projects.provider_store.sensitive_data import SensitiveDataGuard
 
 
 class ProviderServiceTests(unittest.TestCase):
@@ -51,6 +55,412 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_provider_admin_operations_are_gated_by_role_and_provider_scope(self):
+        service = ProviderService(
+            self.connections,
+            access_controller=ProviderAccessController(),
+        )
+        reader = {
+            "subject_id": "reader-1", "tenant_id": "tenant-a",
+            "roles": ["reader"], "project_ids": ["film"],
+        }
+        resource = {"provider_id": "image", "tenant_id": "tenant-a"}
+        configured = service.configure_provider(
+            "image", principal=reader, access_resource=resource,
+            model="new-model",
+        )
+        self.assertEqual(configured["status"], "ACCESS_DENIED")
+        self.assertFalse(configured["saved"])
+        disabled = service.set_provider_enabled(
+            "image", False, principal=reader, access_resource=resource
+        )
+        self.assertEqual(disabled["status"], "ACCESS_DENIED")
+        self.assertFalse(disabled["saved"])
+        registered = service.register_provider(
+            {
+                "id": "new-provider", "name": "New", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            },
+            principal=reader, access_resource=resource,
+        )
+        self.assertEqual(registered["status"], "ACCESS_RESOURCE_MISMATCH")
+        self.assertFalse(registered["saved"])
+        self.assertIsNone(self.connections.get_provider("new-provider"))
+
+    def test_provider_connection_scope_cannot_authorize_another_provider(self):
+        service = ProviderService(
+            self.connections,
+            access_controller=ProviderAccessController(),
+        )
+        calls = []
+        result = service.verify_provider(
+            "image", lambda provider, **kwargs: calls.append(True) or {"ok": True},
+            principal={
+                "subject_id": "operator-1", "tenant_id": "tenant-a",
+                "roles": ["operator"], "project_ids": ["film"],
+            },
+            access_resource={"provider_id": "other-provider", "tenant_id": "tenant-a"},
+        )
+        self.assertEqual(result["status"], "ACCESS_RESOURCE_MISMATCH")
+        self.assertEqual(calls, [])
+
+    def test_routing_access_policy_denies_before_router_or_adapter(self):
+        class SpyRouter:
+            def __init__(self):
+                self.calls = []
+
+            def route(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        router = SpyRouter()
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            access_controller=ProviderAccessController(),
+        )
+        adapter_calls = []
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="access-denied-request",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: adapter_calls.append(kwargs) or {"started": True, "success": True},
+            modality="image",
+            principal={
+                "subject_id": "reader-1", "tenant_id": "tenant-a",
+                "roles": ["reader"], "project_ids": ["film"],
+            },
+            access_resource={
+                "provider_id": "routing", "tenant_id": "tenant-a", "project_id": "film",
+            },
+        )
+        self.assertEqual(result["status"], "ROUTING_REJECTED")
+        self.assertEqual(result["route"]["status"], "ACCESS_DENIED")
+        self.assertEqual(router.calls, [])
+        self.assertEqual(adapter_calls, [])
+
+    def test_connection_verification_is_blocked_before_probe_without_permission(self):
+        class SpyProbe:
+            def __init__(self):
+                self.calls = 0
+
+            def __call__(self, provider, **kwargs):
+                self.calls += 1
+                return {"ok": True}
+
+        probe = SpyProbe()
+        service = ProviderService(
+            self.connections,
+            access_controller=ProviderAccessController(),
+        )
+        result = service.verify_provider(
+            "image", probe,
+            principal={
+                "subject_id": "reader-1", "tenant_id": "tenant-a",
+                "roles": ["reader"], "project_ids": ["film"],
+            },
+            access_resource={
+                "provider_id": "image", "tenant_id": "tenant-a",
+            },
+        )
+        self.assertEqual(result["status"], "ACCESS_DENIED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(probe.calls, 0)
+
+    def test_oauth_token_is_not_accessed_before_authorization(self):
+        class SpyOAuth:
+            def __init__(self):
+                self.calls = 0
+
+            def get_access_token(self, provider_id):
+                self.calls += 1
+                return "must-not-be-read"
+
+        oauth = SpyOAuth()
+        service = ProviderService(
+            self.connections,
+            access_controller=ProviderAccessController(),
+        )
+        result = service.verify_oauth_provider(
+            "image", oauth,
+            principal={
+                "subject_id": "reader-1", "tenant_id": "tenant-a",
+                "roles": ["reader"], "project_ids": ["film"],
+            },
+            access_resource={"provider_id": "image", "tenant_id": "tenant-a"},
+        )
+        self.assertEqual(result["status"], "ACCESS_DENIED")
+        self.assertEqual(oauth.calls, 0)
+
+    def test_connection_verification_requires_context_when_policy_enabled(self):
+        service = ProviderService(
+            self.connections,
+            access_controller=ProviderAccessController(),
+        )
+        calls = []
+        result = service.verify_provider(
+            "image", lambda provider, **kwargs: calls.append(True) or {"ok": True}
+        )
+        self.assertEqual(result["status"], "ACCESS_CONTEXT_REQUIRED")
+        self.assertEqual(calls, [])
+
+    def test_routing_access_policy_requires_trusted_context_when_enabled(self):
+        class SpyRouter:
+            def __init__(self):
+                self.calls = []
+
+            def route(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        router = SpyRouter()
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            access_controller=ProviderAccessController(),
+        )
+        result = service.route_request(category="image", project_id="film")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "ACCESS_CONTEXT_REQUIRED")
+        self.assertEqual(router.calls, [])
+
+    def test_routing_access_policy_allows_scoped_operator_and_strips_auth_context(self):
+        class SpyRouter:
+            def __init__(self):
+                self.calls = []
+
+            def route(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        router = SpyRouter()
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            access_controller=ProviderAccessController(),
+        )
+        result = service.route_request(
+            category="image",
+            project_id="film",
+            principal={
+                "subject_id": "operator-1", "tenant_id": "tenant-a",
+                "roles": ["operator"], "project_ids": ["film"],
+            },
+            access_resource={
+                "provider_id": "routing", "tenant_id": "tenant-a", "project_id": "film",
+            },
+        )
+        self.assertTrue(result["allowed"])
+        self.assertTrue(result["authorization"]["allowed"])
+        self.assertEqual(router.calls, [{"category": "image", "project_id": "film"}])
+
+    def test_sensitive_data_block_happens_before_routing_and_adapter(self):
+        class SpyRouter:
+            def __init__(self):
+                self.calls = 0
+
+            def route(self, **kwargs):
+                self.calls += 1
+                return {"allowed": True, "provider": "image"}
+
+        router = SpyRouter()
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            sensitive_data_guard=SensitiveDataGuard(mode="block"),
+        )
+        adapter_calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="privacy-block",
+            estimated_cost=0.0, adapter=lambda **kwargs: adapter_calls.append(kwargs),
+            modality="image", adapter_options={"prompt": "Contact alice@example.com"},
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(router.calls, 0)
+        self.assertEqual(adapter_calls, [])
+        self.assertNotIn("alice@example.com", repr(result))
+
+    def test_sensitive_data_redaction_reaches_adapter_without_original_values(self):
+        class SpyRouter:
+            def route(self, **kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        seen = []
+        def adapter(**kwargs):
+            seen.append(kwargs)
+            return {
+                "started": True, "success": False, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "error_code": "EXPECTED_TEST_FAILURE",
+            }
+
+        service = ProviderService(
+            self.connections, routing_manager=SpyRouter(),
+            sensitive_data_guard=SensitiveDataGuard(mode="redact"),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="privacy-redact",
+            estimated_cost=0.0, adapter=adapter, modality="image",
+            adapter_options={
+                "prompt": "Contact alice@example.com",
+                "credentials": {"api_key": "never-forward-this-secret"},
+                "ordinary": "preserve",
+            },
+        )
+        self.assertEqual(result["privacy_status"], "REDACTED")
+        self.assertEqual(len(seen), 1)
+        self.assertNotIn("alice@example.com", repr(seen[0]))
+        self.assertNotIn("never-forward-this-secret", repr(seen[0]))
+        self.assertEqual(seen[0]["ordinary"], "preserve")
+        self.assertEqual(seen[0]["credentials"], "[REDACTED:CREDENTIAL_FIELD]")
+
+    def test_data_policy_blocks_before_adapter_and_releases_reservations(self):
+        class Quota:
+            def __init__(self):
+                self.released = []
+                self.committed = []
+
+            def commit(self, **kwargs):
+                self.committed.append(kwargs)
+                return {"status": "COMMITTED", "committed": True}
+
+            def release(self, **kwargs):
+                self.released.append(kwargs)
+                return {"status": "RELEASED", "released": True}
+
+        class Router:
+            def __init__(self, quota):
+                self.quota_manager = quota
+                self.cost_policy = None
+                self.credit_manager = None
+                self.calls = 0
+
+            def route(self, **kwargs):
+                self.calls += 1
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        quota = Quota()
+        router = Router(quota)
+        service = ProviderService(
+            self.connections, routing_manager=router, quota_manager=quota,
+            data_retention_policy=ProviderDataRetentionPolicy({
+                "image": {
+                    "allowed_data_categories": ["public"],
+                    "allowed_purposes": ["generation"],
+                    "max_retention_days": 0,
+                    "uses_data_for_training": False,
+                }
+            }),
+        )
+        adapter_calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="retention-block",
+            estimated_cost=0.0, adapter=lambda **kwargs: adapter_calls.append(kwargs),
+            modality="image", data_categories=["personal"], retention_days=0,
+        )
+        self.assertEqual(result["status"], "DATA_POLICY_REJECTED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(router.calls, 1)
+        self.assertEqual(adapter_calls, [])
+        self.assertEqual(len(quota.released), 1)
+
+    def test_data_policy_forbids_credential_content_before_routing(self):
+        class Router:
+            def __init__(self):
+                self.calls = 0
+
+            def route(self, **kwargs):
+                self.calls += 1
+                return {"allowed": True, "provider": "image"}
+
+        router = Router()
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            data_retention_policy=ProviderDataRetentionPolicy({
+                "image": {
+                    "allowed_data_categories": ["public"],
+                    "allowed_purposes": ["generation"],
+                    "max_retention_days": 0,
+                    "uses_data_for_training": False,
+                }
+            }),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="retention-secret",
+            estimated_cost=0.0, adapter=lambda **kwargs: {"started": False},
+            modality="image", data_categories=["credentials"],
+        )
+        self.assertEqual(result["status"], "CREDENTIAL_DATA_FORBIDDEN")
+        self.assertEqual(router.calls, 0)
+
+    def test_data_policy_allows_declared_public_data_and_reports_policy_status(self):
+        class Quota:
+            def commit(self, **kwargs):
+                return {"status": "COMMITTED", "committed": True}
+
+            def release(self, **kwargs):
+                return {"status": "RELEASED", "released": True}
+
+        class Router:
+            quota_manager = Quota()
+            cost_policy = None
+            credit_manager = None
+
+            def route(self, **kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        seen = []
+        service = ProviderService(
+            self.connections, routing_manager=Router(),
+            data_retention_policy=ProviderDataRetentionPolicy({
+                "image": {
+                    "allowed_data_categories": ["public"],
+                    "allowed_purposes": ["generation"],
+                    "max_retention_days": 0,
+                    "uses_data_for_training": False,
+                }
+            }),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="retention-allow",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: seen.append(kwargs) or {
+                "started": True, "success": False, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred",
+            },
+            modality="image", data_categories=["public"], retention_days=0,
+        )
+        self.assertEqual(result["data_policy_status"], "DATA_POLICY_ALLOWED")
+        self.assertEqual(len(seen), 1)
+
+    def test_execution_queue_service_facade_enforces_backpressure_and_worker_ownership(self):
+        queue = BoundedExecutionQueue(max_pending=1, max_running=1, max_pending_per_tenant=1)
+        service = ProviderService(self.connections, execution_queue=queue)
+        common = {
+            "tenant_id": "tenant-a", "project_id": "film",
+            "category": "image",
+        }
+        self.assertEqual(service.enqueue_execution(
+            request_id="queued-1", **common
+        )["status"], "QUEUED")
+        self.assertEqual(service.enqueue_execution(
+            request_id="queued-2", **common
+        )["status"], "QUEUE_FULL")
+        claim = service.claim_next_execution(worker_id="worker-1")
+        self.assertEqual(claim["status"], "CLAIMED")
+        self.assertEqual(service.complete_execution(
+            request_id="queued-1", worker_id="wrong-worker", status="SUCCEEDED"
+        )["status"], "WORKER_OWNERSHIP_MISMATCH")
+        self.assertTrue(service.complete_execution(
+            request_id="queued-1", worker_id="worker-1", status="SUCCEEDED"
+        )["completed"])
+        self.assertEqual(service.execution_queue_stats()["running"], 0)
+
+    def test_execution_queue_service_reports_unavailable_when_not_configured(self):
+        self.assertEqual(self.service.enqueue_execution(request_id="job")["status"], "EXECUTION_QUEUE_UNAVAILABLE")
+        self.assertEqual(self.service.claim_next_execution(worker_id="worker")["status"], "EXECUTION_QUEUE_UNAVAILABLE")
+        self.assertEqual(self.service.execution_queue_stats()["status"], "EXECUTION_QUEUE_UNAVAILABLE")
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
