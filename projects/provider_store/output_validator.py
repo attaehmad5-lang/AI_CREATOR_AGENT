@@ -596,7 +596,16 @@ class ProviderOutputValidator:
                         media_payload = stream.read(min(size, 16 * 1024 * 1024))
                         if len(media_payload) != min(size, 16 * 1024 * 1024):
                             return {"valid": False, "status": "OUTPUT_CHANGED_DURING_VALIDATION"}
-                        media_properties = self._media_properties(mime, media_payload, size, normalized_modality)
+                        tail_payload = b""
+                        if mime == "audio/ogg":
+                            stream.seek(max(0, size - 65536))
+                            tail_payload = stream.read(min(size, 65536))
+                            if len(tail_payload) != min(size, 65536):
+                                return {"valid": False, "status": "OUTPUT_CHANGED_DURING_VALIDATION"}
+                        media_properties = self._media_properties(
+                            mime, media_payload, size, normalized_modality,
+                            stream=stream, tail_payload=tail_payload,
+                        )
                         if media_properties is None:
                             return {"valid": False, "status": "MEDIA_PROPERTIES_UNVERIFIED"}
                         duration = media_properties.get("duration_seconds")
