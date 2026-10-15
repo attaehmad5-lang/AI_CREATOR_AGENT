@@ -81,7 +81,14 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(self.service.approve_paid_usage(
             pending["approval_id"], approved_by="admin-1"
         )["approved"])
-        route = self.service.route_request(
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, cost_policy=self.cost,
+            quota_manager=self.quota, paid_approval_manager=self.approvals,
+        )
+        route = service.route_request(
             category="image", project_id="film", estimated_cost=2.0,
             request_id="service-paid-job",
             paid_approval_ids={"image": pending["approval_id"]},
