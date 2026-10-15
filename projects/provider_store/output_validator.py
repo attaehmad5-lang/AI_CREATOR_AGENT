@@ -85,7 +85,7 @@ class ProviderOutputValidator:
     @staticmethod
     def _validate_png_structure(stream: Any, size: int) -> tuple[int, int] | None:
         """Validate PNG chunk ordering, lengths, CRCs, and required terminal chunks."""
-        signature = b"\\x89PNG\\r\\n\\x1a\\n"
+        signature = bytes((137, 80, 78, 71, 13, 10, 26, 10))
         stream.seek(0)
         if stream.read(8) != signature:
             return None
