@@ -75,7 +75,9 @@ class ProviderExecutionLimiterTests(unittest.TestCase):
             self.assertEqual(limiter.snapshot()["image"]["waiting"], 1)
             release.set()
             self.assertEqual(first.result(timeout=2)["result"], "first")
-            self.assertEqual(second.result(timeout=2)["result"], "second")
+            second_result = second.result(timeout=2)
+            self.assertEqual(second_result["result"], "second")
+            self.assertGreater(second_result["queue_wait_ms"], 0.0)
         self.assertEqual(limiter.snapshot()["image"]["active"], 0)
         self.assertEqual(limiter.snapshot()["image"]["waiting"], 0)
 
