@@ -25,6 +25,7 @@ class ProviderCostPolicy:
         ledger_path: str | os.PathLike[str] | None = None,
         *,
         project_budgets: dict[str, float] | None = None,
+        per_request_budgets: dict[str, float] | None = None,
         approval_manager: Any | None = None,
     ) -> None:
         if approval_manager is not None and not callable(getattr(approval_manager, "authorize", None)):
@@ -38,6 +39,12 @@ class ProviderCostPolicy:
         for project_id, budget in self.project_budgets.items():
             if not isinstance(project_id, str) or not project_id.strip() or not self._valid_amount(budget):
                 raise ValueError("project budgets require non-empty project IDs and finite non-negative amounts")
+        if per_request_budgets is not None and not isinstance(per_request_budgets, dict):
+            raise ValueError("per_request_budgets must be a mapping")
+        self.per_request_budgets = dict(per_request_budgets or {})
+        for project_id, budget in self.per_request_budgets.items():
+            if not isinstance(project_id, str) or not project_id.strip() or not self._valid_amount(budget):
+                raise ValueError("per-request budgets require non-empty project IDs and finite non-negative amounts")
         self.ledger: dict[str, Any] = {"version": "1.0", "projects": {}}
         self._reload_ledger()
 
@@ -201,6 +208,16 @@ class ProviderCostPolicy:
                 }
             if not self._valid_amount(budget):
                 return {"allowed": False, "status": "INVALID_PROJECT_BUDGET", "provider": provider["id"]}
+            request_limit = self.per_request_budgets.get(project_id)
+            if request_limit is not None:
+                if not self._valid_amount(request_limit):
+                    return {"allowed": False, "status": "INVALID_REQUEST_BUDGET", "provider": provider["id"]}
+                if estimated_cost > request_limit:
+                    return {
+                        "allowed": False, "status": "REQUEST_BUDGET_EXCEEDED",
+                        "provider": provider["id"], "estimated_cost": estimated_cost,
+                        "request_budget_limit": request_limit,
+                    }
             remaining = max(0.0, budget - self._spent(project_id) - self._reserved(project_id))
             if estimated_cost > remaining:
                 return {
@@ -335,6 +352,15 @@ class ProviderCostPolicy:
                 return {"status": "PROJECT_BUDGET_REQUIRED", "saved": False}
             if not self._valid_amount(budget):
                 return {"status": "INVALID_PROJECT_BUDGET", "saved": False}
+            request_limit = self.per_request_budgets.get(project_id)
+            if request_limit is not None:
+                if not self._valid_amount(request_limit):
+                    return {"status": "INVALID_REQUEST_BUDGET", "saved": False}
+                if estimated_cost > request_limit:
+                    return {
+                        "status": "REQUEST_BUDGET_EXCEEDED", "saved": False,
+                        "request_budget_limit": request_limit,
+                    }
             project = self.ledger["projects"].setdefault(
                 project_id, {"actual_spend": 0.0, "requests": {}, "reservations": {}}
             )
