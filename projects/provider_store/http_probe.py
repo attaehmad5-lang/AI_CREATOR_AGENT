@@ -226,6 +226,27 @@ class ProviderHTTPConnectivityProbe:
             raise ConnectionError("provider endpoint is unreachable") from None
 
         try:
+            # Even when a custom opener is injected, never trust it to enforce the
+            # no-redirect policy. Reject a response whose final URL differs from
+            # the explicitly validated endpoint before accepting any success.
+            get_final_url = getattr(response, "geturl", None)
+            if callable(get_final_url):
+                final_url = get_final_url()
+                from urllib.parse import urlsplit
+                requested = urlsplit(endpoint.strip())
+                final = urlsplit(final_url) if isinstance(final_url, str) else None
+                if (
+                    final is None
+                    or final.scheme.casefold() != requested.scheme.casefold()
+                    or (final.hostname or "").casefold().rstrip(".") != (requested.hostname or "").casefold().rstrip(".")
+                    or final.port != requested.port
+                    or final.path != requested.path
+                    or final.query != requested.query
+                    or final.fragment
+                    or final.username is not None
+                    or final.password is not None
+                ):
+                    raise ConnectionError("provider endpoint redirected; redirects are not followed")
             status = response.getcode() if callable(getattr(response, "getcode", None)) else getattr(response, "status", None)
             if not isinstance(status, int) or not 200 <= status < 300:
                 raise ConnectionError("provider did not return a successful HTTP status")
