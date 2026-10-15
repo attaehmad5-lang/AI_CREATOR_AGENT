@@ -81,6 +81,10 @@ class ProviderMetricsManager:
                 or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", event.get("status", ""))
                 or not isinstance(event.get("success"), bool)
                 or finite_number(event.get("latency_ms"), minimum=0) is None
+                or (
+                    event.get("queue_wait_ms") is not None
+                    and finite_number(event.get("queue_wait_ms"), minimum=0) is None
+                )
             ):
                 raise ValueError("invalid provider metrics event")
             cls._parse_timestamp(event.get("recorded_at"))
@@ -125,6 +129,7 @@ class ProviderMetricsManager:
         status: str,
         success: bool,
         latency_ms: float,
+        queue_wait_ms: float | None = None,
     ) -> dict[str, Any]:
         if not self._valid_id(request_id):
             return {"status": "INVALID_REQUEST_ID", "saved": False}
@@ -141,6 +146,9 @@ class ProviderMetricsManager:
         latency = finite_number(latency_ms, minimum=0)
         if latency is None:
             return {"status": "INVALID_LATENCY", "saved": False}
+        queue_wait = None if queue_wait_ms is None else finite_number(queue_wait_ms, minimum=0)
+        if queue_wait_ms is not None and queue_wait is None:
+            return {"status": "INVALID_QUEUE_WAIT", "saved": False}
         try:
             now = self.clock()
             if not isinstance(now, datetime) or now.tzinfo is None:
@@ -156,6 +164,7 @@ class ProviderMetricsManager:
             "status": status,
             "success": success,
             "latency_ms": latency,
+            "queue_wait_ms": queue_wait,
             "recorded_at": timestamp,
         }
         with self._lock, interprocess_file_lock(self.lock_path):
@@ -164,7 +173,7 @@ class ProviderMetricsManager:
             if existing is not None:
                 same_payload = all(
                     existing.get(key) == event.get(key)
-                    for key in ("request_id", "trace_id", "provider_id", "modality", "status", "success", "latency_ms")
+                    for key in ("request_id", "trace_id", "provider_id", "modality", "status", "success", "latency_ms", "queue_wait_ms")
                 )
                 if same_payload:
                     return {"status": "ALREADY_RECORDED", "saved": True, "duplicate": True}
@@ -196,6 +205,10 @@ class ProviderMetricsManager:
                 and (modality is None or event["modality"] == modality)
             ]
         latencies = [float(event["latency_ms"]) for event in events]
+        queue_waits = [
+            float(event["queue_wait_ms"])
+            for event in events if event.get("queue_wait_ms") is not None
+        ]
         successes = sum(1 for event in events if event["success"])
         count = len(events)
         return {
@@ -208,6 +221,11 @@ class ProviderMetricsManager:
             # latency values cannot overflow the aggregate to infinity.
             "average_latency_ms": sum(value / count for value in latencies) if count else None,
             "max_latency_ms": max(latencies) if latencies else None,
+            "queue_wait_sample_count": len(queue_waits),
+            "average_queue_wait_ms": (
+                sum(value / len(queue_waits) for value in queue_waits) if queue_waits else None
+            ),
+            "max_queue_wait_ms": max(queue_waits) if queue_waits else None,
         }
 
     def list_events(self, *, limit: int = 100) -> dict[str, Any]:
