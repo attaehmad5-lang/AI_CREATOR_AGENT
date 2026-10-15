@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        paid_approval_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -33,6 +34,7 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (paid_approval_manager, "authorize", "paid_approval_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -45,6 +47,50 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.paid_approval_manager = paid_approval_manager
+        if paid_approval_manager is not None:
+            for policy in (cost_policy, getattr(routing_manager, "cost_policy", None)):
+                if policy is None:
+                    continue
+                current = getattr(policy, "approval_manager", None)
+                if current is not None and current is not paid_approval_manager:
+                    raise ValueError("paid approval manager conflicts with cost policy configuration")
+                policy.approval_manager = paid_approval_manager
+
+    def request_paid_usage_approval(self, **request: Any) -> dict[str, Any]:
+        if not callable(getattr(self.paid_approval_manager, "request_approval", None)):
+            return {"status": "PAID_APPROVAL_MANAGER_UNAVAILABLE", "approval_created": False}
+        try:
+            result = self.paid_approval_manager.request_approval(**request)
+        except Exception as exc:
+            return {"status": "PAID_APPROVAL_REQUEST_FAILED", "approval_created": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_PAID_APPROVAL_RESPONSE", "approval_created": False
+        }
+
+    def approve_paid_usage(
+        self, approval_id: str, *, approved_by: str,
+        max_amount: float | None = None, expires_in_seconds: int = 900,
+    ) -> dict[str, Any]:
+        if not callable(getattr(self.paid_approval_manager, "approve", None)):
+            return {"status": "PAID_APPROVAL_MANAGER_UNAVAILABLE", "approved": False}
+        try:
+            result = self.paid_approval_manager.approve(
+                approval_id, approved_by=approved_by,
+                max_amount=max_amount, expires_in_seconds=expires_in_seconds,
+            )
+        except Exception as exc:
+            return {"status": "PAID_APPROVAL_ACTION_FAILED", "approved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_PAID_APPROVAL_RESPONSE", "approved": False}
+
+    def revoke_paid_usage_approval(self, approval_id: str, *, revoked_by: str) -> dict[str, Any]:
+        if not callable(getattr(self.paid_approval_manager, "revoke", None)):
+            return {"status": "PAID_APPROVAL_MANAGER_UNAVAILABLE", "revoked": False}
+        try:
+            result = self.paid_approval_manager.revoke(approval_id, revoked_by=revoked_by)
+        except Exception as exc:
+            return {"status": "PAID_APPROVAL_ACTION_FAILED", "revoked": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_PAID_APPROVAL_RESPONSE", "revoked": False}
 
     def verify_provider(
         self,

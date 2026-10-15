@@ -1,6 +1,7 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
+import struct
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
+from projects.provider_store.paid_approval_manager import PaidUsageApprovalManager
 
 
 class ProviderServiceTests(unittest.TestCase):
@@ -36,7 +38,11 @@ class ProviderServiceTests(unittest.TestCase):
         if verified.get("verified") is not True:
             raise AssertionError("test fixture provider failed stub verification")
         self.health = ProviderHealthManager(self.root / "health.json")
-        self.cost = ProviderCostPolicy(self.root / "cost.json", project_budgets={"film": 10.0})
+        self.approvals = PaidUsageApprovalManager(self.root / "paid-approvals.json", authorizer=lambda action, user, record: True)
+        self.cost = ProviderCostPolicy(
+            self.root / "cost.json", project_budgets={"film": 10.0},
+            approval_manager=self.approvals,
+        )
         self.quota = ProviderQuotaManager(self.root / "quota.json", limits={"image": {"daily": 10}})
         self.validator = ProviderOutputValidator()
         self.retry = RetryPolicy(random_fn=lambda: 0)
@@ -47,10 +53,59 @@ class ProviderServiceTests(unittest.TestCase):
             output_validator=self.validator,
             cost_policy=self.cost,
             quota_manager=self.quota,
+            paid_approval_manager=self.approvals,
         )
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def _paid_approval_id(self, request_id, *, provider_id="image", amount=1.0, project_id="film"):
+        pending = self.approvals.request_approval(
+            project_id=project_id, provider_id=provider_id, request_id=request_id,
+            estimated_cost=amount, unit="USD", requested_by="test-user",
+            reason="Explicit approval for provider service test",
+        )
+        self.assertIn(pending["status"], {"APPROVAL_PENDING", "APPROVAL_ALREADY_EXISTS"})
+        approval_id = pending["approval_id"]
+        if pending["status"] == "APPROVAL_PENDING":
+            self.assertTrue(self.approvals.approve(approval_id, approved_by="test-admin")["approved"])
+        return approval_id
+
+    def test_service_exposes_explicit_paid_approval_lifecycle(self):
+        pending = self.service.request_paid_usage_approval(
+            project_id="film", provider_id="image", request_id="service-paid-job",
+            estimated_cost=2.0, unit="USD", requested_by="user-1",
+            reason="User approved paid image generation",
+        )
+        self.assertEqual(pending["status"], "APPROVAL_PENDING")
+        self.assertTrue(self.service.approve_paid_usage(
+            pending["approval_id"], approved_by="admin-1"
+        )["approved"])
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, cost_policy=self.cost,
+            quota_manager=self.quota, paid_approval_manager=self.approvals,
+        )
+        route = service.route_request(
+            category="image", project_id="film", estimated_cost=2.0,
+            request_id="service-paid-job",
+            paid_approval_ids={"image": pending["approval_id"]},
+        )
+        self.assertTrue(route["allowed"], route)
+        self.assertEqual(route["billing_mode"], "PAID_APPROVED")
+
+    def test_service_cannot_approve_without_trusted_authorizer(self):
+        manager = PaidUsageApprovalManager(self.root / "no-authorizer-service.json")
+        service = ProviderService(self.connections, paid_approval_manager=manager)
+        pending = service.request_paid_usage_approval(
+            project_id="film", provider_id="image", request_id="service-no-auth",
+            estimated_cost=1.0, requested_by="user-1", reason="Test fail closed",
+        )
+        result = service.approve_paid_usage(pending["approval_id"], approved_by="admin-1")
+        self.assertEqual(result["status"], "APPROVER_AUTHORIZER_REQUIRED")
+        self.assertFalse(result["approved"])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
@@ -457,7 +512,10 @@ class ProviderServiceTests(unittest.TestCase):
             cost_policy=self.cost, quota_manager=self.quota,
         )
         output_path = self.root / "generated.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        output_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR"
+            + struct.pack(">II", 64, 64) + bytes((8, 2, 0, 0, 0)) + bytes(4)
+        )
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-success",
             estimated_cost=0.0, output_path=str(output_path),
@@ -484,6 +542,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-not-started",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_approval_ids={"image": self._paid_approval_id("execute-not-started")},
             adapter=lambda **kwargs: {"started": False, "success": False},
             modality="image",
         )
@@ -539,6 +598,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-contradictory-start",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_approval_ids={"image": self._paid_approval_id("execute-contradictory-start")},
             adapter=lambda **kwargs: {
                 "started": False, "success": True, "actual_cost": 1.0,
                 "charge_outcome": "incurred",
@@ -565,6 +625,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-unknown",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_approval_ids={"image": self._paid_approval_id("execute-unknown")},
             adapter=adapter, modality="image",
         )
         self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
@@ -586,6 +647,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-invalid-cost",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_approval_ids={"image": self._paid_approval_id("execute-invalid-cost")},
             adapter=lambda **kwargs: {
                 "started": True, "success": True, "actual_cost": float("nan"),
                 "charge_outcome": "not_incurred", "output_path": str(output_path),

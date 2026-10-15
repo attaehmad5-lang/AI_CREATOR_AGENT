@@ -25,7 +25,11 @@ class ProviderCostPolicy:
         ledger_path: str | os.PathLike[str] | None = None,
         *,
         project_budgets: dict[str, float] | None = None,
+        approval_manager: Any | None = None,
     ) -> None:
+        if approval_manager is not None and not callable(getattr(approval_manager, "authorize", None)):
+            raise ValueError("approval_manager must support explicit approval authorization")
+        self.approval_manager = approval_manager
         self.ledger_path = Path(ledger_path) if ledger_path else None
         self._lock = threading.RLock()
         if project_budgets is not None and not isinstance(project_budgets, dict):
@@ -147,6 +151,8 @@ class ProviderCostPolicy:
         estimated_cost: float,
         free_credits_remaining: float = 0.0,
         paid_usage_approved: bool = False,
+        approval_id: str | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(provider, dict) or not isinstance(provider.get("id"), str) or not provider["id"]:
             return {"allowed": False, "status": "INVALID_PROVIDER"}
@@ -203,16 +209,44 @@ class ProviderCostPolicy:
                     "budget_remaining": remaining,
                 }
 
-            # A paid subscription/credit balance is never inferred to be approved.
-            if not paid_usage_approved:
+            # A caller-supplied boolean/set is not an approval record. Paid use
+            # requires a persistent, scoped, unexpired approval from the trusted manager.
+            if self.approval_manager is None:
                 return {
-                    "allowed": False, "status": "PAID_APPROVAL_REQUIRED", "provider": provider["id"],
-                    "estimated_cost": estimated_cost,
+                    "allowed": False, "status": "PAID_APPROVAL_MANAGER_REQUIRED",
+                    "provider": provider["id"], "estimated_cost": estimated_cost,
+                }
+            if not isinstance(approval_id, str) or not approval_id.strip():
+                return {
+                    "allowed": False, "status": "PAID_APPROVAL_REQUIRED",
+                    "provider": provider["id"], "estimated_cost": estimated_cost,
+                }
+            if not isinstance(request_id, str) or not request_id.strip():
+                return {"allowed": False, "status": "PAID_APPROVAL_REQUEST_ID_REQUIRED", "provider": provider["id"]}
+            try:
+                approval = self.approval_manager.authorize(
+                    approval_id,
+                    project_id=project_id,
+                    provider_id=provider["id"],
+                    request_id=request_id,
+                    estimated_cost=estimated_cost,
+                    unit="USD",
+                )
+            except Exception as exc:
+                return {
+                    "allowed": False, "status": "PAID_APPROVAL_LOOKUP_FAILED",
+                    "provider": provider["id"], "error_type": type(exc).__name__,
+                }
+            if not isinstance(approval, dict) or approval.get("approved") is not True:
+                return {
+                    "allowed": False,
+                    "status": approval.get("status", "PAID_APPROVAL_REQUIRED") if isinstance(approval, dict) else "INVALID_APPROVAL_RESPONSE",
+                    "provider": provider["id"], "estimated_cost": estimated_cost,
                 }
             return {
                 "allowed": True, "status": "ALLOWED_PAID", "provider": provider["id"],
                 "billing_mode": "PAID_APPROVED", "estimated_cost": estimated_cost,
-                "approval_recorded": True,
+                "approval_recorded": True, "approval_id": approval.get("approval_id"),
             }
 
     @classmethod
@@ -228,6 +262,8 @@ class ProviderCostPolicy:
         estimated_costs: dict[str, float],
         free_credits: dict[str, float] | None = None,
         paid_approved_providers: set[str] | None = None,
+        paid_approval_ids: dict[str, str] | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         """Prefer eligible free-credit providers before any explicitly approved paid route."""
         if not isinstance(providers, list) or not isinstance(estimated_costs, dict):
@@ -243,6 +279,12 @@ class ProviderCostPolicy:
             return {"allowed": False, "status": "VERIFIED_CREDIT_MANAGER_REQUIRED"}
         if paid_approved_providers is not None and not isinstance(paid_approved_providers, (set, frozenset)):
             return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
+        approval_ids = {} if paid_approval_ids is None else paid_approval_ids
+        if not isinstance(approval_ids, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in approval_ids.items()
+        ):
+            return {"allowed": False, "status": "INVALID_PAID_APPROVAL_IDS"}
         free_credits = {} if free_credits is None else free_credits
         paid_approved_providers = set() if paid_approved_providers is None else paid_approved_providers
         candidates = sorted(
@@ -266,6 +308,8 @@ class ProviderCostPolicy:
                 estimated_cost=estimate,
                 free_credits_remaining=free_credits.get(provider_id, 0.0),
                 paid_usage_approved=provider_id in paid_approved_providers,
+                approval_id=approval_ids.get(provider_id),
+                request_id=request_id,
             )
             if decision["allowed"]:
                 return {**decision, "selection_order": [d.get("provider") for d in decisions] + [provider_id]}
