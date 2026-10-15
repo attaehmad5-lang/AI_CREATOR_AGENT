@@ -79,6 +79,9 @@ class ProviderHealthManager:
             failures = record.get("consecutive_failures", 0)
             if not isinstance(failures, int) or isinstance(failures, bool) or failures < 0:
                 raise ValueError("Invalid provider consecutive failure count")
+            successes = record.get("consecutive_successes", 0)
+            if not isinstance(successes, int) or isinstance(successes, bool) or successes < 0:
+                raise ValueError("Invalid provider consecutive success count")
             history = record.get("history", [])
             if not isinstance(history, list):
                 raise ValueError("Invalid provider health history")
