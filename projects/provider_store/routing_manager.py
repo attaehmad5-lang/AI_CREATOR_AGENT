@@ -169,8 +169,11 @@ class ProviderRoutingManager:
             ):
                 return {"allowed": False, "status": "PROJECT_MODEL_NOT_ALLOWED"}
             allowed_capabilities = project_policy.get("allowed_capabilities")
+            denied_capabilities = project_policy.get("denied_capabilities", [])
             if allowed_capabilities is not None and capability is not None and capability not in allowed_capabilities:
                 return {"allowed": False, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"}
+            if capability is not None and capability in denied_capabilities:
+                return {"allowed": False, "status": "PROJECT_CAPABILITY_DENIED"}
             max_estimated_cost = project_policy.get("max_estimated_cost")
             if max_estimated_cost is not None and self._valid_amount(estimated_cost) and estimated_cost > max_estimated_cost:
                 return {"allowed": False, "status": "PROJECT_COST_LIMIT_EXCEEDED"}
@@ -265,6 +268,7 @@ class ProviderRoutingManager:
         allowed_providers = project_policy.get("allowed_providers")
         denied_providers = project_policy.get("denied_providers", [])
         allowed_capabilities = project_policy.get("allowed_capabilities")
+        denied_capabilities = project_policy.get("denied_capabilities", [])
         for item in discovered:
             if not isinstance(item, dict):
                 continue
@@ -275,10 +279,17 @@ class ProviderRoutingManager:
             if item_id in denied_providers:
                 decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_DENIED"})
                 continue
+            item_capabilities = item.get("capabilities", [])
             if allowed_capabilities is not None and capability is None:
-                item_capabilities = item.get("capabilities", [])
                 if not isinstance(item_capabilities, list) or not set(item_capabilities).intersection(allowed_capabilities):
                     decisions.append({"provider": item_id, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"})
+                    continue
+            if denied_capabilities and capability is None:
+                if not isinstance(item_capabilities, list) or not item_capabilities:
+                    decisions.append({"provider": item_id, "status": "PROVIDER_CAPABILITIES_UNVERIFIED"})
+                    continue
+                if all(value in denied_capabilities for value in item_capabilities):
+                    decisions.append({"provider": item_id, "status": "PROJECT_CAPABILITY_DENIED"})
                     continue
             policy_filtered_discovery.append(item)
         discovered = policy_filtered_discovery

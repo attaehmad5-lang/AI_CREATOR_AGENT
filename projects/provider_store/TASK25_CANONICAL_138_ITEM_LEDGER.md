@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38753686787](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38753686787): **334 tests passed on Ubuntu and 334 on Windows, 0 failures**. This run includes the 50-case denied-capability policy validation matrix and routing regression tests. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -60,7 +60,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 29 | 🟡 | Automatic Fallback On/Off Testing | VERIFIED | `automatic_fallback` can be disabled explicitly; invalid flag values fail closed and regression tests cover no-fallback behavior. |
 | 30 | 🔴 | Capability-Based Routing | PARTIAL | Capability filtering exists and is tested at discovery; the complete canonical routing/metadata truth remains incomplete. |
 | 31 | 🔴 | Model/Version-Aware Routing | PARTIAL | Router and catalog schema now support declared model IDs/versions and fail closed when metadata is absent; live model catalogs are not populated for enabled providers. |
-| 32 | 🔴 | User/Project Policy | PARTIAL | Project IDs and policy gates exist; complete user/project policy enforcement is not verified. |
+| 32 | 🔴 | User/Project Policy | PARTIAL | Project allow/deny providers and allowed/denied capabilities are validated; conflicting allow/deny capabilities fail closed; routing rejects explicitly denied capabilities and filters providers with only denied or unknown capabilities. The 50-case policy validation matrix and routing regressions pass; full user/tenant policy enforcement remains open. Evidence: `tests/test_project_policy_manager.py::test_denied_capability_validation_matrix_50_cases`, `test_allowed_and_denied_capability_overlap_is_rejected`, and four project-denied-capability tests in `tests/test_routing_manager.py`. |
 
 ## E — Retry, Failure and Recovery
 

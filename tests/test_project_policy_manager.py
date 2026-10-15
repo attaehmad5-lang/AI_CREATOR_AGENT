@@ -53,6 +53,63 @@ class ProviderProjectPolicyManagerTests(unittest.TestCase):
                 self.assertEqual(result["status"], "INVALID_PROJECT_POLICY")
         self.assertEqual(self.manager.get_policy("film-project")["status"], "PROJECT_POLICY_NOT_FOUND")
 
+    def test_denied_capability_validation_matrix_50_cases(self):
+        valid_cases = [
+            [f"capability_{index}"] for index in range(25)
+        ]
+        invalid_cases = [
+            None,
+            "image_generation",
+            {},
+            (),
+            ["Image"],
+            ["image generation"],
+            ["image-generation"],
+            ["1image"],
+            ["image/voice"],
+            ["image.voice"],
+            ["image:voice"],
+            ["image+voice"],
+            ["é"],
+            ["a" * 81],
+            ["image", "IMAGE"],
+            ["image", None],
+            [1],
+            [False],
+            [["nested"]],
+            [{"capability": "image"}],
+            [""],
+            ["UPPER_CASE"],
+            ["white space"],
+            [f"capability_{index}" for index in range(101)],
+            [f"valid_{index}" for index in range(100)] + ["invalid-value"],
+        ]
+        self.assertEqual(len(valid_cases) + len(invalid_cases), 50)
+        for index, capabilities in enumerate(valid_cases):
+            with self.subTest(case=index, capabilities=capabilities):
+                result = self.manager.set_policy(
+                    f"valid-project-{index}", {"denied_capabilities": capabilities}
+                )
+                self.assertTrue(result["saved"], result)
+                loaded = self.manager.get_policy(f"valid-project-{index}")
+                self.assertEqual(loaded["policy"]["denied_capabilities"], capabilities)
+        for index, capabilities in enumerate(invalid_cases):
+            with self.subTest(case=index + 25, capabilities=repr(capabilities)[:100]):
+                result = self.manager.set_policy(
+                    f"invalid-project-{index}", {"denied_capabilities": capabilities}
+                )
+                self.assertFalse(result["saved"], result)
+                self.assertEqual(result["status"], "INVALID_PROJECT_POLICY")
+
+    def test_allowed_and_denied_capability_overlap_is_rejected(self):
+        result = self.manager.set_policy(
+            "film-project",
+            {"allowed_capabilities": ["image_generation"], "denied_capabilities": ["image_generation"]},
+        )
+        self.assertFalse(result["saved"])
+        self.assertEqual(result["status"], "INVALID_PROJECT_POLICY")
+        self.assertTrue(any("capability cannot be both allowed and denied" in error for error in result["errors"]))
+
     def test_policy_updates_across_threads_preserve_all_projects(self):
         policies = [
             (f"project-{index}", {"allowed_providers": [f"provider-{index}"], "automatic_fallback": False})

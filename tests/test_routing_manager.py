@@ -206,6 +206,71 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             for decision in capability_denied["decisions"]
         ))
 
+    def test_project_denied_capability_blocks_explicit_request(self):
+        policies = ProviderProjectPolicyManager(self.root / "denied-capability-policy.json")
+        policies.set_policy("film", {"denied_capabilities": ["image_generation"]})
+        router = ProviderRoutingManager(self.connections, project_policy_manager=policies)
+        result = router.route(
+            category="image", project_id="film", capability="image_generation"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "PROJECT_CAPABILITY_DENIED")
+
+    def test_project_denied_capability_filters_matching_provider_when_capability_omitted(self):
+        policies = ProviderProjectPolicyManager(self.root / "denied-capability-policy-omitted.json")
+        policies.set_policy("film", {"denied_capabilities": ["image"]})
+        router = ProviderRoutingManager(
+            self.connections, project_policy_manager=policies, require_verified_connection=False
+        )
+        result = router.route(category="image", project_id="film")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertTrue(any(
+            decision.get("status") == "PROJECT_CAPABILITY_DENIED"
+            for decision in result.get("decisions", [])
+        ))
+
+    def test_project_denied_capability_keeps_provider_with_non_denied_capability(self):
+        self.connections.catalog["providers"].append({
+            "id": "mixed", "name": "Mixed", "category": "image",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "zero_cost_allowed": True, "priority": 99,
+            "capabilities": ["image", "image_upscaling"],
+        })
+        self.connections.catalog_path.write_text(
+            json.dumps(self.connections.catalog), encoding="utf-8"
+        )
+        policies = ProviderProjectPolicyManager(self.root / "mixed-capability-policy.json")
+        policies.set_policy("film", {"denied_capabilities": ["image"]})
+        router = ProviderRoutingManager(
+            self.connections, project_policy_manager=policies, require_verified_connection=False
+        )
+        result = router.route(category="image", project_id="film")
+        self.assertTrue(result["allowed"], result)
+        self.assertEqual(result["provider"], "mixed")
+
+    def test_project_denied_capability_fails_closed_for_missing_provider_capabilities(self):
+        self.connections.catalog["providers"].append({
+            "id": "unknown-caps", "name": "Unknown", "category": "image",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "zero_cost_allowed": True, "priority": 0,
+        })
+        self.connections.catalog_path.write_text(
+            json.dumps(self.connections.catalog), encoding="utf-8"
+        )
+        policies = ProviderProjectPolicyManager(self.root / "unknown-capability-policy.json")
+        policies.set_policy("film", {"denied_capabilities": ["image"]})
+        router = ProviderRoutingManager(
+            self.connections, project_policy_manager=policies, require_verified_connection=False
+        )
+        result = router.route(category="image", project_id="film")
+        self.assertFalse(result["allowed"], result)
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertTrue(any(
+            decision.get("status") == "PROVIDER_CAPABILITIES_UNVERIFIED"
+            for decision in result.get("decisions", [])
+        ))
+
     def test_project_policy_can_require_health_evidence(self):
         policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
         policies.set_policy("film", {"require_health_evidence": True})

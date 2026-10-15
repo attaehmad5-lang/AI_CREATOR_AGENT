@@ -24,6 +24,7 @@ class ProviderProjectPolicyManager:
         "allowed_providers",
         "denied_providers",
         "allowed_capabilities",
+        "denied_capabilities",
         "allowed_models",
         "max_estimated_cost",
         "automatic_fallback",
@@ -84,8 +85,10 @@ class ProviderProjectPolicyManager:
                 or len({value.casefold() for value in values if isinstance(value, str)}) != len(values)
             ):
                 errors.append(f"{key} must be a unique list of safe identifiers")
-        if "allowed_capabilities" in policy:
-            values = policy["allowed_capabilities"]
+        for key in ("allowed_capabilities", "denied_capabilities"):
+            if key not in policy:
+                continue
+            values = policy[key]
             if (
                 not isinstance(values, list)
                 or len(values) > 100
@@ -96,7 +99,7 @@ class ProviderProjectPolicyManager:
                 )
                 or len({value.casefold() for value in values if isinstance(value, str)}) != len(values)
             ):
-                errors.append("allowed_capabilities must be a unique list of lowercase identifiers")
+                errors.append(f"{key} must be a unique list of lowercase identifiers")
         if "max_estimated_cost" in policy and finite_number(policy["max_estimated_cost"], minimum=0) is None:
             errors.append("max_estimated_cost must be a finite non-negative number")
         for key in ("automatic_fallback", "require_health_evidence", "require_verified_connection"):
@@ -108,6 +111,12 @@ class ProviderProjectPolicyManager:
             overlap = {value.casefold() for value in allowed} & {value.casefold() for value in denied}
             if overlap:
                 errors.append("provider cannot be both allowed and denied")
+        allowed_caps = policy.get("allowed_capabilities")
+        denied_caps = policy.get("denied_capabilities", [])
+        if isinstance(allowed_caps, list) and isinstance(denied_caps, list):
+            overlap = set(allowed_caps) & set(denied_caps)
+            if overlap:
+                errors.append("capability cannot be both allowed and denied")
         return errors
 
     @classmethod
