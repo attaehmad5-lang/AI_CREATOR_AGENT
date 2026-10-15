@@ -62,6 +62,26 @@ class ProviderMetricsManagerTests(unittest.TestCase):
         self.assertEqual(summary["average_queue_wait_ms"], 20.0)
         self.assertEqual(summary["max_queue_wait_ms"], 30.0)
 
+    def test_throughput_queue_timeout_and_window_metrics(self):
+        self.manager.record_request(**self.event(
+            "queue-timeout-1", status="EXECUTION_QUEUE_TIMEOUT",
+            success=False, latency_ms=50.0, queue_wait_ms=45.0,
+        ))
+        self.manager.record_request(**self.event(
+            "completed-1", trace_id="trace-completed-1", queue_wait_ms=5.0,
+        ))
+        summary = self.manager.summary(window_seconds=10.0)
+        self.assertEqual(summary["window_request_count"], 2)
+        self.assertEqual(summary["queue_timeout_count"], 1)
+        self.assertEqual(summary["capacity_rejected_count"], 0)
+        self.assertEqual(summary["cancelled_count"], 0)
+        self.assertEqual(summary["throughput_per_second"], 0.2)
+        self.now[0] += timedelta(seconds=11)
+        expired = self.manager.summary(window_seconds=10.0)
+        self.assertEqual(expired["window_request_count"], 0)
+        self.assertEqual(expired["throughput_per_second"], 0.0)
+        self.assertEqual(self.manager.summary(window_seconds=0)["status"], "INVALID_METRICS_WINDOW")
+
     def test_duplicate_is_idempotent_and_conflicting_request_id_is_rejected(self):
         first = self.manager.record_request(**self.event())
         duplicate = self.manager.record_request(**self.event())
