@@ -24,7 +24,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         return (
             b"\x89PNG\r\n\x1a\n"
             + struct.pack(">I", 13) + b"IHDR"
-            + struct.pack(">II", width, height)
+            + struct.pack(">II", width & 0xFFFFFFFF, height & 0xFFFFFFFF)
             + bytes((8, 2, 0, 0, 0)) + b"\x00\x00\x00\x00"
         )
 
@@ -110,7 +110,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
 
     def test_webp_extended_and_lossless_dimensions_are_parsed(self):
         vp8x = (
-            b"RIFF" + bytes(4) + b"WEBPVP8X" + bytes(4)
+            b"RIFF" + bytes(4) + b"WEBPVP8X" + bytes(4) + bytes(4)
             + (19).to_bytes(3, "little") + (9).to_bytes(3, "little")
         )
         self.assertEqual(
