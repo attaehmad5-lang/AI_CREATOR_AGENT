@@ -326,6 +326,21 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
 
+    def test_paid_provider_name_set_cannot_replace_approval_record(self):
+        policy = ProviderCostPolicy(
+            project_budgets={"film": 5.0}, approval_manager=self.approvals
+        )
+        router = ProviderRoutingManager(self.connections, cost_policy=policy)
+        result = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            request_id="unapproved-paid-route", paid_approved_providers={"primary"},
+        )
+        self.assertFalse(result["allowed"])
+        self.assertTrue(any(
+            decision.get("status") == "PAID_APPROVAL_REQUIRED"
+            for decision in result.get("decisions", [])
+        ))
+
     def test_verified_credit_manager_drives_free_first_routing(self):
         credits = ProviderCreditManager(self.root / "credits.json")
         credits.refresh(
