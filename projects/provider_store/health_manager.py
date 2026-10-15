@@ -82,8 +82,17 @@ class ProviderHealthManager:
             successes = record.get("consecutive_successes", 0)
             if not isinstance(successes, int) or isinstance(successes, bool) or successes < 0:
                 raise ValueError("Invalid provider consecutive success count")
-            if status == "RECOVERING" and successes >= self.recovery_success_threshold:
-                raise ValueError("Recovering provider already meets recovery threshold")
+            if status == "RECOVERING" and (
+                successes < 1
+                or successes >= self.recovery_success_threshold
+                or failures != 0
+            ):
+                raise ValueError("Inconsistent provider recovery state")
+            if "consecutive_failures" in record:
+                if status == "HEALTHY" and failures != 0:
+                    raise ValueError("Healthy provider cannot retain consecutive failures")
+                if status in {"DEGRADED", "UNHEALTHY"} and failures == 0:
+                    raise ValueError("Failed provider state requires consecutive failures")
             history = record.get("history", [])
             if not isinstance(history, list):
                 raise ValueError("Invalid provider health history")
@@ -117,9 +126,30 @@ class ProviderHealthManager:
                     or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", error_code)
                 ):
                     raise ValueError("Invalid provider health error code")
+            parsed_timestamps: dict[str, datetime] = {}
             for timestamp_key in ("last_checked_at", "last_success_at", "last_failure_at", "last_recovered_at"):
                 if timestamp_key in record:
-                    self._parse_timestamp(record[timestamp_key])
+                    parsed_timestamps[timestamp_key] = self._parse_timestamp(record[timestamp_key])
+            checked_at = parsed_timestamps.get("last_checked_at")
+            for timestamp_key, observed_at in parsed_timestamps.items():
+                if timestamp_key != "last_checked_at" and checked_at is not None and observed_at > checked_at:
+                    raise ValueError("Provider health event timestamp exceeds last_checked_at")
+            if history and checked_at is not None:
+                latest_history_at = self._parse_timestamp(history[-1].get("timestamp"))
+                if latest_history_at != checked_at:
+                    raise ValueError("Provider health history is inconsistent with last_checked_at")
+            if status == "HEALTHY" and (
+                parsed_timestamps.get("last_failure_at") is not None
+                and parsed_timestamps.get("last_success_at") is not None
+                and parsed_timestamps["last_failure_at"] > parsed_timestamps["last_success_at"]
+            ):
+                raise ValueError("Healthy provider has a newer failure than success")
+            if status in {"DEGRADED", "UNHEALTHY"} and (
+                parsed_timestamps.get("last_success_at") is not None
+                and parsed_timestamps.get("last_failure_at") is not None
+                and parsed_timestamps["last_success_at"] > parsed_timestamps["last_failure_at"]
+            ):
+                raise ValueError("Failed provider has a newer success than failure")
             latency = record.get("last_latency_ms")
             if latency is not None and finite_number(latency, minimum=0) is None:
                 raise ValueError("Invalid provider last health latency")
