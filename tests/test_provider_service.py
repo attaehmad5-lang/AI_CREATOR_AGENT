@@ -6,6 +6,7 @@ from pathlib import Path
 
 from projects.provider_store.access_control import ProviderAccessController
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.data_retention import ProviderDataRetentionPolicy
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
@@ -312,6 +313,125 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn("never-forward-this-secret", repr(seen[0]))
         self.assertEqual(seen[0]["ordinary"], "preserve")
         self.assertEqual(seen[0]["credentials"], "[REDACTED:CREDENTIAL_FIELD]")
+
+    def test_data_policy_blocks_before_adapter_and_releases_reservations(self):
+        class Quota:
+            def __init__(self):
+                self.released = []
+                self.committed = []
+
+            def commit(self, **kwargs):
+                self.committed.append(kwargs)
+                return {"status": "COMMITTED", "committed": True}
+
+            def release(self, **kwargs):
+                self.released.append(kwargs)
+                return {"status": "RELEASED", "released": True}
+
+        class Router:
+            def __init__(self, quota):
+                self.quota_manager = quota
+                self.cost_policy = None
+                self.credit_manager = None
+                self.calls = 0
+
+            def route(self, **kwargs):
+                self.calls += 1
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        quota = Quota()
+        router = Router(quota)
+        service = ProviderService(
+            self.connections, routing_manager=router, quota_manager=quota,
+            data_retention_policy=ProviderDataRetentionPolicy({
+                "image": {
+                    "allowed_data_categories": ["public"],
+                    "allowed_purposes": ["generation"],
+                    "max_retention_days": 0,
+                    "uses_data_for_training": False,
+                }
+            }),
+        )
+        adapter_calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="retention-block",
+            estimated_cost=0.0, adapter=lambda **kwargs: adapter_calls.append(kwargs),
+            modality="image", data_categories=["personal"], retention_days=0,
+        )
+        self.assertEqual(result["status"], "DATA_POLICY_REJECTED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(router.calls, 1)
+        self.assertEqual(adapter_calls, [])
+        self.assertEqual(len(quota.released), 1)
+
+    def test_data_policy_forbids_credential_content_before_routing(self):
+        class Router:
+            def __init__(self):
+                self.calls = 0
+
+            def route(self, **kwargs):
+                self.calls += 1
+                return {"allowed": True, "provider": "image"}
+
+        router = Router()
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            data_retention_policy=ProviderDataRetentionPolicy({
+                "image": {
+                    "allowed_data_categories": ["public"],
+                    "allowed_purposes": ["generation"],
+                    "max_retention_days": 0,
+                    "uses_data_for_training": False,
+                }
+            }),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="retention-secret",
+            estimated_cost=0.0, adapter=lambda **kwargs: {"started": False},
+            modality="image", data_categories=["credentials"],
+        )
+        self.assertEqual(result["status"], "CREDENTIAL_DATA_FORBIDDEN")
+        self.assertEqual(router.calls, 0)
+
+    def test_data_policy_allows_declared_public_data_and_reports_policy_status(self):
+        class Quota:
+            def commit(self, **kwargs):
+                return {"status": "COMMITTED", "committed": True}
+
+            def release(self, **kwargs):
+                return {"status": "RELEASED", "released": True}
+
+        class Router:
+            quota_manager = Quota()
+            cost_policy = None
+            credit_manager = None
+
+            def route(self, **kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        seen = []
+        service = ProviderService(
+            self.connections, routing_manager=Router(),
+            data_retention_policy=ProviderDataRetentionPolicy({
+                "image": {
+                    "allowed_data_categories": ["public"],
+                    "allowed_purposes": ["generation"],
+                    "max_retention_days": 0,
+                    "uses_data_for_training": False,
+                }
+            }),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="retention-allow",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: seen.append(kwargs) or {
+                "started": True, "success": False, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred",
+            },
+            modality="image", data_categories=["public"], retention_days=0,
+        )
+        self.assertEqual(result["data_policy_status"], "DATA_POLICY_ALLOWED")
+        self.assertEqual(len(seen), 1)
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
