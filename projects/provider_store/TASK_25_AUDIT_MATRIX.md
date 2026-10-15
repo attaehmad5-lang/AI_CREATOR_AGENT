@@ -6,7 +6,7 @@ The exact canonical feature names, original baseline markers and item-by-item ev
 
 ## Latest code verification
 
-GitHub Actions code-verification run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299) completed successfully on Python 3.13: **328 tests passed on Ubuntu and 328 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This run includes bounded Retry-After metadata handling, overflow-safe retry backoff, fail-closed OAuth provider lookup, validated deprecation metadata including malformed-input rejection, and candidate-catalog validation before enablement.
+GitHub Actions code-verification run [#38757042004](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38757042004) completed successfully on Python 3.13: **332 tests passed on Ubuntu and 332 on Windows, 0 failures on either platform**. The batch includes a 50-case health freshness boundary matrix and service execution health-gate regressions. Compilation and provider JSON catalog validation passed on both platforms. This run includes bounded Retry-After metadata handling, overflow-safe retry backoff, fail-closed OAuth provider lookup, validated deprecation metadata including malformed-input rejection, and candidate-catalog validation before enablement.
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
@@ -15,7 +15,7 @@ GitHub Actions code-verification run [#38434905299](https://github.com/attaehmad
 | C / 17–24 | Multimodal Provider Support | PARTIAL | Image providers and modality contracts are cataloged; real adapters and end-to-end tests for all modalities remain open. |
 | D / 25–32 | Routing and Selection | PARTIAL | Primary/fallback, PRIMARY_ONLY, automatic-fallback on/off, credit/cost/health and declared model/version routing are tested; enabled providers still lack verified live model catalogs and complete project-policy routing remains open. |
 | E / 33–40 | Retry, Failure and Recovery | PARTIAL | Retry/backoff uses bounded exponentiation for extreme attempt values; bounded Retry-After propagation (including account-balance HTTP 429) and circuit-breaker primitives are tested. Cancellation/stalled-job recovery and provider-specific failure injection remain open. |
-| F / 41–48 | Health and Reliability | PARTIAL | Persistent health history, active-probe hooks and stale-health checks exist; live probes and automatic recovery/re-admission remain open. |
+| F / 41–48 | Health and Reliability | PARTIAL | Persistent health history and stale-health checks exist; execution now requires a shared fresh health manager before adapter invocation. Active network probes on every provider and automatic recovery/re-admission remain open. |
 | G / 49–56 | Output and Asset Safety | PARTIAL | Basic output/file validation and atomic helpers exist; full media decoding, codec constraints, malware scanning and asset lineage remain open. |
 | H / 57–64 | Cost, Free Credits and Quotas | PARTIAL | Budgets, approval gates, quotas, credit snapshots, reconciliation and a generic balance probe are tested; provider-specific balance semantics and live credit-first routing remain open. |
 | I / 65–72 | Security, Privacy and Governance | PARTIAL | Redaction, environment-only credentials, HTTPS allowlists and safe probes exist; least-privilege roles, sensitive-data enforcement, retention rules and complete audit logs remain open. |
