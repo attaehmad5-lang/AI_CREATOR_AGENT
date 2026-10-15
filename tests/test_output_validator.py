@@ -110,6 +110,23 @@ class ProviderOutputValidatorTests(unittest.TestCase):
                 result = validator.validate_file(path, modality="image")
                 self.assertFalse(result["valid"], result)
 
+    def test_png_unknown_critical_chunk_fails_closed(self):
+        validator = ProviderOutputValidator(max_size_bytes=1024)
+        ihdr = struct.pack(">II", 4, 4) + bytes((8, 2, 0, 0, 0))
+        unknown = self.png_chunk(b"ABCD", b"opaque")
+        payload = (
+            bytes((137, 80, 78, 71, 13, 10, 26, 10))
+            + self.png_chunk(b"IHDR", ihdr)
+            + unknown
+            + self.png_chunk(b"IDAT", zlib.compress(b"\\x00"))
+            + self.png_chunk(b"IEND", b"")
+        )
+        path = self.root / "unknown-critical.png"
+        path.write_bytes(payload)
+        result = validator.validate_file(path, modality="image")
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "IMAGE_STRUCTURE_INVALID")
+
     def test_unparseable_image_dimensions_fail_closed(self):
         path = self.root / "truncated.png"
         path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
