@@ -11,6 +11,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.metrics_manager import ProviderMetricsManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 
@@ -472,6 +473,66 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["output"]["valid"])
         self.assertTrue(result["finalization"]["finalized"])
         self.assertEqual(result["provider"], "image")
+
+    def test_execute_propagates_trace_id_and_records_safe_metrics(self):
+        metrics = ProviderMetricsManager(self.root / "execution-metrics.json")
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota, metrics_manager=metrics,
+        )
+        output_path = self.root / "traced.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        seen = {}
+        def adapter(**kwargs):
+            seen.update(kwargs)
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 7.0,
+            }
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="trace-request-1",
+            trace_id="trace-job-1", estimated_cost=0.0, output_path=str(output_path),
+            adapter=adapter, modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(result["trace_id"], "trace-job-1")
+        self.assertEqual(seen["trace_id"], "trace-job-1")
+        self.assertTrue(result["metrics"]["saved"])
+        summary = metrics.summary(provider_id="image", modality="image")
+        self.assertEqual(summary["request_count"], 1)
+        self.assertEqual(summary["success_count"], 1)
+
+    def test_metrics_persistence_failure_does_not_change_execution_result(self):
+        class BrokenMetrics:
+            def record_request(self, **kwargs):
+                raise OSError("private metrics storage path")
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota, metrics_manager=BrokenMetrics(),
+        )
+        output_path = self.root / "metrics-failure.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="metrics-failure-request",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 2.0,
+            }, modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(result["metrics"]["status"], "METRICS_RECORD_FAILED")
+        self.assertNotIn("private metrics storage path", repr(result))
 
     def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
         router = ProviderRoutingManager(
