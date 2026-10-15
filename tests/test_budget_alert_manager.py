@@ -68,7 +68,7 @@ class BudgetAlertManagerTests(unittest.TestCase):
             attempts.append(event["event_id"])
             if len(attempts) == 1:
                 raise OSError("private delivery detail")
-        policy = _SnapshotPolicy(spent=80.0)
+        policy = _SnapshotPolicy(spent=50.0)
         path = self.root / "retry.json"
         manager = BudgetAlertManager(policy, path, notifier=flaky)
         first = manager.evaluate_project("film")
