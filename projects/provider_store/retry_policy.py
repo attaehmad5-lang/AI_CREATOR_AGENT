@@ -132,7 +132,10 @@ class RetryPolicy:
         # responses (for example 501/505) describe permanent incompatibility.
         retryable_status = status_code in {408, 425, 429, 500, 502, 503, 504}
         retryable_exception = isinstance(exception, (TimeoutError, ConnectionError, OSError))
-        if not retryable_status and not retryable_exception:
+        # When an HTTP status is known, it takes precedence over a broad exception
+        # class: a ConnectionError carrying 501 is still a permanent HTTP failure.
+        retryable_failure = retryable_status if status_code is not None else retryable_exception
+        if not retryable_failure:
             return RetryDecision(False, attempt, 0.0, "NON_RETRYABLE_FAILURE")
         exponent = attempt - 1
         if self.base_delay_seconds == 0 or self.max_delay_seconds == 0:
