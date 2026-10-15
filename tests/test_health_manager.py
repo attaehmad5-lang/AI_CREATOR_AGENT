@@ -111,6 +111,36 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertTrue(self.manager.is_eligible("image")["eligible"])
         self.assertEqual(self.manager.data["providers"]["image"]["status"], "HEALTHY")
 
+    def test_unhealthy_provider_requires_two_successful_probes_to_recover(self):
+        self.manager.record_result("image", success=False, error_code="TIMEOUT")
+        self.manager.record_result("image", success=False, error_code="TIMEOUT")
+        first = self.manager.active_probe("image", lambda **kwargs: {"ok": True})
+        self.assertEqual(first["status"], "RECOVERY_PENDING")
+        self.assertFalse(first["verified"])
+        self.assertFalse(self.manager.is_eligible("image")["eligible"])
+        second = self.manager.active_probe("image", lambda **kwargs: {"ok": True})
+        self.assertEqual(second["status"], "HEALTHY")
+        self.assertTrue(second["verified"])
+        self.assertTrue(self.manager.is_eligible("image")["eligible"])
+
+    def test_failed_probe_resets_recovery_success_streak(self):
+        self.manager.record_result("image", success=False, error_code="TIMEOUT")
+        self.manager.record_result("image", success=False, error_code="TIMEOUT")
+        first = self.manager.active_probe("image", lambda **kwargs: {"ok": True})
+        self.assertEqual(first["status"], "RECOVERY_PENDING")
+        failed = self.manager.active_probe(
+            "image", lambda **kwargs: (_ for _ in ()).throw(TimeoutError())
+        )
+        self.assertEqual(failed["status"], "TIMEOUT")
+        self.assertEqual(self.manager.data["providers"]["image"]["recovery_successes"], 0)
+        self.assertFalse(self.manager.is_eligible("image")["eligible"])
+
+    def test_recovery_success_threshold_must_be_positive_integer(self):
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=0)
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=True)
+
     def test_stale_health_is_excluded(self):
         self.manager.record_result("image", success=True, latency_ms=10)
         self.now[0] += timedelta(seconds=301)
