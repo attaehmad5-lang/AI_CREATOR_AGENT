@@ -14,6 +14,7 @@ from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
+from projects.provider_store.paid_approval_manager import PaidUsageApprovalManager
 
 
 class ProviderServiceTests(unittest.TestCase):
@@ -37,7 +38,11 @@ class ProviderServiceTests(unittest.TestCase):
         if verified.get("verified") is not True:
             raise AssertionError("test fixture provider failed stub verification")
         self.health = ProviderHealthManager(self.root / "health.json")
-        self.cost = ProviderCostPolicy(self.root / "cost.json", project_budgets={"film": 10.0})
+        self.approvals = PaidUsageApprovalManager(self.root / "paid-approvals.json")
+        self.cost = ProviderCostPolicy(
+            self.root / "cost.json", project_budgets={"film": 10.0},
+            approval_manager=self.approvals,
+        )
         self.quota = ProviderQuotaManager(self.root / "quota.json", limits={"image": {"daily": 10}})
         self.validator = ProviderOutputValidator()
         self.retry = RetryPolicy(random_fn=lambda: 0)
@@ -52,6 +57,18 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def _paid_approval_id(self, request_id, *, provider_id="image", amount=1.0, project_id="film"):
+        pending = self.approvals.request_approval(
+            project_id=project_id, provider_id=provider_id, request_id=request_id,
+            estimated_cost=amount, unit="USD", requested_by="test-user",
+            reason="Explicit approval for provider service test",
+        )
+        self.assertIn(pending["status"], {"APPROVAL_PENDING", "APPROVAL_ALREADY_EXISTS"})
+        approval_id = pending["approval_id"]
+        if pending["status"] == "APPROVAL_PENDING":
+            self.assertTrue(self.approvals.approve(approval_id, approved_by="test-admin")["approved"])
+        return approval_id
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
@@ -488,6 +505,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-not-started",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_approval_ids={"image": self._paid_approval_id("execute-not-started")},
             adapter=lambda **kwargs: {"started": False, "success": False},
             modality="image",
         )
@@ -543,6 +561,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-contradictory-start",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_approval_ids={"image": self._paid_approval_id("execute-contradictory-start")},
             adapter=lambda **kwargs: {
                 "started": False, "success": True, "actual_cost": 1.0,
                 "charge_outcome": "incurred",
@@ -569,6 +588,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-unknown",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_approval_ids={"image": self._paid_approval_id("execute-unknown")},
             adapter=adapter, modality="image",
         )
         self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
@@ -590,6 +610,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-invalid-cost",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_approval_ids={"image": self._paid_approval_id("execute-invalid-cost")},
             adapter=lambda **kwargs: {
                 "started": True, "success": True, "actual_cost": float("nan"),
                 "charge_outcome": "not_incurred", "output_path": str(output_path),
