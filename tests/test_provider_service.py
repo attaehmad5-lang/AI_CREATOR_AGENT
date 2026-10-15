@@ -262,6 +262,25 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(destination.read_bytes(), previous)
         self.assertFalse(invalid.exists())
 
+    def test_publish_output_persists_provider_attribution_and_asset_metadata(self):
+        temporary = self.root / "attributed-candidate.png"
+        destination = self.root / "attributed-final.png"
+        temporary.write_bytes(b"\\x89PNG\\r\\n\\x1a\\nasset-metadata-image")
+        result = self.service.publish_output(
+            temporary, destination, modality="image",
+            provider_id="image", request_id="publish-asset-1", project_id="film",
+        )
+        self.assertTrue(result["published"])
+        self.assertEqual(result["metadata_status"], "RECORDED")
+        self.assertEqual(result["asset_metadata"]["record"]["provider_id"], "image")
+        self.assertEqual(result["asset_metadata"]["record"]["request_id"], "publish-asset-1")
+        self.assertEqual(result["asset_metadata"]["record"]["project_id"], "film")
+        self.assertEqual(result["asset_metadata"]["record"]["filename"], destination.name)
+        self.assertEqual(result["asset_metadata"]["record"]["sha256"], result["sha256"])
+        manifest = self.root / ".ai_creator_agent_asset_metadata.json"
+        self.assertTrue(manifest.is_file())
+        self.assertEqual(len(json.loads(manifest.read_text(encoding="utf-8"))["assets"]), 1)
+
     def test_publish_output_requires_output_validator(self):
         service = ProviderService(self.connections)
         temporary = self.root / "candidate.png"
@@ -500,6 +519,11 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["output"]["valid"])
         self.assertTrue(result["finalization"]["finalized"])
         self.assertEqual(result["provider"], "image")
+        self.assertTrue(result["output"]["asset_metadata"]["saved"])
+        self.assertEqual(result["output"]["asset_metadata"]["record"]["request_id"], "execute-success")
+        self.assertEqual(result["output"]["asset_metadata"]["record"]["provider_id"], "image")
+        manifest = self.root / ".ai_creator_agent_asset_metadata.json"
+        self.assertTrue(manifest.is_file())
 
     def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
         router = ProviderRoutingManager(
