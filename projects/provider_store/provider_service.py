@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        metrics_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -33,6 +34,7 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (metrics_manager, "record_request", "metrics_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -45,6 +47,7 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.metrics_manager = metrics_manager
 
     def verify_provider(
         self,
@@ -483,6 +486,7 @@ class ProviderService:
         billing_mode: str | None = None,
         credit_outcome: str = "used",
         actual_credit_amount: float | None = None,
+        queue_wait_ms: float = 0.0,
     ) -> dict[str, Any]:
         """Account for a started request without assuming ambiguous failures were free.
 
@@ -512,6 +516,8 @@ class ProviderService:
             return {"status": "INCONSISTENT_CHARGE_OUTCOME", "finalized": False}
         if latency_ms is not None and not self._valid_amount(latency_ms):
             return {"status": "INVALID_LATENCY", "finalized": False}
+        if not self._valid_amount(queue_wait_ms):
+            return {"status": "INVALID_QUEUE_WAIT", "finalized": False}
         cost_result: dict[str, Any] | None = None
         quota_result: dict[str, Any] | None = None
         credit_result: dict[str, Any] | None = None
@@ -674,6 +680,23 @@ class ProviderService:
                 )
             except Exception as exc:
                 health_result = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
+        metrics_result: dict[str, Any] | None = None
+        if self.metrics_manager is not None:
+            try:
+                metrics_result = self.metrics_manager.record_request(
+                    provider_id,
+                    success=success,
+                    latency_ms=latency_ms,
+                    queue_wait_ms=queue_wait_ms,
+                    timed_out=error_code in {"TIMEOUT", "REQUEST_TIMEOUT", "DEADLINE_EXCEEDED"},
+                    request_id=request_id,
+                )
+            except Exception as exc:
+                metrics_result = {
+                    "status": "METRICS_RECORD_FAILED",
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
         finalized = (
             (cost_result is None or cost_result.get("saved") is True)
             and (quota_result is None or quota_result.get("committed") is True or quota_result.get("status") == "ALREADY_COMMITTED")
@@ -687,6 +710,7 @@ class ProviderService:
             "quota": quota_result,
             "credits": credit_result,
             "health": health_result,
+            "metrics": metrics_result,
         }
 
     def release_unstarted_request(

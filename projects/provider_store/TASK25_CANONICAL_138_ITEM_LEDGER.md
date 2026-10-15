@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38780397511](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38780397511): **337 tests passed on Ubuntu and 337 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This run includes the 50-case metrics matrix and ProviderService metrics integration.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -146,7 +146,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 81 | 🔴 | Latency-Aware Routing | PARTIAL | Health latency data exists; verified latency-aware routing policy coverage is incomplete. |
 | 82 | 🔴 | Provider Success/Error-Rate Metrics | PARTIAL | Health history contains success/failure events; production metric aggregation is incomplete. |
-| 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | OPEN | Throughput/queue-wait telemetry is not implemented. |
+| 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | VERIFIED | `ProviderMetricsManager` tracks request counts, success/error rates, timeout counts, latency average/p95, queue-wait average and throughput/minute over a time window. It supports bounded retention, idempotent request IDs, optional atomic cross-process persistence and safe snapshots; ProviderService records metrics at finalization. A 50-case metrics matrix plus persistence/reload, duplicate, time-window, missing-latency, invalid-input and service integration tests passed. External telemetry export and dashboards remain deployment integrations. Evidence: `tests/test_provider_metrics.py`; GitHub Actions run #38780397511 passed 337 tests on Ubuntu and Windows. |
 | 84 | 🔴 | Output Quality Validation/Score Integration | OPEN | Output quality scoring is not integrated with routing/execution. |
 | 85 | 🔴 | Task-Specific Quality Thresholds | OPEN | Task-specific quality threshold policy is not implemented. |
 | 86 | 🔴 | Provider/Model Benchmarking | OPEN | Repeatable provider/model benchmark suite is not implemented. |
