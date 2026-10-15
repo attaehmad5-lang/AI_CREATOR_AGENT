@@ -24,18 +24,22 @@ class ProviderHealthManager:
         *,
         history_limit: int = 50,
         failure_threshold: int = 3,
+        recovery_success_threshold: int = 2,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if (
             not isinstance(history_limit, int) or isinstance(history_limit, bool) or history_limit < 1
             or not isinstance(failure_threshold, int) or isinstance(failure_threshold, bool) or failure_threshold < 1
+            or not isinstance(recovery_success_threshold, int) or isinstance(recovery_success_threshold, bool)
+            or recovery_success_threshold < 1
         ):
-            raise ValueError("history_limit and failure_threshold must be positive integers")
+            raise ValueError("history_limit, failure_threshold and recovery_success_threshold must be positive integers")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.history_limit = history_limit
         self.failure_threshold = failure_threshold
+        self.recovery_success_threshold = recovery_success_threshold
         self._lock = threading.RLock()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}}
@@ -70,11 +74,16 @@ class ProviderHealthManager:
             if not isinstance(provider_id, str) or not provider_id.strip() or not isinstance(record, dict):
                 raise ValueError("Invalid provider health record")
             status = record.get("status")
-            if status is not None and status not in {"HEALTHY", "DEGRADED", "UNHEALTHY"}:
+            if status is not None and status not in {"HEALTHY", "DEGRADED", "UNHEALTHY", "RECOVERING"}:
                 raise ValueError("Invalid provider health status")
             failures = record.get("consecutive_failures", 0)
             if not isinstance(failures, int) or isinstance(failures, bool) or failures < 0:
                 raise ValueError("Invalid provider consecutive failure count")
+            successes = record.get("consecutive_successes", 0)
+            if not isinstance(successes, int) or isinstance(successes, bool) or successes < 0:
+                raise ValueError("Invalid provider consecutive success count")
+            if status == "RECOVERING" and successes >= self.recovery_success_threshold:
+                raise ValueError("Recovering provider already meets recovery threshold")
             history = record.get("history", [])
             if not isinstance(history, list):
                 raise ValueError("Invalid provider health history")
@@ -108,7 +117,7 @@ class ProviderHealthManager:
                     or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", error_code)
                 ):
                     raise ValueError("Invalid provider health error code")
-            for timestamp_key in ("last_checked_at", "last_success_at", "last_failure_at"):
+            for timestamp_key in ("last_checked_at", "last_success_at", "last_failure_at", "last_recovered_at"):
                 if timestamp_key in record:
                     self._parse_timestamp(record[timestamp_key])
             latency = record.get("last_latency_ms")
@@ -199,30 +208,46 @@ class ProviderHealthManager:
                 event["latency_ms"] = round(float(latency_ms), 2)
             if normalized_error is not None:
                 event["error_code"] = normalized_error
+            previous_status = record.get("status", "UNKNOWN")
+            previous_successes = record.get("consecutive_successes", 0)
+            was_unhealthy = previous_status in {"UNHEALTHY", "RECOVERING"}
             history.append(event)
             history = history[-self.history_limit:]
             consecutive_failures = 0 if success else int(record.get("consecutive_failures", 0)) + 1
+            recovered = False
             if success:
-                status = "HEALTHY"
-            elif consecutive_failures >= self.failure_threshold:
-                status = "UNHEALTHY"
+                consecutive_successes = previous_successes + 1 if was_unhealthy else 0
+                if was_unhealthy and consecutive_successes < self.recovery_success_threshold:
+                    status = "RECOVERING"
+                else:
+                    status = "HEALTHY"
+                    recovered = was_unhealthy
+                if recovered:
+                    event["recovered"] = True
             else:
-                status = "DEGRADED"
+                consecutive_successes = 0
+                status = "UNHEALTHY" if consecutive_failures >= self.failure_threshold else "DEGRADED"
             record.update({
                 "status": status,
                 "history": history,
                 "request_events": request_events,
                 "consecutive_failures": consecutive_failures,
+                "consecutive_successes": consecutive_successes,
                 "last_checked_at": event["timestamp"],
             })
             if success:
                 record["last_success_at"] = event["timestamp"]
                 record["last_latency_ms"] = event.get("latency_ms")
+                if recovered:
+                    record["last_recovered_at"] = event["timestamp"]
             else:
                 record["last_failure_at"] = event["timestamp"]
             providers[provider_id] = record
             self._save()
-            return {"provider": provider_id, "status": status, "saved": True, "history_size": len(history)}
+            return {
+                "provider": provider_id, "status": status, "saved": True,
+                "history_size": len(history), "recovered": recovered,
+            }
 
     def active_probe(self, provider_id: str, probe: Any, *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip():
@@ -275,7 +300,13 @@ class ProviderHealthManager:
             }
         if not isinstance(recorded, dict) or recorded.get("saved") is not True:
             return {"provider": provider_id, "status": "HEALTH_RECORD_FAILED", "verified": False}
-        return {"provider": provider_id, "status": "HEALTHY", "verified": True, "latency_ms": round(latency, 2)}
+        return {
+            "provider": provider_id,
+            "status": recorded.get("status", "UNKNOWN"),
+            "verified": recorded.get("status") == "HEALTHY",
+            "recovering": recorded.get("status") == "RECOVERING",
+            "latency_ms": round(latency, 2),
+        }
 
     def is_eligible(
         self,
@@ -311,6 +342,13 @@ class ProviderHealthManager:
             return {"eligible": False, "status": "STALE", "reason": "HEALTH_CHECK_STALE", "age_seconds": age}
         if record.get("status") == "UNHEALTHY":
             return {"eligible": False, "status": "UNHEALTHY", "reason": "FAILURE_THRESHOLD_REACHED"}
+        if record.get("status") == "RECOVERING":
+            return {
+                "eligible": False, "status": "RECOVERING",
+                "reason": "RECOVERY_SUCCESS_THRESHOLD_NOT_MET",
+                "consecutive_successes": record.get("consecutive_successes", 0),
+                "required_successes": self.recovery_success_threshold,
+            }
         latency = record.get("last_latency_ms")
         if max_latency_ms is not None and latency is not None and latency > max_latency_ms:
             return {"eligible": False, "status": "SLOW", "reason": "LATENCY_LIMIT_EXCEEDED"}
