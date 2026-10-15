@@ -55,12 +55,18 @@ class ProviderAccessControllerTests(unittest.TestCase):
 
     def test_unknown_actions_and_missing_scope_fail_closed(self):
         self.assertFalse(self.policy.authorize(self.principal, "provider:root", self.resource)["allowed"])
+        self.assertFalse(self.policy.authorize(self.principal, ["provider:route"], self.resource)["allowed"])
         self.assertFalse(self.policy.authorize(
             {**self.principal, "tenant_id": ""}, "provider:route", self.resource
         )["allowed"])
         self.assertFalse(self.policy.authorize(
             self.principal, "provider:route", {**self.resource, "tenant_id": ""}
         )["allowed"])
+        missing_project = self.policy.authorize(
+            self.principal, "provider:route", {key: value for key, value in self.resource.items() if key != "project_id"}
+        )
+        self.assertFalse(missing_project["allowed"])
+        self.assertEqual(missing_project["reason"], "PROJECT_SCOPE_REQUIRED")
 
     def test_secret_read_and_purchase_are_never_granted(self):
         principal = {**self.principal, "roles": ["admin", "security_admin"]}
