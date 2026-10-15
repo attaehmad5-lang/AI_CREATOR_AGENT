@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from projects.provider_store.access_control import ProviderAccessController
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.credit_manager import ProviderCreditManager
@@ -51,6 +52,72 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_routing_access_policy_denies_before_router_or_adapter(self):
+        class SpyRouter:
+            def __init__(self):
+                self.calls = []
+
+            def route(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        router = SpyRouter()
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            routing_access_controller=ProviderAccessController(),
+        )
+        adapter_calls = []
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="access-denied-request",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: adapter_calls.append(kwargs) or {"started": True, "success": True},
+            modality="image",
+            principal={
+                "subject_id": "reader-1", "tenant_id": "tenant-a",
+                "roles": ["reader"], "project_ids": ["film"],
+            },
+            access_resource={
+                "provider_id": "routing", "tenant_id": "tenant-a", "project_id": "film",
+            },
+        )
+        self.assertEqual(result["status"], "ROUTING_REJECTED")
+        self.assertEqual(result["route"]["status"], "ACCESS_DENIED")
+        self.assertEqual(router.calls, [])
+        self.assertEqual(adapter_calls, [])
+
+    def test_routing_access_policy_allows_scoped_operator_and_strips_auth_context(self):
+        class SpyRouter:
+            def __init__(self):
+                self.calls = []
+
+            def route(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        router = SpyRouter()
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            routing_access_controller=ProviderAccessController(),
+        )
+        result = service.route_request(
+            category="image",
+            project_id="film",
+            principal={
+                "subject_id": "operator-1", "tenant_id": "tenant-a",
+                "roles": ["operator"], "project_ids": ["film"],
+            },
+            access_resource={
+                "provider_id": "routing", "tenant_id": "tenant-a", "project_id": "film",
+            },
+        )
+        self.assertTrue(result["allowed"])
+        self.assertTrue(result["authorization"]["allowed"])
+        self.assertEqual(router.calls, [{"category": "image", "project_id": "film"}])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
