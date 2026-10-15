@@ -40,7 +40,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         chunks = b"fmt " + struct.pack("<I", len(fmt)) + fmt
         chunks += b"data" + struct.pack("<I", len(data)) + data
         if len(data) & 1:
-            chunks += b"\\x00"
+            chunks += b"\x00"
         body = b"WAVE" + chunks
         return b"RIFF" + struct.pack("<I", len(body)) + body
 
@@ -61,8 +61,8 @@ class ProviderOutputValidatorTests(unittest.TestCase):
     def mp4_bytes(codec="avc1", timescale=1000, duration=2000):
         def box(kind, payload):
             return struct.pack(">I", 8 + len(payload)) + kind + payload
-        mvhd = b"\\x00\\x00\\x00\\x00" + struct.pack(">IIII", 0, 0, timescale, duration)
-        stsd = b"\\x00\\x00\\x00\\x00" + struct.pack(">I", 1) + struct.pack(">I", 8) + codec.encode("ascii")
+        mvhd = b"\x00\x00\x00\x00" + struct.pack(">IIII", 0, 0, timescale, duration)
+        stsd = b"\x00\x00\x00\x00" + struct.pack(">I", 1) + struct.pack(">I", 8) + codec.encode("ascii")
         return box(b"ftyp", b"isom" + bytes(4)) + box(b"moov", box(b"mvhd", mvhd) + box(b"stsd", stsd))
 
     def test_valid_image_signature_returns_hash_and_metadata(self):
