@@ -112,7 +112,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 61 | 🔴 | Estimated vs Actual Usage Reconciliation | PARTIAL | Cost reservation/reconciliation is implemented and tested; provider-specific actual usage adapters are missing. |
 | 62 | 🔴 | Credit Exhaustion and Billing Error Handling | PARTIAL | Known billing/quota failures fail closed; provider-specific exhaustion behavior needs live tests. |
 | 63 | 🔴 | Cost-Aware Provider/Model Selection | PARTIAL | Cost/credit-aware routing foundations exist; reliable live prices and model-level cost comparisons remain open. |
-| 64 | 🔴 | Budget Alerts and Hard-Stop Policy | PARTIAL | Budget hard-stop logic exists; alerting/notification delivery is not implemented end-to-end. |
+| 64 | 🔴 | Budget Alerts and Hard-Stop Policy | PARTIAL | Added `budget_snapshot()` plus a persistent threshold alert manager with deduplication, pending delivery retry, and service-finalization integration; the 50-case usage matrix and cross-platform CI are pending. Remaining: connect the notifier to a real delivery provider and verify production delivery/recovery. |
 
 ## I — Security, Privacy and Governance
 
