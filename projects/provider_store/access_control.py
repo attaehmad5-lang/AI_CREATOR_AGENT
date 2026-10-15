@@ -102,10 +102,10 @@ class ProviderAccessController:
             reason = "INVALID_RESOURCE"
         elif project_id is not None and not self._identifier(project_id):
             reason = "INVALID_RESOURCE"
-        elif action in self.PROJECT_SCOPED_ACTIONS and project_id is None:
-            reason = "PROJECT_SCOPE_REQUIRED"
         elif not isinstance(action, str) or action not in self.KNOWN_ACTIONS:
             reason = "UNKNOWN_ACTION"
+        elif action in self.PROJECT_SCOPED_ACTIONS and project_id is None:
+            reason = "PROJECT_SCOPE_REQUIRED"
         elif action in self.NEVER_ALLOWED:
             reason = "SENSITIVE_ACTION_FORBIDDEN"
         elif resource_tenant != tenant_id:
