@@ -1,15 +1,18 @@
 # Task #25 — Provider Connection Manager Verification Audit
 
 **Branch:** `task-25-provider-connection-manager`  
-**Pull request:** #1 (draft; not approved for merge)  
+**Historical implementation PR:** #1 (merged 2026-10-12)  
+**Current follow-up PR:** #44 (draft; verification pending)  
 **Audit status:** In progress — do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
-GitHub Actions run [#38278998978](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38278998978) completed successfully on Python 3.13:
+GitHub Actions run [#38280619566](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280619566) completed successfully on Python 3.13:
 
-- Ubuntu: 275 tests passed, 0 failures.
-- Windows: 275 tests passed, 0 failures.
+- Ubuntu: 292 tests passed, 0 failures.
+- Windows: 292 tests passed, 0 failures.
+
+The current follow-up branch `task-25-progress-50-percent` adds redirect-final-URL validation and bounded retry exponent handling. Its CI run is pending; do not count those changes as verified until both matrix jobs pass.
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
 
@@ -50,4 +53,4 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 ## Completion gate
 
-Do not mark this task complete, mark all 138 items PASS, or merge PR #1 until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and the user approves any merge.
+Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, and unresolved external/account-dependent requirements are explicitly handled. PR #1 is historical and already merged; PR #44 remains a draft and must not be merged until its tests pass and the user approves.
