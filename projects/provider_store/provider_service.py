@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        require_health_check_before_execution: bool = True,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -37,6 +38,11 @@ class ProviderService:
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
                 raise ValueError(f"{label} does not support {method}")
+        if health_manager is not None and not callable(getattr(health_manager, "is_eligible", None)):
+            raise ValueError("health_manager does not support is_eligible")
+        if not isinstance(require_health_check_before_execution, bool):
+            raise ValueError("require_health_check_before_execution must be boolean")
+        self.require_health_check_before_execution = require_health_check_before_execution
         self.connection_manager = connection_manager
         self.routing_manager = routing_manager
         self.health_manager = health_manager
@@ -283,6 +289,13 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+
+        if self.require_health_check_before_execution:
+            if self.health_manager is None:
+                return {"status": "HEALTH_CHECK_MANAGER_REQUIRED", "executed": False}
+            if getattr(self.routing_manager, "health_manager", None) is not self.health_manager:
+                return {"status": "HEALTH_MANAGER_MISMATCH", "executed": False}
+            route_options["require_health_evidence"] = True
 
         route = self.route_request(
             category=category,
