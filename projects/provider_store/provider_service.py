@@ -25,6 +25,7 @@ class ProviderService:
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
         metrics_manager: Any | None = None,
+        execution_limiter: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -37,6 +38,7 @@ class ProviderService:
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
             (metrics_manager, "record_request", "metrics_manager"),
+            (execution_limiter, "run", "execution_limiter"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -50,6 +52,7 @@ class ProviderService:
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
         self.metrics_manager = metrics_manager
+        self.execution_limiter = execution_limiter
 
     def verify_provider(
         self,
@@ -270,6 +273,8 @@ class ProviderService:
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
         trace_id: str | None = None,
+        queue_timeout_seconds: float = 0.0,
+        cancel_event: Any = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
@@ -327,7 +332,40 @@ class ProviderService:
             options["trace_id"] = trace_id
         started_at = time.monotonic()
         try:
-            adapter_result = adapter(**options)
+            if self.execution_limiter is None:
+                adapter_result = adapter(**options)
+            else:
+                limited = self.execution_limiter.run(
+                    provider_id,
+                    lambda: adapter(**options),
+                    queue_timeout_seconds=queue_timeout_seconds,
+                    cancel_event=cancel_event,
+                )
+                if not isinstance(limited, dict) or limited.get("acquired") is not True:
+                    limit_status = (
+                        limited.get("status", "EXECUTION_CAPACITY_REJECTED")
+                        if isinstance(limited, dict) else "EXECUTION_LIMITER_FAILED"
+                    )
+                    released = self.release_unstarted_request(
+                        project_id=project_id, provider_id=provider_id, request_id=request_id
+                    )
+                    result_status = limit_status if released.get("released") is True else "RESERVATION_RELEASE_FAILED"
+                    metrics = self._record_execution_metric(
+                        request_id=request_id, trace_id=trace_id, provider_id=provider_id,
+                        modality=modality, status=result_status, success=False,
+                        latency_ms=(time.monotonic() - started_at) * 1000,
+                    )
+                    return {
+                        "status": result_status,
+                        "executed": False,
+                        "provider": provider_id,
+                        "request_id": request_id,
+                        "trace_id": trace_id,
+                        "metrics": metrics,
+                        "limiter": {"status": limit_status},
+                        "release": released,
+                    }
+                adapter_result = limited.get("result")
         except Exception as exc:
             # The adapter may have transmitted the request before failing. Do not
             # release cost, quota, or credit reservations on this ambiguous outcome.
