@@ -234,6 +234,34 @@ class ProviderHealthManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path)
 
+    def test_metrics_summary_aggregates_success_rates_and_latency_without_raw_events(self):
+        self.manager.record_result("image", success=True, latency_ms=10)
+        self.now[0] += timedelta(seconds=1)
+        self.manager.record_result("image", success=False, error_code="HTTP_503")
+        self.now[0] += timedelta(seconds=1)
+        self.manager.record_result("image", success=True, latency_ms=30)
+        result = self.manager.metrics_summary("image", window_seconds=10)
+        self.assertEqual(result["status"], "METRICS_READY")
+        metrics = result["providers"]["image"]
+        self.assertEqual(metrics["sample_count"], 3)
+        self.assertEqual(metrics["success_count"], 2)
+        self.assertEqual(metrics["failure_count"], 1)
+        self.assertEqual(metrics["success_rate"], 0.6667)
+        self.assertEqual(metrics["failure_rate"], 0.3333)
+        self.assertEqual(metrics["average_latency_ms"], 20.0)
+        self.assertEqual(metrics["p95_latency_ms"], 30.0)
+        self.assertNotIn("history", metrics)
+        self.assertNotIn("HTTP_503", repr(result))
+
+    def test_metrics_summary_excludes_stale_and_future_events_and_rejects_invalid_windows(self):
+        self.manager.record_result("image", success=True, latency_ms=5)
+        self.now[0] += timedelta(seconds=301)
+        stale = self.manager.metrics_summary("image", window_seconds=10)
+        self.assertEqual(stale["providers"]["image"]["sample_count"], 0)
+        self.assertIsNone(stale["providers"]["image"]["success_rate"])
+        self.assertEqual(self.manager.metrics_summary(window_seconds=float("nan"))["status"], "INVALID_METRICS_WINDOW")
+        self.assertEqual(self.manager.metrics_summary("missing")["status"], "PROVIDER_NOT_FOUND")
+
     def test_malformed_persisted_health_state_rejects_counter_status_mismatch(self):
         malformed_records = (
             {"status": "HEALTHY", "consecutive_failures": 1, "history": []},
