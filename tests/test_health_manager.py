@@ -161,6 +161,21 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertEqual(result["candidates"][1]["reason"], "STALE_HEALTH")
         self.assertEqual(result["candidates"][2]["reason"], "NO_HEALTH_EVIDENCE")
 
+    def test_invalid_persisted_recovery_counter_fails_closed(self):
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "providers": {
+                "image": {
+                    "status": "UNHEALTHY",
+                    "consecutive_failures": 3,
+                    "recovery_successes": "two",
+                    "history": [],
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path)
+
     def test_recheck_candidate_inputs_fail_closed(self):
         self.assertEqual(
             self.manager.list_recheck_candidates(recheck_after_seconds=0)["status"],
