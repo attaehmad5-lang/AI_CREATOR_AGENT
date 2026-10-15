@@ -72,7 +72,7 @@ GitHub Actions run [#38791171237](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 36 | 🔴 | HTTP 429/Rate-Limit Handling | VERIFIED | RetryPolicy seconds/date parsing and maximum-delay capping; HTTP probe and account-balance probe preserve bounded Retry-After metadata. Regression tests: `tests/test_http_probe.py`, `tests/test_account_balance_probe.py::test_rate_limit_preserves_bounded_retry_after_without_leaking_body`, `test_malformed_retry_after_is_not_propagated`. Provider-specific live rate-limit behavior remains unverified. |
 | 37 | 🟡 | Quota Exhaustion Detection | PARTIAL | Quota manager and routing rejection paths are tested; provider-side quota semantics remain incomplete. |
 | 38 | 🔴 | Circuit Breaker | VERIFIED | Circuit breaker threshold, cooldown, half-open single-probe concurrency, cancellation and recovery are tested. |
-| 39 | 🔴 | Cooldown and Provider Recheck | PARTIAL | Active probes now provide controlled recovery: an unhealthy provider remains excluded until two consecutive successful probes, and failed probes reset the streak. Automated scheduling/cooldown orchestration remains open. Regression tests cover recheck success and failure. |
+| 39 | 🔴 | Cooldown and Provider Recheck | PARTIAL | `list_recheck_candidates()` deterministically prioritizes unhealthy providers and finds stale/unknown health records; active probes require two consecutive successes to re-admit an unhealthy provider, and failures reset the streak. Unit tests cover candidate ordering, invalid inputs and recovery. A background scheduler/cooldown service is still open. |
 | 40 | 🔴 | Timeout, Cancellation and Stalled-Request Handling | PARTIAL | Timeout handling is tested; cancellation, deadlines and stalled-job recovery are incomplete. |
 
 ## F — Health and Reliability
@@ -85,7 +85,7 @@ GitHub Actions run [#38791171237](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
 | 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
-| 47 | 🔴 | Provider Recovery Detection | PARTIAL | `ProviderHealthManager.active_probe()` now requires two consecutive successful probes by default before an unhealthy provider is re-admitted; failed probes reset the streak. Regression tests cover pending recovery, failed-streak reset, and re-admission. Automatic probe scheduling and live provider recovery evidence remain open. |
+| 47 | 🔴 | Provider Recovery Detection | VERIFIED | `ProviderHealthManager.active_probe()` requires two consecutive successful probes by default before an unhealthy provider is re-admitted; a failed probe resets the streak and leaves the provider ineligible. Regression tests cover pending recovery, failed-streak reset and re-admission. Live provider recovery evidence remains separate from this unit-verified behavior. |
 | 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale health exclusion and malformed persisted-state checks exist; full health/consistency reconciliation is not complete. |
 
 ## G — Output and Asset Safety
