@@ -89,6 +89,11 @@ class BudgetAlertManager:
                 os.unlink(name)
 
     @staticmethod
+    def _crossed_thresholds(usage_pct: float, thresholds: tuple[int, ...]) -> tuple[int, ...]:
+        """Return configured alert thresholds reached by a validated usage percentage."""
+        return tuple(threshold for threshold in thresholds if usage_pct >= threshold)
+
+    @staticmethod
     def _event_id(project_id: str, budget: float, threshold: int) -> str:
         material = f"{project_id}\0{budget:.12g}\0{threshold}".encode("utf-8")
         return hashlib.sha256(material).hexdigest()
@@ -115,9 +120,7 @@ class BudgetAlertManager:
         lock_path = self.path.with_name(self.path.name + ".lock")
         with self._lock, interprocess_file_lock(lock_path):
             self._reload()
-            for threshold in self.thresholds:
-                if percent < threshold:
-                    continue
+            for threshold in self._crossed_thresholds(percent, self.thresholds):
                 event_id = self._event_id(project_id, float(budget), threshold)
                 if event_id in self._data["events"]:
                     continue
