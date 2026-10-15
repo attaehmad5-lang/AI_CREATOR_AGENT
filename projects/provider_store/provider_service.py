@@ -4,6 +4,8 @@ from __future__ import annotations
 from typing import Any
 import re
 import time
+import inspect
+import uuid
 
 from .safe_numbers import finite_number
 
@@ -22,6 +24,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        metrics_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -33,6 +36,7 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (metrics_manager, "record_request", "metrics_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -45,6 +49,7 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.metrics_manager = metrics_manager
 
     def verify_provider(
         self,
@@ -264,6 +269,7 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        trace_id: str | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
@@ -284,6 +290,22 @@ class ProviderService:
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
 
+        explicit_trace_id = trace_id is not None
+        if trace_id is None:
+            trace_id = uuid.uuid4().hex
+        if not isinstance(trace_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}", trace_id):
+            return {"status": "INVALID_TRACE_ID", "executed": False}
+        try:
+            adapter_parameters = inspect.signature(adapter).parameters.values()
+            accepts_trace_id = any(
+                parameter.name == "trace_id" or parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in adapter_parameters
+            )
+        except (TypeError, ValueError):
+            accepts_trace_id = False
+        if explicit_trace_id and not accepts_trace_id:
+            return {"status": "TRACE_ID_UNSUPPORTED_BY_ADAPTER", "executed": False, "trace_id": trace_id}
+
         route = self.route_request(
             category=category,
             project_id=project_id,
@@ -293,34 +315,52 @@ class ProviderService:
             **route_options,
         )
         if not isinstance(route, dict) or route.get("allowed") is not True:
-            return {"status": "ROUTING_REJECTED", "executed": False, "route": route}
+            return {"status": "ROUTING_REJECTED", "executed": False, "route": route, "trace_id": trace_id}
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
-            return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+            return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route, "trace_id": trace_id}
 
         options = dict(adapter_options or {})
         options["provider_id"] = provider_id
         options["request_id"] = request_id
+        if accepts_trace_id:
+            options["trace_id"] = trace_id
         started_at = time.monotonic()
         try:
             adapter_result = adapter(**options)
         except Exception as exc:
             # The adapter may have transmitted the request before failing. Do not
             # release cost, quota, or credit reservations on this ambiguous outcome.
+            latency_ms = (time.monotonic() - started_at) * 1000
+            metrics = self._record_execution_metric(
+                request_id=request_id, trace_id=trace_id, provider_id=provider_id,
+                modality=modality, status="EXECUTION_OUTCOME_UNKNOWN",
+                success=False, latency_ms=latency_ms,
+            )
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                "trace_id": trace_id,
+                "metrics": metrics,
                 "reservations_retained": True,
                 "error_type": type(exc).__name__,
             }
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
+            latency_ms = (time.monotonic() - started_at) * 1000
+            metrics = self._record_execution_metric(
+                request_id=request_id, trace_id=trace_id, provider_id=provider_id,
+                modality=modality, status="EXECUTION_OUTCOME_UNKNOWN",
+                success=False, latency_ms=latency_ms,
+            )
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                "trace_id": trace_id,
+                "metrics": metrics,
                 "reservations_retained": True,
             }
         if adapter_result["started"] is False:
@@ -337,21 +377,37 @@ class ProviderService:
                     and adapter_result.get("actual_credit_amount") > 0
                 )
             ):
+                latency_ms = (time.monotonic() - started_at) * 1000
+                metrics = self._record_execution_metric(
+                    request_id=request_id, trace_id=trace_id, provider_id=provider_id,
+                    modality=modality, status="INCONSISTENT_START_RESULT",
+                    success=False, latency_ms=latency_ms,
+                )
                 return {
                     "status": "INCONSISTENT_START_RESULT",
                     "executed": False,
                     "provider": provider_id,
                     "request_id": request_id,
+                    "trace_id": trace_id,
+                    "metrics": metrics,
                     "reservations_retained": True,
                 }
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id
             )
+            execution_status = "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED"
+            metrics = self._record_execution_metric(
+                request_id=request_id, trace_id=trace_id, provider_id=provider_id,
+                modality=modality, status=execution_status, success=False,
+                latency_ms=(time.monotonic() - started_at) * 1000,
+            )
             return {
-                "status": "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED",
+                "status": execution_status,
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                "trace_id": trace_id,
+                "metrics": metrics,
                 "release": released,
             }
 
@@ -439,16 +495,41 @@ class ProviderService:
             status = "EXECUTION_SUCCEEDED"
         else:
             status = "EXECUTION_FINALIZATION_PARTIAL"
+        metrics = self._record_execution_metric(
+            request_id=request_id, trace_id=trace_id, provider_id=provider_id,
+            modality=modality, status=status, success=final_success,
+            latency_ms=latency_ms,
+        )
         return {
             "status": status,
             "executed": True,
             "provider": provider_id,
             "request_id": request_id,
+            "trace_id": trace_id,
+            "metrics": metrics,
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "finalization": finalization,
             "retry_decision": retry,
         }
+
+    def _record_execution_metric(
+        self, *, request_id: str, trace_id: str, provider_id: str,
+        modality: str, status: str, success: bool, latency_ms: float,
+    ) -> dict[str, Any] | None:
+        if self.metrics_manager is None:
+            return None
+        try:
+            result = self.metrics_manager.record_request(
+                request_id=request_id, trace_id=trace_id, provider_id=provider_id,
+                modality=modality, status=status, success=success, latency_ms=latency_ms,
+            )
+        except Exception as exc:
+            return {"status": "METRICS_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "METRICS_RECORD_FAILED", "saved": False}
+        # Observability failure must never turn a provider execution into a billing failure.
+        return {"status": result.get("status", "METRICS_RECORD_FAILED"), "saved": result.get("saved") is True}
 
     def retry_decision(self, **failure: Any) -> dict[str, Any]:
         if self.retry_policy is None:
