@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38780357491](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38780357491): **343 tests passed on Ubuntu and 343 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This branch includes 50-case image-dimension and 50-case WAV-duration matrices, plus FLAC/MP3/AAC/Ogg and AVI/MP4/WebM duration/codec/dimension regressions.
+GitHub Actions run [#38781067942](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38781067942): **345 tests passed on Ubuntu and 345 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This branch includes 50-case image-dimension and 50-case WAV-duration matrices, 50-case sufficient-credit routing and 50-case insufficient-credit rejection matrices, plus format-specific media regressions.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -105,7 +105,7 @@ GitHub Actions run [#38780357491](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 57 | 🔴 | Free-Credit-First Routing | PARTIAL | Routing and credit reservations exist; provider-specific verified free-credit balances are still required. |
+| 57 | 🔴 | Free-Credit-First Routing | VERIFIED | `ProviderRoutingManager` uses the injected `ProviderCreditManager`'s verified, unit-compatible snapshots, selects the greatest available balance with deterministic priority tie-breaks, and reserves before routing. A 50-case sufficient-balance selection matrix and 50-case insufficient-balance rejection matrix pass on Ubuntu and Windows. Provider-specific live balance endpoint semantics are tracked separately under item #58. |
 | 58 | 🔴 | Provider Free-Tier/Quota Verification | PARTIAL | Generic JSON account-balance probe exists; provider-specific documented fields and authorized live checks are missing. |
 | 59 | 🔴 | Explicit Approval Before Paid Usage | PARTIAL | Paid-usage approval guard and tests exist; approval workflow integration is not complete. |
 | 60 | 🔴 | Per-Request/Project Budgets | PARTIAL | Project budget and quota managers are tested; end-to-end tenant/user budgeting is incomplete. |
