@@ -5,6 +5,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 from projects.provider_store.cost_policy import ProviderCostPolicy
+from projects.provider_store.paid_approval_manager import PaidUsageApprovalManager
 
 
 def _reserve_cost_in_process(args):
@@ -37,7 +38,11 @@ class ProviderCostPolicyTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.ledger = Path(self.temp_dir.name) / "usage_ledger.json"
-        self.policy = ProviderCostPolicy(self.ledger, project_budgets={"documentary": 5.0})
+        self.approvals = PaidUsageApprovalManager(Path(self.temp_dir.name) / "approvals.json")
+        self.policy = ProviderCostPolicy(
+            self.ledger, project_budgets={"documentary": 5.0},
+            approval_manager=self.approvals,
+        )
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -108,12 +113,47 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertEqual(result["status"], "PAID_APPROVAL_REQUIRED")
 
     def test_paid_usage_requires_budget_and_approval(self):
+        pending = self.approvals.request_approval(
+            project_id="documentary", provider_id="paid", request_id="paid-approval-job",
+            estimated_cost=1.0, unit="USD", requested_by="user-1",
+            reason="User explicitly approved a paid generation request",
+        )
+        self.assertEqual(pending["status"], "APPROVAL_PENDING")
+        self.assertTrue(self.approvals.approve(pending["approval_id"], approved_by="admin-1")["approved"])
         result = self.policy.evaluate_request(
             {"id": "paid", "enabled": True}, project_id="documentary",
             estimated_cost=1.0, paid_usage_approved=True,
+            approval_id=pending["approval_id"], request_id="paid-approval-job",
         )
-        self.assertTrue(result["allowed"])
+        self.assertTrue(result["allowed"], result)
         self.assertEqual(result["billing_mode"], "PAID_APPROVED")
+        self.assertEqual(result["approval_id"], pending["approval_id"])
+
+    def test_legacy_boolean_cannot_bypass_persistent_approval(self):
+        result = self.policy.evaluate_request(
+            {"id": "paid", "enabled": True}, project_id="documentary",
+            estimated_cost=1.0, paid_usage_approved=True, request_id="no-approval-job",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "PAID_APPROVAL_REQUIRED")
+
+    def test_approval_cannot_be_reused_for_another_request_or_provider(self):
+        pending = self.approvals.request_approval(
+            project_id="documentary", provider_id="paid", request_id="bound-job",
+            estimated_cost=1.0, unit="USD", requested_by="user-1",
+            reason="Approved only for this exact request",
+        )
+        self.approvals.approve(pending["approval_id"], approved_by="admin-1")
+        other_request = self.policy.evaluate_request(
+            {"id": "paid", "enabled": True}, project_id="documentary",
+            estimated_cost=1.0, approval_id=pending["approval_id"], request_id="other-job",
+        )
+        other_provider = self.policy.evaluate_request(
+            {"id": "different", "enabled": True}, project_id="documentary",
+            estimated_cost=1.0, approval_id=pending["approval_id"], request_id="bound-job",
+        )
+        self.assertEqual(other_request["status"], "APPROVAL_SCOPE_MISMATCH")
+        self.assertEqual(other_provider["status"], "APPROVAL_SCOPE_MISMATCH")
 
     def test_paid_usage_requires_a_configured_budget(self):
         policy = ProviderCostPolicy()
