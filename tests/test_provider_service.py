@@ -53,6 +53,7 @@ class ProviderServiceTests(unittest.TestCase):
             output_validator=self.validator,
             cost_policy=self.cost,
             quota_manager=self.quota,
+            paid_approval_manager=self.approvals,
         )
 
     def tearDown(self):
@@ -69,6 +70,35 @@ class ProviderServiceTests(unittest.TestCase):
         if pending["status"] == "APPROVAL_PENDING":
             self.assertTrue(self.approvals.approve(approval_id, approved_by="test-admin")["approved"])
         return approval_id
+
+    def test_service_exposes_explicit_paid_approval_lifecycle(self):
+        pending = self.service.request_paid_usage_approval(
+            project_id="film", provider_id="image", request_id="service-paid-job",
+            estimated_cost=2.0, unit="USD", requested_by="user-1",
+            reason="User approved paid image generation",
+        )
+        self.assertEqual(pending["status"], "APPROVAL_PENDING")
+        self.assertTrue(self.service.approve_paid_usage(
+            pending["approval_id"], approved_by="admin-1"
+        )["approved"])
+        route = self.service.route_request(
+            category="image", project_id="film", estimated_cost=2.0,
+            request_id="service-paid-job",
+            paid_approval_ids={"image": pending["approval_id"]},
+        )
+        self.assertTrue(route["allowed"], route)
+        self.assertEqual(route["billing_mode"], "PAID_APPROVED")
+
+    def test_service_cannot_approve_without_trusted_authorizer(self):
+        manager = PaidUsageApprovalManager(self.root / "no-authorizer-service.json")
+        service = ProviderService(self.connections, paid_approval_manager=manager)
+        pending = service.request_paid_usage_approval(
+            project_id="film", provider_id="image", request_id="service-no-auth",
+            estimated_cost=1.0, requested_by="user-1", reason="Test fail closed",
+        )
+        result = service.approve_paid_usage(pending["approval_id"], approved_by="admin-1")
+        self.assertEqual(result["status"], "APPROVER_AUTHORIZER_REQUIRED")
+        self.assertFalse(result["approved"])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
