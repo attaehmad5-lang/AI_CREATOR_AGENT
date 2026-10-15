@@ -131,6 +131,7 @@ class ProviderRoutingManager:
         capability: str | None = None,
         model: str | None = None,
         model_version: str | None = None,
+        required_region: str | None = None,
         strategy: str | None = None,
         estimated_costs: dict[str, float] | None = None,
         estimated_cost_unit: str = "USD",
@@ -171,6 +172,16 @@ class ProviderRoutingManager:
             allowed_capabilities = project_policy.get("allowed_capabilities")
             if allowed_capabilities is not None and capability is not None and capability not in allowed_capabilities:
                 return {"allowed": False, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"}
+            policy_required_region = project_policy.get("required_region")
+            if policy_required_region is not None:
+                if required_region is not None and required_region.casefold() != policy_required_region.casefold():
+                    return {"allowed": False, "status": "PROJECT_REGION_POLICY_CONFLICT"}
+                required_region = policy_required_region
+            allowed_regions = project_policy.get("allowed_regions")
+            if required_region is not None and allowed_regions is not None and required_region.casefold() not in {
+                value.casefold() for value in allowed_regions if isinstance(value, str)
+            }:
+                return {"allowed": False, "status": "PROJECT_REGION_POLICY_CONFLICT"}
             max_estimated_cost = project_policy.get("max_estimated_cost")
             if max_estimated_cost is not None and self._valid_amount(estimated_cost) and estimated_cost > max_estimated_cost:
                 return {"allowed": False, "status": "PROJECT_COST_LIMIT_EXCEEDED"}
@@ -191,6 +202,27 @@ class ProviderRoutingManager:
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,99}", model_version)
         ):
             return {"allowed": False, "status": "INVALID_MODEL_VERSION"}
+        if required_region is not None and (
+            not isinstance(required_region, str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", required_region.casefold())
+        ):
+            return {"allowed": False, "status": "INVALID_REQUIRED_REGION"}
+        if required_region is not None:
+            required_region = required_region.casefold()
+        allowed_regions = project_policy.get("allowed_regions")
+        if allowed_regions is not None and (
+            not isinstance(allowed_regions, list)
+            or not allowed_regions
+            or any(
+                not isinstance(region, str)
+                or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", region.casefold())
+                for region in allowed_regions
+            )
+        ):
+            return {"allowed": False, "status": "INVALID_PROJECT_REGION_POLICY"}
+        allowed_region_set = {
+            region.casefold() for region in allowed_regions
+        } if isinstance(allowed_regions, list) else None
         selected_strategy = str(strategy or self.default_strategy).upper()
         if selected_strategy not in self.STRATEGIES:
             return {"allowed": False, "status": "INVALID_ROUTING_STRATEGY"}
@@ -303,6 +335,26 @@ class ProviderRoutingManager:
                 continue
             if provider.get("enabled") is not True:
                 continue
+            if required_region is not None or allowed_region_set is not None:
+                declared_regions = provider.get("data_residency_regions", provider.get("regions"))
+                if (
+                    not isinstance(declared_regions, list)
+                    or not declared_regions
+                    or any(
+                        not isinstance(region, str)
+                        or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", region.casefold())
+                        for region in declared_regions
+                    )
+                ):
+                    decisions.append({"provider": provider_id, "status": "REGION_METADATA_UNVERIFIED"})
+                    continue
+                normalized_regions = {region.casefold() for region in declared_regions}
+                if required_region is not None and required_region not in normalized_regions:
+                    decisions.append({"provider": provider_id, "status": "REQUIRED_REGION_NOT_SUPPORTED"})
+                    continue
+                if allowed_region_set is not None and not normalized_regions.intersection(allowed_region_set):
+                    decisions.append({"provider": provider_id, "status": "PROJECT_REGION_NOT_SUPPORTED"})
+                    continue
             if model is not None:
                 model_records = provider.get("supported_models")
                 if not isinstance(model_records, list):
