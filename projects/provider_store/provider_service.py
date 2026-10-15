@@ -473,6 +473,7 @@ class ProviderService:
             "output": output_validation,
             "finalization": finalization,
             "retry_decision": retry,
+            "privacy_status": privacy_status,
         }
 
     def retry_decision(self, **failure: Any) -> dict[str, Any]:
