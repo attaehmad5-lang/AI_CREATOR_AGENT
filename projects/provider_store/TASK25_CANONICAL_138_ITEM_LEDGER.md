@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-Region routing, adapter versioning, policy simulation, concurrent routing and local text-adapter follow-up PR #28 run [#38761075322](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38761075322): **353 tests passed on Ubuntu and 353 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This includes 50 region-routing subcases, 50 adapter-version combinations, 50 side-effect-free policy simulations, 100 concurrent routing requests, local Ollama-compatible adapter contract checks, 50 endpoint-security cases, mandatory HTTPS allowlisting and bounded response/error handling. Production region metadata and a live local-model server test remain unverified.
+Latest branch verification run [#38766070416](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38766070416): **355 tests passed on Ubuntu and 355 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This run adds controlled provider recovery: after reaching `UNHEALTHY`, a provider remains `RECOVERING` and ineligible until two consecutive successful health results are recorded; recovery state survives reload. Region routing, adapter versioning, side-effect-free policy simulation, 100 concurrent routing requests, local Ollama-compatible adapter checks, and bounded endpoint security remain covered. Production region metadata and a live local-model server test remain unverified.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -232,6 +232,6 @@ Region routing, adapter versioning, policy simulation, concurrent routing and lo
 
 1. Every one of the 138 items must be reviewed against its original wording; do not infer or rename features.
 2. Any `PARTIAL` or `OPEN` item must remain uncompleted until its implementation, tests and required live/operational evidence exist.
-3. The 303 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
+3. The 355 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
 4. The account-balance adapter is generic. It must be configured only with a provider-documented endpoint and a field representing actual available credits; never mistake a per-key budget cap for free credits.
 5. Task #29 Generation State Manager remains paused and must not be started as a separate task during this Task #25 work.
