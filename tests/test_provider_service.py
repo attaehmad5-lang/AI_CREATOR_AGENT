@@ -13,6 +13,7 @@ from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
+from projects.provider_store.sensitive_data import SensitiveDataGuard
 
 
 class ProviderServiceTests(unittest.TestCase):
@@ -51,6 +52,65 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_sensitive_data_block_happens_before_routing_and_adapter(self):
+        class SpyRouter:
+            def __init__(self):
+                self.calls = 0
+
+            def route(self, **kwargs):
+                self.calls += 1
+                return {"allowed": True, "provider": "image"}
+
+        router = SpyRouter()
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            sensitive_data_guard=SensitiveDataGuard(mode="block"),
+        )
+        adapter_calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="privacy-block",
+            estimated_cost=0.0, adapter=lambda **kwargs: adapter_calls.append(kwargs),
+            modality="image", adapter_options={"prompt": "Contact alice@example.com"},
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(router.calls, 0)
+        self.assertEqual(adapter_calls, [])
+        self.assertNotIn("alice@example.com", repr(result))
+
+    def test_sensitive_data_redaction_reaches_adapter_without_original_values(self):
+        class SpyRouter:
+            def route(self, **kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        seen = []
+        def adapter(**kwargs):
+            seen.append(kwargs)
+            return {
+                "started": True, "success": False, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "error_code": "EXPECTED_TEST_FAILURE",
+            }
+
+        service = ProviderService(
+            self.connections, routing_manager=SpyRouter(),
+            sensitive_data_guard=SensitiveDataGuard(mode="redact"),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="privacy-redact",
+            estimated_cost=0.0, adapter=adapter, modality="image",
+            adapter_options={
+                "prompt": "Contact alice@example.com",
+                "credentials": {"api_key": "never-forward-this-secret"},
+                "ordinary": "preserve",
+            },
+        )
+        self.assertEqual(result["privacy_status"], "REDACTED")
+        self.assertEqual(len(seen), 1)
+        self.assertNotIn("alice@example.com", repr(seen[0]))
+        self.assertNotIn("never-forward-this-secret", repr(seen[0]))
+        self.assertEqual(seen[0]["ordinary"], "preserve")
+        self.assertEqual(seen[0]["credentials"], "[REDACTED:CREDENTIAL_FIELD]")
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
