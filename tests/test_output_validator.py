@@ -1,5 +1,6 @@
 import json
 import stat
+import struct
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -18,13 +19,107 @@ class ProviderOutputValidatorTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    @staticmethod
+    def png_header(width, height):
+        return (
+            b"\x89PNG\r\n\x1a\n"
+            + struct.pack(">I", 13) + b"IHDR"
+            + struct.pack(">II", width, height)
+            + bytes((8, 2, 0, 0, 0)) + b"\x00\x00\x00\x00"
+        )
+
     def test_valid_image_signature_returns_hash_and_metadata(self):
         path = self.root / "cover.png"
-        path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
+        path.write_bytes(self.png_header(320, 240))
         result = self.validator.validate_file(path, modality="image")
         self.assertTrue(result["valid"])
         self.assertEqual(result["mime_type"], "image/png")
+        self.assertEqual((result["width"], result["height"]), (320, 240))
         self.assertEqual(len(result["sha256"]), 64)
+
+    def test_image_dimension_validation_50_case_matrix(self):
+        validator = ProviderOutputValidator(
+            max_size_bytes=128, max_image_dimension=100, max_image_pixels=1000
+        )
+        valid_dimensions = [(index, 1) for index in range(1, 26)]
+        invalid_dimensions = [
+            (0, 1), (1, 0), (-1, 1), (1, -1),
+            (101, 1), (1, 101), (1000, 1), (1, 1000),
+            (50, 21), (21, 50), (34, 30), (30, 34),
+            (100, 11), (11, 100), (99, 11), (11, 99),
+            (200, 2), (2, 200), (100, 100), (101, 10),
+            (10, 101), (16385, 1), (1, 16385), (500, 500),
+            (100000, 1),
+        ]
+        self.assertEqual(len(valid_dimensions) + len(invalid_dimensions), 50)
+        for index, (width, height) in enumerate(valid_dimensions):
+            with self.subTest(case=index, dimensions=(width, height)):
+                path = self.root / f"valid-{index}.png"
+                path.write_bytes(self.png_header(width, height))
+                result = validator.validate_file(path, modality="image")
+                self.assertTrue(result["valid"], result)
+                self.assertEqual((result["width"], result["height"]), (width, height))
+        for index, (width, height) in enumerate(invalid_dimensions):
+            with self.subTest(case=index + 25, dimensions=(width, height)):
+                path = self.root / f"invalid-{index}.png"
+                path.write_bytes(self.png_header(width, height))
+                result = validator.validate_file(path, modality="image")
+                self.assertFalse(result["valid"], result)
+                self.assertIn(result["status"], {
+                    "IMAGE_DIMENSIONS_INVALID",
+                    "IMAGE_DIMENSION_LIMIT_EXCEEDED",
+                    "IMAGE_PIXEL_LIMIT_EXCEEDED",
+                })
+
+    def test_unparseable_image_dimensions_fail_closed(self):
+        path = self.root / "truncated.png"
+        path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
+        result = self.validator.validate_file(path, modality="image")
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "IMAGE_DIMENSIONS_UNVERIFIED")
+
+    def test_image_limit_configuration_is_bounded(self):
+        invalid_options = [
+            {"max_image_dimension": 0},
+            {"max_image_dimension": -1},
+            {"max_image_dimension": True},
+            {"max_image_dimension": 1_000_001},
+            {"max_image_pixels": 0},
+            {"max_image_pixels": -1},
+            {"max_image_pixels": False},
+            {"max_image_pixels": 10**13},
+        ]
+        for index, options in enumerate(invalid_options):
+            with self.subTest(case=index, options=options):
+                with self.assertRaises(ValueError):
+                    ProviderOutputValidator(**options)
+
+    def test_gif_and_jpeg_dimensions_are_parsed(self):
+        gif = b"GIF89a" + struct.pack("<HH", 12, 7) + bytes(20)
+        self.assertEqual(
+            ProviderOutputValidator._image_dimensions("image/gif", gif), (12, 7)
+        )
+        jpeg = (
+            b"\xff\xd8\xff\xc0"
+            + struct.pack(">H", 8) + bytes([8])
+            + struct.pack(">HH", 7, 12) + bytes([3])
+        )
+        self.assertEqual(
+            ProviderOutputValidator._image_dimensions("image/jpeg", jpeg), (12, 7)
+        )
+
+    def test_webp_extended_and_lossless_dimensions_are_parsed(self):
+        vp8x = (
+            b"RIFF" + bytes(4) + b"WEBPVP8X" + bytes(4)
+            + (19).to_bytes(3, "little") + (9).to_bytes(3, "little")
+        )
+        self.assertEqual(
+            ProviderOutputValidator._image_dimensions("image/webp", vp8x), (20, 10)
+        )
+        vp8l = b"RIFF" + bytes(4) + b"WEBPVP8L" + bytes(4) + bytes([0x2F, 4, 0, 4, 0])
+        self.assertEqual(
+            ProviderOutputValidator._image_dimensions("image/webp", vp8l), (5, 5)
+        )
 
     def test_mismatched_signature_and_extension_are_rejected(self):
         wrong_signature = self.root / "cover.png"
@@ -92,12 +187,12 @@ class ProviderOutputValidatorTests(unittest.TestCase):
 
     def test_file_growth_during_validation_is_detected(self):
         path = self.root / "changing.png"
-        signature = b"\x89PNG\r\n\x1a\n"
-        path.write_bytes(signature + b"extra bytes")
+        valid_png = self.png_header(16, 16)
+        path.write_bytes(valid_png + b"extra bytes")
         actual = path.stat()
         fake_stat = SimpleNamespace(
             st_mode=stat.S_IFREG | 0o600,
-            st_size=len(signature),
+            st_size=len(valid_png),
             st_dev=actual.st_dev,
             st_ino=actual.st_ino,
         )
