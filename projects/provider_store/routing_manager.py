@@ -32,6 +32,7 @@ class ProviderRoutingManager:
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
         project_policy_manager: Any | None = None,
+        feature_flag_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
         require_verified_connection: bool = True,
     ) -> None:
@@ -47,6 +48,8 @@ class ProviderRoutingManager:
             raise ValueError("credit_manager must provide fresh verified balances")
         if project_policy_manager is not None and not callable(getattr(project_policy_manager, "get_policy", None)):
             raise ValueError("project_policy_manager must support policy lookup")
+        if feature_flag_manager is not None and not callable(getattr(feature_flag_manager, "evaluate", None)):
+            raise ValueError("feature_flag_manager must support flag evaluation")
         if not isinstance(require_verified_connection, bool):
             raise ValueError("require_verified_connection must be boolean")
         if require_verified_connection and not callable(getattr(connection_manager, "get_state", None)):
@@ -60,6 +63,7 @@ class ProviderRoutingManager:
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager
         self.project_policy_manager = project_policy_manager
+        self.feature_flag_manager = feature_flag_manager
         self.default_strategy = normalized_strategy
         self.require_verified_connection = require_verified_connection
         self._round_robin_counters: dict[str, int] = {}
@@ -143,12 +147,36 @@ class ProviderRoutingManager:
         automatic_fallback: bool = True,
         dry_run: bool = False,
         simulation_policy: dict[str, Any] | None = None,
+        required_feature_flag: str | None = None,
+        rollout_subject_id: str | None = None,
     ) -> dict[str, Any]:
         """Return the first policy-compliant provider and the decisions that led to it."""
         if not isinstance(category, str) or not category.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_REQUIRED"}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
+        if required_feature_flag is not None:
+            if self.feature_flag_manager is None:
+                return {"allowed": False, "status": "FEATURE_FLAG_MANAGER_REQUIRED"}
+            try:
+                flag_result = self.feature_flag_manager.evaluate(
+                    required_feature_flag,
+                    project_id=project_id,
+                    subject_id=rollout_subject_id or request_id,
+                )
+            except Exception as exc:
+                return {
+                    "allowed": False,
+                    "status": "FEATURE_FLAG_EVALUATION_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(flag_result, dict) or flag_result.get("enabled") is not True:
+                return {
+                    "allowed": False,
+                    "status": "FEATURE_FLAG_BLOCKED",
+                    "feature_flag_status": flag_result.get("status", "INVALID_FLAG_RESPONSE")
+                    if isinstance(flag_result, dict) else "INVALID_FLAG_RESPONSE",
+                }
         if required_region is not None and (
             not isinstance(required_region, str)
             or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", required_region.casefold())
