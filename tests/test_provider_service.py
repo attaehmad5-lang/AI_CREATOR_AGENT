@@ -602,6 +602,25 @@ class ProviderServiceTests(unittest.TestCase):
             release.set()
             holder.result(timeout=2)
 
+    def test_generation_fails_closed_without_health_evidence_even_if_override_is_false(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="no-health-evidence",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(True),
+            modality="image", require_health_evidence=False,
+        )
+        self.assertEqual(result["status"], "ROUTING_REJECTED")
+        self.assertEqual(result["route"]["status"], "HEALTH_DATA_REQUIRED")
+        self.assertEqual(called, [])
+
     def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
         router = ProviderRoutingManager(
             self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
