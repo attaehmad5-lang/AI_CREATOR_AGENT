@@ -13,6 +13,18 @@ class RetryPolicyTests(unittest.TestCase):
         self.assertEqual(first.delay_seconds, 1)
         self.assertEqual(second.delay_seconds, 2)
 
+    def test_extreme_attempt_number_does_not_construct_unbounded_exponent(self):
+        policy = RetryPolicy(
+            max_attempts=1_000_000_001,
+            base_delay_seconds=0.5,
+            max_delay_seconds=30,
+            jitter_fraction=0,
+            random_fn=lambda: 0,
+        )
+        result = policy.decide(attempt=1_000_000_000, status_code=503)
+        self.assertTrue(result.retry)
+        self.assertEqual(result.delay_seconds, 30)
+
     def test_http_429_respects_retry_after(self):
         policy = RetryPolicy(max_attempts=4, base_delay_seconds=1, jitter_fraction=0, random_fn=lambda: 0)
         result = policy.decide(attempt=1, status_code=429, retry_after=7)
