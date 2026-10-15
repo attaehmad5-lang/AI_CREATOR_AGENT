@@ -246,11 +246,11 @@ class ProviderServiceTests(unittest.TestCase):
     def test_publish_output_atomically_preserves_previous_artifact_on_failure(self):
         temporary = self.root / "candidate.png"
         destination = self.root / "final.png"
-        temporary.write_bytes(b"\\x89PNG\\r\\n\\x1a\\nnew-image")
+        temporary.write_bytes(b"\x89PNG\r\n\x1a\nnew-image")
         destination.write_bytes(b"previous-good-output")
         result = self.service.publish_output(temporary, destination, modality="image")
         self.assertTrue(result["published"])
-        self.assertEqual(destination.read_bytes(), b"\\x89PNG\\r\\n\\x1a\\nnew-image")
+        self.assertEqual(destination.read_bytes(), b"\x89PNG\r\n\x1a\nnew-image")
         self.assertFalse(temporary.exists())
 
         invalid = self.root / "invalid.png"
@@ -266,7 +266,7 @@ class ProviderServiceTests(unittest.TestCase):
         service = ProviderService(self.connections)
         temporary = self.root / "candidate.png"
         destination = self.root / "final.png"
-        temporary.write_bytes(b"\\x89PNG\\r\\n\\x1a\\nimage")
+        temporary.write_bytes(b"\x89PNG\r\n\x1a\nimage")
         result = service.publish_output(temporary, destination, modality="image")
         self.assertEqual(result["status"], "OUTPUT_VALIDATOR_UNAVAILABLE")
         self.assertTrue(temporary.exists())
