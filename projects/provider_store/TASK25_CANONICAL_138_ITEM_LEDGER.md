@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38794819081](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38794819081): **354 tests passed on Ubuntu and 354 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite includes safe persistent execution metrics, unique trace propagation, mandatory fresh-enough health evidence before generation, bounded per-provider concurrency/backpressure, latency-aware routing, cross-process metrics writes, overflow-safe latency aggregation, and an explicit error-specific retry matrix.
+GitHub Actions run [#38795242278](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38795242278): **357 tests passed on Ubuntu and 357 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite includes safe persistent execution metrics, unique trace propagation, mandatory fresh-enough health evidence before generation, capability-based routing, active health probes and recovery, bounded per-provider concurrency/backpressure, latency-aware routing, cross-process metrics writes, overflow-safe latency aggregation, and an explicit error-specific retry matrix.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -58,7 +58,7 @@ GitHub Actions run [#38794819081](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 27 | 🟡 | PRIMARY_THEN_FALLBACK Strategy | VERIFIED | Default PRIMARY_THEN_FALLBACK behavior is covered by primary and fallback route tests. |
 | 28 | 🔴 | PRIMARY_ONLY Strategy Testing | VERIFIED | PRIMARY_ONLY strategy now limits attempts to the selected primary and is tested not to use fallback. |
 | 29 | 🟡 | Automatic Fallback On/Off Testing | VERIFIED | `automatic_fallback` can be disabled explicitly; invalid flag values fail closed and regression tests cover no-fallback behavior. |
-| 30 | 🔴 | Capability-Based Routing | PARTIAL | Capability filtering exists and is tested at discovery; the complete canonical routing/metadata truth remains incomplete. |
+| 30 | 🔴 | Capability-Based Routing | VERIFIED | Routing filters the provider catalog by the requested declared capability and selects only a matching eligible provider; regression test `test_capability_based_routing_selects_only_declared_capability`. Live capability discovery/refresh remains separate metadata work. |
 | 31 | 🔴 | Model/Version-Aware Routing | PARTIAL | Router and catalog schema now support declared model IDs/versions and fail closed when metadata is absent; live model catalogs are not populated for enabled providers. |
 | 32 | 🔴 | User/Project Policy | PARTIAL | Project IDs and policy gates exist; complete user/project policy enforcement is not verified. |
 
@@ -83,9 +83,9 @@ GitHub Actions run [#38794819081](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 42 | 🟢 | Basic Success/Failure History | VERIFIED | Success/failure history persistence, bounded history and idempotent request recording are tested. |
 | 43 | 🟡 | Health Check Before Generation | VERIFIED | ProviderService forces health evidence for every generation execution; missing or stale health is rejected before adapter invocation. Tests: `test_generation_fails_closed_without_health_evidence_even_if_override_is_false`, `test_generation_rejects_stale_health_evidence_before_adapter_call`. |
 | 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
-| 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
+| 45 | 🔴 | Active Health Probes | VERIFIED | Bounded active probes classify success, timeout, network and probe failures; successful probes persist health state and are covered by `test_active_probe_success_recoveries_re_admit_provider`. Provider-specific live credential checks remain open under item 13. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
-| 47 | 🔴 | Provider Recovery Detection | OPEN | Automatic recovery detection and controlled re-admission are not fully integrated. |
+| 47 | 🔴 | Provider Recovery Detection | VERIFIED | A successful active probe resets an unhealthy provider to HEALTHY, after which health eligibility permits routing; regression test `test_active_probe_success_recoveries_re_admit_provider`. Periodic recovery scheduling remains open operational work. |
 | 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale health exclusion and malformed persisted-state checks exist; full health/consistency reconciliation is not complete. |
 
 ## G — Output and Asset Safety
@@ -124,7 +124,7 @@ GitHub Actions run [#38794819081](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 68 | 🔴 | Provider Permissions and Allowed Operations | PARTIAL | Catalog capabilities and OAuth scope checks exist; operation-level authorization coverage is incomplete. |
 | 69 | 🔴 | Sensitive-Data Detection and Privacy Enforcement | OPEN | Sensitive-data detection and policy enforcement are not complete. |
 | 70 | 🔴 | Data Retention and Provider Data-Handling Rules | OPEN | Provider-specific retention/data-handling policy enforcement is not complete. |
-| 71 | 🔴 | Provider Endpoint Allowlisting and Network Security | PARTIAL | HTTPS host allowlists, redirect rejection and bounded reads are tested; deployment threat-model review remains open. |
+| 71 | 🔴 | Provider Endpoint Allowlisting and Network Security | VERIFIED | HTTPS-only policy, host allowlists, embedded-credential/query rejection, non-public-address controls, redirect rejection and bounded reads are covered by connection-manager and HTTP-probe tests. Deployment-specific threat-model review remains a release gate. |
 | 72 | 🔴 | Routing, Credential and Approval Audit Logs | PARTIAL | Some cost/state ledgers exist; complete immutable routing/credential/approval audit trail is not verified. |
 
 ## J — Production Orchestration
@@ -170,7 +170,7 @@ GitHub Actions run [#38794819081](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 354-test cross-platform suite covers helper/routing, metrics, concurrency, health-gated execution and error-specific retry paths; exact item-level coverage matrix remains incomplete. |
+| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 357-test cross-platform suite covers helper/routing, metrics, concurrency, health-gated execution, capability routing and error-specific retry paths; exact item-level coverage matrix remains incomplete. |
 | 98 | 🟢 | Mock Provider Fallback Integration Test | VERIFIED | Mock/fallback integration regression coverage passes in the cross-platform suite. |
 | 99 | 🔴 | PRIMARY_ONLY and Fallback-Disabled Regression Tests | VERIFIED | PRIMARY_ONLY and automatic-fallback-disabled regression cases now have explicit tests. |
 | 100 | 🟡 | Retry, Backoff and Timeout Tests | VERIFIED | Retry, backoff, Retry-After, timeout and invalid numeric inputs are covered by regression tests. |
@@ -181,7 +181,7 @@ GitHub Actions run [#38794819081](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 354 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 357 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
