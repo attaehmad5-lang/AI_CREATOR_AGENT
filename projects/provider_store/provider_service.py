@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        budget_alert_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -33,6 +34,7 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (budget_alert_manager, "evaluate_project", "budget_alert_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -45,6 +47,7 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.budget_alert_manager = budget_alert_manager
 
     def verify_provider(
         self,
@@ -674,6 +677,20 @@ class ProviderService:
                 )
             except Exception as exc:
                 health_result = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
+        budget_alert_result: dict[str, Any] | None = None
+        if (
+            self.budget_alert_manager is not None
+            and self.cost_policy is not None
+            and isinstance(cost_result, dict)
+            and cost_result.get("saved") is True
+        ):
+            try:
+                budget_alert_result = self.budget_alert_manager.evaluate_project(project_id)
+            except Exception as exc:
+                budget_alert_result = {
+                    "status": "BUDGET_ALERT_EVALUATION_FAILED",
+                    "error_type": type(exc).__name__,
+                }
         finalized = (
             (cost_result is None or cost_result.get("saved") is True)
             and (quota_result is None or quota_result.get("committed") is True or quota_result.get("status") == "ALREADY_COMMITTED")
@@ -687,6 +704,7 @@ class ProviderService:
             "quota": quota_result,
             "credits": credit_result,
             "health": health_result,
+            "budget_alerts": budget_alert_result,
         }
 
     def release_unstarted_request(
