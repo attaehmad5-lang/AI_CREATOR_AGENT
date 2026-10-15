@@ -58,11 +58,17 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         return b"RIFF" + struct.pack("<I", len(body)) + body
 
     @staticmethod
-    def mp4_bytes(codec="avc1", timescale=1000, duration=2000):
+    def mp4_bytes(codec="avc1", timescale=1000, duration=2000, width=320, height=240):
         def box(kind, payload):
             return struct.pack(">I", 8 + len(payload)) + kind + payload
-        mvhd = b"\x00\x00\x00\x00" + struct.pack(">IIII", 0, 0, timescale, duration)
-        stsd = b"\x00\x00\x00\x00" + struct.pack(">I", 1) + struct.pack(">I", 8) + codec.encode("ascii")
+        mvhd = bytes(4) + struct.pack(">IIII", 0, 0, timescale, duration)
+        entry_body = (
+            bytes(6) + struct.pack(">H", 1) + bytes(16)
+            + struct.pack(">HH", width, height) + bytes(8) + bytes(4)
+            + struct.pack(">H", 1) + bytes(32) + struct.pack(">HH", 24, 0)
+        )
+        sample_entry = struct.pack(">I", 8 + len(entry_body)) + codec.encode("ascii") + entry_body
+        stsd = bytes(4) + struct.pack(">I", 1) + sample_entry
         return box(b"ftyp", b"isom" + bytes(4)) + box(b"moov", box(b"mvhd", mvhd) + box(b"stsd", stsd))
 
     def test_valid_image_signature_returns_hash_and_metadata(self):
@@ -125,7 +131,9 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             return element_id + bytes((0x80 | len(value),)) + value
         scale = element(bytes((0x2A, 0xD7, 0xB1)), timecode_scale.to_bytes(3, "big"))
         duration_element = element(bytes((0x44, 0x89)), struct.pack(">d", duration * 1_000_000_000 / timecode_scale))
-        return bytes((0x1A, 0x45, 0xDF, 0xA3)) + scale + duration_element + codec.encode("ascii")
+        width = element(bytes((0xB0,)), (320).to_bytes(2, "big"))
+        height = element(bytes((0xBA,)), (240).to_bytes(2, "big"))
+        return bytes((0x1A, 0x45, 0xDF, 0xA3)) + scale + duration_element + width + height + codec.encode("ascii")
 
     @staticmethod
     def mp3_bytes(frame_count=2):
@@ -195,6 +203,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         self.assertTrue(result["valid"], result)
         self.assertEqual(result["codec"], "vp9")
         self.assertEqual(result["duration_seconds"], 2.0)
+        self.assertEqual((result["width"], result["height"]), (320, 240))
         short_limit = ProviderOutputValidator(max_size_bytes=1024, max_media_duration_seconds=1)
         self.assertEqual(short_limit.validate_file(path, modality="video")["status"], "MEDIA_DURATION_LIMIT_EXCEEDED")
         codec_limit = ProviderOutputValidator(max_size_bytes=1024, allowed_video_codecs={"avc1"})
@@ -256,6 +265,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         self.assertTrue(result["valid"], result)
         self.assertEqual(result["codec"], "avc1")
         self.assertEqual(result["duration_seconds"], 2.0)
+        self.assertEqual((result["width"], result["height"]), (320, 240))
         short_limit = ProviderOutputValidator(max_size_bytes=1024, max_media_duration_seconds=1)
         self.assertEqual(short_limit.validate_file(path, modality="video")["status"], "MEDIA_DURATION_LIMIT_EXCEEDED")
         codec_limit = ProviderOutputValidator(max_size_bytes=1024, allowed_video_codecs={"av01"})
