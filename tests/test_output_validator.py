@@ -108,6 +108,50 @@ class ProviderOutputValidatorTests(unittest.TestCase):
                     "IMAGE_PIXEL_LIMIT_EXCEEDED",
                 })
 
+    @staticmethod
+    def flac_bytes(sample_rate=44100, channels=2, bits_per_sample=16, total_samples=44100):
+        packed = (
+            (sample_rate << 44)
+            | ((channels - 1) << 41)
+            | ((bits_per_sample - 1) << 36)
+            | total_samples
+        )
+        streaminfo = bytes(10) + packed.to_bytes(8, "big") + bytes(16)
+        return b"fLaC" + bytes((0x80, 0, 0, 34)) + streaminfo
+
+    @staticmethod
+    def webm_bytes(codec="V_VP9", duration=2.0, timecode_scale=1_000_000):
+        def element(element_id, value):
+            return element_id + bytes((0x80 | len(value),)) + value
+        scale = element(bytes((0x2A, 0xD7, 0xB1)), timecode_scale.to_bytes(3, "big"))
+        duration_element = element(bytes((0x44, 0x89)), struct.pack(">d", duration))
+        return bytes((0x1A, 0x45, 0xDF, 0xA3)) + scale + duration_element + codec.encode("ascii")
+
+    def test_flac_streaminfo_duration_and_sample_rate_are_validated(self):
+        path = self.root / "song.flac"
+        path.write_bytes(self.flac_bytes(sample_rate=44100, total_samples=88200))
+        validator = ProviderOutputValidator(max_size_bytes=1024, max_media_duration_seconds=3)
+        result = validator.validate_file(path, modality="audio")
+        self.assertTrue(result["valid"], result)
+        self.assertEqual(result["codec"], "flac")
+        self.assertEqual(result["duration_seconds"], 2.0)
+        self.assertEqual(result["sample_rate"], 44100)
+        long_limit = ProviderOutputValidator(max_size_bytes=1024, max_media_duration_seconds=1)
+        self.assertEqual(long_limit.validate_file(path, modality="audio")["status"], "MEDIA_DURATION_LIMIT_EXCEEDED")
+
+    def test_webm_duration_and_codec_constraints(self):
+        path = self.root / "clip.webm"
+        path.write_bytes(self.webm_bytes(codec="V_VP9", duration=2.0))
+        validator = ProviderOutputValidator(max_size_bytes=1024, max_media_duration_seconds=3)
+        result = validator.validate_file(path, modality="video")
+        self.assertTrue(result["valid"], result)
+        self.assertEqual(result["codec"], "vp9")
+        self.assertEqual(result["duration_seconds"], 2.0)
+        short_limit = ProviderOutputValidator(max_size_bytes=1024, max_media_duration_seconds=1)
+        self.assertEqual(short_limit.validate_file(path, modality="video")["status"], "MEDIA_DURATION_LIMIT_EXCEEDED")
+        codec_limit = ProviderOutputValidator(max_size_bytes=1024, allowed_video_codecs={"avc1"})
+        self.assertEqual(codec_limit.validate_file(path, modality="video")["status"], "MEDIA_CODEC_NOT_ALLOWED")
+
     def test_media_duration_limit_50_case_matrix(self):
         validator = ProviderOutputValidator(max_size_bytes=5000, max_media_duration_seconds=0.1)
         valid_sizes = [index * 8 for index in range(1, 26)]
