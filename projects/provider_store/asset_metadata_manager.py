@@ -146,7 +146,9 @@ class AssetMetadataManager:
                 return {"saved": False, "status": "ASSET_METADATA_STORE_INVALID"}
             existing = loaded["assets"].get(asset_id)
             if existing is not None:
-                if existing == record:
+                comparable_existing = {key: value for key, value in existing.items() if key != "created_at"}
+                comparable_record = {key: value for key, value in record.items() if key != "created_at"}
+                if comparable_existing == comparable_record:
                     return {"saved": True, "status": "ALREADY_RECORDED", "asset_id": asset_id, "record": copy.deepcopy(existing)}
                 return {"saved": False, "status": "ASSET_METADATA_CONFLICT", "asset_id": asset_id}
             loaded["assets"][asset_id] = record
