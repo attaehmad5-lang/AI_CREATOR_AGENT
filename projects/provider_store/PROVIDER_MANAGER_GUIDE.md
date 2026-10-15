@@ -92,3 +92,8 @@ Live provider API/account probes, provider-specific OAuth registration/token-ref
 ## Paid usage approvals
 
 `paid_approval_manager.py` persists request-scoped approval records. Requests start as `PENDING`; an injected trusted authorizer must approve/revoke them. `ProviderCostPolicy` requires a valid approval ID matching project, provider, request ID, unit, maximum amount and expiry. Caller-supplied booleans or provider-name sets are not authorization. If the application does not inject an authorizer, paid approval actions fail closed. Production must connect this callback to its authenticated identity/RBAC layer.
+
+
+## Per-request and project budgets
+
+`ProviderCostPolicy` accepts `project_budgets` for aggregate project spend and `per_request_budgets` for the maximum estimated cost of any single request within a project. Both request evaluation and reservation enforce the cap. If the provider actually charges more than the cap, reconciliation still records the real amount and returns `REQUEST_BUDGET_OVERRUN`; it does not discard a real charge. Tenant/user-specific limits require an additional identity-aware policy layer.
