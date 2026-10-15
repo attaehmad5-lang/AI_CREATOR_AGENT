@@ -1,12 +1,12 @@
 # Task #25 — Canonical 138-Item Verification Ledger
 
-**Overall status: IN PROGRESS — do not mark Task #25 complete and do not merge PR #7 without explicit approval.**
+**Overall status: IN PROGRESS — do not mark Task #25 complete. PR #7 is already merged; the current metrics/concurrency follow-up is draft PR #46 and must not be merged without explicit approval.**
 
 This file preserves the user's original A–P headings, feature numbers, feature names and baseline status markers. The **Baseline** column is the user's original 🟢/🟡/🔴 status; it is not the current implementation result. **Current audit** is independently evidence-based. A green baseline does not automatically mean the feature is verified today.
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38793101402](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38793101402): **350 tests passed on Ubuntu and 350 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite includes safe persistent execution metrics, trace propagation, bounded per-provider concurrency/backpressure, latency-aware routing, cross-process metrics writes, and overflow-safe latency aggregation.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -131,10 +131,10 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 73 | 🔴 | Unique Request ID and Trace ID | PARTIAL | Request IDs and duplicate protection exist; distributed trace propagation is incomplete. |
+| 73 | 🔴 | Unique Request ID and Trace ID | PARTIAL | ProviderService validates or generates trace IDs and propagates them to adapters that accept the trace keyword; persistent request/trace metrics are covered. Full distributed trace propagation across every adapter and backend remains open. |
 | 74 | 🔴 | Idempotency and Duplicate Prevention | PARTIAL | Manager-level idempotency is tested; full external-provider request idempotency is not verified. |
 | 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | Cross-process reservations and locking are tested; worker pools and provider-specific concurrency limits are incomplete. |
-| 76 | 🔴 | Queue, Backpressure and Overload Handling | OPEN | Queue/backpressure orchestration is not implemented end-to-end. |
+| 76 | 🔴 | Queue, Backpressure and Overload Handling | PARTIAL | Bounded in-process waiting, queue timeouts, queued cancellation and overload rejection are tested; durable/distributed queue orchestration remains open. |
 | 77 | 🔴 | Async/Long-Running Job and Polling Support | OPEN | Asynchronous job lifecycle/polling is not implemented end-to-end. |
 | 78 | 🔴 | Webhook/Callback Verification | OPEN | Provider webhook/callback verification is not implemented. |
 | 79 | 🔴 | Cancellation, Deadlines and Graceful Shutdown | PARTIAL | Timeout handling exists; cancellation/deadline/shutdown propagation remains incomplete. |
@@ -144,13 +144,13 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 81 | 🔴 | Latency-Aware Routing | PARTIAL | Health latency data exists; verified latency-aware routing policy coverage is incomplete. |
-| 82 | 🔴 | Provider Success/Error-Rate Metrics | PARTIAL | Health history contains success/failure events; production metric aggregation is incomplete. |
+| 81 | 🔴 | Latency-Aware Routing | VERIFIED | HEALTHIEST_FIRST deterministically selects the eligible provider with the lowest recorded latency; regression test `test_healthiest_first_routes_to_lowest_verified_latency`. |
+| 82 | 🔴 | Provider Success/Error-Rate Metrics | VERIFIED | Process-safe persistent execution metrics aggregate request, success/failure, success-rate and latency summaries; idempotency, bounded retention, concurrent process writes and ProviderService integration are tested. |
 | 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | OPEN | Throughput/queue-wait telemetry is not implemented. |
 | 84 | 🔴 | Output Quality Validation/Score Integration | OPEN | Output quality scoring is not integrated with routing/execution. |
 | 85 | 🔴 | Task-Specific Quality Thresholds | OPEN | Task-specific quality threshold policy is not implemented. |
 | 86 | 🔴 | Provider/Model Benchmarking | OPEN | Repeatable provider/model benchmark suite is not implemented. |
-| 87 | 🔴 | Structured Logs, Metrics and Distributed Traces | PARTIAL | Some structured status metadata exists; end-to-end metrics/tracing is incomplete. |
+| 87 | 🔴 | Structured Logs, Metrics and Distributed Traces | PARTIAL | Safe structured metric events and trace IDs now exist; distributed trace export, complete application logs, alerts and dashboards remain open. |
 | 88 | 🔴 | Alerts, Dashboards and Incident Diagnostics | OPEN | Alerting/dashboard/incident tooling is not implemented end-to-end. |
 
 ## L — Configuration, Compatibility and Change Control
@@ -170,7 +170,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 303-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
+| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 350-test cross-platform suite covers helper/routing, metrics and concurrency paths; exact item-level coverage matrix remains incomplete. |
 | 98 | 🟢 | Mock Provider Fallback Integration Test | VERIFIED | Mock/fallback integration regression coverage passes in the cross-platform suite. |
 | 99 | 🔴 | PRIMARY_ONLY and Fallback-Disabled Regression Tests | VERIFIED | PRIMARY_ONLY and automatic-fallback-disabled regression cases now have explicit tests. |
 | 100 | 🟡 | Retry, Backoff and Timeout Tests | VERIFIED | Retry, backoff, Retry-After, timeout and invalid numeric inputs are covered by regression tests. |
@@ -181,7 +181,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 303 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 350 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
@@ -232,6 +232,6 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 1. Every one of the 138 items must be reviewed against its original wording; do not infer or rename features.
 2. Any `PARTIAL` or `OPEN` item must remain uncompleted until its implementation, tests and required live/operational evidence exist.
-3. The 303 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
+3. The 350 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
 4. The account-balance adapter is generic. It must be configured only with a provider-documented endpoint and a field representing actual available credits; never mistake a per-key budget cap for free credits.
 5. Task #29 Generation State Manager remains paused and must not be started as a separate task during this Task #25 work.
