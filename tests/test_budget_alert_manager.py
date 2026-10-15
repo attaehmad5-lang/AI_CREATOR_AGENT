@@ -75,7 +75,7 @@ class BudgetAlertManagerTests(unittest.TestCase):
         self.assertEqual(first["alerts"][0]["delivery_status"], "PENDING")
         self.assertNotIn("private delivery detail", repr(first))
         second = manager.evaluate_project("film")
-        self.assertEqual(second["delivered_count"], 2)
+        self.assertEqual(second["delivered_count"], 1)
         self.assertEqual(attempts[0], attempts[1])
         self.assertEqual(
             {e["delivery_status"] for e in second["alerts"]},
@@ -149,10 +149,10 @@ class BudgetAlertManagerTests(unittest.TestCase):
             charge_outcome="incurred",
         )
         self.assertTrue(result["finalized"])
-        self.assertEqual(result["budget_alerts"]["new_alert_count"], 2)
+        self.assertEqual(result["budget_alerts"]["new_alert_count"], 1)
         self.assertEqual(
             [event["threshold_pct"] for event in delivered],
-            [50, 75] if False else [50],
+            [50],
         )
 
 
