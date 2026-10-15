@@ -109,6 +109,8 @@ class ProviderOutputValidator:
                 or not (65 <= chunk_type[2] <= 90)
             ):
                 return None
+            if 65 <= chunk_type[0] <= 90 and chunk_type not in {b"IHDR", b"PLTE", b"IDAT", b"IEND"}:
+                return None
             data_start = offset + 8
             crc_offset = data_start + length
             next_offset = crc_offset + 4
