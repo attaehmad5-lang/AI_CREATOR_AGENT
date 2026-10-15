@@ -8,7 +8,7 @@ import os
 import re
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -189,7 +189,13 @@ class ProviderMetricsManager:
             self._save_unlocked()
         return {"status": "METRIC_RECORDED", "saved": True, "request_id": request_id}
 
-    def summary(self, *, provider_id: str | None = None, modality: str | None = None) -> dict[str, Any]:
+    def summary(
+        self, *, provider_id: str | None = None, modality: str | None = None,
+        window_seconds: float = 300.0,
+    ) -> dict[str, Any]:
+        window = finite_number(window_seconds, minimum=0)
+        if window is None or window <= 0:
+            return {"status": "INVALID_METRICS_WINDOW"}
         if provider_id is not None and not self._valid_id(provider_id, max_length=120):
             return {"status": "INVALID_PROVIDER_ID"}
         if modality is not None and (
@@ -204,6 +210,18 @@ class ProviderMetricsManager:
                 if (provider_id is None or event["provider_id"] == provider_id)
                 and (modality is None or event["modality"] == modality)
             ]
+        try:
+            now = self.clock()
+            if not isinstance(now, datetime) or now.tzinfo is None:
+                return {"status": "INVALID_METRICS_CLOCK"}
+            now = now.astimezone(timezone.utc)
+        except Exception:
+            return {"status": "INVALID_METRICS_CLOCK"}
+        window_start = now - timedelta(seconds=window)
+        window_events = [
+            event for event in events
+            if window_start <= self._parse_timestamp(event["recorded_at"]) <= now
+        ]
         latencies = [float(event["latency_ms"]) for event in events]
         queue_waits = [
             float(event["queue_wait_ms"])
@@ -214,6 +232,18 @@ class ProviderMetricsManager:
         return {
             "status": "METRICS_SUMMARY",
             "request_count": count,
+            "window_seconds": window,
+            "window_request_count": len(window_events),
+            "throughput_per_second": len(window_events) / window,
+            "queue_timeout_count": sum(
+                1 for event in window_events if event["status"] == "EXECUTION_QUEUE_TIMEOUT"
+            ),
+            "capacity_rejected_count": sum(
+                1 for event in window_events if event["status"] == "EXECUTION_CAPACITY_REJECTED"
+            ),
+            "cancelled_count": sum(
+                1 for event in window_events if event["status"] == "EXECUTION_CANCELLED"
+            ),
             "success_count": successes,
             "failure_count": count - successes,
             "success_rate": (successes / count) if count else None,
