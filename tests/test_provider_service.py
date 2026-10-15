@@ -1,5 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 import tempfile
 import unittest
 from pathlib import Path
@@ -619,6 +620,35 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "ROUTING_REJECTED")
         self.assertEqual(result["route"]["status"], "HEALTH_DATA_REQUIRED")
+        self.assertEqual(called, [])
+
+    def test_generation_rejects_stale_health_evidence_before_adapter_call(self):
+        now = [datetime(2026, 10, 15, 12, 0, tzinfo=timezone.utc)]
+        stale_health = ProviderHealthManager(
+            self.root / "stale-routing-health.json", clock=lambda: now[0]
+        )
+        stale_health.record_result("image", success=True, latency_ms=5.0)
+        now[0] += timedelta(seconds=301)
+        router = ProviderRoutingManager(
+            self.connections, health_manager=stale_health,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="stale-health-evidence",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(True),
+            modality="image", require_health_evidence=False,
+        )
+        self.assertEqual(result["status"], "ROUTING_REJECTED")
+        self.assertTrue(any(
+            decision.get("status") == "STALE"
+            for decision in result["route"]["decisions"]
+        ))
         self.assertEqual(called, [])
 
     def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
