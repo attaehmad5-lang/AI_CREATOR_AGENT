@@ -53,6 +53,55 @@ class ProviderServiceTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_provider_admin_operations_are_gated_by_role_and_provider_scope(self):
+        service = ProviderService(
+            self.connections,
+            access_controller=ProviderAccessController(),
+        )
+        reader = {
+            "subject_id": "reader-1", "tenant_id": "tenant-a",
+            "roles": ["reader"], "project_ids": ["film"],
+        }
+        resource = {"provider_id": "image", "tenant_id": "tenant-a"}
+        configured = service.configure_provider(
+            "image", principal=reader, access_resource=resource,
+            model="new-model",
+        )
+        self.assertEqual(configured["status"], "ACCESS_DENIED")
+        self.assertFalse(configured["saved"])
+        disabled = service.set_provider_enabled(
+            "image", False, principal=reader, access_resource=resource
+        )
+        self.assertEqual(disabled["status"], "ACCESS_DENIED")
+        self.assertFalse(disabled["saved"])
+        registered = service.register_provider(
+            {
+                "id": "new-provider", "name": "New", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            },
+            principal=reader, access_resource=resource,
+        )
+        self.assertEqual(registered["status"], "ACCESS_RESOURCE_MISMATCH")
+        self.assertFalse(registered["saved"])
+        self.assertIsNone(self.connections.get_provider("new-provider"))
+
+    def test_provider_connection_scope_cannot_authorize_another_provider(self):
+        service = ProviderService(
+            self.connections,
+            access_controller=ProviderAccessController(),
+        )
+        calls = []
+        result = service.verify_provider(
+            "image", lambda provider, **kwargs: calls.append(True) or {"ok": True},
+            principal={
+                "subject_id": "operator-1", "tenant_id": "tenant-a",
+                "roles": ["operator"], "project_ids": ["film"],
+            },
+            access_resource={"provider_id": "other-provider", "tenant_id": "tenant-a"},
+        )
+        self.assertEqual(result["status"], "ACCESS_RESOURCE_MISMATCH")
+        self.assertEqual(calls, [])
+
     def test_routing_access_policy_denies_before_router_or_adapter(self):
         class SpyRouter:
             def __init__(self):
