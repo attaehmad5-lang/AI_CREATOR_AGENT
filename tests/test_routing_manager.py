@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from pathlib import Path
 
@@ -969,6 +970,24 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             )["status"],
             "INVALID_SIMULATION_OPTIONS",
         )
+
+    def test_round_robin_routing_balances_100_concurrent_requests(self):
+        router = ProviderRoutingManager(self.connections)
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            results = list(pool.map(
+                lambda _: router.route(
+                    category="image",
+                    project_id="film",
+                    strategy="ROUND_ROBIN",
+                ),
+                range(100),
+            ))
+        self.assertEqual(len(results), 100)
+        self.assertTrue(all(result["allowed"] for result in results))
+        counts = {}
+        for result in results:
+            counts[result["provider"]] = counts.get(result["provider"], 0) + 1
+        self.assertEqual(counts, {"primary": 50, "fallback": 50})
 
     def test_invalid_route_inputs_and_missing_health_evidence_fail_closed(self):
         router = ProviderRoutingManager(self.connections)
