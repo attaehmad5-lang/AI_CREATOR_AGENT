@@ -433,6 +433,13 @@ class ProviderRoutingManager:
             cost = provider["_route_cost"]
             credit = credits.get(provider_id, 0.0)
             billing_mode = None
+            if (
+                cost > 0 and self.cost_policy is not None
+                and not (self.credit_manager is not None and credit >= cost)
+                and (not isinstance(request_id, str) or not request_id.strip())
+            ):
+                decisions.append({"provider": provider_id, "status": "COST_RESERVATION_REQUEST_ID_REQUIRED"})
+                continue
             if cost == 0:
                 if self.cost_policy is not None:
                     try:
