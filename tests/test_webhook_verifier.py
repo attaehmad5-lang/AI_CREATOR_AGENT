@@ -80,13 +80,16 @@ class ProviderWebhookVerifierTests(unittest.TestCase):
             self.root / "secret-errors.json",
             secret_resolver=lambda provider: (_ for _ in ()).throw(RuntimeError("private detail")),
         )
-        result = broken.verify("provider-a", b"event", "0" * 64, "1000", now=1000)
-        self.assertEqual(result["status"], "SIGNATURE_MISMATCH")
-        # Signature format/age checks precede credential use; a valid signature exercises lookup.
+        # A valid signature exercises secret resolution; error text must stay hidden.
         sig = ProviderWebhookVerifier.signature_for(self.secret, "1000", b"event")
         result = broken.verify("provider-a", b"event", sig, "1000", now=1000)
         self.assertEqual(result["status"], "SECRET_LOOKUP_FAILED")
         self.assertNotIn("private detail", repr(result))
+        missing = ProviderWebhookVerifier(
+            self.root / "missing-secret.json", secret_resolver=lambda provider: None
+        )
+        result = missing.verify("provider-a", b"event", sig, "1000", now=1000)
+        self.assertEqual(result["status"], "SECRET_UNAVAILABLE")
 
     def test_body_size_and_signature_format_are_rejected(self):
         verifier = ProviderWebhookVerifier(
