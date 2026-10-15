@@ -510,6 +510,8 @@ class ProviderServiceTests(unittest.TestCase):
         summary = metrics.summary(provider_id="image", modality="image")
         self.assertEqual(summary["request_count"], 1)
         self.assertEqual(summary["success_count"], 1)
+        self.assertEqual(summary["queue_wait_sample_count"], 1)
+        self.assertEqual(summary["average_queue_wait_ms"], 0.0)
 
     def test_generated_trace_ids_are_unique_and_reach_compatible_adapters(self):
         router = ProviderRoutingManager(
