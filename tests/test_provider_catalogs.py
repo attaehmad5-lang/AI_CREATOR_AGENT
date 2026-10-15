@@ -277,7 +277,9 @@ class ProviderCatalogValidationTests(unittest.TestCase):
             "edit_image", "upscale_image", "upscale_video", "generate_lipsync", "edit_video",
         )
         adapter = type("CompleteTestAdapter", (), {
-            method: (lambda self, *args, **kwargs: None) for method in required_methods
+            "API_VERSION": "1.0",
+            "adapter_api_version": "1.0",
+            **{method: (lambda self, *args, **kwargs: None) for method in required_methods},
         })()
         with tempfile.TemporaryDirectory() as temporary:
             temp = Path(temporary)
