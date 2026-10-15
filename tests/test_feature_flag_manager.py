@@ -30,14 +30,14 @@ class ProviderFeatureFlagManagerTests(unittest.TestCase):
     def test_project_allow_deny_scopes_and_kill_switch(self):
         self.manager.set_flag(
             "new_router", enabled=True, rollout_percent=100,
-            allowed_projects=["film", "shorts"], denied_projects=["shorts"],
+            allowed_projects=["film"], denied_projects=["shorts"],
         )
         self.assertTrue(self.manager.evaluate("new_router", project_id="film")["enabled"])
         self.assertEqual(self.manager.evaluate("new_router", project_id="other")["status"], "PROJECT_NOT_ALLOWLISTED")
         self.assertEqual(self.manager.evaluate("new_router", project_id="shorts")["status"], "PROJECT_DENIED")
         self.manager.set_flag(
             "new_router", enabled=False, rollout_percent=100,
-            allowed_projects=["film", "shorts"], denied_projects=["shorts"],
+            allowed_projects=["film"], denied_projects=["shorts"],
         )
         self.assertEqual(self.manager.evaluate("new_router", project_id="film")["status"], "FLAG_DISABLED")
 
