@@ -87,3 +87,8 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+
+## Paid usage approvals
+
+`paid_approval_manager.py` persists request-scoped approval records. Requests start as `PENDING`; an injected trusted authorizer must approve/revoke them. `ProviderCostPolicy` requires a valid approval ID matching project, provider, request ID, unit, maximum amount and expiry. Caller-supplied booleans or provider-name sets are not authorization. If the application does not inject an authorizer, paid approval actions fail closed. Production must connect this callback to its authenticated identity/RBAC layer.
