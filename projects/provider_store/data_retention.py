@@ -141,6 +141,8 @@ class ProviderDataRetentionPolicy:
         ):
             return {"status": "INVALID_RETENTION_PERIOD", "kept": [], "purged": 0, "invalid_timestamp_purged": 0}
         current = now or datetime.now(timezone.utc)
+        if not isinstance(current, datetime):
+            return {"status": "INVALID_CURRENT_TIME", "kept": [], "purged": 0, "invalid_timestamp_purged": 0}
         if current.tzinfo is None or current.utcoffset() is None:
             return {"status": "INVALID_CURRENT_TIME", "kept": [], "purged": 0, "invalid_timestamp_purged": 0}
         current = current.astimezone(timezone.utc)
