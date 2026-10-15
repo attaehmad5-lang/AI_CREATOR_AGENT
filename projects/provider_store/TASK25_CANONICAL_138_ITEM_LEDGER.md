@@ -85,7 +85,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
 | 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
-| 47 | 🔴 | Provider Recovery Detection | OPEN | Automatic recovery detection and controlled re-admission are not fully integrated. |
+| 47 | 🔴 | Provider Recovery Detection | PARTIAL | `ProviderHealthManager.active_probe()` now requires two consecutive successful probes by default before an unhealthy provider is re-admitted; failed probes reset the streak. Regression tests cover pending recovery, failed-streak reset, and re-admission. Automatic probe scheduling and live provider recovery evidence remain open. |
 | 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale health exclusion and malformed persisted-state checks exist; full health/consistency reconciliation is not complete. |
 
 ## G — Output and Asset Safety
@@ -144,7 +144,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 81 | 🔴 | Latency-Aware Routing | PARTIAL | Health latency data exists; verified latency-aware routing policy coverage is incomplete. |
+| 81 | 🔴 | Latency-Aware Routing | VERIFIED | `HEALTHIEST_FIRST` sorts eligible providers by persisted measured latency; a regression test verifies the lowest-latency provider is selected. Live latency sampling and adaptive policy remain separate requirements. |
 | 82 | 🔴 | Provider Success/Error-Rate Metrics | PARTIAL | Health history contains success/failure events; production metric aggregation is incomplete. |
 | 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | OPEN | Throughput/queue-wait telemetry is not implemented. |
 | 84 | 🔴 | Output Quality Validation/Score Integration | OPEN | Output quality scoring is not integrated with routing/execution. |
