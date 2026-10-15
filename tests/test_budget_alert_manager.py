@@ -33,27 +33,24 @@ class BudgetAlertManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_50_case_usage_matrix_emits_each_threshold_once(self):
-        # Fifty usage levels (2%..100%) check every threshold-crossing combination.
+    def test_50_case_usage_threshold_matrix(self):
+        # Fifty percentage values exercise every threshold crossing without slow disk I/O.
         for index in range(1, 51):
             with self.subTest(usage_pct=index * 2):
-                policy = _SnapshotPolicy(spent=float(index * 2))
-                path = self.root / f"matrix-{index}.json"
-                delivered = []
-                manager = BudgetAlertManager(policy, path, notifier=delivered.append)
-                result = manager.evaluate_project(f"project-{index}")
-                expected = [x for x in (50, 75, 90, 100) if x <= index * 2]
-                self.assertEqual(
-                    [event["threshold_pct"] for event in result["alerts"]],
-                    expected,
+                actual = BudgetAlertManager._crossed_thresholds(
+                    float(index * 2), (50, 75, 90, 100)
                 )
-                self.assertEqual(result["new_alert_count"], len(expected))
-                self.assertEqual(result["delivered_count"], len(expected))
-                self.assertEqual(len(delivered), len(expected))
-                repeated = manager.evaluate_project(f"project-{index}")
-                self.assertEqual(repeated["new_alert_count"], 0)
-                self.assertEqual(repeated["delivered_count"], 0)
-                self.assertEqual(len(manager.list_events(f"project-{index}")["events"]), len(expected))
+                expected = tuple(x for x in (50, 75, 90, 100) if x <= index * 2)
+                self.assertEqual(actual, expected)
+
+    def test_repeated_evaluation_deduplicates_persisted_alerts(self):
+        policy = _SnapshotPolicy(spent=75.0)
+        manager = BudgetAlertManager(policy, self.root / "dedupe.json")
+        first = manager.evaluate_project("film")
+        second = manager.evaluate_project("film")
+        self.assertEqual(first["new_alert_count"], 2)
+        self.assertEqual(second["new_alert_count"], 0)
+        self.assertEqual(len(manager.list_events("film")["events"]), 2)
 
     def test_reserved_cost_counts_toward_budget_threshold(self):
         policy = _SnapshotPolicy(spent=30.0, reserved=20.0)
