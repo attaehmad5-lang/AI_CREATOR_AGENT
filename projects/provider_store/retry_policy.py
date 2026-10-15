@@ -85,23 +85,40 @@ class RetryPolicy:
             return RetryDecision(False, attempt, 0.0, "INVALID_IDEMPOTENCY_FLAG")
         if exception is not None:
             if status_code is None:
-                try:
-                    candidate_status = getattr(exception, "status_code", None)
-                except Exception:
-                    candidate_status = None
-                if (
-                    isinstance(candidate_status, int)
-                    and not isinstance(candidate_status, bool)
-                    and 100 <= candidate_status <= 599
-                ):
-                    status_code = candidate_status
+                for attribute in ("status_code", "http_status", "status"):
+                    try:
+                        candidate_status = getattr(exception, attribute, None)
+                    except Exception:
+                        candidate_status = None
+                    if (
+                        isinstance(candidate_status, int)
+                        and not isinstance(candidate_status, bool)
+                        and 100 <= candidate_status <= 599
+                    ):
+                        status_code = candidate_status
+                        break
             if retry_after is None:
                 try:
                     candidate_retry_after = getattr(exception, "retry_after", None)
                 except Exception:
                     candidate_retry_after = None
+                if candidate_retry_after is None:
+                    try:
+                        headers = getattr(exception, "headers", None)
+                        candidate_retry_after = (
+                            headers.get("Retry-After") or headers.get("retry-after")
+                            if hasattr(headers, "get") else None
+                        )
+                    except Exception:
+                        candidate_retry_after = None
                 if isinstance(candidate_retry_after, (str, int, float)) and not isinstance(candidate_retry_after, bool):
                     retry_after = candidate_retry_after
+            try:
+                provider_retryable = getattr(exception, "retryable", None)
+            except Exception:
+                provider_retryable = None
+            if provider_retryable is False:
+                return RetryDecision(False, attempt, 0.0, "PROVIDER_MARKED_NON_RETRYABLE")
         if status_code is not None and (
             not isinstance(status_code, int) or isinstance(status_code, bool)
             or status_code < 100 or status_code > 599
@@ -111,7 +128,9 @@ class RetryPolicy:
             return RetryDecision(False, attempt, 0.0, "NON_IDEMPOTENT_REQUEST")
         if status_code in {401, 403}:
             return RetryDecision(False, attempt, 0.0, "AUTHORIZATION_FAILURE")
-        retryable_status = status_code == 429 or (status_code is not None and 500 <= status_code <= 599)
+        # Retry only statuses that are conventionally transient. Some 5xx
+        # responses (for example 501/505) describe permanent incompatibility.
+        retryable_status = status_code in {408, 425, 429, 500, 502, 503, 504}
         retryable_exception = isinstance(exception, (TimeoutError, ConnectionError, OSError))
         if not retryable_status and not retryable_exception:
             return RetryDecision(False, attempt, 0.0, "NON_RETRYABLE_FAILURE")
