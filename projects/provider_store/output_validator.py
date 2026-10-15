@@ -210,6 +210,87 @@ class ProviderOutputValidator:
         }
 
     @staticmethod
+    def _flac_properties(payload: bytes) -> dict[str, Any] | None:
+        if len(payload) < 42 or payload[:4] != b"fLaC":
+            return None
+        block_header = payload[4]
+        if (block_header & 0x7F) != 0 or int.from_bytes(payload[5:8], "big") != 34:
+            return None
+        streaminfo = payload[8:42]
+        packed = int.from_bytes(streaminfo[10:18], "big")
+        sample_rate = packed >> 44
+        channels = ((packed >> 41) & 0x7) + 1
+        bits_per_sample = ((packed >> 36) & 0x1F) + 1
+        total_samples = packed & ((1 << 36) - 1)
+        if not 1 <= sample_rate <= 384000 or not 1 <= channels <= 8 or bits_per_sample not in {8, 16, 20, 24, 32} or total_samples <= 0:
+            return None
+        return {
+            "duration_seconds": total_samples / sample_rate,
+            "codec": "flac",
+            "sample_rate": sample_rate,
+            "channels": channels,
+            "bits_per_sample": bits_per_sample,
+        }
+
+    @staticmethod
+    def _ebml_element(payload: bytes, element_id: bytes) -> bytes | None:
+        index = payload.find(element_id)
+        if index < 0 or index + len(element_id) + 1 > len(payload):
+            return None
+        size_index = index + len(element_id)
+        first = payload[size_index]
+        mask = 0x80
+        size_length = 1
+        while size_length <= 8 and not first & mask:
+            mask >>= 1
+            size_length += 1
+        if size_length > 8 or size_index + size_length > len(payload):
+            return None
+        value_size = first & (mask - 1)
+        for byte in payload[size_index + 1:size_index + size_length]:
+            value_size = (value_size << 8) | byte
+        start = size_index + size_length
+        end = start + value_size
+        if end > len(payload):
+            return None
+        return payload[start:end]
+
+    @classmethod
+    def _webm_properties(cls, payload: bytes, modality: str) -> dict[str, Any] | None:
+        if not payload.startswith(b"\\x1a\\x45\\xdf\\xa3"):
+            return None
+        scale_bytes = cls._ebml_element(payload, b"\\x2a\\xd7\\xb1")
+        duration_bytes = cls._ebml_element(payload, b"\\x44\\x89")
+        if scale_bytes is None or duration_bytes not in (None, b""):
+            # Duration is expected to be an IEEE-754 float, not an integer.
+            pass
+        if scale_bytes is None or duration_bytes is None or len(scale_bytes) not in range(1, 9) or len(duration_bytes) not in {4, 8}:
+            return None
+        scale = int.from_bytes(scale_bytes, "big")
+        try:
+            duration_units = __import__("struct").unpack(">f" if len(duration_bytes) == 4 else ">d", duration_bytes)[0]
+        except Exception:
+            return None
+        duration = duration_units * scale / 1_000_000_000
+        if scale <= 0 or not duration > 0:
+            return None
+        if modality == "video":
+            codec_map = ((b"V_VP8", "vp8"), (b"V_VP9", "vp9"), (b"V_AV1", "av1"))
+        else:
+            codec_map = ((b"A_OPUS", "opus"), (b"A_VORBIS", "vorbis"))
+        codec = next((name for token, name in codec_map if token in payload), None)
+        if codec is None:
+            return None
+        result: dict[str, Any] = {"duration_seconds": duration, "codec": codec}
+        if modality == "video":
+            width_bytes = cls._ebml_element(payload, b"\\xb0")
+            height_bytes = cls._ebml_element(payload, b"\\xba")
+            if width_bytes is not None and height_bytes is not None:
+                result["width"] = int.from_bytes(width_bytes, "big")
+                result["height"] = int.from_bytes(height_bytes, "big")
+        return result
+
+    @staticmethod
     def _avi_properties(payload: bytes, total_size: int) -> dict[str, Any] | None:
         if len(payload) < 12 or payload[:4] != b"RIFF" or payload[8:12] != b"AVI ":
             return None
@@ -316,6 +397,12 @@ class ProviderOutputValidator:
     def _media_properties(self, mime: str, payload: bytes, total_size: int, modality: str) -> dict[str, Any] | None:
         if mime == "audio/wav":
             return self._wav_properties(payload, total_size)
+        if mime == "audio/flac":
+            return self._flac_properties(payload)
+        if mime == "audio/ogg":
+            return None
+        if mime == "video/webm":
+            return self._webm_properties(payload, modality)
         if mime == "video/avi":
             return self._avi_properties(payload, total_size)
         if mime in {"audio/mp4", "video/mp4"}:
