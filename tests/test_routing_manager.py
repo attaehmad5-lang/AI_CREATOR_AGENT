@@ -327,6 +327,69 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["billing_mode"], "FREE_CREDITS")
         self.assertTrue(result["credit_reserved"])
 
+    def test_free_credit_first_selection_50_case_balance_matrix(self):
+        # All candidates have a verified, unit-compatible balance sufficient for
+        # this request. Highest available balance wins; ties use provider priority.
+        for index in range(50):
+            with self.subTest(case=index):
+                credits = ProviderCreditManager(self.root / f"free-first-matrix-{index}.json")
+                primary_balance = float(1 + index % 13)
+                fallback_balance = float(1 + (index * 7 + 3) % 13)
+                for provider_id, amount in (
+                    ("primary", primary_balance), ("fallback", fallback_balance)
+                ):
+                    refreshed = credits.refresh(
+                        provider_id,
+                        lambda _, amount=amount: {
+                            "verified": True, "free_credits_remaining": amount,
+                            "unit": "USD", "source": "official-account-api",
+                        },
+                    )
+                    self.assertEqual(refreshed["status"], "CREDIT_BALANCE_UPDATED")
+                policy = ProviderCostPolicy(project_budgets={"film": 100.0})
+                router = ProviderRoutingManager(
+                    self.connections, cost_policy=policy, credit_manager=credits
+                )
+                result = router.route(
+                    category="image", project_id="film", estimated_cost=1.0,
+                    estimated_cost_unit="USD", strategy="FREE_CREDITS_FIRST",
+                    request_id=f"free-first-matrix-{index}",
+                )
+                expected = (
+                    "fallback" if fallback_balance > primary_balance else "primary"
+                )
+                self.assertTrue(result["allowed"], result)
+                self.assertEqual(result["provider"], expected)
+                self.assertEqual(result["billing_mode"], "FREE_CREDITS")
+                self.assertTrue(result["credit_reserved"])
+
+    def test_insufficient_free_credit_never_authorizes_50_case_matrix(self):
+        for index in range(50):
+            with self.subTest(case=index):
+                credits = ProviderCreditManager(self.root / f"insufficient-credit-{index}.json")
+                amount = index / 100.0
+                credits.refresh(
+                    "primary",
+                    lambda _, amount=amount: {
+                        "verified": True, "free_credits_remaining": amount,
+                        "unit": "USD", "source": "official-account-api",
+                    },
+                )
+                policy = ProviderCostPolicy(project_budgets={"film": 100.0})
+                router = ProviderRoutingManager(
+                    self.connections, cost_policy=policy, credit_manager=credits
+                )
+                result = router.route(
+                    category="image", project_id="film", estimated_cost=1.0,
+                    estimated_cost_unit="USD", strategy="FREE_CREDITS_FIRST",
+                    request_id=f"insufficient-credit-{index}",
+                )
+                self.assertFalse(result["allowed"], result)
+                self.assertFalse(result.get("credit_reserved", False))
+                self.assertNotIn(
+                    f"insufficient-credit-{index}", credits.data["reservations"]
+                )
+
     def test_quota_rejection_releases_new_free_credit_reservation(self):
         credits = ProviderCreditManager(self.root / "credits-quota.json")
         credits.refresh(
