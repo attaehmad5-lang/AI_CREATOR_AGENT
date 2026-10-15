@@ -75,8 +75,13 @@ class ProviderRoutingManagerTests(unittest.TestCase):
     def test_required_feature_flag_blocks_routing_before_provider_selection(self):
         flags = ProviderFeatureFlagManager(self.root / "flags.json")
         flags.set_flag("new_router", enabled=False)
+        quota = ProviderQuotaManager(
+            self.root / "flag-quota.json",
+            limits={"primary": {"hourly": 1}, "fallback": {"hourly": 1}},
+        )
         router = ProviderRoutingManager(
-            self.connections, feature_flag_manager=flags, require_verified_connection=False
+            self.connections, feature_flag_manager=flags, quota_manager=quota,
+            require_verified_connection=False,
         )
         result = router.route(
             category="image", project_id="film",
@@ -85,6 +90,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "FEATURE_FLAG_BLOCKED")
         self.assertEqual(result["feature_flag_status"], "FLAG_DISABLED")
+        self.assertEqual(quota.data["requests"], {})
 
     def test_enabled_feature_flag_allows_normal_routing(self):
         flags = ProviderFeatureFlagManager(self.root / "flags.json")
