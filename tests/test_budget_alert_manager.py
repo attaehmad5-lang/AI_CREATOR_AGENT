@@ -124,6 +124,31 @@ class BudgetAlertManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             BudgetAlertManager(_SnapshotPolicy(), path)
 
+    def test_real_cost_policy_snapshot_includes_reserved_spend(self):
+        policy = ProviderCostPolicy(
+            self.root / "snapshot-cost.json", project_budgets={"film": 10.0}
+        )
+        result = policy.reserve_usage(
+            project_id="film", provider_id="image",
+            estimated_cost=6.0, request_id="reserved-six",
+        )
+        self.assertTrue(result["reserved"])
+        snapshot = policy.budget_snapshot("film")
+        self.assertEqual(snapshot["status"], "OK")
+        self.assertEqual(snapshot["spent"], 0.0)
+        self.assertEqual(snapshot["reserved"], 6.0)
+        self.assertEqual(snapshot["remaining"], 4.0)
+
+    def test_zero_budget_hard_stop_emits_alert_when_usage_exists(self):
+        policy = _SnapshotPolicy(budget=0.0, spent=1.0)
+        manager = BudgetAlertManager(policy, self.root / "zero-budget.json")
+        result = manager.evaluate_project("film")
+        self.assertEqual(result["usage_pct"], 100.0)
+        self.assertEqual(
+            [event["threshold_pct"] for event in result["alerts"]],
+            [50, 75, 90, 100],
+        )
+
     def test_usage_finalization_triggers_budget_alerts(self):
         policy = ProviderCostPolicy(
             self.root / "cost-ledger.json",
