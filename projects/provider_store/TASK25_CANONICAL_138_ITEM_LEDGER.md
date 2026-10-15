@@ -1,6 +1,6 @@
 # Task #25 — Canonical 138-Item Verification Ledger
 
-**Overall status: IN PROGRESS — do not mark Task #25 complete and do not merge PR #7 without explicit approval.**
+**Overall status: IN PROGRESS — do not mark Task #25 complete or merge draft PR #28 without explicit user approval.**
 
 This file preserves the user's original A–P headings, feature numbers, feature names and baseline status markers. The **Baseline** column is the user's original 🟢/🟡/🔴 status; it is not the current implementation result. **Current audit** is independently evidence-based. A green baseline does not automatically mean the feature is verified today.
 
