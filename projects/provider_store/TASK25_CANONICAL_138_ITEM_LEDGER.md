@@ -146,7 +146,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 81 | 🔴 | Latency-Aware Routing | PARTIAL | Health latency data exists; verified latency-aware routing policy coverage is incomplete. |
 | 82 | 🔴 | Provider Success/Error-Rate Metrics | PARTIAL | Health history contains success/failure events; production metric aggregation is incomplete. |
-| 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | OPEN | Throughput/queue-wait telemetry is not implemented. |
+| 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | PARTIAL | Added bounded provider request metrics for request counts, success/error rates, timeout counts, latency average/p95, queue-wait average, and throughput/minute; wired ProviderService finalization to record metrics. A 50-case matrix and persistence/idempotency tests are added; cross-platform CI is pending. External telemetry export and production dashboards remain separate integrations. |
 | 84 | 🔴 | Output Quality Validation/Score Integration | OPEN | Output quality scoring is not integrated with routing/execution. |
 | 85 | 🔴 | Task-Specific Quality Thresholds | OPEN | Task-specific quality threshold policy is not implemented. |
 | 86 | 🔴 | Provider/Model Benchmarking | OPEN | Repeatable provider/model benchmark suite is not implemented. |
