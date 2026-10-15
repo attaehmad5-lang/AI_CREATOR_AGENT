@@ -6,7 +6,7 @@ The exact canonical feature names, original baseline markers and item-by-item ev
 
 ## Latest code verification
 
-Latest GitHub Actions run [#38767774200](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38767774200) completed successfully on Python 3.13: **365 tests passed on Ubuntu and 365 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This includes controlled provider recovery (two consecutive successes required for readmission after `UNHEALTHY`), region routing, adapter versioning, side-effect-free policy simulation, 100 concurrent round-robin requests, and the bounded OpenAI-compatible local text adapter. Live local-server generation and production region evidence remain unverified.
+Latest GitHub Actions run [#38768194708](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38768194708) completed successfully on Python 3.13: **367 tests passed on Ubuntu and 367 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This includes controlled provider recovery (two consecutive successes required for readmission after `UNHEALTHY`), region routing, adapter versioning, side-effect-free policy simulation, 100 concurrent round-robin requests, and the bounded OpenAI-compatible local text adapter. Live local-server generation and production region evidence remain unverified.
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
