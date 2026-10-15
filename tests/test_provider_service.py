@@ -38,7 +38,7 @@ class ProviderServiceTests(unittest.TestCase):
         if verified.get("verified") is not True:
             raise AssertionError("test fixture provider failed stub verification")
         self.health = ProviderHealthManager(self.root / "health.json")
-        self.approvals = PaidUsageApprovalManager(self.root / "paid-approvals.json")
+        self.approvals = PaidUsageApprovalManager(self.root / "paid-approvals.json", authorizer=lambda action, user, record: True)
         self.cost = ProviderCostPolicy(
             self.root / "cost.json", project_budgets={"film": 10.0},
             approval_manager=self.approvals,
