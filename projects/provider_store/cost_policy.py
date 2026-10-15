@@ -216,6 +216,11 @@ class ProviderCostPolicy:
                     "allowed": False, "status": "PAID_APPROVAL_MANAGER_REQUIRED",
                     "provider": provider["id"], "estimated_cost": estimated_cost,
                 }
+            if not isinstance(approval_id, str) or not approval_id.strip():
+                return {
+                    "allowed": False, "status": "PAID_APPROVAL_REQUIRED",
+                    "provider": provider["id"], "estimated_cost": estimated_cost,
+                }
             if not isinstance(request_id, str) or not request_id.strip():
                 return {"allowed": False, "status": "PAID_APPROVAL_REQUEST_ID_REQUIRED", "provider": provider["id"]}
             try:
