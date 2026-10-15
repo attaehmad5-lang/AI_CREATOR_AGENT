@@ -439,6 +439,10 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             category="image", project_id="film", free_credits={"primary": 999.0}
         )
         self.assertEqual(result["status"], "UNVERIFIED_FREE_CREDIT_INPUT_REJECTED")
+        unconfigured = ProviderRoutingManager(self.connections).route(
+            category="image", project_id="film", free_credits={"primary": 999.0}
+        )
+        self.assertEqual(unconfigured["status"], "VERIFIED_CREDIT_MANAGER_REQUIRED")
 
     def test_cost_policy_rejects_unverified_free_credit_map(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
