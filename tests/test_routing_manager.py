@@ -214,6 +214,25 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "HEALTH_DATA_REQUIRED")
 
+    def test_capability_based_routing_selects_only_declared_capability(self):
+        registered = self.connections.register_provider({
+            "id": "image_editor", "name": "Image Editor", "category": "image",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "zero_cost_allowed": True, "priority": 0,
+            "capabilities": ["image_editing"],
+        })
+        self.assertTrue(registered["saved"])
+        self.connections.verify_connectivity(
+            "image_editor", lambda provider, **kwargs: {"ok": True}
+        )
+        router = ProviderRoutingManager(self.connections)
+        result = router.route(
+            category="image", project_id="film", capability="image_editing"
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "image_editor")
+        self.assertEqual(result["category"], "image")
+
     def test_free_credit_and_lowest_cost_strategies(self):
         router = ProviderRoutingManager(self.connections)
         free_first = router.route(
