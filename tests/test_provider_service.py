@@ -1,6 +1,8 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
+import struct
+import zlib
 import unittest
 from pathlib import Path
 
@@ -457,7 +459,18 @@ class ProviderServiceTests(unittest.TestCase):
             cost_policy=self.cost, quota_manager=self.quota,
         )
         output_path = self.root / "generated.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        def png_chunk(kind, data):
+            return (
+                struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+            )
+        ihdr = struct.pack(">II", 64, 64) + bytes((8, 2, 0, 0, 0))
+        output_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n"
+            + png_chunk(b"IHDR", ihdr)
+            + png_chunk(b"IDAT", zlib.compress(b"\x00"))
+            + png_chunk(b"IEND", b"")
+        )
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-success",
             estimated_cost=0.0, output_path=str(output_path),

@@ -7,6 +7,7 @@ import io
 import json
 import os
 import stat
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,8 @@ class ProviderOutputValidator:
     def __init__(
         self, *, min_size_bytes: int = 1, max_size_bytes: int = 1_000_000_000,
         max_json_depth: int = 128,
+        max_image_dimension: int = 16384,
+        max_image_pixels: int = 100_000_000,
     ) -> None:
         if (
             not isinstance(min_size_bytes, int)
@@ -62,9 +65,165 @@ class ProviderOutputValidator:
             or max_json_depth > 4096
         ):
             raise ValueError("max_json_depth must be an integer between 1 and 4096")
+        if (
+            not isinstance(max_image_dimension, int)
+            or isinstance(max_image_dimension, bool)
+            or max_image_dimension < 1
+            or max_image_dimension > 1_000_000
+            or not isinstance(max_image_pixels, int)
+            or isinstance(max_image_pixels, bool)
+            or max_image_pixels < 1
+            or max_image_pixels > 10**12
+        ):
+            raise ValueError("image dimension limits must be positive bounded integers")
         self.min_size_bytes = min_size_bytes
         self.max_size_bytes = max_size_bytes
         self.max_json_depth = max_json_depth
+        self.max_image_dimension = max_image_dimension
+        self.max_image_pixels = max_image_pixels
+
+    @staticmethod
+    def _validate_png_structure(stream: Any, size: int) -> tuple[int, int] | None:
+        """Validate PNG chunk ordering, lengths, CRCs, and required terminal chunks."""
+        signature = bytes((137, 80, 78, 71, 13, 10, 26, 10))
+        stream.seek(0)
+        if stream.read(8) != signature:
+            return None
+        offset = 8
+        chunk_count = 0
+        width = height = None
+        seen_ihdr = seen_idat = seen_iend = False
+        idat_ended = False
+        while offset < size:
+            chunk_count += 1
+            if chunk_count > 100_000:
+                return None
+            stream.seek(offset)
+            header = stream.read(8)
+            if len(header) != 8:
+                return None
+            length = int.from_bytes(header[:4], "big")
+            chunk_type = header[4:8]
+            if (
+                any(not (65 <= byte <= 90 or 97 <= byte <= 122) for byte in chunk_type)
+                or not (65 <= chunk_type[2] <= 90)
+            ):
+                return None
+            if 65 <= chunk_type[0] <= 90 and chunk_type not in {b"IHDR", b"PLTE", b"IDAT", b"IEND"}:
+                return None
+            data_start = offset + 8
+            crc_offset = data_start + length
+            next_offset = crc_offset + 4
+            if length > size or next_offset > size or next_offset <= offset:
+                return None
+            if not seen_ihdr:
+                if chunk_type != b"IHDR" or length != 13:
+                    return None
+            elif chunk_type == b"IHDR":
+                return None
+            if chunk_type == b"IHDR":
+                if seen_ihdr or offset != 8:
+                    return None
+                stream.seek(data_start)
+                ihdr = stream.read(13)
+                if len(ihdr) != 13:
+                    return None
+                width = int.from_bytes(ihdr[:4], "big")
+                height = int.from_bytes(ihdr[4:8], "big")
+                if ihdr[8] not in {1, 2, 4, 8, 16} and ihdr[8] != 8:
+                    return None
+                if ihdr[9] not in {0, 2, 3, 4, 6} or any(ihdr[10:13]):
+                    return None
+                seen_ihdr = True
+            if chunk_type == b"IDAT":
+                if idat_ended:
+                    return None
+                seen_idat = True
+            elif seen_idat and chunk_type != b"IEND":
+                idat_ended = True
+            if chunk_type == b"IEND":
+                if length != 0 or not seen_idat:
+                    return None
+                seen_iend = True
+            crc = zlib.crc32(chunk_type)
+            remaining = length
+            stream.seek(data_start)
+            while remaining:
+                chunk = stream.read(min(64 * 1024, remaining))
+                if not chunk:
+                    return None
+                crc = zlib.crc32(chunk, crc)
+                remaining -= len(chunk)
+            stored_crc = stream.read(4)
+            if len(stored_crc) != 4 or int.from_bytes(stored_crc, "big") != (crc & 0xFFFFFFFF):
+                return None
+            offset = next_offset
+            if seen_iend:
+                return (width, height) if offset == size and width is not None and height is not None else None
+        return None
+
+    @staticmethod
+    def _image_dimensions(mime: str, payload: bytes) -> tuple[int, int] | None:
+        """Read image dimensions from bounded format headers without decoding pixels."""
+        if mime == "image/png":
+            if len(payload) < 24 or payload[12:16] != b"IHDR":
+                return None
+            return int.from_bytes(payload[16:20], "big"), int.from_bytes(payload[20:24], "big")
+        if mime == "image/gif":
+            if len(payload) < 10:
+                return None
+            return int.from_bytes(payload[6:8], "little"), int.from_bytes(payload[8:10], "little")
+        if mime == "image/jpeg":
+            if len(payload) < 4 or payload[:2] != bytes((255, 216)):
+                return None
+            index = 2
+            sof_markers = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+            while index + 4 <= len(payload):
+                if payload[index] != 0xFF:
+                    index += 1
+                    continue
+                while index < len(payload) and payload[index] == 0xFF:
+                    index += 1
+                if index >= len(payload):
+                    return None
+                marker = payload[index]
+                index += 1
+                if marker in {0xD8, 0xD9, 0x01} or 0xD0 <= marker <= 0xD7:
+                    continue
+                if index + 2 > len(payload):
+                    return None
+                segment_length = int.from_bytes(payload[index:index + 2], "big")
+                if segment_length < 2 or index + segment_length > len(payload):
+                    return None
+                if marker in sof_markers:
+                    if segment_length < 7:
+                        return None
+                    height = int.from_bytes(payload[index + 3:index + 5], "big")
+                    width = int.from_bytes(payload[index + 5:index + 7], "big")
+                    return width, height
+                if marker == 0xDA:
+                    return None
+                index += segment_length
+            return None
+        if mime == "image/webp":
+            if len(payload) < 12 or payload[:4] != b"RIFF" or payload[8:12] != b"WEBP":
+                return None
+            chunk_type = payload[12:16]
+            if chunk_type == b"VP8X" and len(payload) >= 30:
+                width = 1 + int.from_bytes(payload[24:27], "little")
+                height = 1 + int.from_bytes(payload[27:30], "little")
+                return width, height
+            if chunk_type == b"VP8L" and len(payload) >= 25 and payload[20] == 0x2F:
+                b1, b2, b3, b4 = payload[21:25]
+                width = 1 + b1 + ((b2 & 0x3F) << 8)
+                height = 1 + (b2 >> 6) + (b3 << 2) + ((b4 & 0x0F) << 10)
+                return width, height
+            if chunk_type == b"VP8 " and len(payload) >= 30 and payload[23:26] == bytes((157, 1, 42)):
+                width = int.from_bytes(payload[26:28], "little") & 0x3FFF
+                height = int.from_bytes(payload[28:30], "little") & 0x3FFF
+                return width, height
+            return None
+        return None
 
     @staticmethod
     def _json_depth_within_limit(stream: Any, max_depth: int) -> bool:
@@ -131,10 +290,29 @@ class ProviderOutputValidator:
                 if size > self.max_size_bytes:
                     return {"valid": False, "status": "OUTPUT_TOO_LARGE", "size_bytes": size}
                 header = stream.read(32)
+                image_dimensions = None
                 if normalized_modality in self.SIGNATURES:
                     mime = self._match_signature(normalized_modality, header)
                     if mime is None:
                         return {"valid": False, "status": "SIGNATURE_MISMATCH"}
+                    if normalized_modality == "image":
+                        stream.seek(0)
+                        image_header = stream.read(min(size, 1_048_576))
+                        if mime == "image/png":
+                            image_dimensions = self._validate_png_structure(stream, size)
+                            if image_dimensions is None:
+                                return {"valid": False, "status": "IMAGE_STRUCTURE_INVALID"}
+                        else:
+                            image_dimensions = self._image_dimensions(mime, image_header)
+                        if image_dimensions is None:
+                            return {"valid": False, "status": "IMAGE_DIMENSIONS_UNVERIFIED"}
+                        width, height = image_dimensions
+                        if width < 1 or height < 1:
+                            return {"valid": False, "status": "IMAGE_DIMENSIONS_INVALID"}
+                        if width > self.max_image_dimension or height > self.max_image_dimension:
+                            return {"valid": False, "status": "IMAGE_DIMENSION_LIMIT_EXCEEDED", "width": width, "height": height}
+                        if width * height > self.max_image_pixels:
+                            return {"valid": False, "status": "IMAGE_PIXEL_LIMIT_EXCEEDED", "width": width, "height": height}
                 elif normalized_modality == "text":
                     stream.seek(0)
                     decoder = codecs.getincrementaldecoder("utf-8")()
@@ -196,6 +374,10 @@ class ProviderOutputValidator:
             "modality": normalized_modality,
             "mime_type": mime,
             "size_bytes": size,
+            **(
+                {"width": image_dimensions[0], "height": image_dimensions[1]}
+                if normalized_modality == "image" and image_dimensions is not None else {}
+            ),
             "sha256": digest.hexdigest(),
         }
 

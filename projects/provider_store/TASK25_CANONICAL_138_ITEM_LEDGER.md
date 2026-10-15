@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38754907256](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38754907256): **333 tests passed on Ubuntu and 333 on Windows, 0 failures**. The batch includes a 50-case image dimension/pixel-budget matrix. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -95,10 +95,10 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 49 | 🟢 | Image Output Validation | PARTIAL | Signature/basic file validation is tested; real provider images and decoder-level validation remain open. |
 | 50 | 🟡 | Output File Existence Validation | VERIFIED | Missing, empty and oversized output files are rejected by output-validator tests. |
 | 51 | 🔴 | Audio/Video Format, Codec and Integrity Validation | OPEN | Full codec/container decoding and integrity checks are not implemented. |
-| 52 | 🟡 | Corrupt/Incomplete Output Rejection | PARTIAL | Basic corrupt/truncated artifact rejection is tested; decoder-level detection remains open. |
+| 52 | 🟡 | Corrupt/Incomplete Output Rejection | PARTIAL | PNG artifacts now require a valid signature, first/unique IHDR, valid chunk types/order/lengths, correct CRC-32 for each chunk, contiguous IDAT, required IEND, and no trailing bytes; chunk payloads are checked incrementally with a 100,000-chunk ceiling. A 50-case truncation/CRC corruption matrix and unknown-critical-chunk regression pass. Full pixel decompression/decoder-level validation and non-PNG container integrity remain open. Evidence: `tests/test_output_validator.py::test_png_structure_rejects_50_corruptions`, `test_png_unknown_critical_chunk_fails_closed`. |
 | 53 | 🟡 | Temporary File Cleanup and Atomic Replacement | PARTIAL | Atomic replacement helpers exist; output-pipeline cleanup integration is incomplete. |
 | 54 | 🟡 | Previous Output Preservation on Failure | PARTIAL | Some preservation/atomicity tests exist; end-to-end generation replacement behavior is not verified. |
-| 55 | 🔴 | File Size, Dimensions, Duration and Codec Constraints | PARTIAL | Size limits exist; dimensions/duration/codec constraints need modality-specific decoders. |
+| 55 | 🔴 | File Size, Dimensions, Duration and Codec Constraints | PARTIAL | Configurable image dimension and pixel budgets are enforced for PNG, GIF, JPEG SOF, and WebP headers; a 50-case boundary matrix verifies valid, zero, over-dimension, over-pixel, and extreme values. Accepted images return width/height metadata. Audio/video duration and codec constraints, full decoding, and malformed container integrity remain open. Evidence: `tests/test_output_validator.py::test_image_dimension_validation_50_case_matrix`, `test_gif_and_jpeg_dimensions_are_parsed`, `test_webp_extended_and_lossless_dimensions_are_parsed`. |
 | 56 | 🟡 | Provider Attribution and Output Metadata | PARTIAL | Request/provider IDs exist in service records; complete asset lineage metadata is not verified. |
 
 ## H — Cost, Free Credits and Quotas
