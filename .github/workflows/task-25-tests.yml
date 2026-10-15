@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - task-25-provider-connection-manager
+      - task-25-region-policy-hardening
   pull_request:
     branches:
       - main
