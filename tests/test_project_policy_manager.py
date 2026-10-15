@@ -87,6 +87,17 @@ class ProviderProjectPolicyManagerTests(unittest.TestCase):
                 self.assertEqual(result["status"], "INVALID_PROJECT_POLICY")
         self.assertEqual(len(invalid_policies), 15)
 
+    def test_candidate_policy_validation_does_not_persist(self):
+        candidate = {"allowed_providers": ["primary"], "required_region": "eu-west-1"}
+        result = self.manager.validate_policy("film-project", candidate)
+        self.assertTrue(result["valid"])
+        self.assertFalse(result["persisted"])
+        self.assertEqual(self.manager.get_policy("film-project")["status"], "PROJECT_POLICY_NOT_FOUND")
+        invalid = self.manager.validate_policy("film-project", {"unknown": True})
+        self.assertFalse(invalid["valid"])
+        self.assertEqual(invalid["status"], "INVALID_PROJECT_POLICY")
+        self.assertEqual(self.manager.get_policy("film-project")["status"], "PROJECT_POLICY_NOT_FOUND")
+
     def test_policy_updates_across_threads_preserve_all_projects(self):
         policies = [
             (f"project-{index}", {"allowed_providers": [f"provider-{index}"], "automatic_fallback": False})
