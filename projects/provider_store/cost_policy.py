@@ -139,6 +139,27 @@ class ProviderCostPolicy:
             if isinstance(record, dict) and self._valid_amount(record.get("estimated_cost"))
         )
 
+    def budget_snapshot(self, project_id: str) -> dict[str, Any]:
+        """Return current spend/reservations for budget alerts without exposing request details."""
+        if not isinstance(project_id, str) or not project_id.strip():
+            return {"status": "INVALID_PROJECT"}
+        with self._transaction():
+            budget = self.project_budgets.get(project_id)
+            if budget is None:
+                return {"status": "PROJECT_BUDGET_REQUIRED"}
+            if not self._valid_amount(budget):
+                return {"status": "INVALID_PROJECT_BUDGET"}
+            spent = self._spent(project_id)
+            reserved = self._reserved(project_id)
+            return {
+                "status": "OK",
+                "project_id": project_id,
+                "budget": float(budget),
+                "spent": float(spent),
+                "reserved": float(reserved),
+                "remaining": max(0.0, float(budget) - spent - reserved),
+            }
+
     def evaluate_request(
         self,
         provider: dict[str, Any],
