@@ -38,6 +38,8 @@ class ProviderServiceTests(unittest.TestCase):
         if verified.get("verified") is not True:
             raise AssertionError("test fixture provider failed stub verification")
         self.health = ProviderHealthManager(self.root / "health.json")
+        self.routing_health = ProviderHealthManager(self.root / "routing-health.json")
+        self.routing_health.record_result("image", success=True, latency_ms=5.0)
         self.cost = ProviderCostPolicy(self.root / "cost.json", project_budgets={"film": 10.0})
         self.quota = ProviderQuotaManager(self.root / "quota.json", limits={"image": {"daily": 10}})
         self.validator = ProviderOutputValidator()
@@ -384,7 +386,7 @@ class ProviderServiceTests(unittest.TestCase):
                 "source": "official-account-api",
             },
         )
-        router = ProviderRoutingManager(self.connections, credit_manager=credits)
+        router = ProviderRoutingManager(self.connections, health_manager=self.routing_health, credit_manager=credits)
         service = ProviderService(
             self.connections,
             routing_manager=router,
@@ -451,7 +453,7 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
