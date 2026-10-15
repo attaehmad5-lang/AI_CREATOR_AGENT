@@ -25,11 +25,14 @@ class PaidUsageApprovalManager:
     _UNIT = re.compile(r"[A-Za-z0-9._/-]{1,32}\Z")
     _SECRET_MARKERS = ("token=", "api_key=", "password=", "secret=", "bearer ")
 
-    def __init__(self, path: str | Path, *, clock: Any = None) -> None:
+    def __init__(self, path: str | Path, *, clock: Any = None, authorizer: Any = None) -> None:
         if not isinstance(path, (str, Path)) or not str(path).strip() or "\x00" in str(path):
             raise ValueError("invalid approval store path")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
+        if authorizer is not None and not callable(authorizer):
+            raise ValueError("authorizer must be callable")
+        self.authorizer = authorizer
         self.path = Path(path)
         self.lock_path = self.path.with_name(self.path.name + ".lock")
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -157,6 +160,14 @@ class PaidUsageApprovalManager:
                 return {"status": "APPROVAL_NOT_FOUND", "approved": False}
             if record.get("status") != "PENDING":
                 return {"status": "APPROVAL_NOT_PENDING", "approved": False}
+            if self.authorizer is None:
+                return {"status": "APPROVER_AUTHORIZER_REQUIRED", "approved": False}
+            try:
+                authorized = self.authorizer("approve", approved_by, copy.deepcopy(record))
+            except Exception:
+                return {"status": "APPROVER_AUTHORIZATION_FAILED", "approved": False}
+            if authorized is not True:
+                return {"status": "APPROVER_NOT_AUTHORIZED", "approved": False}
             ceiling = record["requested_cost"] if max_amount is None else finite_number(max_amount, minimum=0)
             if ceiling is None or ceiling < record["requested_cost"]:
                 return {"status": "APPROVAL_LIMIT_BELOW_REQUEST", "approved": False}
@@ -214,6 +225,14 @@ class PaidUsageApprovalManager:
                 return {"status": "APPROVAL_NOT_FOUND", "revoked": False}
             if record.get("status") not in {"PENDING", "APPROVED"}:
                 return {"status": "APPROVAL_NOT_REVOCABLE", "revoked": False}
+            if self.authorizer is None:
+                return {"status": "APPROVER_AUTHORIZER_REQUIRED", "revoked": False}
+            try:
+                authorized = self.authorizer("revoke", revoked_by, copy.deepcopy(record))
+            except Exception:
+                return {"status": "APPROVER_AUTHORIZATION_FAILED", "revoked": False}
+            if authorized is not True:
+                return {"status": "APPROVER_NOT_AUTHORIZED", "revoked": False}
             record.update({"status": "REVOKED", "revoked_by": revoked_by, "revoked_at": self._now().isoformat()})
         return {"status": "REVOKED", "revoked": True, "approval_id": approval_id}
 
