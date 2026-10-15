@@ -116,7 +116,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         self.assertEqual(
             ProviderOutputValidator._image_dimensions("image/webp", vp8x), (20, 10)
         )
-        vp8l = b"RIFF" + bytes(4) + b"WEBPVP8L" + bytes(4) + bytes([0x2F, 4, 0, 4, 0])
+        vp8l = b"RIFF" + bytes(4) + b"WEBPVP8L" + bytes(4) + bytes([0x2F, 4, 0, 1, 0])
         self.assertEqual(
             ProviderOutputValidator._image_dimensions("image/webp", vp8l), (5, 5)
         )
