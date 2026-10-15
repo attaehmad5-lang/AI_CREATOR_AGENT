@@ -243,6 +243,42 @@ class ProviderService:
             "valid": False, "status": "INVALID_OUTPUT_VALIDATION_RESPONSE"
         }
 
+    def publish_output(
+        self,
+        temporary_path: Any,
+        destination_path: Any,
+        *,
+        modality: str,
+    ) -> dict[str, Any]:
+        """Validate a temporary provider artifact and atomically publish it."""
+        if self.output_validator is None:
+            return {
+                "published": False,
+                "status": "OUTPUT_VALIDATOR_UNAVAILABLE",
+                "cleanup_succeeded": False,
+            }
+        try:
+            from .atomic_output import publish_validated_output
+
+            result = publish_validated_output(
+                temporary_path,
+                destination_path,
+                modality=modality,
+                validator=self.output_validator,
+            )
+        except Exception as exc:
+            return {
+                "published": False,
+                "status": "ATOMIC_PUBLISH_FAILED",
+                "error_type": type(exc).__name__,
+                "cleanup_succeeded": False,
+            }
+        return result if isinstance(result, dict) else {
+            "published": False,
+            "status": "INVALID_ATOMIC_PUBLISH_RESPONSE",
+            "cleanup_succeeded": False,
+        }
+
     @staticmethod
     def _safe_error_code(value: Any, default: str) -> str:
         if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", value):

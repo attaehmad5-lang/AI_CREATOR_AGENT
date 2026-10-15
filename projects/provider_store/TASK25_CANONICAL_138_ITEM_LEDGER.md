@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38774886199](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38774886199): **331 tests passed on Ubuntu and 331 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, runtime enablement rejecting invalid catalogs, and error-specific retry classification.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -67,7 +67,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 33 | 🟢 | Configurable Retry Limit | VERIFIED | Retry attempt limit is configurable and covered by timeout/transient failure tests. |
-| 34 | 🟡 | Error-Specific Retry Policy | PARTIAL | Retryability/status mapping exists; provider-specific transient failure coverage is incomplete. |
+| 34 | 🟡 | Error-Specific Retry Policy | VERIFIED | Explicit transient status allowlist (408/425/429/500/502/503/504), permanent-status rejection, provider exception status aliases, Retry-After header extraction, and explicit non-retryable veto are covered by batched regression tests in `tests/test_retry_policy.py`; Windows and Ubuntu suites pass. Live provider behavior remains a separate connectivity/integration gate. |
 | 35 | 🔴 | Exponential Backoff and Jitter | VERIFIED | Exponential backoff and jitter are covered; exponentiation is capped before calculation for extreme attempt numbers. Evidence: `tests/test_retry_policy.py::test_extreme_attempt_number_caps_backoff_without_large_exponentiation`. |
 | 36 | 🔴 | HTTP 429/Rate-Limit Handling | VERIFIED | RetryPolicy seconds/date parsing and maximum-delay capping; HTTP probe and account-balance probe preserve bounded Retry-After metadata. Regression tests: `tests/test_http_probe.py`, `tests/test_account_balance_probe.py::test_rate_limit_preserves_bounded_retry_after_without_leaking_body`, `test_malformed_retry_after_is_not_propagated`. Provider-specific live rate-limit behavior remains unverified. |
 | 37 | 🟡 | Quota Exhaustion Detection | PARTIAL | Quota manager and routing rejection paths are tested; provider-side quota semantics remain incomplete. |
@@ -97,7 +97,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 51 | 🔴 | Audio/Video Format, Codec and Integrity Validation | OPEN | Full codec/container decoding and integrity checks are not implemented. |
 | 52 | 🟡 | Corrupt/Incomplete Output Rejection | PARTIAL | Basic corrupt/truncated artifact rejection is tested; decoder-level detection remains open. |
 | 53 | 🟡 | Temporary File Cleanup and Atomic Replacement | PARTIAL | Atomic replacement helpers exist; output-pipeline cleanup integration is incomplete. |
-| 54 | 🟡 | Previous Output Preservation on Failure | PARTIAL | Some preservation/atomicity tests exist; end-to-end generation replacement behavior is not verified. |
+| 54 | 🟡 | Previous Output Preservation on Failure | VERIFIED | `tests/test_atomic_output.py::test_fifty_failure_cases_preserve_previous_output_exactly` exercises 50 cases (5 failure modes × 10 prior-output byte patterns); Ubuntu and Windows CI both pass. Existing targeted tests also cover invalid candidate, missing candidate, validator exception, hash mismatch, symlink rejection and atomic replace failure. Full external-provider generation E2E remains a separate gate. |
 | 55 | 🔴 | File Size, Dimensions, Duration and Codec Constraints | PARTIAL | Size limits exist; dimensions/duration/codec constraints need modality-specific decoders. |
 | 56 | 🟡 | Provider Attribution and Output Metadata | PARTIAL | Request/provider IDs exist in service records; complete asset lineage metadata is not verified. |
 
