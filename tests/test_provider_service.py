@@ -89,6 +89,26 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(router.calls, [])
         self.assertEqual(adapter_calls, [])
 
+    def test_routing_access_policy_requires_trusted_context_when_enabled(self):
+        class SpyRouter:
+            def __init__(self):
+                self.calls = []
+
+            def route(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        router = SpyRouter()
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            routing_access_controller=ProviderAccessController(),
+        )
+        result = service.route_request(category="image", project_id="film")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "ACCESS_CONTEXT_REQUIRED")
+        self.assertEqual(router.calls, [])
+
     def test_routing_access_policy_allows_scoped_operator_and_strips_auth_context(self):
         class SpyRouter:
             def __init__(self):
