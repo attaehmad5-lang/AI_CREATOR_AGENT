@@ -35,6 +35,7 @@ class ProviderAccessController:
     NEVER_ALLOWED = frozenset({
         "credential:read", "secret:read", "token:read", "provider:purchase",
     })
+    PROJECT_SCOPED_ACTIONS = frozenset({"provider:route", "usage:read"})
     KNOWN_ACTIONS = frozenset().union(*ROLE_PERMISSIONS.values(), NEVER_ALLOWED)
 
     def __init__(self, *, role_permissions: dict[str, set[str] | frozenset[str]] | None = None) -> None:
@@ -101,6 +102,8 @@ class ProviderAccessController:
             reason = "INVALID_RESOURCE"
         elif project_id is not None and not self._identifier(project_id):
             reason = "INVALID_RESOURCE"
+        elif action in self.PROJECT_SCOPED_ACTIONS and project_id is None:
+            reason = "PROJECT_SCOPE_REQUIRED"
         elif not isinstance(action, str) or action not in self.KNOWN_ACTIONS:
             reason = "UNKNOWN_ACTION"
         elif action in self.NEVER_ALLOWED:
