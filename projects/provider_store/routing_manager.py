@@ -200,6 +200,11 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_COST_UNIT"}
         if free_credits is not None and not isinstance(free_credits, dict):
             return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
+        if free_credits is not None and any(
+            not isinstance(key, str) or not self._valid_amount(value)
+            for key, value in free_credits.items()
+        ):
+            return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
         if free_credits is not None:
             # Raw caller-provided balances are never authoritative, even when no
             # cost policy is installed. Free-credit routing must use a verified
