@@ -13,7 +13,8 @@ class PaidUsageApprovalManagerTests(unittest.TestCase):
         self.root = Path(self.temp_dir.name)
         self.now = [datetime(2026, 10, 15, 12, 0, tzinfo=timezone.utc)]
         self.manager = PaidUsageApprovalManager(
-            self.root / "approvals.json", clock=lambda: self.now[0]
+            self.root / "approvals.json", clock=lambda: self.now[0],
+            authorizer=lambda action, user, record: True,
         )
 
     def tearDown(self):
@@ -141,6 +142,29 @@ class PaidUsageApprovalManagerTests(unittest.TestCase):
             )["status"],
             "PAID_APPROVAL_REQUIRED",
         )
+
+    def test_approval_and_revocation_fail_closed_without_trusted_authorizer(self):
+        manager = PaidUsageApprovalManager(self.root / "no-authorizer.json", clock=lambda: self.now[0])
+        pending = manager.request_approval(
+            project_id="film", provider_id="paid-provider", request_id="no-auth-job",
+            estimated_cost=1.0, unit="USD", requested_by="user-1", reason="Test approval boundary",
+        )
+        result = manager.approve(pending["approval_id"], approved_by="admin-1")
+        self.assertFalse(result["approved"])
+        self.assertEqual(result["status"], "APPROVER_AUTHORIZER_REQUIRED")
+
+    def test_authorizer_denial_prevents_approval_and_revocation(self):
+        manager = PaidUsageApprovalManager(
+            self.root / "denied-authorizer.json", clock=lambda: self.now[0],
+            authorizer=lambda action, user, record: False,
+        )
+        pending = manager.request_approval(
+            project_id="film", provider_id="paid-provider", request_id="denied-job",
+            estimated_cost=1.0, unit="USD", requested_by="user-1", reason="Test denied approval",
+        )
+        denied = manager.approve(pending["approval_id"], approved_by="untrusted-user")
+        self.assertEqual(denied["status"], "APPROVER_NOT_AUTHORIZED")
+        self.assertEqual(manager.list_approvals()["approvals"][0]["status"], "PENDING")
 
     def test_concurrent_approval_attempts_only_approve_once(self):
         pending = self.request()
