@@ -384,6 +384,74 @@ class ProviderHealthManager:
             return {"eligible": False, "status": "SLOW", "reason": "LATENCY_LIMIT_EXCEEDED"}
         return {"eligible": True, "status": record.get("status", "UNKNOWN"), "age_seconds": age}
 
+    def metrics_summary(
+        self,
+        provider_id: str | None = None,
+        *,
+        window_seconds: float = 3600.0,
+    ) -> dict[str, Any]:
+        """Return aggregate health/latency metrics without exposing raw events."""
+        window = finite_number(window_seconds, minimum=0)
+        if window is None or window <= 0:
+            return {"status": "INVALID_METRICS_WINDOW", "providers": {}}
+        if provider_id is not None and (
+            not isinstance(provider_id, str) or not provider_id.strip()
+        ):
+            return {"status": "INVALID_PROVIDER", "providers": {}}
+        now = self.clock()
+        if not isinstance(now, datetime) or now.tzinfo is None:
+            return {"status": "INVALID_CLOCK", "providers": {}}
+        now = now.astimezone(timezone.utc)
+        cutoff = now.timestamp() - window
+        with self._transaction():
+            snapshot = {
+                key: dict(value)
+                for key, value in self.data["providers"].items()
+                if isinstance(value, dict) and (provider_id is None or key == provider_id)
+            }
+        if provider_id is not None and provider_id not in snapshot:
+            return {"status": "PROVIDER_NOT_FOUND", "providers": {}}
+        summaries: dict[str, Any] = {}
+        for key, record in snapshot.items():
+            events = record.get("history", [])
+            eligible_events: list[dict[str, Any]] = []
+            for event in events if isinstance(events, list) else []:
+                if not isinstance(event, dict) or not isinstance(event.get("success"), bool):
+                    continue
+                try:
+                    observed = self._parse_timestamp(event.get("timestamp")).timestamp()
+                except ValueError:
+                    continue
+                if cutoff <= observed <= now.timestamp():
+                    eligible_events.append(event)
+            successes = sum(1 for event in eligible_events if event["success"])
+            failures = len(eligible_events) - successes
+            latencies = sorted(
+                float(value)
+                for event in eligible_events
+                if (value := finite_number(event.get("latency_ms"), minimum=0)) is not None
+            )
+            if latencies:
+                p95_index = max(0, math.ceil(0.95 * len(latencies)) - 1)
+                average_latency = round(sum(latencies) / len(latencies), 2)
+                p95_latency = round(latencies[p95_index], 2)
+            else:
+                average_latency = None
+                p95_latency = None
+            sample_count = len(eligible_events)
+            summaries[key] = {
+                "status": record.get("status", "UNKNOWN"),
+                "sample_count": sample_count,
+                "success_count": successes,
+                "failure_count": failures,
+                "success_rate": round(successes / sample_count, 4) if sample_count else None,
+                "failure_rate": round(failures / sample_count, 4) if sample_count else None,
+                "average_latency_ms": average_latency,
+                "p95_latency_ms": p95_latency,
+                "window_seconds": window,
+            }
+        return {"status": "METRICS_READY", "providers": summaries, "window_seconds": window}
+
     def _save(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(
