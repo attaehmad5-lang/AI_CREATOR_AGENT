@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-Region-aware routing and adapter-version follow-up PR #28 run [#38758241660](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38758241660): **335 tests passed on Ubuntu and 335 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This adds 50 supported/unsupported region-routing subcases, 50 adapter-version negotiation combinations, malformed/missing region metadata rejection, project region-policy conflict checks, and 15 invalid policy validation cases. Production region metadata and live residency evidence remain unverified.
+Region-aware routing, adapter-version and policy-simulation follow-up PR #28 run [#38759085721](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38759085721): **340 tests passed on Ubuntu and 340 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This includes 50 region-routing subcases, 50 adapter-version negotiation combinations, and 50 side-effect-free policy simulation cases, plus malformed metadata, policy-conflict, quota-preview, and invalid-policy checks. Production region metadata and live residency evidence remain unverified.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -223,7 +223,7 @@ Region-aware routing and adapter-version follow-up PR #28 run [#38758241660](htt
 | 132 | 🟡 | نئے providers کو محفوظ طریقے سے شامل کرنے کا workflow | PARTIAL | Catalog registration/schema validation exists; complete onboarding, approval and probe workflow is incomplete. |
 | 133 | 🔴 | Self-hosted اور local models کی support، جہاں ممکن ہو | OPEN | Local/self-hosted provider lifecycle and modality verification are not complete. |
 | 134 | 🔴 | Model deprecation اور end-of-life handling | PARTIAL | Catalog schema records a validated deprecation reason/date and rejects deprecated providers that are enabled; OpenAI Sora is marked deprecated and disabled. General deprecation discovery, replacement migration, and EOL routing remain open. Evidence: `tests/test_provider_catalogs.py::test_deprecated_provider_requires_reason_date_and_stays_disabled`. |
-| 135 | 🔴 | Provider policy activation سے پہلے simulation | OPEN | Policy simulation/dry-run before activation is not implemented. |
+| 135 | 🔴 | Provider policy activation سے پہلے simulation | VERIFIED | `ProviderProjectPolicyManager.validate_policy` validates candidate policies without saving; `ProviderRoutingManager.simulate_policy` evaluates routing against the candidate policy with connection/region/model/health/cost/credit gates, read-only quota preview, and no cost/credit/quota reservation. 50 simulation cases plus invalid-policy, quota-exhaustion, and ledger-no-mutation tests pass. |
 | 136 | 🟡 | Backward compatibility اور automated contract checks | PARTIAL | Compatibility facades and contract tests exist; full versioned compatibility checks remain open. |
 | 137 | 🔴 | Provider configuration اور policy کے لیے admin controls | OPEN | Complete administrative controls and authorization are not implemented. |
 | 138 | 🔴 | Documentation، diagnostics and maintenance tooling | PARTIAL | Provider guide and diagnostics exist; complete diagnostics/maintenance workflows remain open. |
