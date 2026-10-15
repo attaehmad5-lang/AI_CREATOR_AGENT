@@ -24,18 +24,22 @@ class ProviderHealthManager:
         *,
         history_limit: int = 50,
         failure_threshold: int = 3,
+        recovery_success_threshold: int = 2,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if (
             not isinstance(history_limit, int) or isinstance(history_limit, bool) or history_limit < 1
             or not isinstance(failure_threshold, int) or isinstance(failure_threshold, bool) or failure_threshold < 1
+            or not isinstance(recovery_success_threshold, int)
+            or isinstance(recovery_success_threshold, bool) or recovery_success_threshold < 1
         ):
-            raise ValueError("history_limit and failure_threshold must be positive integers")
+            raise ValueError("history_limit, failure_threshold and recovery_success_threshold must be positive integers")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.history_limit = history_limit
         self.failure_threshold = failure_threshold
+        self.recovery_success_threshold = recovery_success_threshold
         self._lock = threading.RLock()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}}
@@ -75,6 +79,13 @@ class ProviderHealthManager:
             failures = record.get("consecutive_failures", 0)
             if not isinstance(failures, int) or isinstance(failures, bool) or failures < 0:
                 raise ValueError("Invalid provider consecutive failure count")
+            recovery_successes = record.get("recovery_successes", 0)
+            if (
+                not isinstance(recovery_successes, int)
+                or isinstance(recovery_successes, bool)
+                or recovery_successes < 0
+            ):
+                raise ValueError("Invalid provider recovery success count")
             history = record.get("history", [])
             if not isinstance(history, list):
                 raise ValueError("Invalid provider health history")
@@ -133,7 +144,10 @@ class ProviderHealthManager:
         latency_ms: float | None = None,
         error_code: str | None = None,
         request_id: str | None = None,
+        probe_result: bool = False,
     ) -> dict[str, Any]:
+        if not isinstance(probe_result, bool):
+            return {"status": "INVALID_PROBE_RESULT_FLAG", "saved": False}
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER", "saved": False}
         if not isinstance(success, bool):
@@ -201,18 +215,32 @@ class ProviderHealthManager:
                 event["error_code"] = normalized_error
             history.append(event)
             history = history[-self.history_limit:]
+            was_unhealthy = record.get("status") == "UNHEALTHY"
+            recovery_successes = int(record.get("recovery_successes", 0))
             consecutive_failures = 0 if success else int(record.get("consecutive_failures", 0)) + 1
-            if success:
-                status = "HEALTHY"
-            elif consecutive_failures >= self.failure_threshold:
-                status = "UNHEALTHY"
+            if not success:
+                recovery_successes = 0
+                if was_unhealthy and probe_result:
+                    consecutive_failures = max(consecutive_failures, self.failure_threshold)
+                    status = "UNHEALTHY"
+                else:
+                    status = "UNHEALTHY" if consecutive_failures >= self.failure_threshold else "DEGRADED"
+            elif was_unhealthy and probe_result:
+                recovery_successes += 1
+                if recovery_successes >= self.recovery_success_threshold:
+                    status = "HEALTHY"
+                    recovery_successes = 0
+                else:
+                    status = "UNHEALTHY"
             else:
-                status = "DEGRADED"
+                status = "HEALTHY"
+                recovery_successes = 0
             record.update({
                 "status": status,
                 "history": history,
                 "request_events": request_events,
                 "consecutive_failures": consecutive_failures,
+                "recovery_successes": recovery_successes,
                 "last_checked_at": event["timestamp"],
             })
             if success:
@@ -239,7 +267,7 @@ class ProviderHealthManager:
             name = type(exc).__name__.casefold()
             code = "TIMEOUT" if isinstance(exc, TimeoutError) or "timeout" in name else "NETWORK_ERROR"
             try:
-                recorded = self.record_result(provider_id, success=False, error_code=code)
+                recorded = self.record_result(provider_id, success=False, error_code=code, probe_result=True)
             except Exception as persist_exc:
                 return {
                     "provider": provider_id,
@@ -252,7 +280,7 @@ class ProviderHealthManager:
             return {"provider": provider_id, "status": code, "verified": False, "error_type": type(exc).__name__}
         if result is not True and not (isinstance(result, dict) and result.get("ok") is True):
             try:
-                recorded = self.record_result(provider_id, success=False, error_code="PROBE_FAILED")
+                recorded = self.record_result(provider_id, success=False, error_code="PROBE_FAILED", probe_result=True)
             except Exception as exc:
                 return {
                     "provider": provider_id,
@@ -265,7 +293,7 @@ class ProviderHealthManager:
             return {"provider": provider_id, "status": "PROBE_FAILED", "verified": False}
         latency = (__import__("time").monotonic() - started) * 1000
         try:
-            recorded = self.record_result(provider_id, success=True, latency_ms=latency)
+            recorded = self.record_result(provider_id, success=True, latency_ms=latency, probe_result=True)
         except Exception as exc:
             return {
                 "provider": provider_id,
@@ -275,7 +303,103 @@ class ProviderHealthManager:
             }
         if not isinstance(recorded, dict) or recorded.get("saved") is not True:
             return {"provider": provider_id, "status": "HEALTH_RECORD_FAILED", "verified": False}
+        if recorded.get("status") == "UNHEALTHY":
+            return {
+                "provider": provider_id, "status": "RECOVERY_PENDING",
+                "verified": False, "probe_succeeded": True,
+                "recovery_successes_required": self.recovery_success_threshold,
+            }
         return {"provider": provider_id, "status": "HEALTHY", "verified": True, "latency_ms": round(latency, 2)}
+
+    def list_recheck_candidates(
+        self,
+        provider_ids: list[str] | tuple[str, ...] | None = None,
+        *,
+        recheck_after_seconds: float = 60.0,
+        max_candidates: int = 100,
+        include_unknown: bool = True,
+    ) -> dict[str, Any]:
+        """Return deterministic candidates for a caller-managed health recheck scheduler.
+
+        This method does not perform network requests or create background workers.
+        Callers must schedule and authorize the actual probes themselves.
+        """
+        interval = finite_number(recheck_after_seconds, minimum=0)
+        if interval is None or interval <= 0:
+            return {"status": "INVALID_RECHECK_INTERVAL", "candidates": []}
+        if (
+            not isinstance(max_candidates, int) or isinstance(max_candidates, bool)
+            or max_candidates < 1 or max_candidates > 1000
+        ):
+            return {"status": "INVALID_MAX_CANDIDATES", "candidates": []}
+        if not isinstance(include_unknown, bool):
+            return {"status": "INVALID_INCLUDE_UNKNOWN", "candidates": []}
+        if provider_ids is not None:
+            if not isinstance(provider_ids, (list, tuple)):
+                return {"status": "INVALID_PROVIDER_IDS", "candidates": []}
+            if any(not isinstance(item, str) or not item.strip() for item in provider_ids):
+                return {"status": "INVALID_PROVIDER_IDS", "candidates": []}
+            ids = list(dict.fromkeys(item.strip() for item in provider_ids))
+        else:
+            ids = None
+
+        with self._transaction():
+            records = dict(self.data.get("providers", {}))
+        if ids is None:
+            ids = list(records)
+        now = self.clock().astimezone(timezone.utc)
+        candidates: list[dict[str, Any]] = []
+        for provider_id in ids:
+            record = records.get(provider_id)
+            if not isinstance(record, dict) or not record.get("last_checked_at"):
+                if include_unknown:
+                    candidates.append({
+                        "provider": provider_id,
+                        "reason": "NO_HEALTH_EVIDENCE",
+                        "age_seconds": None,
+                        "last_checked_at": None,
+                    })
+                continue
+            try:
+                checked = self._parse_timestamp(record.get("last_checked_at"))
+            except ValueError:
+                candidates.append({
+                    "provider": provider_id,
+                    "reason": "INVALID_HEALTH_TIMESTAMP",
+                    "age_seconds": None,
+                    "last_checked_at": None,
+                })
+                continue
+            age = (now - checked).total_seconds()
+            if age < 0:
+                candidates.append({
+                    "provider": provider_id,
+                    "reason": "FUTURE_HEALTH_TIMESTAMP",
+                    "age_seconds": age,
+                    "last_checked_at": record.get("last_checked_at"),
+                })
+                continue
+            status = record.get("status")
+            if status == "UNHEALTHY":
+                candidates.append({
+                    "provider": provider_id,
+                    "reason": "UNHEALTHY_RECHECK",
+                    "age_seconds": age,
+                    "last_checked_at": record.get("last_checked_at"),
+                })
+            elif age >= interval:
+                candidates.append({
+                    "provider": provider_id,
+                    "reason": "STALE_HEALTH",
+                    "age_seconds": age,
+                    "last_checked_at": record.get("last_checked_at"),
+                })
+        candidates.sort(key=lambda item: (
+            0 if item["reason"] == "UNHEALTHY_RECHECK" else 1,
+            -(item["age_seconds"] if isinstance(item["age_seconds"], (int, float)) else -1),
+            item["provider"],
+        ))
+        return {"status": "RECHECK_CANDIDATES", "candidates": candidates[:max_candidates]}
 
     def is_eligible(
         self,

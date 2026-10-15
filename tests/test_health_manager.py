@@ -111,6 +111,85 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertTrue(self.manager.is_eligible("image")["eligible"])
         self.assertEqual(self.manager.data["providers"]["image"]["status"], "HEALTHY")
 
+    def test_unhealthy_provider_requires_two_successful_probes_to_recover(self):
+        self.manager.record_result("image", success=False, error_code="TIMEOUT")
+        self.manager.record_result("image", success=False, error_code="TIMEOUT")
+        first = self.manager.active_probe("image", lambda **kwargs: {"ok": True})
+        self.assertEqual(first["status"], "RECOVERY_PENDING")
+        self.assertFalse(first["verified"])
+        self.assertFalse(self.manager.is_eligible("image")["eligible"])
+        second = self.manager.active_probe("image", lambda **kwargs: {"ok": True})
+        self.assertEqual(second["status"], "HEALTHY")
+        self.assertTrue(second["verified"])
+        self.assertTrue(self.manager.is_eligible("image")["eligible"])
+
+    def test_failed_probe_resets_recovery_success_streak(self):
+        self.manager.record_result("image", success=False, error_code="TIMEOUT")
+        self.manager.record_result("image", success=False, error_code="TIMEOUT")
+        first = self.manager.active_probe("image", lambda **kwargs: {"ok": True})
+        self.assertEqual(first["status"], "RECOVERY_PENDING")
+        failed = self.manager.active_probe(
+            "image", lambda **kwargs: (_ for _ in ()).throw(TimeoutError())
+        )
+        self.assertEqual(failed["status"], "TIMEOUT")
+        self.assertEqual(self.manager.data["providers"]["image"]["recovery_successes"], 0)
+        self.assertFalse(self.manager.is_eligible("image")["eligible"])
+
+    def test_recovery_success_threshold_must_be_positive_integer(self):
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=0)
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=True)
+
+    def test_recheck_candidates_prioritize_unhealthy_and_include_unknown(self):
+        self.manager.record_result("unhealthy", success=False, error_code="HTTP_503")
+        self.manager.record_result("unhealthy", success=False, error_code="HTTP_503")
+        self.manager.record_result("stale", success=True)
+        self.now[0] += timedelta(seconds=120)
+        self.manager.record_result("fresh", success=True)
+        result = self.manager.list_recheck_candidates(
+            ["unhealthy", "stale", "fresh", "unknown"],
+            recheck_after_seconds=60,
+            include_unknown=True,
+        )
+        self.assertEqual(result["status"], "RECHECK_CANDIDATES")
+        self.assertEqual(
+            [item["provider"] for item in result["candidates"]],
+            ["unhealthy", "stale", "unknown"],
+        )
+        self.assertEqual(result["candidates"][0]["reason"], "UNHEALTHY_RECHECK")
+        self.assertEqual(result["candidates"][1]["reason"], "STALE_HEALTH")
+        self.assertEqual(result["candidates"][2]["reason"], "NO_HEALTH_EVIDENCE")
+
+    def test_invalid_persisted_recovery_counter_fails_closed(self):
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "providers": {
+                "image": {
+                    "status": "UNHEALTHY",
+                    "consecutive_failures": 3,
+                    "recovery_successes": "two",
+                    "history": [],
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path)
+
+    def test_recheck_candidate_inputs_fail_closed(self):
+        self.assertEqual(
+            self.manager.list_recheck_candidates(recheck_after_seconds=0)["status"],
+            "INVALID_RECHECK_INTERVAL",
+        )
+        self.assertEqual(
+            self.manager.list_recheck_candidates(max_candidates=True)["status"],
+            "INVALID_MAX_CANDIDATES",
+        )
+        self.assertEqual(
+            self.manager.list_recheck_candidates(["ok", ""])["status"],
+            "INVALID_PROVIDER_IDS",
+        )
+
     def test_stale_health_is_excluded(self):
         self.manager.record_result("image", success=True, latency_ms=10)
         self.now[0] += timedelta(seconds=301)
