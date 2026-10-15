@@ -76,7 +76,7 @@ class OpenAICompatibleTextAdapterTests(unittest.TestCase):
             "http://172.16.0.2:11434/v1/chat/completions",
             "http://192.168.1.2:11434/v1/chat/completions",
             "http://example.local/v1/chat/completions",
-            "http://127.0.0.2/v1/chat/completions",
+            "http://169.254.169.254/v1/chat/completions",
             "https://api.example.com:0/v1/chat/completions",
             "https://api.example.com:abc/v1/chat/completions",
             "https://api.example.com/v1/chat/completions\n",
