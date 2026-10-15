@@ -763,6 +763,23 @@ class ProviderRoutingManager:
             "decisions": decisions,
         }
 
+    def simulate_policy(
+        self,
+        *,
+        project_id: str,
+        policy: dict[str, Any],
+        **route_options: Any,
+    ) -> dict[str, Any]:
+        """Evaluate a proposed project policy without saving it or reserving resources."""
+        if any(key in route_options for key in ("project_id", "simulation_policy", "dry_run")):
+            return {"allowed": False, "status": "INVALID_SIMULATION_OPTIONS"}
+        return self.route(
+            project_id=project_id,
+            dry_run=True,
+            simulation_policy=policy,
+            **route_options,
+        )
+
     def select_fallback(
         self,
         *,
