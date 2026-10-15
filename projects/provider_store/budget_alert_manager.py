@@ -71,6 +71,24 @@ class BudgetAlertManager:
                 or event.get("delivery_status") not in {"PENDING", "DELIVERED", "NOT_CONFIGURED"}
                 or not isinstance(event.get("attempts"), int)
                 or isinstance(event.get("attempts"), bool) or event["attempts"] < 0
+                or any(
+                    not isinstance(event.get(field), (int, float))
+                    or isinstance(event.get(field), bool)
+                    or not math.isfinite(event[field]) or event[field] < 0
+                    for field in ("spent", "reserved", "usage_pct")
+                )
+                or event_id != self._event_id(
+                    event.get("project_id", ""), float(event.get("budget", 0.0)),
+                    event.get("threshold_pct", 0),
+                )
+                or (
+                    "last_error_type" in event
+                    and (
+                        not isinstance(event["last_error_type"], str)
+                        or not event["last_error_type"]
+                        or len(event["last_error_type"]) > 100
+                    )
+                )
             ):
                 raise ValueError("Invalid budget alert event")
         self._data = loaded
