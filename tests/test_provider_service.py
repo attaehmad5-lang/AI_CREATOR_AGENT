@@ -11,6 +11,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.http_probe import ProviderHTTPStatusError
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 
@@ -215,6 +216,13 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "NETWORK_ERROR")
         self.assertNotIn("private endpoint and token", repr(result))
         self.assertEqual(self.health.data["providers"]["image"]["status"], "DEGRADED")
+
+    def test_http_rate_limit_metadata_flows_through_service_retry_policy(self):
+        error = ProviderHTTPStatusError(429, "7")
+        result = self.service.retry_decision(attempt=1, exception=error)
+        self.assertTrue(result["retry"])
+        self.assertEqual(result["reason"], "RATE_LIMIT_RETRY_AFTER")
+        self.assertGreaterEqual(result["delay_seconds"], 7.0)
 
     def test_output_validation_and_retry_decision_are_delegated(self):
         path = self.root / "script.txt"
