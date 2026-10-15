@@ -66,7 +66,7 @@ class ProviderServiceTests(unittest.TestCase):
         service = ProviderService(
             self.connections,
             routing_manager=router,
-            routing_access_controller=ProviderAccessController(),
+            access_controller=ProviderAccessController(),
         )
         adapter_calls = []
         result = service.execute_routed_request(
@@ -89,6 +89,46 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(router.calls, [])
         self.assertEqual(adapter_calls, [])
 
+    def test_connection_verification_is_blocked_before_probe_without_permission(self):
+        class SpyProbe:
+            def __init__(self):
+                self.calls = 0
+
+            def __call__(self, provider, **kwargs):
+                self.calls += 1
+                return {"ok": True}
+
+        probe = SpyProbe()
+        service = ProviderService(
+            self.connections,
+            access_controller=ProviderAccessController(),
+        )
+        result = service.verify_provider(
+            "image", probe,
+            principal={
+                "subject_id": "reader-1", "tenant_id": "tenant-a",
+                "roles": ["reader"], "project_ids": ["film"],
+            },
+            access_resource={
+                "provider_id": "image", "tenant_id": "tenant-a",
+            },
+        )
+        self.assertEqual(result["status"], "ACCESS_DENIED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(probe.calls, 0)
+
+    def test_connection_verification_requires_context_when_policy_enabled(self):
+        service = ProviderService(
+            self.connections,
+            access_controller=ProviderAccessController(),
+        )
+        calls = []
+        result = service.verify_provider(
+            "image", lambda provider, **kwargs: calls.append(True) or {"ok": True}
+        )
+        self.assertEqual(result["status"], "ACCESS_CONTEXT_REQUIRED")
+        self.assertEqual(calls, [])
+
     def test_routing_access_policy_requires_trusted_context_when_enabled(self):
         class SpyRouter:
             def __init__(self):
@@ -102,7 +142,7 @@ class ProviderServiceTests(unittest.TestCase):
         service = ProviderService(
             self.connections,
             routing_manager=router,
-            routing_access_controller=ProviderAccessController(),
+            access_controller=ProviderAccessController(),
         )
         result = service.route_request(category="image", project_id="film")
         self.assertFalse(result["allowed"])
@@ -122,7 +162,7 @@ class ProviderServiceTests(unittest.TestCase):
         service = ProviderService(
             self.connections,
             routing_manager=router,
-            routing_access_controller=ProviderAccessController(),
+            access_controller=ProviderAccessController(),
         )
         result = service.route_request(
             category="image",
