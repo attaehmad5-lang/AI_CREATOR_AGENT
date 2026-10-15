@@ -52,6 +52,53 @@ class RetryPolicyTests(unittest.TestCase):
         self.assertTrue(policy.decide(attempt=1, exception=TimeoutError()).retry)
         self.assertEqual(policy.decide(attempt=2, exception=TimeoutError()).reason, "RETRY_LIMIT_REACHED")
 
+    def test_error_specific_http_retry_classification(self):
+        policy = RetryPolicy(
+            max_attempts=4, base_delay_seconds=1, max_delay_seconds=10,
+            jitter_fraction=0, random_fn=lambda: 0,
+        )
+        for status in (408, 425, 429, 500, 502, 503, 504):
+            with self.subTest(status=status):
+                result = policy.decide(attempt=1, status_code=status)
+                self.assertTrue(result.retry)
+        for status in (400, 401, 403, 404, 409, 501, 505, 599):
+            with self.subTest(status=status):
+                result = policy.decide(attempt=1, status_code=status)
+                self.assertFalse(result.retry)
+
+    def test_provider_exception_metadata_supports_status_headers_and_retryable_veto(self):
+        class ProviderRateLimit(Exception):
+            http_status = 429
+            headers = {"Retry-After": "6"}
+
+        policy = RetryPolicy(
+            max_attempts=4, base_delay_seconds=1, max_delay_seconds=10,
+            jitter_fraction=0, random_fn=lambda: 0,
+        )
+        limited = policy.decide(attempt=1, exception=ProviderRateLimit("private response"))
+        self.assertTrue(limited.retry)
+        self.assertEqual(limited.reason, "RATE_LIMIT_RETRY_AFTER")
+        self.assertEqual(limited.delay_seconds, 6)
+
+        class PermanentProviderFailure(ConnectionError):
+            status_code = 503
+            retryable = False
+
+        permanent = policy.decide(attempt=1, exception=PermanentProviderFailure("private"))
+        self.assertFalse(permanent.retry)
+        self.assertEqual(permanent.reason, "PROVIDER_MARKED_NON_RETRYABLE")
+
+    def test_explicit_non_retryable_provider_metadata_overrides_transient_status(self):
+        class ProviderError(Exception):
+            status_code = 429
+            retryable = False
+            retry_after = 30
+
+        result = RetryPolicy().decide(attempt=1, exception=ProviderError("sensitive"))
+        self.assertFalse(result.retry)
+        self.assertEqual(result.reason, "PROVIDER_MARKED_NON_RETRYABLE")
+        self.assertEqual(result.delay_seconds, 0)
+
     def test_http_status_and_retry_after_are_read_from_exception(self):
         class AuthenticationFailure(PermissionError):
             status_code = 401
