@@ -1,12 +1,12 @@
 # Task #25 — A–P Verification Matrix
 
-**Status: IN PROGRESS. Do not merge or mark complete.**
+**Status: IN PROGRESS. The earlier implementation PR (#1) was merged on 2026-10-12, but Task #25 itself is not complete. Follow-up security/reliability work must be reviewed and tested separately; do not mark the 138-item checklist complete.**
 
 This matrix preserves the canonical feature-ID ranges and group names. It is an evidence tracker, not a replacement for the user's exact 138-item checklist. A group is not complete merely because a supporting module or test exists; every original item still requires individual verification.
 
 ## Latest confirmed verification
 
-GitHub Actions run [#38280285131](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280285131) passed on Ubuntu and Windows with Python 3.13: **291 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation also passed. Compilation and provider JSON catalog validation passed. Newer runs may be in progress; use Actions for the latest result.
+GitHub Actions run [#38280619566](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38280619566) passed on Ubuntu and Windows with Python 3.13: **292 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation also passed. Follow-up branch `task-25-progress-50-percent` contains additional redirect-hardening and extreme-retry-count safeguards; its CI verification is pending.
 
 | Group / IDs | Canonical group | Current evidence | Status | Remaining verification |
 |---|---|---|---|---|
@@ -33,4 +33,4 @@ GitHub Actions run [#38280285131](https://github.com/attaehmad5-lang/AI_CREATOR_
 2. Mark each original item individually only after code evidence and relevant tests exist.
 3. Fix and rerun every failing test; no failure is ignored or marked passed without a rerun.
 4. Complete live-provider checks only with user-authorized credentials and safe, provider-specific probes. A generic HTTP 2xx is not proof of authenticated access unless the configured endpoint is documented to enforce the credential.
-5. Keep this pull request in draft and do not merge into `main` until the full checklist and all required tests are verified.
+5. Keep follow-up work in a draft PR until the changed code and tests pass. The prior implementation PR was already merged; that historical merge does not mean Task #25 is complete.
