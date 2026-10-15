@@ -87,6 +87,8 @@ class OpenAICompatibleTextAdapter:
         if not parsed.hostname or parsed.query:
             raise ValueError("endpoint host or query is invalid")
         if parsed.scheme == "https":
+            if not isinstance(allowed_hosts, list) or not allowed_hosts:
+                raise ValueError("HTTPS endpoint requires an explicit host allowlist")
             validation = ConnectionManager.validate_endpoint(
                 endpoint.strip(), allowed_hosts=allowed_hosts
             )
