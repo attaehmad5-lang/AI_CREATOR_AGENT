@@ -11,6 +11,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
+from projects.provider_store.paid_approval_manager import PaidUsageApprovalManager
 
 
 class ProviderRoutingManagerTests(unittest.TestCase):
@@ -34,12 +35,33 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         }), encoding="utf-8")
         self.state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
         self.connections = ConnectionManager(self.catalog_path, self.state_path)
+        self.approvals = PaidUsageApprovalManager(self.root / "paid-approvals.json")
         for provider_id in ("primary", "fallback", "voice"):
             verified = self.connections.verify_connectivity(
                 provider_id, lambda provider, **kwargs: {"ok": True}
             )
             if verified.get("verified") is not True:
                 raise AssertionError(f"test fixture provider {provider_id} failed stub verification")
+
+    def _approval_ids(self, providers, *, request_id, amount=1.0, project_id="film"):
+        if isinstance(providers, dict):
+            amounts = providers
+        else:
+            amounts = {provider_id: amount for provider_id in providers}
+        result = {}
+        for provider_id, cost in amounts.items():
+            pending = self.approvals.request_approval(
+                project_id=project_id, provider_id=provider_id, request_id=request_id,
+                estimated_cost=cost, unit="USD", requested_by="test-user",
+                reason="Test-scoped explicit paid usage approval",
+            )
+            self.assertIn(pending["status"], {"APPROVAL_PENDING", "APPROVAL_ALREADY_EXISTS"})
+            approval_id = pending["approval_id"]
+            if pending["status"] == "APPROVAL_PENDING":
+                approved = self.approvals.approve(approval_id, approved_by="test-admin")
+                self.assertTrue(approved["approved"], approved)
+            result[provider_id] = approval_id
+        return result
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -221,7 +243,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             free_credits={"primary": 0.0, "fallback": 2.0},
         )
         self.assertEqual(free_first["provider"], "fallback")
-        cost_policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        cost_policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         cost_router = ProviderRoutingManager(self.connections, cost_policy=cost_policy)
         cheapest = cost_router.route(
             category="image", project_id="film", strategy="LOWEST_COST",
@@ -256,7 +278,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(routed["health_verified"])
 
     def test_paid_budget_routing_rejects_incompatible_cost_unit(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
         result = router.route(
             category="image", project_id="film", estimated_cost=1.0,
@@ -295,7 +317,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["decisions"][0]["status"], "COST_POLICY_REQUIRED")
 
     def test_cost_policy_blocks_paid_route_without_budget_or_approval(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
         result = router.route(
             category="image", project_id="film", estimated_cost=1.0,
@@ -314,7 +336,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
                 "unit": "USD",
             },
         )
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         router = ProviderRoutingManager(
             self.connections, cost_policy=policy, credit_manager=credits
         )
@@ -346,7 +368,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
                         },
                     )
                     self.assertEqual(refreshed["status"], "CREDIT_BALANCE_UPDATED")
-                policy = ProviderCostPolicy(project_budgets={"film": 100.0})
+                policy = ProviderCostPolicy(project_budgets={"film": 100.0}, approval_manager=self.approvals)
                 router = ProviderRoutingManager(
                     self.connections, cost_policy=policy, credit_manager=credits
                 )
@@ -375,7 +397,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
                         "unit": "USD", "source": "official-account-api",
                     },
                 )
-                policy = ProviderCostPolicy(project_budgets={"film": 100.0})
+                policy = ProviderCostPolicy(project_budgets={"film": 100.0}, approval_manager=self.approvals)
                 router = ProviderRoutingManager(
                     self.connections, cost_policy=policy, credit_manager=credits
                 )
@@ -426,7 +448,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
                 "unit": "credits",
             },
         )
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         router = ProviderRoutingManager(
             self.connections, cost_policy=policy, credit_manager=credits
         )
@@ -460,7 +482,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "UNVERIFIED_FREE_CREDIT_INPUT_REJECTED")
 
     def test_cost_policy_rejects_unverified_free_credit_map(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
         result = router.route(
             category="image", project_id="film", estimated_cost=1.0,
@@ -483,7 +505,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(quota.data["requests"]["duplicate-route"]["status"], "RESERVED")
 
     def test_duplicate_paid_reservation_cannot_start_second_provider_call(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
         options = dict(
             category="image", project_id="film", estimated_cost=1.0,
@@ -583,7 +605,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(quota.data["requests"]["job-1"]["provider_id"], "fallback")
 
     def test_quota_rejection_releases_new_cost_reservation(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         quota = ProviderQuotaManager(
             self.root / "quota-rollback.json",
             limits={"primary": {"hourly": 1}, "fallback": {"hourly": 1}},
@@ -603,7 +625,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertNotIn("paid-job", reservations)
 
     def test_already_reserved_quota_rolls_back_new_cost_reservation(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         quota = ProviderQuotaManager(
             self.root / "quota-already-reserved.json",
             limits={"primary": {"hourly": 2}, "fallback": {"hourly": 2}},
@@ -648,7 +670,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["reservation_cleanup"], [{"manager": "credit", "released": True}])
 
     def test_reservation_cleanup_failure_stops_routing(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         quota = ProviderQuotaManager(
             self.root / "quota-cleanup-failure.json",
             limits={"primary": {"hourly": 2}},
@@ -668,7 +690,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertIn("paid-job", policy.ledger["projects"]["film"]["reservations"])
 
     def test_quota_rejection_does_not_release_preexisting_cost_reservation(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         quota = ProviderQuotaManager(
             self.root / "quota-existing.json",
             limits={"primary": {"hourly": 1}, "fallback": {"hourly": 1}},
@@ -692,7 +714,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(reservation["provider_id"], "primary")
 
     def test_paid_route_fails_closed_without_reservation_method(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
         with patch.object(policy, "reserve_usage", None):
             result = router.route(
@@ -708,7 +730,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertNotIn("no-reserver", project.get("reservations", {}))
 
     def test_paid_routing_reserves_budget_and_requires_idempotency_key(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
         missing_id = router.route(
             category="image", project_id="film", estimated_cost=1.0,
@@ -731,7 +753,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
 
     def test_fallback_releases_and_reassigns_budget_and_quota_reservations(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         quota = ProviderQuotaManager(
             self.root / "quotas.json",
             limits={"primary": {"hourly": 2}, "fallback": {"hourly": 2}},
@@ -758,7 +780,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(quota.data["requests"]["job-1"]["provider_id"], "fallback")
 
     def test_fallback_preserves_possible_charges_and_requires_new_attempt_id(self):
-        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0}, approval_manager=self.approvals)
         quota = ProviderQuotaManager(
             self.root / "quotas.json",
             limits={"primary": {"hourly": 3}, "fallback": {"hourly": 3}},
