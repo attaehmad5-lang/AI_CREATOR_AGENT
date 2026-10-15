@@ -600,7 +600,7 @@ class ConnectionManager:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
         expected_api_version = provider.get("adapter_api_version")
         if expected_api_version is not None:
-            if not isinstance(expected_api_version, str) or not re.fullmatch(r"[0-9]+\\.[0-9]+", expected_api_version):
+            if not isinstance(expected_api_version, str) or not re.fullmatch(r"[0-9]+[.][0-9]+", expected_api_version):
                 return {
                     "status": "INVALID_ADAPTER_API_VERSION",
                     "provider": provider_id,
