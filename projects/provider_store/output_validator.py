@@ -210,6 +210,70 @@ class ProviderOutputValidator:
         }
 
     @staticmethod
+    def _mp3_properties_stream(stream: Any, total_size: int) -> dict[str, Any] | None:
+        stream.seek(0)
+        prefix = stream.read(10)
+        offset = 0
+        if prefix[:3] == b"ID3":
+            if len(prefix) != 10 or any(byte & 0x80 for byte in prefix[6:10]):
+                return None
+            tag_size = (prefix[6] << 21) | (prefix[7] << 14) | (prefix[8] << 7) | prefix[9]
+            offset = 10 + tag_size + (10 if prefix[5] & 0x10 else 0)
+        if offset >= total_size:
+            return None
+
+        def header_info(header: bytes):
+            if len(header) != 4:
+                return None
+            word = int.from_bytes(header, "big")
+            if ((word >> 21) & 0x7FF) != 0x7FF:
+                return None
+            version, layer = (word >> 19) & 3, (word >> 17) & 3
+            bitrate_index, sample_index = (word >> 12) & 15, (word >> 10) & 3
+            if version == 1 or layer != 1 or bitrate_index in {0, 15} or sample_index == 3:
+                return None
+            rates = [44100, 48000, 32000]
+            sample_rate = rates[sample_index] // (2 if version == 2 else 4 if version == 0 else 1)
+            mpeg1 = [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320,0]
+            mpeg2 = [0,8,16,24,32,40,48,56,64,80,96,112,128,144,160,0]
+            bitrate = (mpeg1 if version == 3 else mpeg2)[bitrate_index] * 1000
+            frame_size = ((144 if version == 3 else 72) * bitrate) // sample_rate + ((word >> 9) & 1)
+            return version, sample_rate, frame_size, 1152 if version == 3 else 576
+
+        start = None
+        first = None
+        for delta in range(min(65536, total_size - offset)):
+            stream.seek(offset + delta)
+            parsed = header_info(stream.read(4))
+            if parsed is not None:
+                start, first = offset + delta, parsed
+                break
+        if start is None or first is None:
+            return None
+        version, sample_rate, _, _ = first
+        current, samples, frames = start, 0, 0
+        while current + 4 <= total_size:
+            stream.seek(current)
+            header = stream.read(4)
+            if current + 128 == total_size and header[:3] == b"TAG":
+                current = total_size
+                break
+            parsed = header_info(header)
+            if parsed is None:
+                return None
+            frame_version, frame_rate, frame_size, frame_samples = parsed
+            if frame_version != version or frame_rate != sample_rate or frame_size < 4 or current + frame_size > total_size:
+                return None
+            current += frame_size
+            samples += frame_samples
+            frames += 1
+            if frames > 1_000_000:
+                return None
+        if frames == 0 or current != total_size:
+            return None
+        return {"duration_seconds": samples / sample_rate, "codec": "mp3", "sample_rate": sample_rate}
+
+    @staticmethod
     def _flac_properties(payload: bytes) -> dict[str, Any] | None:
         if len(payload) < 42 or payload[:4] != b"fLaC":
             return None
