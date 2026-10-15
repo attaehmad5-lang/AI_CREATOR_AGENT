@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -78,7 +79,7 @@ class ProviderCatalogMigrationManager:
                         isinstance(host, str)
                         and bool(host)
                         and len(host) <= 253
-                        and __import__("re").fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", host)
+                        and re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", host)
                         and ".." not in host
                         for host in hosts
                     )
