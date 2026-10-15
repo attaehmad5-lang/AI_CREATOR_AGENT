@@ -178,6 +178,13 @@ class ProviderService:
         Token refresh is explicit: call the OAuth manager's refresh method only when the
         provider supports it and the user-authorized session allows it.
         """
+        authorization = self._authorize_if_configured(principal, "provider:connect", access_resource)
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {
+                "status": authorization.get("status", "ACCESS_DENIED"),
+                "provider": provider_id, "verified": False,
+                "authorization": authorization.get("authorization"),
+            }
         if not callable(getattr(oauth_manager, "get_access_token", None)):
             return {"status": "OAUTH_MANAGER_INVALID", "provider": provider_id, "verified": False}
         try:
