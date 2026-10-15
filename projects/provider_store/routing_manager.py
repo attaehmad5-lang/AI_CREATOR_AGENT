@@ -32,6 +32,7 @@ class ProviderRoutingManager:
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
         project_policy_manager: Any | None = None,
+        operation_policy_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
         require_verified_connection: bool = True,
     ) -> None:
@@ -47,6 +48,8 @@ class ProviderRoutingManager:
             raise ValueError("credit_manager must provide fresh verified balances")
         if project_policy_manager is not None and not callable(getattr(project_policy_manager, "get_policy", None)):
             raise ValueError("project_policy_manager must support policy lookup")
+        if operation_policy_manager is not None and not callable(getattr(operation_policy_manager, "allowed_provider_ids", None)):
+            raise ValueError("operation_policy_manager must support provider-operation authorization")
         if not isinstance(require_verified_connection, bool):
             raise ValueError("require_verified_connection must be boolean")
         if require_verified_connection and not callable(getattr(connection_manager, "get_state", None)):
@@ -60,6 +63,7 @@ class ProviderRoutingManager:
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager
         self.project_policy_manager = project_policy_manager
+        self.operation_policy_manager = operation_policy_manager
         self.default_strategy = normalized_strategy
         self.require_verified_connection = require_verified_connection
         self._round_robin_counters: dict[str, int] = {}
@@ -136,6 +140,8 @@ class ProviderRoutingManager:
         estimated_cost_unit: str = "USD",
         free_credits: dict[str, float] | None = None,
         request_id: str | None = None,
+        subject_id: str | None = None,
+        operation: str | None = None,
         paid_approved_providers: set[str] | frozenset[str] | None = None,
         excluded_providers: set[str] | frozenset[str] | None = None,
         require_health_evidence: bool = False,
@@ -260,6 +266,34 @@ class ProviderRoutingManager:
         if not isinstance(discovered, list):
             return {"allowed": False, "status": "PROVIDER_DISCOVERY_FAILED", "reason": "INVALID_DISCOVERY_RESULT"}
 
+        access_allowed: set[str] | None = None
+        if self.operation_policy_manager is not None:
+            if (
+                not isinstance(subject_id, str) or not subject_id.strip()
+                or not isinstance(operation, str) or not operation.strip()
+            ):
+                return {"allowed": False, "status": "ACCESS_DENIED"}
+            try:
+                access_result = self.operation_policy_manager.allowed_provider_ids(
+                    subject_id=subject_id,
+                    operation=operation,
+                    project_id=project_id,
+                )
+            except Exception as exc:
+                return {
+                    "allowed": False, "status": "ACCESS_POLICY_LOOKUP_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if (
+                not isinstance(access_result, dict)
+                or access_result.get("status") != "ACCESS_POLICY_FOUND"
+                or not isinstance(access_result.get("provider_ids"), list)
+                or not access_result.get("provider_ids")
+                or any(not isinstance(item, str) or not item.strip() for item in access_result["provider_ids"])
+            ):
+                return {"allowed": False, "status": "ACCESS_DENIED"}
+            access_allowed = set(access_result["provider_ids"])
+
         decisions: list[dict[str, Any]] = []
         policy_filtered_discovery = []
         allowed_providers = project_policy.get("allowed_providers")
@@ -269,6 +303,9 @@ class ProviderRoutingManager:
             if not isinstance(item, dict):
                 continue
             item_id = item.get("id")
+            if access_allowed is not None and item_id not in access_allowed:
+                decisions.append({"provider": item_id, "status": "ACCESS_POLICY_PROVIDER_DENIED"})
+                continue
             if allowed_providers is not None and item_id not in allowed_providers:
                 decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_NOT_ALLOWED"})
                 continue
