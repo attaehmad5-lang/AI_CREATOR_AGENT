@@ -265,7 +265,7 @@ class ProviderServiceTests(unittest.TestCase):
     def test_publish_output_persists_provider_attribution_and_asset_metadata(self):
         temporary = self.root / "attributed-candidate.png"
         destination = self.root / "attributed-final.png"
-        temporary.write_bytes(b"\\x89PNG\\r\\n\\x1a\\nasset-metadata-image")
+        temporary.write_bytes(b"\x89PNG\r\n\x1a\nasset-metadata-image")
         result = self.service.publish_output(
             temporary, destination, modality="image",
             provider_id="image", request_id="publish-asset-1", project_id="film",
