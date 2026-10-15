@@ -456,6 +456,9 @@ class ProviderService:
                 or any(not isinstance(item, str) for item in data_categories)
             ):
                 return {"status": "INVALID_DATA_CATEGORIES", "executed": False}
+            valid_categories = getattr(self.data_retention_policy, "CATEGORIES", None)
+            if valid_categories is not None and any(item not in valid_categories for item in data_categories):
+                return {"status": "INVALID_DATA_CATEGORIES", "executed": False}
             if "credentials" in data_categories:
                 return {"status": "CREDENTIAL_DATA_FORBIDDEN", "executed": False}
             if not isinstance(data_purpose, str) or not data_purpose.strip() or len(data_purpose) > 80:
@@ -518,7 +521,11 @@ class ProviderService:
                     "allowed": False, "status": "DATA_POLICY_EVALUATION_FAILED",
                     "error_type": type(exc).__name__,
                 }
-            if not isinstance(data_policy_result, dict) or data_policy_result.get("allowed") is not True:
+            if (
+                not isinstance(data_policy_result, dict)
+                or data_policy_result.get("allowed") is not True
+                or data_policy_result.get("status") != "DATA_POLICY_ALLOWED"
+            ):
                 release = self.release_unstarted_request(
                     project_id=project_id, provider_id=provider_id, request_id=request_id
                 )
