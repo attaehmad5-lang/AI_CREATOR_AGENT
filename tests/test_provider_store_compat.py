@@ -113,7 +113,7 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
         advanced_catalog = project_root / "projects" / "provider_store" / "advanced" / "advanced_provider_catalog.json"
         main_ids = {p["id"] for p in json.loads(main_catalog.read_text(encoding="utf-8"))["providers"]}
         advanced_ids = {p["id"] for p in json.loads(advanced_catalog.read_text(encoding="utf-8"))["providers"]}
-        self.assertEqual(len(main_ids), 54)
+        self.assertEqual(len(main_ids), 55)
         self.assertEqual(len(advanced_ids), 18)
         self.assertTrue(advanced_ids.issubset(main_ids))
 
@@ -121,7 +121,7 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             manager = ConnectionManager(main_catalog, Path(tmp) / "state.json")
             registry = UnifiedProviderRegistry(connection_manager=manager)
             advanced = AdvancedProviderManager(connection_manager=manager)
-            self.assertEqual(len(registry.all_providers()), 54)
+            self.assertEqual(len(registry.all_providers()), 55)
             self.assertEqual(len(advanced.list_providers()), 18)
             self.assertEqual(registry.status()["advanced_providers"], 18)
 
