@@ -220,7 +220,11 @@ class ProviderHealthManager:
             consecutive_failures = 0 if success else int(record.get("consecutive_failures", 0)) + 1
             if not success:
                 recovery_successes = 0
-                status = "UNHEALTHY" if consecutive_failures >= self.failure_threshold else "DEGRADED"
+                if was_unhealthy and probe_result:
+                    consecutive_failures = max(consecutive_failures, self.failure_threshold)
+                    status = "UNHEALTHY"
+                else:
+                    status = "UNHEALTHY" if consecutive_failures >= self.failure_threshold else "DEGRADED"
             elif was_unhealthy and probe_result:
                 recovery_successes += 1
                 if recovery_successes >= self.recovery_success_threshold:
