@@ -11,6 +11,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
+from projects.provider_store.operation_policy import ProviderOperationPolicy
 
 
 class ProviderRoutingManagerTests(unittest.TestCase):
@@ -62,6 +63,43 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "primary")
+
+    def test_operation_policy_filters_providers_before_routing(self):
+        policy = ProviderOperationPolicy([{
+            "subject_id": "user-a", "project_id": "film",
+            "operation": "image.generate", "provider_ids": ["fallback"],
+        }])
+        router = ProviderRoutingManager(
+            self.connections, operation_policy_manager=policy
+        )
+        result = router.route(
+            category="image", project_id="film",
+            subject_id="user-a", operation="image.generate",
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertIn(
+            {"provider": "primary", "status": "ACCESS_POLICY_PROVIDER_DENIED"},
+            result["decisions"],
+        )
+
+    def test_operation_policy_fails_closed_without_identity_or_grant(self):
+        policy = ProviderOperationPolicy([{
+            "subject_id": "user-a", "project_id": "film",
+            "operation": "image.generate", "provider_ids": ["fallback"],
+        }])
+        router = ProviderRoutingManager(
+            self.connections, operation_policy_manager=policy
+        )
+        missing_identity = router.route(category="image", project_id="film")
+        self.assertFalse(missing_identity["allowed"])
+        self.assertEqual(missing_identity["status"], "ACCESS_DENIED")
+        wrong_operation = router.route(
+            category="image", project_id="film",
+            subject_id="user-a", operation="video.generate",
+        )
+        self.assertFalse(wrong_operation["allowed"])
+        self.assertEqual(wrong_operation["status"], "ACCESS_DENIED")
 
     def test_primary_route_skips_disabled_and_orders_by_priority(self):
         router = ProviderRoutingManager(self.connections)
