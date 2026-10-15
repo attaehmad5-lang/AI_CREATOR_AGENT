@@ -81,6 +81,15 @@ class ProviderMetricsManagerTests(unittest.TestCase):
         self.assertTrue(all(item["saved"] for item in results))
         self.assertEqual(self.manager.summary()["request_count"], 60)
 
+    def test_latency_aggregate_stays_finite_for_extreme_valid_values(self):
+        self.manager.record_request(**self.event("huge-1", latency_ms=1e308))
+        self.manager.record_request(**self.event(
+            "huge-2", trace_id="trace-huge-2", latency_ms=1e308
+        ))
+        average = self.manager.summary()["average_latency_ms"]
+        self.assertTrue(average < float("inf"))
+        self.assertEqual(average, 1e308)
+
     def test_concurrent_processes_do_not_lose_metrics_events(self):
         args = [(str(self.path), index) for index in range(1, 17)]
         with ProcessPoolExecutor(max_workers=8) as pool:
