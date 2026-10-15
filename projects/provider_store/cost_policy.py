@@ -257,6 +257,8 @@ class ProviderCostPolicy:
         estimated_costs: dict[str, float],
         free_credits: dict[str, float] | None = None,
         paid_approved_providers: set[str] | None = None,
+        paid_approval_ids: dict[str, str] | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         """Prefer eligible free-credit providers before any explicitly approved paid route."""
         if not isinstance(providers, list) or not isinstance(estimated_costs, dict):
@@ -272,6 +274,12 @@ class ProviderCostPolicy:
             return {"allowed": False, "status": "VERIFIED_CREDIT_MANAGER_REQUIRED"}
         if paid_approved_providers is not None and not isinstance(paid_approved_providers, (set, frozenset)):
             return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
+        approval_ids = {} if paid_approval_ids is None else paid_approval_ids
+        if not isinstance(approval_ids, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in approval_ids.items()
+        ):
+            return {"allowed": False, "status": "INVALID_PAID_APPROVAL_IDS"}
         free_credits = {} if free_credits is None else free_credits
         paid_approved_providers = set() if paid_approved_providers is None else paid_approved_providers
         candidates = sorted(
@@ -295,6 +303,8 @@ class ProviderCostPolicy:
                 estimated_cost=estimate,
                 free_credits_remaining=free_credits.get(provider_id, 0.0),
                 paid_usage_approved=provider_id in paid_approved_providers,
+                approval_id=approval_ids.get(provider_id),
+                request_id=request_id,
             )
             if decision["allowed"]:
                 return {**decision, "selection_order": [d.get("provider") for d in decisions] + [provider_id]}
