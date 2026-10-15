@@ -88,6 +88,15 @@ class RetryPolicyTests(unittest.TestCase):
         self.assertFalse(permanent.retry)
         self.assertEqual(permanent.reason, "PROVIDER_MARKED_NON_RETRYABLE")
 
+        class PermanentHttpConnectionError(ConnectionError):
+            status_code = 501
+
+        unsupported = policy.decide(
+            attempt=1, exception=PermanentHttpConnectionError("unsupported endpoint")
+        )
+        self.assertFalse(unsupported.retry)
+        self.assertEqual(unsupported.reason, "NON_RETRYABLE_FAILURE")
+
     def test_explicit_non_retryable_provider_metadata_overrides_transient_status(self):
         class ProviderError(Exception):
             status_code = 429
