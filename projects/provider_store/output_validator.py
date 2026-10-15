@@ -47,6 +47,9 @@ class ProviderOutputValidator:
         max_json_depth: int = 128,
         max_image_dimension: int = 16384,
         max_image_pixels: int = 100_000_000,
+        max_media_duration_seconds: float = 3600.0,
+        allowed_audio_codecs: set[str] | None = None,
+        allowed_video_codecs: set[str] | None = None,
     ) -> None:
         if (
             not isinstance(min_size_bytes, int)
@@ -78,8 +81,17 @@ class ProviderOutputValidator:
         self.min_size_bytes = min_size_bytes
         self.max_size_bytes = max_size_bytes
         self.max_json_depth = max_json_depth
+        if (
+            not isinstance(max_media_duration_seconds, (int, float))
+            or isinstance(max_media_duration_seconds, bool)
+            or not 0 < max_media_duration_seconds <= 86400
+        ):
+            raise ValueError("max_media_duration_seconds must be between 0 and 86400")
         self.max_image_dimension = max_image_dimension
         self.max_image_pixels = max_image_pixels
+        self.max_media_duration_seconds = float(max_media_duration_seconds)
+        self.allowed_audio_codecs = set(allowed_audio_codecs or {"pcm", "ieee_float", "alaw", "mulaw", "mp4a", "ac-3", "ec-3", "opus"})
+        self.allowed_video_codecs = set(allowed_video_codecs or {"h264", "avc1", "avc3", "h265", "hvc1", "hev1", "vp9", "vp09", "av1", "av01", "mp4v", "mjpg", "xvid", "divx", "dib"})
 
     @staticmethod
     def _image_dimensions(mime: str, payload: bytes) -> tuple[int, int] | None:
@@ -142,6 +154,172 @@ class ProviderOutputValidator:
                 height = int.from_bytes(payload[28:30], "little") & 0x3FFF
                 return width, height
             return None
+        return None
+
+    @staticmethod
+    def _wav_properties(payload: bytes, total_size: int) -> dict[str, Any] | None:
+        if len(payload) < 12 or payload[:4] != b"RIFF" or payload[8:12] != b"WAVE":
+            return None
+        riff_size = int.from_bytes(payload[4:8], "little")
+        if riff_size + 8 != total_size:
+            return None
+        index = 12
+        fmt = None
+        data_size = None
+        while index + 8 <= len(payload):
+            chunk_id = payload[index:index + 4]
+            chunk_size = int.from_bytes(payload[index + 4:index + 8], "little")
+            start = index + 8
+            end = start + chunk_size
+            if end > total_size or end < start:
+                return None
+            if chunk_id == b"fmt ":
+                if chunk_size < 16 or end > len(payload):
+                    return None
+                fmt = {
+                    "format": int.from_bytes(payload[start:start + 2], "little"),
+                    "channels": int.from_bytes(payload[start + 2:start + 4], "little"),
+                    "sample_rate": int.from_bytes(payload[start + 4:start + 8], "little"),
+                    "byte_rate": int.from_bytes(payload[start + 8:start + 12], "little"),
+                    "block_align": int.from_bytes(payload[start + 12:start + 14], "little"),
+                    "bits_per_sample": int.from_bytes(payload[start + 14:start + 16], "little"),
+                }
+            elif chunk_id == b"data":
+                data_size = chunk_size
+            if chunk_id == b"data" and fmt is not None:
+                break
+            index = end + (chunk_size & 1)
+        if fmt is None or data_size is None:
+            return None
+        channels, sample_rate = fmt["channels"], fmt["sample_rate"]
+        bits, byte_rate = fmt["bits_per_sample"], fmt["byte_rate"]
+        if not 1 <= channels <= 32 or not 8000 <= sample_rate <= 384000 or bits not in {8, 16, 24, 32, 64}:
+            return None
+        expected_align = channels * ((bits + 7) // 8)
+        if fmt["block_align"] != expected_align or byte_rate != sample_rate * expected_align or data_size > total_size:
+            return None
+        codec = {1: "pcm", 3: "ieee_float", 6: "alaw", 7: "mulaw"}.get(fmt["format"])
+        if codec is None or data_size == 0:
+            return None
+        return {
+            "duration_seconds": data_size / byte_rate,
+            "codec": codec,
+            "sample_rate": sample_rate,
+            "channels": channels,
+            "bits_per_sample": bits,
+        }
+
+    @staticmethod
+    def _avi_properties(payload: bytes, total_size: int) -> dict[str, Any] | None:
+        if len(payload) < 12 or payload[:4] != b"RIFF" or payload[8:12] != b"AVI ":
+            return None
+        if int.from_bytes(payload[4:8], "little") + 8 != total_size:
+            return None
+        avih = payload.find(b"avih")
+        if avih < 0 or avih + 8 + 40 > len(payload):
+            return None
+        header_size = int.from_bytes(payload[avih + 4:avih + 8], "little")
+        start = avih + 8
+        if header_size < 40 or start + 40 > len(payload):
+            return None
+        micros_per_frame = int.from_bytes(payload[start:start + 4], "little")
+        total_frames = int.from_bytes(payload[start + 16:start + 20], "little")
+        width = int.from_bytes(payload[start + 32:start + 36], "little")
+        height = int.from_bytes(payload[start + 36:start + 40], "little")
+        if micros_per_frame <= 0 or total_frames <= 0 or width <= 0 or height <= 0:
+            return None
+        codec = None
+        index = 0
+        while True:
+            index = payload.find(b"strh", index)
+            if index < 0:
+                break
+            if index + 16 <= len(payload):
+                size = int.from_bytes(payload[index + 4:index + 8], "little")
+                stream_type = payload[index + 8:index + 12]
+                handler = payload[index + 12:index + 16]
+                if size >= 8 and stream_type == b"vids":
+                    try:
+                        codec = handler.decode("ascii").strip().casefold()
+                    except UnicodeDecodeError:
+                        return None
+                    break
+            index += 4
+        if not codec:
+            return None
+        return {
+            "duration_seconds": total_frames * micros_per_frame / 1_000_000,
+            "codec": codec,
+            "width": width,
+            "height": height,
+        }
+
+    @staticmethod
+    def _mp4_properties(payload: bytes, total_size: int, modality: str) -> dict[str, Any] | None:
+        if len(payload) < 16 or payload[4:8] != b"ftyp":
+            return None
+        # Require a bounded, complete moov box in the inspected header region.
+        index = 0
+        moov = None
+        while index + 8 <= len(payload):
+            box_size = int.from_bytes(payload[index:index + 4], "big")
+            box_type = payload[index + 4:index + 8]
+            header_size = 8
+            if box_size == 1:
+                if index + 16 > len(payload):
+                    return None
+                box_size = int.from_bytes(payload[index + 8:index + 16], "big")
+                header_size = 16
+            elif box_size == 0:
+                box_size = total_size - index
+            if box_size < header_size or index + box_size > total_size:
+                return None
+            if box_type == b"moov":
+                if index + box_size > len(payload):
+                    return None
+                moov = payload[index:index + box_size]
+                break
+            if index + box_size > len(payload):
+                break
+            index += box_size
+        if moov is None:
+            return None
+        mvhd = moov.find(b"mvhd")
+        if mvhd < 0 or mvhd + 24 > len(moov):
+            return None
+        data = mvhd + 8
+        version = moov[data]
+        if version == 0:
+            if data + 20 > len(moov):
+                return None
+            timescale = int.from_bytes(moov[data + 12:data + 16], "big")
+            duration = int.from_bytes(moov[data + 16:data + 20], "big")
+        elif version == 1:
+            if data + 32 > len(moov):
+                return None
+            timescale = int.from_bytes(moov[data + 20:data + 24], "big")
+            duration = int.from_bytes(moov[data + 24:data + 32], "big")
+        else:
+            return None
+        stsd = moov.find(b"stsd")
+        codec = None
+        if stsd >= 0 and stsd + 24 <= len(moov):
+            entry_type = moov[stsd + 20:stsd + 24]
+            try:
+                codec = entry_type.decode("ascii").casefold()
+            except UnicodeDecodeError:
+                return None
+        if timescale <= 0 or duration <= 0 or not codec:
+            return None
+        return {"duration_seconds": duration / timescale, "codec": codec}
+
+    def _media_properties(self, mime: str, payload: bytes, total_size: int, modality: str) -> dict[str, Any] | None:
+        if mime == "audio/wav":
+            return self._wav_properties(payload, total_size)
+        if mime == "video/avi":
+            return self._avi_properties(payload, total_size)
+        if mime in {"audio/mp4", "video/mp4"}:
+            return self._mp4_properties(payload, total_size, modality)
         return None
 
     @staticmethod
@@ -210,6 +388,7 @@ class ProviderOutputValidator:
                     return {"valid": False, "status": "OUTPUT_TOO_LARGE", "size_bytes": size}
                 header = stream.read(32)
                 image_dimensions = None
+                media_properties = None
                 if normalized_modality in self.SIGNATURES:
                     mime = self._match_signature(normalized_modality, header)
                     if mime is None:
@@ -227,6 +406,23 @@ class ProviderOutputValidator:
                             return {"valid": False, "status": "IMAGE_DIMENSION_LIMIT_EXCEEDED", "width": width, "height": height}
                         if width * height > self.max_image_pixels:
                             return {"valid": False, "status": "IMAGE_PIXEL_LIMIT_EXCEEDED", "width": width, "height": height}
+                    elif normalized_modality in {"audio", "video"}:
+                        stream.seek(0)
+                        media_payload = stream.read(min(size, 16 * 1024 * 1024))
+                        if len(media_payload) != min(size, 16 * 1024 * 1024):
+                            return {"valid": False, "status": "OUTPUT_CHANGED_DURING_VALIDATION"}
+                        media_properties = self._media_properties(mime, media_payload, size, normalized_modality)
+                        if media_properties is None:
+                            return {"valid": False, "status": "MEDIA_PROPERTIES_UNVERIFIED"}
+                        duration = media_properties.get("duration_seconds")
+                        codec = media_properties.get("codec")
+                        allowed_codecs = self.allowed_audio_codecs if normalized_modality == "audio" else self.allowed_video_codecs
+                        if not isinstance(duration, (int, float)) or isinstance(duration, bool) or duration <= 0:
+                            return {"valid": False, "status": "MEDIA_DURATION_INVALID"}
+                        if duration > self.max_media_duration_seconds:
+                            return {"valid": False, "status": "MEDIA_DURATION_LIMIT_EXCEEDED", "duration_seconds": duration}
+                        if not isinstance(codec, str) or codec.casefold() not in allowed_codecs:
+                            return {"valid": False, "status": "MEDIA_CODEC_NOT_ALLOWED", "codec": codec}
                 elif normalized_modality == "text":
                     stream.seek(0)
                     decoder = codecs.getincrementaldecoder("utf-8")()
@@ -292,6 +488,7 @@ class ProviderOutputValidator:
                 {"width": image_dimensions[0], "height": image_dimensions[1]}
                 if normalized_modality == "image" and image_dimensions is not None else {}
             ),
+            **(media_properties or {}),
             "sha256": digest.hexdigest(),
         }
 
