@@ -311,6 +311,10 @@ class ProviderService:
         if explicit_trace_id and not accepts_trace_id:
             return {"status": "TRACE_ID_UNSUPPORTED_BY_ADAPTER", "executed": False, "trace_id": trace_id}
 
+        # Actual generation execution always requires eligible health evidence.
+        # Planning-only callers can use route_request() directly, but execution must
+        # not silently bypass health gating even if route_options says otherwise.
+        route_options["require_health_evidence"] = True
         route = self.route_request(
             category=category,
             project_id=project_id,
