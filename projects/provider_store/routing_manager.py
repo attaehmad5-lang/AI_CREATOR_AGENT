@@ -200,11 +200,21 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_COST_UNIT"}
         if free_credits is not None and not isinstance(free_credits, dict):
             return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
-        if self.credit_manager is not None and free_credits is not None:
-            return {"allowed": False, "status": "UNVERIFIED_FREE_CREDIT_INPUT_REJECTED"}
-        if self.cost_policy is not None and self.credit_manager is None and free_credits is not None:
-            # An arbitrary caller-supplied balance must never bypass paid approval.
-            return {"allowed": False, "status": "VERIFIED_CREDIT_MANAGER_REQUIRED"}
+        if free_credits is not None and any(
+            not isinstance(key, str) or not self._valid_amount(value)
+            for key, value in free_credits.items()
+        ):
+            return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
+        if free_credits is not None:
+            # Raw caller-provided balances are never authoritative, even when no
+            # cost policy is installed. Free-credit routing must use a verified
+            # account snapshot from the injected credit manager.
+            status = (
+                "UNVERIFIED_FREE_CREDIT_INPUT_REJECTED"
+                if self.credit_manager is not None
+                else "VERIFIED_CREDIT_MANAGER_REQUIRED"
+            )
+            return {"allowed": False, "status": status}
         if paid_approved_providers is not None and not isinstance(paid_approved_providers, (set, frozenset)):
             return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
         if excluded_providers is not None and not isinstance(excluded_providers, (set, frozenset)):

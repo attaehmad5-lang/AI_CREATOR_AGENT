@@ -1,12 +1,12 @@
 # Task #25 — Canonical 138-Item Verification Ledger
 
-**Overall status: IN PROGRESS — do not mark Task #25 complete and do not merge PR #7 without explicit approval.**
+**Overall status: IN PROGRESS — do not mark Task #25 complete. PR #7 is already merged; the current metrics/concurrency follow-up is draft PR #46 and must not be merged without explicit approval.**
 
 This file preserves the user's original A–P headings, feature numbers, feature names and baseline status markers. The **Baseline** column is the user's original 🟢/🟡/🔴 status; it is not the current implementation result. **Current audit** is independently evidence-based. A green baseline does not automatically mean the feature is verified today.
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38795242278](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38795242278): **357 tests passed on Ubuntu and 357 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite includes safe persistent execution metrics, unique trace propagation, mandatory fresh-enough health evidence before generation, capability-based routing, active health probes and recovery, bounded per-provider concurrency/backpressure, latency-aware routing, cross-process metrics writes, overflow-safe latency aggregation, and an explicit error-specific retry matrix.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -58,7 +58,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 27 | 🟡 | PRIMARY_THEN_FALLBACK Strategy | VERIFIED | Default PRIMARY_THEN_FALLBACK behavior is covered by primary and fallback route tests. |
 | 28 | 🔴 | PRIMARY_ONLY Strategy Testing | VERIFIED | PRIMARY_ONLY strategy now limits attempts to the selected primary and is tested not to use fallback. |
 | 29 | 🟡 | Automatic Fallback On/Off Testing | VERIFIED | `automatic_fallback` can be disabled explicitly; invalid flag values fail closed and regression tests cover no-fallback behavior. |
-| 30 | 🔴 | Capability-Based Routing | PARTIAL | Capability filtering exists and is tested at discovery; the complete canonical routing/metadata truth remains incomplete. |
+| 30 | 🔴 | Capability-Based Routing | VERIFIED | Routing filters the provider catalog by the requested declared capability and selects only a matching eligible provider; regression test `test_capability_based_routing_selects_only_declared_capability`. Live capability discovery/refresh remains separate metadata work. |
 | 31 | 🔴 | Model/Version-Aware Routing | PARTIAL | Router and catalog schema now support declared model IDs/versions and fail closed when metadata is absent; live model catalogs are not populated for enabled providers. |
 | 32 | 🔴 | User/Project Policy | PARTIAL | Project IDs and policy gates exist; complete user/project policy enforcement is not verified. |
 
@@ -67,7 +67,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 33 | 🟢 | Configurable Retry Limit | VERIFIED | Retry attempt limit is configurable and covered by timeout/transient failure tests. |
-| 34 | 🟡 | Error-Specific Retry Policy | PARTIAL | Retryability/status mapping exists; provider-specific transient failure coverage is incomplete. |
+| 34 | 🟡 | Error-Specific Retry Policy | VERIFIED | RetryPolicy has explicit tests for non-retryable client/auth errors, retryable 429/5xx and network failures, attempt limits, Retry-After and non-idempotent requests. Provider-specific live failure behavior remains a separate integration gate. |
 | 35 | 🔴 | Exponential Backoff and Jitter | VERIFIED | Exponential backoff and jitter are covered; exponentiation is capped before calculation for extreme attempt numbers. Evidence: `tests/test_retry_policy.py::test_extreme_attempt_number_caps_backoff_without_large_exponentiation`. |
 | 36 | 🔴 | HTTP 429/Rate-Limit Handling | VERIFIED | RetryPolicy seconds/date parsing and maximum-delay capping; HTTP probe and account-balance probe preserve bounded Retry-After metadata. Regression tests: `tests/test_http_probe.py`, `tests/test_account_balance_probe.py::test_rate_limit_preserves_bounded_retry_after_without_leaking_body`, `test_malformed_retry_after_is_not_propagated`. Provider-specific live rate-limit behavior remains unverified. |
 | 37 | 🟡 | Quota Exhaustion Detection | PARTIAL | Quota manager and routing rejection paths are tested; provider-side quota semantics remain incomplete. |
@@ -81,11 +81,11 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 41 | 🟢 | Provider Health State Tracking | VERIFIED | Persistent provider health states are stored and covered by state/reload tests. |
 | 42 | 🟢 | Basic Success/Failure History | VERIFIED | Success/failure history persistence, bounded history and idempotent request recording are tested. |
-| 43 | 🟡 | Health Check Before Generation | PARTIAL | Health eligibility hooks exist; not every generation path enforces a fresh check. |
+| 43 | 🟡 | Health Check Before Generation | VERIFIED | ProviderService forces health evidence for every generation execution; missing or stale health is rejected before adapter invocation. Tests: `test_generation_fails_closed_without_health_evidence_even_if_override_is_false`, `test_generation_rejects_stale_health_evidence_before_adapter_call`. |
 | 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
-| 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
+| 45 | 🔴 | Active Health Probes | VERIFIED | Bounded active probes classify success, timeout, network and probe failures; successful probes persist health state and are covered by `test_active_probe_success_recoveries_re_admit_provider`. Provider-specific live credential checks remain open under item 13. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
-| 47 | 🔴 | Provider Recovery Detection | OPEN | Automatic recovery detection and controlled re-admission are not fully integrated. |
+| 47 | 🔴 | Provider Recovery Detection | VERIFIED | A successful active probe resets an unhealthy provider to HEALTHY, after which health eligibility permits routing; regression test `test_active_probe_success_recoveries_re_admit_provider`. Periodic recovery scheduling remains open operational work. |
 | 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale health exclusion and malformed persisted-state checks exist; full health/consistency reconciliation is not complete. |
 
 ## G — Output and Asset Safety
@@ -124,17 +124,17 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 68 | 🔴 | Provider Permissions and Allowed Operations | PARTIAL | Catalog capabilities and OAuth scope checks exist; operation-level authorization coverage is incomplete. |
 | 69 | 🔴 | Sensitive-Data Detection and Privacy Enforcement | OPEN | Sensitive-data detection and policy enforcement are not complete. |
 | 70 | 🔴 | Data Retention and Provider Data-Handling Rules | OPEN | Provider-specific retention/data-handling policy enforcement is not complete. |
-| 71 | 🔴 | Provider Endpoint Allowlisting and Network Security | PARTIAL | HTTPS host allowlists, redirect rejection and bounded reads are tested; deployment threat-model review remains open. |
+| 71 | 🔴 | Provider Endpoint Allowlisting and Network Security | VERIFIED | HTTPS-only policy, host allowlists, embedded-credential/query rejection, non-public-address controls, redirect rejection and bounded reads are covered by connection-manager and HTTP-probe tests. Deployment-specific threat-model review remains a release gate. |
 | 72 | 🔴 | Routing, Credential and Approval Audit Logs | PARTIAL | Some cost/state ledgers exist; complete immutable routing/credential/approval audit trail is not verified. |
 
 ## J — Production Orchestration
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 73 | 🔴 | Unique Request ID and Trace ID | PARTIAL | Request IDs and duplicate protection exist; distributed trace propagation is incomplete. |
+| 73 | 🔴 | Unique Request ID and Trace ID | VERIFIED | Request IDs are validated; each execution generates a unique trace ID or validates the caller's ID, passes it to compatible adapters, and records it in the metrics ledger. Explicit trace IDs fail closed if the adapter cannot accept them. Distributed export remains under item 87. |
 | 74 | 🔴 | Idempotency and Duplicate Prevention | PARTIAL | Manager-level idempotency is tested; full external-provider request idempotency is not verified. |
-| 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | Cross-process reservations and locking are tested; worker pools and provider-specific concurrency limits are incomplete. |
-| 76 | 🔴 | Queue, Backpressure and Overload Handling | OPEN | Queue/backpressure orchestration is not implemented end-to-end. |
+| 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | ProviderExecutionLimiter enforces per-provider in-process concurrency and releases permits on exceptions; global multi-process worker coordination remains open. |
+| 76 | 🔴 | Queue, Backpressure and Overload Handling | VERIFIED | ProviderExecutionLimiter bounds in-process waiting, rejects overload, handles queue timeout/cancellation and safely releases reservations when execution never starts. Durable long-running jobs and distributed queueing remain separate open requirements. |
 | 77 | 🔴 | Async/Long-Running Job and Polling Support | OPEN | Asynchronous job lifecycle/polling is not implemented end-to-end. |
 | 78 | 🔴 | Webhook/Callback Verification | OPEN | Provider webhook/callback verification is not implemented. |
 | 79 | 🔴 | Cancellation, Deadlines and Graceful Shutdown | PARTIAL | Timeout handling exists; cancellation/deadline/shutdown propagation remains incomplete. |
@@ -144,13 +144,13 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 81 | 🔴 | Latency-Aware Routing | PARTIAL | Health latency data exists; verified latency-aware routing policy coverage is incomplete. |
-| 82 | 🔴 | Provider Success/Error-Rate Metrics | PARTIAL | Health history contains success/failure events; production metric aggregation is incomplete. |
+| 81 | 🔴 | Latency-Aware Routing | VERIFIED | HEALTHIEST_FIRST deterministically selects the eligible provider with the lowest recorded latency; regression test `test_healthiest_first_routes_to_lowest_verified_latency`. |
+| 82 | 🔴 | Provider Success/Error-Rate Metrics | VERIFIED | Process-safe persistent execution metrics aggregate request, success/failure, success-rate and latency summaries; idempotency, bounded retention, concurrent process writes and ProviderService integration are tested. |
 | 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | OPEN | Throughput/queue-wait telemetry is not implemented. |
 | 84 | 🔴 | Output Quality Validation/Score Integration | OPEN | Output quality scoring is not integrated with routing/execution. |
 | 85 | 🔴 | Task-Specific Quality Thresholds | OPEN | Task-specific quality threshold policy is not implemented. |
 | 86 | 🔴 | Provider/Model Benchmarking | OPEN | Repeatable provider/model benchmark suite is not implemented. |
-| 87 | 🔴 | Structured Logs, Metrics and Distributed Traces | PARTIAL | Some structured status metadata exists; end-to-end metrics/tracing is incomplete. |
+| 87 | 🔴 | Structured Logs, Metrics and Distributed Traces | PARTIAL | Safe structured metric events and trace IDs now exist; distributed trace export, complete application logs, alerts and dashboards remain open. |
 | 88 | 🔴 | Alerts, Dashboards and Incident Diagnostics | OPEN | Alerting/dashboard/incident tooling is not implemented end-to-end. |
 
 ## L — Configuration, Compatibility and Change Control
@@ -170,7 +170,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 303-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
+| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 357-test cross-platform suite covers helper/routing, metrics, concurrency, health-gated execution, capability routing and error-specific retry paths; exact item-level coverage matrix remains incomplete. |
 | 98 | 🟢 | Mock Provider Fallback Integration Test | VERIFIED | Mock/fallback integration regression coverage passes in the cross-platform suite. |
 | 99 | 🔴 | PRIMARY_ONLY and Fallback-Disabled Regression Tests | VERIFIED | PRIMARY_ONLY and automatic-fallback-disabled regression cases now have explicit tests. |
 | 100 | 🟡 | Retry, Backoff and Timeout Tests | VERIFIED | Retry, backoff, Retry-After, timeout and invalid numeric inputs are covered by regression tests. |
@@ -181,7 +181,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 303 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 357 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
@@ -232,6 +232,6 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 1. Every one of the 138 items must be reviewed against its original wording; do not infer or rename features.
 2. Any `PARTIAL` or `OPEN` item must remain uncompleted until its implementation, tests and required live/operational evidence exist.
-3. The 303 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
+3. The 350 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
 4. The account-balance adapter is generic. It must be configured only with a provider-documented endpoint and a field representing actual available credits; never mistake a per-key budget cap for free credits.
 5. Task #29 Generation State Manager remains paused and must not be started as a separate task during this Task #25 work.

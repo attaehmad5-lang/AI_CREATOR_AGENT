@@ -124,6 +124,21 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertEqual(result["status"], "SLOW")
 
+    def test_active_probe_success_recoveries_re_admit_provider(self):
+        for _ in range(3):
+            self.manager.record_result("image", success=False, error_code="HTTP_503")
+        self.assertEqual(self.manager.data["providers"]["image"]["status"], "UNHEALTHY")
+        result = self.manager.active_probe("image", lambda **kwargs: {"ok": True})
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["status"], "HEALTHY")
+        self.assertTrue(self.manager.is_eligible("image")["eligible"])
+
+    def test_active_probe_rejects_non_success_probe_result(self):
+        result = self.manager.active_probe("image", lambda **kwargs: {"ok": False})
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "PROBE_FAILED")
+        self.assertEqual(self.manager.data["providers"]["image"]["status"], "DEGRADED")
+
     def test_active_probe_classifies_failure_without_leaking_details(self):
         def probe(timeout_seconds):
             raise TimeoutError("private endpoint and token")

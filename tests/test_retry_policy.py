@@ -47,6 +47,25 @@ class RetryPolicyTests(unittest.TestCase):
         self.assertFalse(policy.decide(attempt=1, status_code=401).retry)
         self.assertFalse(policy.decide(attempt=1, status_code=400).retry)
 
+    def test_error_specific_retry_matrix(self):
+        policy = RetryPolicy(random_fn=lambda: 0)
+        expected = {
+            400: (False, "NON_RETRYABLE_FAILURE"),
+            401: (False, "AUTHORIZATION_FAILURE"),
+            403: (False, "AUTHORIZATION_FAILURE"),
+            429: (True, "TRANSIENT_HTTP_FAILURE"),
+            500: (True, "TRANSIENT_HTTP_FAILURE"),
+            503: (True, "TRANSIENT_HTTP_FAILURE"),
+            599: (True, "TRANSIENT_HTTP_FAILURE"),
+        }
+        for status_code, (should_retry, reason) in expected.items():
+            with self.subTest(status_code=status_code):
+                result = policy.decide(attempt=1, status_code=status_code)
+                self.assertEqual(result.retry, should_retry)
+                self.assertEqual(result.reason, reason)
+        self.assertTrue(policy.decide(attempt=1, exception=ConnectionError()).retry)
+        self.assertFalse(policy.decide(attempt=1, exception=ValueError()).retry)
+
     def test_timeout_is_retryable_but_respects_attempt_limit(self):
         policy = RetryPolicy(max_attempts=2, random_fn=lambda: 0)
         self.assertTrue(policy.decide(attempt=1, exception=TimeoutError()).retry)

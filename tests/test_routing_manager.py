@@ -214,13 +214,44 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "HEALTH_DATA_REQUIRED")
 
-    def test_free_credit_and_lowest_cost_strategies(self):
+    def test_capability_based_routing_selects_only_declared_capability(self):
+        registered = self.connections.register_provider({
+            "id": "image_editor", "name": "Image Editor", "category": "image",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "zero_cost_allowed": True, "priority": 0,
+            "capabilities": ["image_editing"],
+        })
+        self.assertTrue(registered["saved"])
+        self.connections.verify_connectivity(
+            "image_editor", lambda provider, **kwargs: {"ok": True}
+        )
         router = ProviderRoutingManager(self.connections)
+        result = router.route(
+            category="image", project_id="film", capability="image_editing"
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "image_editor")
+        self.assertEqual(result["category"], "image")
+
+    def test_free_credit_and_lowest_cost_strategies(self):
+        credits = ProviderCreditManager(self.root / "strategy-credits.json")
+        for provider_id, balance in (("primary", 0.0), ("fallback", 2.0)):
+            refreshed = credits.refresh(
+                provider_id,
+                lambda _, balance=balance: {
+                    "verified": True, "free_credits_remaining": balance,
+                    "unit": "USD", "source": "official-account-api",
+                },
+            )
+            self.assertEqual(refreshed["status"], "CREDIT_BALANCE_UPDATED")
+        router = ProviderRoutingManager(self.connections, credit_manager=credits)
         free_first = router.route(
-            category="image", project_id="film", strategy="FREE_CREDITS_FIRST",
-            free_credits={"primary": 0.0, "fallback": 2.0},
+            category="image", project_id="film", estimated_cost=1.0,
+            estimated_cost_unit="USD", strategy="FREE_CREDITS_FIRST",
+            request_id="free-first-job",
         )
         self.assertEqual(free_first["provider"], "fallback")
+        self.assertEqual(free_first["billing_mode"], "FREE_CREDITS")
         cost_policy = ProviderCostPolicy(project_budgets={"film": 5.0})
         cost_router = ProviderRoutingManager(self.connections, cost_policy=cost_policy)
         cheapest = cost_router.route(
@@ -254,6 +285,19 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(routed["allowed"])
         self.assertEqual(routed["provider"], "fallback")
         self.assertTrue(routed["health_verified"])
+
+    def test_healthiest_first_routes_to_lowest_verified_latency(self):
+        health = ProviderHealthManager(self.health_path)
+        health.record_result("primary", success=True, latency_ms=180.0)
+        health.record_result("fallback", success=True, latency_ms=24.0)
+        router = ProviderRoutingManager(self.connections, health_manager=health)
+        result = router.route(
+            category="image", project_id="film", strategy="HEALTHIEST_FIRST",
+            require_health_evidence=True,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertTrue(result["health_verified"])
 
     def test_paid_budget_routing_rejects_incompatible_cost_unit(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
@@ -395,6 +439,10 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             category="image", project_id="film", free_credits={"primary": 999.0}
         )
         self.assertEqual(result["status"], "UNVERIFIED_FREE_CREDIT_INPUT_REJECTED")
+        unconfigured = ProviderRoutingManager(self.connections).route(
+            category="image", project_id="film", free_credits={"primary": 999.0}
+        )
+        self.assertEqual(unconfigured["status"], "VERIFIED_CREDIT_MANAGER_REQUIRED")
 
     def test_cost_policy_rejects_unverified_free_credit_map(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
