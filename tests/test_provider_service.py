@@ -243,6 +243,34 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(retry["retry"])
         self.assertEqual(retry["reason"], "TRANSIENT_HTTP_FAILURE")
 
+    def test_publish_output_atomically_preserves_previous_artifact_on_failure(self):
+        temporary = self.root / "candidate.png"
+        destination = self.root / "final.png"
+        temporary.write_bytes(b"\\x89PNG\\r\\n\\x1a\\nnew-image")
+        destination.write_bytes(b"previous-good-output")
+        result = self.service.publish_output(temporary, destination, modality="image")
+        self.assertTrue(result["published"])
+        self.assertEqual(destination.read_bytes(), b"\\x89PNG\\r\\n\\x1a\\nnew-image")
+        self.assertFalse(temporary.exists())
+
+        invalid = self.root / "invalid.png"
+        invalid.write_text("not-an-image", encoding="utf-8")
+        previous = destination.read_bytes()
+        rejected = self.service.publish_output(invalid, destination, modality="image")
+        self.assertFalse(rejected["published"])
+        self.assertEqual(rejected["status"], "TEMP_OUTPUT_INVALID")
+        self.assertEqual(destination.read_bytes(), previous)
+        self.assertFalse(invalid.exists())
+
+    def test_publish_output_requires_output_validator(self):
+        service = ProviderService(self.connections)
+        temporary = self.root / "candidate.png"
+        destination = self.root / "final.png"
+        temporary.write_bytes(b"\\x89PNG\\r\\n\\x1a\\nimage")
+        result = service.publish_output(temporary, destination, modality="image")
+        self.assertEqual(result["status"], "OUTPUT_VALIDATOR_UNAVAILABLE")
+        self.assertTrue(temporary.exists())
+
     def test_started_request_reconciles_cost_commits_quota_and_records_health(self):
         self.cost.reserve_usage(
             project_id="film", provider_id="image", estimated_cost=2.0, request_id="job-1"
