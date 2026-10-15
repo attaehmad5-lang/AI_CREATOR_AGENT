@@ -183,10 +183,23 @@ class ProviderHealthManager:
                     "duplicate": False,
                     "history_size": len(history),
                 }
+            recovered = bool(
+                success
+                and (
+                    record.get("status") in {"UNHEALTHY", "DEGRADED"}
+                    or (
+                        isinstance(record.get("consecutive_failures", 0), int)
+                        and not isinstance(record.get("consecutive_failures", 0), bool)
+                        and record.get("consecutive_failures", 0) > 0
+                    )
+                )
+            )
             event = {
                 "success": success,
                 "timestamp": self.clock().astimezone(timezone.utc).isoformat(),
             }
+            if recovered:
+                event["recovered"] = True
             if request_id is not None:
                 event["request_id"] = request_id
                 request_events[request_id] = {
@@ -218,11 +231,16 @@ class ProviderHealthManager:
             if success:
                 record["last_success_at"] = event["timestamp"]
                 record["last_latency_ms"] = event.get("latency_ms")
+                if recovered:
+                    record["last_recovered_at"] = event["timestamp"]
             else:
                 record["last_failure_at"] = event["timestamp"]
             providers[provider_id] = record
             self._save()
-            return {"provider": provider_id, "status": status, "saved": True, "history_size": len(history)}
+            return {
+                "provider": provider_id, "status": status, "saved": True,
+                "history_size": len(history), "recovered": recovered,
+            }
 
     def active_probe(self, provider_id: str, probe: Any, *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip():

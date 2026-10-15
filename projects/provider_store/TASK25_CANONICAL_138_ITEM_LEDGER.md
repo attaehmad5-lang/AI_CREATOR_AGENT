@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38757630023](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38757630023): **330 tests passed on Ubuntu and 330 on Windows, 0 failures**. This batch includes a 50-case provider recovery transition matrix. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -85,7 +85,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
 | 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
-| 47 | 🔴 | Provider Recovery Detection | OPEN | Automatic recovery detection and controlled re-admission are not fully integrated. |
+| 47 | 🔴 | Provider Recovery Detection | PARTIAL | Health records now explicitly mark a recovery transition when a success follows degraded/unhealthy state, persist `last_recovered_at`, and return `recovered=true`; a 50-case matrix verifies 25 threshold-based recoveries and 25 initial-success non-recoveries. Scheduled rechecks, cooldown orchestration and controlled production re-admission remain open. Evidence: `tests/test_health_manager.py::test_recovery_transition_matrix_50_cases`, `test_recovery_transition_persists_after_reload`. |
 | 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale health exclusion and malformed persisted-state checks exist; full health/consistency reconciliation is not complete. |
 
 ## G — Output and Asset Safety
