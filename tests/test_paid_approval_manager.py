@@ -72,7 +72,10 @@ class PaidUsageApprovalManagerTests(unittest.TestCase):
             cases.extend((field, value) for value in ("", None, 5, "bad id", "secret=do-not-store"))
         for index, (field, value) in enumerate(cases):
             with self.subTest(case=index, field=field):
-                result = self.request(**{field: value, "request_id": value if field == "request_id" else f"bad-{index}"})
+                overrides = {field: value}
+                if field != "request_id":
+                    overrides["request_id"] = f"bad-{index}"
+                result = self.request(**overrides)
                 self.assertFalse(result["approval_created"])
                 self.assertEqual(result["status"], "INVALID_APPROVAL_SCOPE")
         for index in range(30):
