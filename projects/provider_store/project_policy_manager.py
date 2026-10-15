@@ -164,6 +164,23 @@ class ProviderProjectPolicyManager:
             except FileNotFoundError:
                 pass
 
+    @classmethod
+    def validate_policy(cls, project_id: str, policy: dict[str, Any]) -> dict[str, Any]:
+        """Validate a candidate policy without writing or changing active policy."""
+        errors = cls._validate_policy(project_id, policy)
+        if errors:
+            return {"status": "INVALID_PROJECT_POLICY", "valid": False, "errors": errors}
+        safe = copy.deepcopy(policy)
+        if "max_estimated_cost" in safe:
+            safe["max_estimated_cost"] = finite_number(safe["max_estimated_cost"], minimum=0)
+        return {
+            "status": "PROJECT_POLICY_VALID",
+            "valid": True,
+            "project_id": project_id,
+            "policy": safe,
+            "persisted": False,
+        }
+
     def set_policy(self, project_id: str, policy: dict[str, Any]) -> dict[str, Any]:
         errors = self._validate_policy(project_id, policy)
         if errors:
