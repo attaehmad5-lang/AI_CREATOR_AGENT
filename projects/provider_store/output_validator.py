@@ -257,10 +257,10 @@ class ProviderOutputValidator:
 
     @classmethod
     def _webm_properties(cls, payload: bytes, modality: str) -> dict[str, Any] | None:
-        if not payload.startswith(b"\\x1a\\x45\\xdf\\xa3"):
+        if not payload.startswith(b"\x1a\x45\xdf\xa3"):
             return None
-        scale_bytes = cls._ebml_element(payload, b"\\x2a\\xd7\\xb1")
-        duration_bytes = cls._ebml_element(payload, b"\\x44\\x89")
+        scale_bytes = cls._ebml_element(payload, b"\x2a\xd7\xb1")
+        duration_bytes = cls._ebml_element(payload, b"\x44\x89")
         if scale_bytes is None or duration_bytes not in (None, b""):
             # Duration is expected to be an IEEE-754 float, not an integer.
             pass
@@ -283,8 +283,8 @@ class ProviderOutputValidator:
             return None
         result: dict[str, Any] = {"duration_seconds": duration, "codec": codec}
         if modality == "video":
-            width_bytes = cls._ebml_element(payload, b"\\xb0")
-            height_bytes = cls._ebml_element(payload, b"\\xba")
+            width_bytes = cls._ebml_element(payload, b"\xb0")
+            height_bytes = cls._ebml_element(payload, b"\xba")
             if width_bytes is not None and height_bytes is not None:
                 result["width"] = int.from_bytes(width_bytes, "big")
                 result["height"] = int.from_bytes(height_bytes, "big")
