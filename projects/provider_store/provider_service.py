@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        webhook_verifier: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -33,6 +34,7 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (webhook_verifier, "verify", "webhook_verifier"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -45,6 +47,33 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.webhook_verifier = webhook_verifier
+
+    def verify_provider_webhook(
+        self,
+        provider_id: str,
+        raw_body: bytes,
+        signature: str,
+        timestamp: str | int,
+        *,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Verify a signed provider callback before any job/state mutation."""
+        if self.webhook_verifier is None:
+            return {"status": "WEBHOOK_VERIFIER_UNAVAILABLE", "verified": False}
+        try:
+            result = self.webhook_verifier.verify(
+                provider_id, raw_body, signature, timestamp, now=now
+            )
+        except Exception as exc:
+            return {
+                "status": "WEBHOOK_VERIFICATION_FAILED",
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict) or not isinstance(result.get("verified"), bool):
+            return {"status": "INVALID_WEBHOOK_VERIFIER_RESULT", "verified": False}
+        return result
 
     def verify_provider(
         self,
