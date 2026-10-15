@@ -287,7 +287,7 @@ class ProviderOutputValidator:
         mvhd = moov.find(b"mvhd")
         if mvhd < 0 or mvhd + 24 > len(moov):
             return None
-        data = mvhd + 8
+        data = mvhd + 4
         version = moov[data]
         if version == 0:
             if data + 20 > len(moov):
@@ -304,7 +304,7 @@ class ProviderOutputValidator:
         stsd = moov.find(b"stsd")
         codec = None
         if stsd >= 0 and stsd + 24 <= len(moov):
-            entry_type = moov[stsd + 20:stsd + 24]
+            entry_type = moov[stsd + 16:stsd + 20]
             try:
                 codec = entry_type.decode("ascii").casefold()
             except UnicodeDecodeError:
