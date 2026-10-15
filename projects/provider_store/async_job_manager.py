@@ -169,7 +169,7 @@ class AsyncJobManager:
     ) -> dict[str, Any]:
         if not self._valid_id(request_id) or not self._valid_id(worker_id):
             return {"status": "INVALID_JOB_METADATA", "completed": False}
-        if status not in self.TERMINAL_STATES - {"EXPIRED"}:
+        if not isinstance(status, str) or status not in self.TERMINAL_STATES - {"EXPIRED"}:
             return {"status": "INVALID_TERMINAL_STATUS", "completed": False}
         if result_code is not None and (
             not isinstance(result_code, str) or not self.SAFE_RESULT_CODE.fullmatch(result_code)
