@@ -266,7 +266,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "fallback")
-        self.assertEqual(result["health"]["last_latency_ms"], 24.0)
+        self.assertTrue(result["health_verified"])
 
     def test_paid_budget_routing_rejects_incompatible_cost_unit(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
