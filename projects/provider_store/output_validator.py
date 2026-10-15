@@ -7,6 +7,7 @@ import io
 import json
 import os
 import stat
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,84 @@ class ProviderOutputValidator:
         self.max_json_depth = max_json_depth
         self.max_image_dimension = max_image_dimension
         self.max_image_pixels = max_image_pixels
+
+    @staticmethod
+    def _validate_png_structure(stream: Any, size: int) -> tuple[int, int] | None:
+        """Validate PNG chunk ordering, lengths, CRCs, and required terminal chunks."""
+        signature = b"\\x89PNG\\r\\n\\x1a\\n"
+        stream.seek(0)
+        if stream.read(8) != signature:
+            return None
+        offset = 8
+        chunk_count = 0
+        width = height = None
+        seen_ihdr = seen_idat = seen_iend = False
+        idat_ended = False
+        while offset < size:
+            chunk_count += 1
+            if chunk_count > 100_000:
+                return None
+            stream.seek(offset)
+            header = stream.read(8)
+            if len(header) != 8:
+                return None
+            length = int.from_bytes(header[:4], "big")
+            chunk_type = header[4:8]
+            if (
+                any(not (65 <= byte <= 90 or 97 <= byte <= 122) for byte in chunk_type)
+                or 65 <= chunk_type[2] <= 90 is False
+            ):
+                return None
+            data_start = offset + 8
+            crc_offset = data_start + length
+            next_offset = crc_offset + 4
+            if length > size or next_offset > size or next_offset <= offset:
+                return None
+            if not seen_ihdr:
+                if chunk_type != b"IHDR" or length != 13:
+                    return None
+            elif chunk_type == b"IHDR":
+                return None
+            if chunk_type == b"IHDR":
+                if seen_ihdr or offset != 8:
+                    return None
+                stream.seek(data_start)
+                ihdr = stream.read(13)
+                if len(ihdr) != 13:
+                    return None
+                width = int.from_bytes(ihdr[:4], "big")
+                height = int.from_bytes(ihdr[4:8], "big")
+                if ihdr[8] not in {1, 2, 4, 8, 16} and ihdr[8] != 8:
+                    return None
+                if ihdr[9] not in {0, 2, 3, 4, 6} or any(ihdr[10:13]):
+                    return None
+                seen_ihdr = True
+            if chunk_type == b"IDAT":
+                if idat_ended:
+                    return None
+                seen_idat = True
+            elif seen_idat and chunk_type != b"IEND":
+                idat_ended = True
+            if chunk_type == b"IEND":
+                if length != 0 or not seen_idat:
+                    return None
+                seen_iend = True
+            crc = zlib.crc32(chunk_type)
+            remaining = length
+            stream.seek(data_start)
+            while remaining:
+                chunk = stream.read(min(64 * 1024, remaining))
+                if not chunk:
+                    return None
+                crc = zlib.crc32(chunk, crc)
+                remaining -= len(chunk)
+            stored_crc = stream.read(4)
+            if len(stored_crc) != 4 or int.from_bytes(stored_crc, "big") != (crc & 0xFFFFFFFF):
+                return None
+            offset = next_offset
+            if seen_iend:
+                return (width, height) if offset == size and width is not None and height is not None else None
+        return None
 
     @staticmethod
     def _image_dimensions(mime: str, payload: bytes) -> tuple[int, int] | None:
@@ -217,7 +296,12 @@ class ProviderOutputValidator:
                     if normalized_modality == "image":
                         stream.seek(0)
                         image_header = stream.read(min(size, 1_048_576))
-                        image_dimensions = self._image_dimensions(mime, image_header)
+                        if mime == "image/png":
+                            image_dimensions = self._validate_png_structure(stream, size)
+                            if image_dimensions is None:
+                                return {"valid": False, "status": "IMAGE_STRUCTURE_INVALID"}
+                        else:
+                            image_dimensions = self._image_dimensions(mime, image_header)
                         if image_dimensions is None:
                             return {"valid": False, "status": "IMAGE_DIMENSIONS_UNVERIFIED"}
                         width, height = image_dimensions
