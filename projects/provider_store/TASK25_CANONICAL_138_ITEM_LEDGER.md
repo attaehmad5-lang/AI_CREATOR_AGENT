@@ -86,7 +86,7 @@ Latest branch verification run [#38767774200](https://github.com/attaehmad5-lang
 | 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
 | 47 | 🔴 | Provider Recovery Detection | VERIFIED | `ProviderHealthManager` tracks consecutive recovery successes, persists `RECOVERING` state, keeps recovering providers ineligible until the configured threshold (default 2) is met, then records `last_recovered_at` and a recovery event. Covered by `test_unhealthy_provider_requires_consecutive_successes_before_readmission` and `test_recovering_state_survives_reload_and_is_not_eligible`. |
-| 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale health exclusion and malformed persisted-state checks exist; full health/consistency reconciliation is not complete. |
+| 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale/future health evidence is excluded; persisted health status/counter combinations, recovery counters, timestamp ordering and latest-history versus `last_checked_at` consistency are validated. Regression tests cover malformed and contradictory records. Cross-manager reconciliation and live operational freshness remain incomplete. |
 
 ## G — Output and Asset Safety
 
