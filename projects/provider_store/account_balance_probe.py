@@ -62,7 +62,7 @@ class ProviderJSONBalanceProbe:
         if (
             not isinstance(balance_field, str)
             or len(balance_field) > 256
-            or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}(?:\\.[A-Za-z][A-Za-z0-9_]{0,79}){0,7}", balance_field)
+            or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}(?:\.[A-Za-z][A-Za-z0-9_]{0,79}){0,7}", balance_field)
         ):
             raise ValueError("INVALID_BALANCE_FIELD")
         if (
