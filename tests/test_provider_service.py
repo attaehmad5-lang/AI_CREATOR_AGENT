@@ -58,6 +58,12 @@ class ProviderServiceTests(unittest.TestCase):
         self.health.data["providers"]["image"]["history"] = []
         self.health._save()
 
+    def _prepare_execution_health(self):
+        result = self.health.record_result("image", success=True, latency_ms=1.0)
+        self.assertTrue(result["saved"])
+        self.health.data["providers"]["image"]["history"] = []
+        self.health._save()
+
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
         self.assertTrue(result["verified"])
@@ -460,6 +466,7 @@ class ProviderServiceTests(unittest.TestCase):
             require_health_check_before_execution=True,
         )
         called = []
+        self._prepare_execution_health()
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="health-required",
             estimated_cost=0.0,
@@ -480,6 +487,7 @@ class ProviderServiceTests(unittest.TestCase):
             require_health_check_before_execution=True,
         )
         called = []
+        self._prepare_execution_health()
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="health-mismatch",
             estimated_cost=0.0,
@@ -497,6 +505,7 @@ class ProviderServiceTests(unittest.TestCase):
             self.connections, routing_manager=router, health_manager=self.health,
         )
         called = []
+        self._prepare_execution_health()
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="health-evidence-missing",
             estimated_cost=0.0,
