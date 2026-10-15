@@ -136,6 +136,12 @@ class ProviderDataRetentionPolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             ProviderDataRetentionPolicy.purge_expired_records(
+                [], now="not-a-datetime", retention_days=1
+            )["status"],
+            "INVALID_CURRENT_TIME",
+        )
+        self.assertEqual(
+            ProviderDataRetentionPolicy.purge_expired_records(
                 [], now=datetime.now(timezone.utc), retention_days=True
             )["status"],
             "INVALID_RETENTION_PERIOD",
