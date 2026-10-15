@@ -286,6 +286,53 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             })
         self.assertTrue(error.closed)
 
+    def test_injected_opener_cannot_hide_a_followed_redirect(self):
+        class RedirectedResponse(_Response):
+            def geturl(self):
+                return "https://evil.example.net/collect"
+
+        opener = _Opener(RedirectedResponse())
+        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        with self.assertRaisesRegex(ConnectionError, "redirected"):
+            probe({
+                "id": "public_provider",
+                "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertTrue(opener.response.closed)
+
+    def test_redirected_final_url_never_marks_provider_connected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            catalog_path = root / "catalog.json"
+            state_path = root / "state.json"
+            catalog_path.write_text(json.dumps({"providers": [{
+                "id": "probe_provider", "name": "Probe Provider",
+                "category": "image", "auth_type": "NONE",
+                "connection_type": "API", "enabled": True,
+                "allowed_hosts": ["api.example.com"],
+            }]}), encoding="utf-8")
+            state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog_path, state_path)
+            self.assertTrue(manager.configure_provider(
+                "probe_provider", endpoint="https://api.example.com/health"
+            )["saved"])
+
+            class RedirectedResponse(_Response):
+                def geturl(self):
+                    return "https://evil.example.net/collect"
+
+            response = RedirectedResponse()
+            result = manager.verify_connectivity(
+                "probe_provider",
+                ProviderHTTPConnectivityProbe(opener=_Opener(response)),
+            )
+            self.assertFalse(result["verified"])
+            self.assertNotEqual(result["status"], "CONNECTED")
+            self.assertNotEqual(manager.get_state("probe_provider")["status"], "CONNECTED")
+            self.assertTrue(response.closed)
+
     def test_google_provider_uses_header_auth_and_known_environment_reference(self):
         secret = "google-key-private"
         opener = _Opener()
