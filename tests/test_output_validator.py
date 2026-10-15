@@ -127,6 +127,54 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         duration_element = element(bytes((0x44, 0x89)), struct.pack(">d", duration * 1_000_000_000 / timecode_scale))
         return bytes((0x1A, 0x45, 0xDF, 0xA3)) + scale + duration_element + codec.encode("ascii")
 
+    @staticmethod
+    def mp3_bytes(frame_count=2):
+        header = bytes.fromhex("FF FB 90 00")
+        frame_size = (144 * 128000) // 44100
+        return (header + bytes(frame_size - len(header))) * frame_count
+
+    @staticmethod
+    def aac_bytes(frame_count=2):
+        header = bytes((0xFF, 0xF1, 0x50, 0x80, 0x00, 0xE0, 0xFC))
+        return header * frame_count
+
+    @staticmethod
+    def ogg_page(granule, packet, sequence=0):
+        segment_count = (len(packet) + 254) // 255
+        lacing = bytes([255] * (len(packet) // 255) + ([len(packet) % 255] if len(packet) % 255 else []))
+        header = b"OggS" + bytes((0, 2 if sequence == 0 else 4))
+        header += granule.to_bytes(8, "little") + (1).to_bytes(4, "little")
+        header += sequence.to_bytes(4, "little") + bytes(4) + bytes((segment_count,))
+        return header + lacing + packet
+
+    def test_mp3_frame_duration_and_codec_constraints(self):
+        path = self.root / "song.mp3"
+        path.write_bytes(self.mp3_bytes(frame_count=4))
+        result = ProviderOutputValidator(max_size_bytes=4096, max_media_duration_seconds=1).validate_file(path, modality="audio")
+        self.assertTrue(result["valid"], result)
+        self.assertEqual(result["codec"], "mp3")
+        self.assertAlmostEqual(result["duration_seconds"], 4 * 1152 / 44100)
+
+    def test_aac_adts_frame_duration_and_codec_constraints(self):
+        path = self.root / "song.aac"
+        path.write_bytes(self.aac_bytes(frame_count=4))
+        result = ProviderOutputValidator(max_size_bytes=1024, max_media_duration_seconds=1).validate_file(path, modality="audio")
+        self.assertTrue(result["valid"], result)
+        self.assertEqual(result["codec"], "aac")
+        self.assertAlmostEqual(result["duration_seconds"], 4 * 1024 / 44100)
+
+    def test_ogg_vorbis_duration_uses_last_page_granule(self):
+        identification = bytes((1,)) + b"vorbis" + bytes(4) + bytes((2,))
+        identification += (44100).to_bytes(4, "little") + bytes(20)
+        first = self.ogg_page(0, identification, sequence=0)
+        last = self.ogg_page(88200, b"audio-data", sequence=1)
+        path = self.root / "song.ogg"
+        path.write_bytes(first + last)
+        result = ProviderOutputValidator(max_size_bytes=2048, max_media_duration_seconds=3).validate_file(path, modality="audio")
+        self.assertTrue(result["valid"], result)
+        self.assertEqual(result["codec"], "vorbis")
+        self.assertEqual(result["duration_seconds"], 2.0)
+
     def test_flac_streaminfo_duration_and_sample_rate_are_validated(self):
         path = self.root / "song.flac"
         path.write_bytes(self.flac_bytes(sample_rate=44100, total_samples=88200))
