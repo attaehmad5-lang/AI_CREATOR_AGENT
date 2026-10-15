@@ -26,6 +26,7 @@ class ProviderService:
         sensitive_data_guard: Any | None = None,
         data_retention_policy: Any | None = None,
         execution_queue: Any | None = None,
+        async_job_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -61,6 +62,12 @@ class ProviderService:
         ):
             raise ValueError("execution_queue does not implement the required queue interface")
         self.execution_queue = execution_queue
+        if async_job_manager is not None and any(
+            not callable(getattr(async_job_manager, method, None))
+            for method in ("submit", "claim_next", "complete", "poll", "cancel", "stats")
+        ):
+            raise ValueError("async_job_manager does not implement the required job interface")
+        self.async_job_manager = async_job_manager
         if access_controller is not None and not callable(
             getattr(access_controller, "authorize", None)
         ):
@@ -407,6 +414,60 @@ class ProviderService:
         except Exception as exc:
             return {"status": "EXECUTION_QUEUE_FAILED", "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE"}
+
+    def submit_async_job(self, **request: Any) -> dict[str, Any]:
+        if self.async_job_manager is None:
+            return {"status": "ASYNC_JOB_MANAGER_UNAVAILABLE", "accepted": False}
+        try:
+            result = self.async_job_manager.submit(**request)
+        except Exception as exc:
+            return {"status": "ASYNC_JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_ASYNC_JOB_RESPONSE", "accepted": False}
+
+    def claim_next_async_job(self, **claim: Any) -> dict[str, Any]:
+        if self.async_job_manager is None:
+            return {"status": "ASYNC_JOB_MANAGER_UNAVAILABLE", "job": None}
+        try:
+            result = self.async_job_manager.claim_next(**claim)
+        except Exception as exc:
+            return {"status": "ASYNC_JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_ASYNC_JOB_RESPONSE", "job": None}
+
+    def complete_async_job(self, **completion: Any) -> dict[str, Any]:
+        if self.async_job_manager is None:
+            return {"status": "ASYNC_JOB_MANAGER_UNAVAILABLE", "completed": False}
+        try:
+            result = self.async_job_manager.complete(**completion)
+        except Exception as exc:
+            return {"status": "ASYNC_JOB_COMPLETION_FAILED", "completed": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_ASYNC_JOB_RESPONSE", "completed": False}
+
+    def poll_async_job(self, **query: Any) -> dict[str, Any]:
+        if self.async_job_manager is None:
+            return {"status": "ASYNC_JOB_MANAGER_UNAVAILABLE"}
+        try:
+            result = self.async_job_manager.poll(**query)
+        except Exception as exc:
+            return {"status": "ASYNC_JOB_POLL_FAILED", "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_ASYNC_JOB_RESPONSE"}
+
+    def cancel_async_job(self, **cancellation: Any) -> dict[str, Any]:
+        if self.async_job_manager is None:
+            return {"status": "ASYNC_JOB_MANAGER_UNAVAILABLE", "cancelled": False}
+        try:
+            result = self.async_job_manager.cancel(**cancellation)
+        except Exception as exc:
+            return {"status": "ASYNC_JOB_CANCELLATION_FAILED", "cancelled": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_ASYNC_JOB_RESPONSE", "cancelled": False}
+
+    def async_job_stats(self) -> dict[str, Any]:
+        if self.async_job_manager is None:
+            return {"status": "ASYNC_JOB_MANAGER_UNAVAILABLE"}
+        try:
+            result = self.async_job_manager.stats()
+        except Exception as exc:
+            return {"status": "ASYNC_JOB_STATS_FAILED", "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_ASYNC_JOB_RESPONSE"}
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         authorization = None
