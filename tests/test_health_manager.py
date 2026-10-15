@@ -234,6 +234,44 @@ class ProviderHealthManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path)
 
+    def test_malformed_persisted_health_state_rejects_counter_status_mismatch(self):
+        malformed_records = (
+            {"status": "HEALTHY", "consecutive_failures": 1, "history": []},
+            {"status": "UNHEALTHY", "consecutive_failures": 0, "history": []},
+            {"status": "RECOVERING", "consecutive_failures": 0, "consecutive_successes": 2, "history": []},
+            {"status": "RECOVERING", "consecutive_failures": 1, "consecutive_successes": 1, "history": []},
+        )
+        for record in malformed_records:
+            with self.subTest(record=record):
+                self.path.write_text(
+                    json.dumps({"version": "1.0", "providers": {"image": record}}),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(ValueError):
+                    ProviderHealthManager(self.path, recovery_success_threshold=2)
+
+    def test_health_history_latest_event_must_match_last_checked_timestamp(self):
+        checked = self.now[0].isoformat()
+        stale_event = (self.now[0] - timedelta(seconds=1)).isoformat()
+        self.path.write_text(
+            json.dumps({
+                "version": "1.0",
+                "providers": {
+                    "image": {
+                        "status": "HEALTHY",
+                        "consecutive_failures": 0,
+                        "consecutive_successes": 0,
+                        "last_checked_at": checked,
+                        "last_success_at": checked,
+                        "history": [{"success": True, "timestamp": stale_event}],
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, clock=lambda: self.now[0])
+
     def test_active_probe_fails_closed_when_health_state_cannot_be_saved(self):
         self.path.write_text("{invalid-json", encoding="utf-8")
         result = self.manager.active_probe("image", lambda **kwargs: True)
