@@ -53,7 +53,7 @@ class RetryPolicyTests(unittest.TestCase):
             400: (False, "NON_RETRYABLE_FAILURE"),
             401: (False, "AUTHORIZATION_FAILURE"),
             403: (False, "AUTHORIZATION_FAILURE"),
-            429: (True, "RATE_LIMIT_BACKOFF"),
+            429: (True, "TRANSIENT_HTTP_FAILURE"),
             500: (True, "TRANSIENT_HTTP_FAILURE"),
             503: (True, "TRANSIENT_HTTP_FAILURE"),
             599: (True, "TRANSIENT_HTTP_FAILURE"),
