@@ -139,7 +139,7 @@ class ProviderAccessController:
             "audit_event": {
                 "subject_id": subject_id if self._identifier(subject_id) else None,
                 "tenant_id": tenant_id if self._identifier(tenant_id) else None,
-                "action": action if isinstance(action, str) and len(action) <= 128 else None,
+                "action": action if isinstance(action, str) and action in self.KNOWN_ACTIONS else None,
                 "provider_id": provider_id if self._identifier(provider_id) else None,
                 "resource_tenant_id": resource_tenant if self._identifier(resource_tenant) else None,
                 "project_id": project_id if self._identifier(project_id) else None,
