@@ -120,7 +120,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 65 | 🟡 | Secrets Manager Integration | PARTIAL | Environment variable references are supported; managed secret vault/rotation integration is not complete. |
 | 66 | 🟡 | Secret/Token Leak Prevention in Logs | PARTIAL | Credential redaction and no-response-body probes are tested; full application log scan is pending. |
-| 67 | 🔴 | Least-Privilege Access Control | PARTIAL | New `access_control.py` implements deny-by-default RBAC, tenant/project scoping, safe decision metadata, and forbidden secret-read/purchase actions with regression tests. It is not yet wired into every provider-service/admin/API boundary; enforcement integration remains required. |
+| 67 | 🔴 | Least-Privilege Access Control | PARTIAL | New `access_control.py` implements deny-by-default RBAC, tenant/project scoping, safe decision metadata, and forbidden secret-read/purchase actions. `ProviderService` can gate routing and connection/OAuth verification before reservations, probes, or token reads. Full enforcement at every admin/API boundary and a trusted authenticated-principal integration remain required. |
 | 68 | 🔴 | Provider Permissions and Allowed Operations | PARTIAL | Catalog capabilities and OAuth scope checks exist; operation-level authorization coverage is incomplete. |
 | 69 | 🔴 | Sensitive-Data Detection and Privacy Enforcement | OPEN | Sensitive-data detection and policy enforcement are not complete. |
 | 70 | 🔴 | Data Retention and Provider Data-Handling Rules | OPEN | Provider-specific retention/data-handling policy enforcement is not complete. |
