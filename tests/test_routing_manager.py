@@ -249,6 +249,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             category="image", project_id="film", strategy="LOWEST_COST",
             estimated_costs={"primary": 1.5, "fallback": 0.2},
             paid_approved_providers={"primary", "fallback"},
+            paid_approval_ids=self._approval_ids({"primary": 1.5, "fallback": 0.2}, request_id="lowest-cost-job"),
             request_id="lowest-cost-job",
         )
         self.assertTrue(cheapest["allowed"])
@@ -509,7 +510,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
         options = dict(
             category="image", project_id="film", estimated_cost=1.0,
-            paid_approved_providers={"primary"}, request_id="duplicate-paid-route",
+            paid_approved_providers={"primary"}, paid_approval_ids=self._approval_ids({"primary"}, request_id="duplicate-paid-route"), request_id="duplicate-paid-route",
         )
         first = router.route(**options)
         second = router.route(**options)
@@ -617,7 +618,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
 
         result = router.route(
             category="image", project_id="film", estimated_cost=1.0,
-            paid_approved_providers={"primary"}, request_id="paid-job",
+            paid_approved_providers={"primary"}, paid_approval_ids=self._approval_ids({"primary"}, request_id="paid-job"), request_id="paid-job",
         )
 
         self.assertFalse(result["allowed"])
@@ -636,7 +637,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
         result = router.route(
             category="image", project_id="film", estimated_cost=1.0,
-            paid_approved_providers={"primary"}, request_id="paid-job",
+            paid_approved_providers={"primary"}, paid_approval_ids=self._approval_ids({"primary"}, request_id="paid-job"), request_id="paid-job",
         )
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "REQUEST_ALREADY_RESERVED")
@@ -682,7 +683,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         with patch.object(policy, "release_reservation", side_effect=OSError("storage unavailable")):
             result = router.route(
                 category="image", project_id="film", estimated_cost=1.0,
-                paid_approved_providers={"primary"}, request_id="paid-job",
+                paid_approved_providers={"primary"}, paid_approval_ids=self._approval_ids({"primary"}, request_id="paid-job"), request_id="paid-job",
             )
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "RESERVATION_CLEANUP_FAILED")
@@ -706,7 +707,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
 
         result = router.route(
             category="image", project_id="film", estimated_cost=1.0,
-            paid_approved_providers={"primary"}, request_id="existing-paid-job",
+            paid_approved_providers={"primary"}, paid_approval_ids=self._approval_ids({"primary"}, request_id="existing-paid-job"), request_id="existing-paid-job",
         )
 
         self.assertFalse(result["allowed"])
@@ -719,7 +720,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         with patch.object(policy, "reserve_usage", None):
             result = router.route(
                 category="image", project_id="film", estimated_cost=1.0,
-                paid_approved_providers={"primary"}, request_id="no-reserver",
+                paid_approved_providers={"primary"}, paid_approval_ids=self._approval_ids({"primary"}, request_id="no-reserver"), request_id="no-reserver",
             )
         self.assertFalse(result["allowed"])
         self.assertTrue(any(
@@ -743,7 +744,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         ))
         routed = router.route(
             category="image", project_id="film", estimated_cost=1.0,
-            paid_approved_providers={"primary"}, request_id="paid-job",
+            paid_approved_providers={"primary"}, paid_approval_ids=self._approval_ids({"primary"}, request_id="paid-job"), request_id="paid-job",
         )
         self.assertEqual(routed["provider"], "primary")
         self.assertTrue(routed["cost_reserved"])
@@ -763,14 +764,14 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
         first = router.route(
             category="image", project_id="film", estimated_cost=1.0,
-            paid_approved_providers={"primary", "fallback"}, request_id="job-1",
+            paid_approved_providers={"primary", "fallback"}, paid_approval_ids=self._approval_ids({"primary", "fallback"}, request_id="job-1"), request_id="job-1",
         )
         self.assertEqual(first["provider"], "primary")
         fallback = router.select_fallback(
             failed_provider="primary",
             release_reservations=True,
             category="image", project_id="film", estimated_cost=1.0,
-            paid_approved_providers={"primary", "fallback"}, request_id="job-1",
+            paid_approved_providers={"primary", "fallback"}, paid_approval_ids=self._approval_ids({"primary", "fallback"}, request_id="job-1"), request_id="job-1",
         )
         self.assertEqual(fallback["provider"], "fallback")
         self.assertEqual(
@@ -790,12 +791,12 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
         router.route(
             category="image", project_id="film", estimated_cost=1.0,
-            paid_approved_providers={"primary", "fallback"}, request_id="attempt-1",
+            paid_approved_providers={"primary", "fallback"}, paid_approval_ids=self._approval_ids({"primary", "fallback"}, request_id="attempt-1"), request_id="attempt-1",
         )
         same_id = router.select_fallback(
             failed_provider="primary",
             category="image", project_id="film", estimated_cost=1.0,
-            paid_approved_providers={"primary", "fallback"}, request_id="attempt-1",
+            paid_approved_providers={"primary", "fallback"}, paid_approval_ids=self._approval_ids({"primary", "fallback"}, request_id="attempt-1"), request_id="attempt-1",
         )
         self.assertEqual(same_id["status"], "NEW_FALLBACK_REQUEST_ID_REQUIRED")
         self.assertEqual(
@@ -808,7 +809,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             failed_provider="primary",
             failed_request_id="attempt-1",
             category="image", project_id="film", estimated_cost=1.0,
-            paid_approved_providers={"primary", "fallback"}, request_id="attempt-2",
+            paid_approved_providers={"primary", "fallback"}, paid_approval_ids=self._approval_ids({"primary", "fallback"}, request_id="attempt-2"), request_id="attempt-2",
         )
         self.assertEqual(fallback["provider"], "fallback")
         self.assertEqual(
