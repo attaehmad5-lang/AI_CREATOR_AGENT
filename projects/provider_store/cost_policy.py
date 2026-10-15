@@ -152,6 +152,7 @@ class ProviderCostPolicy:
         free_credits_remaining: float = 0.0,
         paid_usage_approved: bool = False,
         approval_id: str | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(provider, dict) or not isinstance(provider.get("id"), str) or not provider["id"]:
             return {"allowed": False, "status": "INVALID_PROVIDER"}
@@ -215,12 +216,14 @@ class ProviderCostPolicy:
                     "allowed": False, "status": "PAID_APPROVAL_MANAGER_REQUIRED",
                     "provider": provider["id"], "estimated_cost": estimated_cost,
                 }
+            if not isinstance(request_id, str) or not request_id.strip():
+                return {"allowed": False, "status": "PAID_APPROVAL_REQUEST_ID_REQUIRED", "provider": provider["id"]}
             try:
                 approval = self.approval_manager.authorize(
                     approval_id,
                     project_id=project_id,
                     provider_id=provider["id"],
-                    request_id=approval_id_request_id if False else request_id_for_approval,
+                    request_id=request_id,
                     estimated_cost=estimated_cost,
                     unit="USD",
                 )
