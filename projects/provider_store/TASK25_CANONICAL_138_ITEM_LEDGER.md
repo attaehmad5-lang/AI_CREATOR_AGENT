@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38778435502](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38778435502): **340 tests passed on Ubuntu and 340 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This run includes the 50-case budget-threshold matrix, persisted alert deduplication, notification retry, and usage-finalization integration.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -112,7 +112,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 61 | 🔴 | Estimated vs Actual Usage Reconciliation | PARTIAL | Cost reservation/reconciliation is implemented and tested; provider-specific actual usage adapters are missing. |
 | 62 | 🔴 | Credit Exhaustion and Billing Error Handling | PARTIAL | Known billing/quota failures fail closed; provider-specific exhaustion behavior needs live tests. |
 | 63 | 🔴 | Cost-Aware Provider/Model Selection | PARTIAL | Cost/credit-aware routing foundations exist; reliable live prices and model-level cost comparisons remain open. |
-| 64 | 🔴 | Budget Alerts and Hard-Stop Policy | PARTIAL | Budget hard-stop logic exists; alerting/notification delivery is not implemented end-to-end. |
+| 64 | 🔴 | Budget Alerts and Hard-Stop Policy | VERIFIED | `ProviderCostPolicy.budget_snapshot()` reports actual spend and active reservations; `BudgetAlertManager` persists/deduplicates threshold events, uses stable IDs, retries pending notifier callbacks, and is invoked after successful usage finalization. A 50-case threshold matrix plus delivery retry, budget change, zero-budget hard-stop, corruption, and service integration tests passed. Channel-specific notification providers remain injectable deployment integrations. Evidence: `tests/test_budget_alert_manager.py`; GitHub Actions run #38778435502 passed 340 tests on Ubuntu and Windows. |
 
 ## I — Security, Privacy and Governance
 
