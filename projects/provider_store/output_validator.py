@@ -376,9 +376,13 @@ class ProviderOutputValidator:
         if modality == "video":
             width_bytes = cls._ebml_element(payload, b"\xb0")
             height_bytes = cls._ebml_element(payload, b"\xba")
-            if width_bytes is not None and height_bytes is not None:
-                result["width"] = int.from_bytes(width_bytes, "big")
-                result["height"] = int.from_bytes(height_bytes, "big")
+            if width_bytes is None or height_bytes is None:
+                return None
+            width = int.from_bytes(width_bytes, "big")
+            height = int.from_bytes(height_bytes, "big")
+            if width <= 0 or height <= 0:
+                return None
+            result.update({"width": width, "height": height})
         return result
 
     @staticmethod
@@ -504,15 +508,26 @@ class ProviderOutputValidator:
             return None
         stsd = moov.find(b"stsd")
         codec = None
+        width = height = None
         if stsd >= 0 and stsd + 20 <= len(moov):
             entry_type = moov[stsd + 16:stsd + 20]
             try:
                 codec = entry_type.decode("ascii").casefold()
             except UnicodeDecodeError:
                 return None
+            if modality == "video":
+                if stsd + 48 > len(moov):
+                    return None
+                width = int.from_bytes(moov[stsd + 44:stsd + 46], "big")
+                height = int.from_bytes(moov[stsd + 46:stsd + 48], "big")
+                if width <= 0 or height <= 0:
+                    return None
         if timescale <= 0 or duration <= 0 or not codec:
             return None
-        return {"duration_seconds": duration / timescale, "codec": codec}
+        result = {"duration_seconds": duration / timescale, "codec": codec}
+        if width is not None and height is not None:
+            result.update({"width": width, "height": height})
+        return result
 
     def _media_properties(
         self, mime: str, payload: bytes, total_size: int, modality: str,
