@@ -141,6 +141,8 @@ class ProviderRoutingManager:
         excluded_providers: set[str] | frozenset[str] | None = None,
         require_health_evidence: bool = False,
         automatic_fallback: bool = True,
+        dry_run: bool = False,
+        simulation_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Return the first policy-compliant provider and the decisions that led to it."""
         if not isinstance(category, str) or not category.strip():
@@ -154,23 +156,45 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_REQUIRED_REGION"}
         if required_region is not None:
             required_region = required_region.casefold()
+        if not isinstance(dry_run, bool):
+            return {"allowed": False, "status": "INVALID_DRY_RUN_FLAG"}
+        if simulation_policy is not None and not dry_run:
+            return {"allowed": False, "status": "SIMULATION_POLICY_REQUIRES_DRY_RUN"}
+        if simulation_policy is not None and not isinstance(simulation_policy, dict):
+            return {"allowed": False, "status": "INVALID_SIMULATION_POLICY"}
+        if simulation_policy is not None and self.project_policy_manager is None:
+            return {"allowed": False, "status": "PROJECT_POLICY_MANAGER_REQUIRED"}
 
         project_policy: dict[str, Any] = {}
         if self.project_policy_manager is not None:
-            try:
-                policy_result = self.project_policy_manager.get_policy(project_id)
-            except Exception as exc:
-                return {
-                    "allowed": False, "status": "PROJECT_POLICY_LOOKUP_FAILED",
-                    "error_type": type(exc).__name__,
-                }
-            if (
-                not isinstance(policy_result, dict)
-                or policy_result.get("status") != "PROJECT_POLICY_FOUND"
-                or not isinstance(policy_result.get("policy"), dict)
-            ):
-                return {"allowed": False, "status": "PROJECT_POLICY_REQUIRED"}
-            project_policy = policy_result["policy"]
+            if simulation_policy is not None:
+                try:
+                    validator = getattr(self.project_policy_manager, "validate_policy", None)
+                    validation = validator(project_id, simulation_policy) if callable(validator) else None
+                except Exception:
+                    validation = None
+                if not isinstance(validation, dict) or validation.get("valid") is not True:
+                    return {
+                        "allowed": False,
+                        "status": "INVALID_SIMULATION_POLICY",
+                        "errors": validation.get("errors", []) if isinstance(validation, dict) else [],
+                    }
+                project_policy = validation["policy"]
+            else:
+                try:
+                    policy_result = self.project_policy_manager.get_policy(project_id)
+                except Exception as exc:
+                    return {
+                        "allowed": False, "status": "PROJECT_POLICY_LOOKUP_FAILED",
+                        "error_type": type(exc).__name__,
+                    }
+                if (
+                    not isinstance(policy_result, dict)
+                    or policy_result.get("status") != "PROJECT_POLICY_FOUND"
+                    or not isinstance(policy_result.get("policy"), dict)
+                ):
+                    return {"allowed": False, "status": "PROJECT_POLICY_REQUIRED"}
+                project_policy = policy_result["policy"]
             allowed_models = project_policy.get("allowed_models")
             if allowed_models is not None and (
                 model is None or model not in allowed_models
@@ -530,6 +554,53 @@ class ProviderRoutingManager:
                     decisions.append({"provider": provider_id, "status": status})
                     continue
                 billing_mode = decision.get("billing_mode")
+
+            if dry_run:
+                if self.quota_manager is not None:
+                    preview = getattr(self.quota_manager, "preview", None)
+                    if not callable(preview):
+                        decisions.append({
+                            "provider": provider_id,
+                            "status": "QUOTA_SIMULATION_UNAVAILABLE",
+                        })
+                        continue
+                    try:
+                        quota_preview = preview(
+                            provider_id=provider_id,
+                            request_id=request_id,
+                        )
+                    except Exception as exc:
+                        decisions.append({
+                            "provider": provider_id,
+                            "status": "QUOTA_SIMULATION_FAILED",
+                            "error_type": type(exc).__name__,
+                        })
+                        continue
+                    if not isinstance(quota_preview, dict) or quota_preview.get("available") is not True:
+                        decisions.append({
+                            "provider": provider_id,
+                            "status": quota_preview.get("status", "QUOTA_SIMULATION_FAILED")
+                            if isinstance(quota_preview, dict) else "INVALID_QUOTA_PREVIEW",
+                        })
+                        continue
+                return {
+                    "allowed": True,
+                    "status": "SIMULATION_ROUTED",
+                    "dry_run": True,
+                    "reservations_created": False,
+                    "provider": provider_id,
+                    "category": category.strip(),
+                    "strategy": selected_strategy,
+                    "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
+                    "model": model,
+                    "model_version": model_version,
+                    "required_region": required_region,
+                    "estimated_cost": cost,
+                    "estimated_cost_unit": estimated_cost_unit.strip(),
+                    "billing_mode": billing_mode or "ZERO_COST",
+                    "quota_checked": self.quota_manager is not None,
+                    "prior_decisions": decisions,
+                }
 
             cost_reserved = False
             cost_reservation_created = False
