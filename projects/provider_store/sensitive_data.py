@@ -24,7 +24,7 @@ class SensitiveDataScanner:
         ), "critical"),
         ("US_SSN", re.compile(r"\b(?!000|666|9\d\d)\d{3}[- ]?(?!00)\d{2}[- ]?(?!0000)\d{4}\b"), "high"),
         ("EMAIL_ADDRESS", re.compile(r"(?<![\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w.-])", re.I), "medium"),
-        ("PHONE_NUMBER", re.compile(r"(?<!\w)(?:\+?\d[\d(). -]{7,}\d)(?!\w)"), "medium"),
+        ("PHONE_NUMBER", re.compile(r"(?<!\w)(?:\(\d{3}\)[ .-]?\d{3}[ .-]?\d{4}|\d{3}[-. ]\d{3}[-. ]\d{4}|\+\d{1,3}[ .-]?(?:\(?\d{2,4}\)?[ .-]?){2,4}\d{3,4})(?!\w)"), "medium"),
     )
     SECRET_KEYS = frozenset({
         "api_key", "apikey", "access_token", "refresh_token", "client_secret",
@@ -96,7 +96,8 @@ class SensitiveDataScanner:
             if isinstance(current, dict):
                 identity = id(current)
                 if identity in seen:
-                    continue
+                    limited = True
+                    break
                 seen.add(identity)
                 for key, child in reversed(list(current.items())):
                     key_category = self._field_category(key)
@@ -108,7 +109,8 @@ class SensitiveDataScanner:
             elif isinstance(current, (list, tuple)):
                 identity = id(current)
                 if identity in seen:
-                    continue
+                    limited = True
+                    break
                 seen.add(identity)
                 for index in range(len(current) - 1, -1, -1):
                     stack.append((current[index], f"{path}[{index}]", depth + 1, None))
