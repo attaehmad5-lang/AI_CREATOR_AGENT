@@ -234,12 +234,24 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["category"], "image")
 
     def test_free_credit_and_lowest_cost_strategies(self):
-        router = ProviderRoutingManager(self.connections)
+        credits = ProviderCreditManager(self.root / "strategy-credits.json")
+        for provider_id, balance in (("primary", 0.0), ("fallback", 2.0)):
+            refreshed = credits.refresh(
+                provider_id,
+                lambda _, balance=balance: {
+                    "verified": True, "free_credits_remaining": balance,
+                    "unit": "USD", "source": "official-account-api",
+                },
+            )
+            self.assertEqual(refreshed["status"], "CREDIT_BALANCE_UPDATED")
+        router = ProviderRoutingManager(self.connections, credit_manager=credits)
         free_first = router.route(
-            category="image", project_id="film", strategy="FREE_CREDITS_FIRST",
-            free_credits={"primary": 0.0, "fallback": 2.0},
+            category="image", project_id="film", estimated_cost=1.0,
+            estimated_cost_unit="USD", strategy="FREE_CREDITS_FIRST",
+            request_id="free-first-job",
         )
         self.assertEqual(free_first["provider"], "fallback")
+        self.assertEqual(free_first["billing_mode"], "FREE_CREDITS")
         cost_policy = ProviderCostPolicy(project_budgets={"film": 5.0})
         cost_router = ProviderRoutingManager(self.connections, cost_policy=cost_policy)
         cheapest = cost_router.route(
