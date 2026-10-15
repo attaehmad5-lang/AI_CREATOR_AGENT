@@ -135,6 +135,7 @@ def publish_validated_output(
             "name": destination.name,
             "sha256": expected_hash,
             "size_bytes": validation.get("size_bytes"),
+            "mime_type": validation.get("mime_type"),
             "modality": modality.casefold() if isinstance(modality, str) else modality,
             "cleanup_succeeded": True,
         }
