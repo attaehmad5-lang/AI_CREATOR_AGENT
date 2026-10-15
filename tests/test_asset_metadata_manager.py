@@ -71,7 +71,10 @@ class AssetMetadataManagerTests(unittest.TestCase):
         self.assertEqual(len(invalid_cases), 50)
         for index, (field, value) in enumerate(invalid_cases):
             with self.subTest(index=index, field=field, value=repr(value)):
-                result = self._record(**{field: value}, request_id=f"request-{index:03d}")
+                overrides = {field: value}
+                if field != "request_id":
+                    overrides["request_id"] = f"request-{index:03d}"
+                result = self._record(**overrides)
                 self.assertFalse(result["saved"])
                 self.assertEqual(result["status"], "INVALID_ASSET_METADATA")
         self.assertEqual(self.manager.list_assets()["assets"], [])
