@@ -24,6 +24,7 @@ class ProviderService:
         credit_manager: Any | None = None,
         access_controller: Any | None = None,
         sensitive_data_guard: Any | None = None,
+        data_retention_policy: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -44,12 +45,15 @@ class ProviderService:
         self.health_manager = health_manager
         self.retry_policy = retry_policy
         self.output_validator = output_validator
-        self.cost_policy = cost_policy
-        self.quota_manager = quota_manager
+        self.cost_policy = cost_policy or getattr(routing_manager, "cost_policy", None)
+        self.quota_manager = quota_manager or getattr(routing_manager, "quota_manager", None)
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
         if sensitive_data_guard is not None and not callable(getattr(sensitive_data_guard, "sanitize", None)):
             raise ValueError("sensitive_data_guard must support sanitize")
         self.sensitive_data_guard = sensitive_data_guard
+        if data_retention_policy is not None and not callable(getattr(data_retention_policy, "evaluate", None)):
+            raise ValueError("data_retention_policy must support evaluate")
+        self.data_retention_policy = data_retention_policy
         if access_controller is not None and not callable(
             getattr(access_controller, "authorize", None)
         ):
@@ -421,6 +425,10 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        data_categories: list[str] | tuple[str, ...] | None = None,
+        data_purpose: str = "generation",
+        retention_days: int = 0,
+        training_opt_in: bool = False,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
@@ -440,6 +448,25 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        if self.data_retention_policy is not None:
+            if data_categories is None:
+                data_categories = ["public"]
+            if (
+                not isinstance(data_categories, (list, tuple)) or not data_categories
+                or any(not isinstance(item, str) for item in data_categories)
+            ):
+                return {"status": "INVALID_DATA_CATEGORIES", "executed": False}
+            if "credentials" in data_categories:
+                return {"status": "CREDENTIAL_DATA_FORBIDDEN", "executed": False}
+            if not isinstance(data_purpose, str) or not data_purpose.strip() or len(data_purpose) > 80:
+                return {"status": "INVALID_DATA_PURPOSE", "executed": False}
+            if (
+                not isinstance(retention_days, int) or isinstance(retention_days, bool)
+                or not 0 <= retention_days <= 3650
+            ):
+                return {"status": "INVALID_RETENTION_PERIOD", "executed": False}
+            if not isinstance(training_opt_in, bool):
+                return {"status": "INVALID_TRAINING_CONSENT", "executed": False}
 
         safe_adapter_options = dict(adapter_options or {})
         privacy_status = None
@@ -475,6 +502,35 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+
+        data_policy_result = None
+        if self.data_retention_policy is not None:
+            try:
+                data_policy_result = self.data_retention_policy.evaluate(
+                    provider_id,
+                    data_categories=data_categories,
+                    purpose=data_purpose,
+                    retention_days=retention_days,
+                    training_opt_in=training_opt_in,
+                )
+            except Exception as exc:
+                data_policy_result = {
+                    "allowed": False, "status": "DATA_POLICY_EVALUATION_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(data_policy_result, dict) or data_policy_result.get("allowed") is not True:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                released = isinstance(release, dict) and release.get("released") is True
+                return {
+                    "status": "DATA_POLICY_REJECTED" if released else "DATA_POLICY_REJECTED_RELEASE_FAILED",
+                    "executed": False,
+                    "provider": provider_id,
+                    "request_id": request_id,
+                    "data_policy": data_policy_result,
+                    "release": release,
+                }
 
         options = dict(safe_adapter_options)
         options["provider_id"] = provider_id
@@ -627,6 +683,7 @@ class ProviderService:
             "finalization": finalization,
             "retry_decision": retry,
             "privacy_status": privacy_status,
+            "data_policy_status": data_policy_result.get("status") if isinstance(data_policy_result, dict) else None,
         }
 
     def retry_decision(self, **failure: Any) -> dict[str, Any]:
