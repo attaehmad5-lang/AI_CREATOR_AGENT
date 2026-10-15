@@ -120,6 +120,23 @@ class AtomicOutputPublicationTests(unittest.TestCase):
         self.assertEqual(destination.read_bytes(), b"previous-good-output")
         self.assertFalse(temporary.exists())
 
+    def test_validator_exception_preserves_destination_and_cleans_candidate(self):
+        class BrokenValidator:
+            def validate_file(self, path, *, modality):
+                raise RuntimeError("private internal detail")
+
+        temporary = self._write_temp()
+        destination = self.root / "final.png"
+        destination.write_bytes(b"previous-good-output")
+        result = publish_validated_output(
+            temporary, destination, modality="image", validator=BrokenValidator()
+        )
+        self.assertEqual(result["status"], "TEMP_OUTPUT_VALIDATION_FAILED")
+        self.assertEqual(result["error_type"], "RuntimeError")
+        self.assertEqual(destination.read_bytes(), b"previous-good-output")
+        self.assertFalse(temporary.exists())
+        self.assertNotIn("private internal detail", repr(result))
+
     def test_atomic_replace_failure_preserves_destination_and_cleans_candidate(self):
         temporary = self._write_temp()
         destination = self.root / "final.png"
