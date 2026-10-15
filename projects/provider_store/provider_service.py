@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        routing_access_controller: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -45,6 +46,11 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        if routing_access_controller is not None and not callable(
+            getattr(routing_access_controller, "authorize", None)
+        ):
+            raise ValueError("routing_access_controller must support authorize")
+        self.routing_access_controller = routing_access_controller
 
     def verify_provider(
         self,
@@ -222,15 +228,41 @@ class ProviderService:
         }
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
+        authorization = None
+        if self.routing_access_controller is not None:
+            # principal must come from the trusted authentication boundary, never
+            # directly from an untrusted request body. Authorization happens before
+            # routing can create cost, credit, or quota reservations.
+            principal = route_options.pop("principal", None)
+            access_resource = route_options.pop("access_resource", None)
+            if not isinstance(principal, dict) or not isinstance(access_resource, dict):
+                return {"allowed": False, "status": "ACCESS_CONTEXT_REQUIRED"}
+            try:
+                authorization = self.routing_access_controller.authorize(
+                    principal, "provider:route", access_resource
+                )
+            except Exception as exc:
+                return {
+                    "allowed": False, "status": "ACCESS_POLICY_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+                return {
+                    "allowed": False, "status": "ACCESS_DENIED",
+                    "authorization": authorization if isinstance(authorization, dict) else None,
+                }
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
             return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
-        }
+        if not isinstance(result, dict):
+            return {"allowed": False, "status": "INVALID_ROUTING_RESPONSE"}
+        if authorization is not None:
+            result = dict(result)
+            result["authorization"] = authorization
+        return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
         if self.output_validator is None:
