@@ -899,6 +899,57 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(set(quota.data["requests"]), {"already-used"})
         self.assertEqual(policies.get_policy("film")["status"], "PROJECT_POLICY_NOT_FOUND")
 
+    def test_policy_simulation_never_reserves_paid_cost_or_free_credits(self):
+        policies = ProviderProjectPolicyManager(self.root / "simulation-billing-policies.json")
+        cost = ProviderCostPolicy(
+            self.root / "simulation-cost-ledger.json",
+            project_budgets={"film": 5.0},
+        )
+        paid_router = ProviderRoutingManager(
+            self.connections,
+            project_policy_manager=policies,
+            cost_policy=cost,
+        )
+        paid = paid_router.simulate_policy(
+            project_id="film",
+            policy={"allowed_providers": ["primary"]},
+            category="image",
+            estimated_cost=1.0,
+            paid_approved_providers={"primary"},
+            request_id="paid-simulation",
+        )
+        self.assertTrue(paid["allowed"], paid)
+        self.assertEqual(paid["status"], "SIMULATION_ROUTED")
+        self.assertEqual(paid["billing_mode"], "PAID_APPROVED")
+        self.assertEqual(cost.ledger["projects"], {})
+
+        credits = ProviderCreditManager(self.root / "simulation-credit-ledger.json")
+        credits.refresh(
+            "primary",
+            lambda _: {
+                "verified": True,
+                "free_credits_remaining": 5.0,
+                "unit": "USD",
+                "source": "official-account-api",
+            },
+        )
+        credit_router = ProviderRoutingManager(
+            self.connections,
+            project_policy_manager=policies,
+            credit_manager=credits,
+        )
+        free = credit_router.simulate_policy(
+            project_id="film",
+            policy={"allowed_providers": ["primary"]},
+            category="image",
+            estimated_cost=1.0,
+            request_id="credit-simulation",
+        )
+        self.assertTrue(free["allowed"], free)
+        self.assertEqual(free["billing_mode"], "FREE_CREDITS")
+        self.assertEqual(credits.data["reservations"], {})
+        self.assertEqual(credits.usable_free_credits(unit="USD"), {"primary": 5.0})
+
     def test_policy_simulation_flags_and_options_fail_closed(self):
         router = ProviderRoutingManager(self.connections)
         self.assertEqual(
