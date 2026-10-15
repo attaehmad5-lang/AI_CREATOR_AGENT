@@ -204,7 +204,9 @@ class ProviderMetricsManager:
             "success_count": successes,
             "failure_count": count - successes,
             "success_rate": (successes / count) if count else None,
-            "average_latency_ms": (sum(latencies) / count) if count else None,
+            # Divide before summing so several individually finite, very large
+            # latency values cannot overflow the aggregate to infinity.
+            "average_latency_ms": sum(value / count for value in latencies) if count else None,
             "max_latency_ms": max(latencies) if latencies else None,
         }
 
