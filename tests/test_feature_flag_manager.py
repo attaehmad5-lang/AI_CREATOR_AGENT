@@ -35,7 +35,10 @@ class ProviderFeatureFlagManagerTests(unittest.TestCase):
         self.assertTrue(self.manager.evaluate("new_router", project_id="film")["enabled"])
         self.assertEqual(self.manager.evaluate("new_router", project_id="other")["status"], "PROJECT_NOT_ALLOWLISTED")
         self.assertEqual(self.manager.evaluate("new_router", project_id="shorts")["status"], "PROJECT_DENIED")
-        self.manager.set_flag("new_router", enabled=False)
+        self.manager.set_flag(
+            "new_router", enabled=False, rollout_percent=100,
+            allowed_projects=["film", "shorts"], denied_projects=["shorts"],
+        )
         self.assertEqual(self.manager.evaluate("new_router", project_id="film")["status"], "FLAG_DISABLED")
 
     def test_rollout_assignment_is_deterministic_and_bounded(self):
