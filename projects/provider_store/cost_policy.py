@@ -25,7 +25,11 @@ class ProviderCostPolicy:
         ledger_path: str | os.PathLike[str] | None = None,
         *,
         project_budgets: dict[str, float] | None = None,
+        approval_manager: Any | None = None,
     ) -> None:
+        if approval_manager is not None and not callable(getattr(approval_manager, "authorize", None)):
+            raise ValueError("approval_manager must support explicit approval authorization")
+        self.approval_manager = approval_manager
         self.ledger_path = Path(ledger_path) if ledger_path else None
         self._lock = threading.RLock()
         if project_budgets is not None and not isinstance(project_budgets, dict):
@@ -147,6 +151,7 @@ class ProviderCostPolicy:
         estimated_cost: float,
         free_credits_remaining: float = 0.0,
         paid_usage_approved: bool = False,
+        approval_id: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(provider, dict) or not isinstance(provider.get("id"), str) or not provider["id"]:
             return {"allowed": False, "status": "INVALID_PROVIDER"}
@@ -203,16 +208,37 @@ class ProviderCostPolicy:
                     "budget_remaining": remaining,
                 }
 
-            # A paid subscription/credit balance is never inferred to be approved.
-            if not paid_usage_approved:
+            # A caller-supplied boolean/set is not an approval record. Paid use
+            # requires a persistent, scoped, unexpired approval from the trusted manager.
+            if self.approval_manager is None:
                 return {
-                    "allowed": False, "status": "PAID_APPROVAL_REQUIRED", "provider": provider["id"],
-                    "estimated_cost": estimated_cost,
+                    "allowed": False, "status": "PAID_APPROVAL_MANAGER_REQUIRED",
+                    "provider": provider["id"], "estimated_cost": estimated_cost,
+                }
+            try:
+                approval = self.approval_manager.authorize(
+                    approval_id,
+                    project_id=project_id,
+                    provider_id=provider["id"],
+                    request_id=approval_id_request_id if False else request_id_for_approval,
+                    estimated_cost=estimated_cost,
+                    unit="USD",
+                )
+            except Exception as exc:
+                return {
+                    "allowed": False, "status": "PAID_APPROVAL_LOOKUP_FAILED",
+                    "provider": provider["id"], "error_type": type(exc).__name__,
+                }
+            if not isinstance(approval, dict) or approval.get("approved") is not True:
+                return {
+                    "allowed": False,
+                    "status": approval.get("status", "PAID_APPROVAL_REQUIRED") if isinstance(approval, dict) else "INVALID_APPROVAL_RESPONSE",
+                    "provider": provider["id"], "estimated_cost": estimated_cost,
                 }
             return {
                 "allowed": True, "status": "ALLOWED_PAID", "provider": provider["id"],
                 "billing_mode": "PAID_APPROVED", "estimated_cost": estimated_cost,
-                "approval_recorded": True,
+                "approval_recorded": True, "approval_id": approval.get("approval_id"),
             }
 
     @classmethod
