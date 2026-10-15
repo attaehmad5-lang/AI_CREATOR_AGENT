@@ -1,11 +1,25 @@
 import json
 import tempfile
 import unittest
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from projects.provider_store.metrics_manager import ProviderMetricsManager
+
+
+def _record_metric_in_process(args):
+    path, index = args
+    manager = ProviderMetricsManager(path)
+    return manager.record_request(
+        request_id=f"process-req-{index}",
+        trace_id=f"process-trace-{index}",
+        provider_id="image-provider",
+        modality="image",
+        status="EXECUTION_SUCCEEDED",
+        success=True,
+        latency_ms=float(index),
+    )["saved"]
 
 
 class ProviderMetricsManagerTests(unittest.TestCase):
@@ -66,6 +80,13 @@ class ProviderMetricsManagerTests(unittest.TestCase):
             ))
         self.assertTrue(all(item["saved"] for item in results))
         self.assertEqual(self.manager.summary()["request_count"], 60)
+
+    def test_concurrent_processes_do_not_lose_metrics_events(self):
+        args = [(str(self.path), index) for index in range(1, 17)]
+        with ProcessPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(_record_metric_in_process, args))
+        self.assertTrue(all(results))
+        self.assertEqual(ProviderMetricsManager(self.path).summary()["request_count"], 16)
 
     def test_retention_is_bounded_and_keeps_newest_events(self):
         manager = ProviderMetricsManager(
