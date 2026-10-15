@@ -7,6 +7,7 @@ import math
 import os
 import tempfile
 import threading
+import uuid
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -63,9 +64,13 @@ class ProviderMetricsManager:
             if (
                 not isinstance(event, dict)
                 or not isinstance(event.get("event_id"), str) or len(event["event_id"]) != 64
+                or any(ch not in "0123456789abcdef" for ch in event["event_id"])
                 or not isinstance(event.get("provider_id"), str) or not event["provider_id"].strip()
                 or not isinstance(event.get("success"), bool)
-                or not self._valid_nonnegative(event.get("latency_ms"))
+                or (
+                    event.get("latency_ms") is not None
+                    and not self._valid_nonnegative(event.get("latency_ms"))
+                )
                 or not self._valid_nonnegative(event.get("queue_wait_ms"))
                 or not isinstance(event.get("timed_out"), bool)
                 or (event["timed_out"] and event["success"])
@@ -117,7 +122,7 @@ class ProviderMetricsManager:
         provider_id: str,
         *,
         success: bool,
-        latency_ms: float,
+        latency_ms: float | None,
         queue_wait_ms: float = 0.0,
         timed_out: bool = False,
         request_id: str | None = None,
@@ -127,7 +132,10 @@ class ProviderMetricsManager:
             return {"status": "INVALID_PROVIDER", "saved": False}
         if not isinstance(success, bool) or not isinstance(timed_out, bool) or (success and timed_out):
             return {"status": "INVALID_OUTCOME", "saved": False}
-        if not self._valid_nonnegative(latency_ms) or not self._valid_nonnegative(queue_wait_ms):
+        if (
+            (latency_ms is not None and not self._valid_nonnegative(latency_ms))
+            or not self._valid_nonnegative(queue_wait_ms)
+        ):
             return {"status": "INVALID_METRIC_VALUE", "saved": False}
         if request_id is not None and (
             not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 200
@@ -145,9 +153,11 @@ class ProviderMetricsManager:
             if dedupe_key is not None and dedupe_key in self._data["seen"]:
                 return {"status": "DUPLICATE_METRIC_EVENT", "saved": False}
             material = (
-                f"{provider_id}\0{request_id or ''}\0{when:.9f}\0{len(self._data['events'])}"
+                f"{provider_id}\0{request_id or ''}\0{when:.9f}\0{len(self._data['events'])}\0{uuid.uuid4().hex}"
             ).encode("utf-8")
             event_id = hashlib.sha256(material).hexdigest()
+            previous_events = list(self._data["events"])
+            previous_seen = dict(self._data["seen"])
             event = {
                 "event_id": event_id,
                 "provider_id": provider_id,
@@ -169,11 +179,8 @@ class ProviderMetricsManager:
             try:
                 self._save()
             except Exception as exc:
-                self._data["events"] = [
-                    item for item in self._data["events"] if item["event_id"] != event_id
-                ]
-                if dedupe_key is not None:
-                    self._data["seen"].pop(dedupe_key, None)
+                self._data["events"] = previous_events
+                self._data["seen"] = previous_seen
                 return {"status": "METRICS_PERSISTENCE_FAILED", "saved": False, "error_type": type(exc).__name__}
         return {"status": "RECORDED", "saved": True, "event_id": event_id}
 
@@ -201,9 +208,9 @@ class ProviderMetricsManager:
         total = len(events)
         successes = sum(1 for event in events if event["success"])
         timeouts = sum(1 for event in events if event["timed_out"])
-        latencies = sorted(event["latency_ms"] for event in events)
+        latencies = sorted(event["latency_ms"] for event in events if event["latency_ms"] is not None)
         queues = [event["queue_wait_ms"] for event in events]
-        p95_index = max(0, math.ceil(0.95 * total) - 1) if total else 0
+        p95_index = max(0, math.ceil(0.95 * len(latencies)) - 1) if latencies else 0
         return {
             "status": "OK",
             "provider_id": provider_id,
@@ -213,8 +220,8 @@ class ProviderMetricsManager:
             "failure_count": total - successes,
             "timeout_count": timeouts,
             "success_rate_pct": round(successes * 100.0 / total, 4) if total else None,
-            "average_latency_ms": round(sum(latencies) / total, 4) if total else None,
-            "p95_latency_ms": latencies[p95_index] if total else None,
+            "average_latency_ms": round(sum(latencies) / len(latencies), 4) if latencies else None,
+            "p95_latency_ms": latencies[p95_index] if latencies else None,
             "average_queue_wait_ms": round(sum(queues) / total, 4) if total else None,
             "throughput_per_minute": round(total * 60.0 / window_seconds, 4),
             "last_event_at": events[-1]["timestamp"] if events else None,
