@@ -133,7 +133,7 @@ GitHub Actions run [#38793101402](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 73 | 🔴 | Unique Request ID and Trace ID | PARTIAL | ProviderService validates or generates trace IDs and propagates them to adapters that accept the trace keyword; persistent request/trace metrics are covered. Full distributed trace propagation across every adapter and backend remains open. |
 | 74 | 🔴 | Idempotency and Duplicate Prevention | PARTIAL | Manager-level idempotency is tested; full external-provider request idempotency is not verified. |
-| 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | Cross-process reservations and locking are tested; worker pools and provider-specific concurrency limits are incomplete. |
+| 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | ProviderExecutionLimiter enforces per-provider in-process concurrency and releases permits on exceptions; global multi-process worker coordination remains open. |
 | 76 | 🔴 | Queue, Backpressure and Overload Handling | PARTIAL | Bounded in-process waiting, queue timeouts, queued cancellation and overload rejection are tested; durable/distributed queue orchestration remains open. |
 | 77 | 🔴 | Async/Long-Running Job and Polling Support | OPEN | Asynchronous job lifecycle/polling is not implemented end-to-end. |
 | 78 | 🔴 | Webhook/Callback Verification | OPEN | Provider webhook/callback verification is not implemented. |
