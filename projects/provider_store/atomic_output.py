@@ -69,7 +69,15 @@ def publish_validated_output(
         if destination.exists() and not destination.is_file():
             return {"published": False, "status": "DESTINATION_NOT_REGULAR_FILE", "cleanup_succeeded": cleanup()}
 
-        validation = validator.validate_file(temporary, modality=modality)
+        try:
+            validation = validator.validate_file(temporary, modality=modality)
+        except Exception as exc:
+            return {
+                "published": False,
+                "status": "TEMP_OUTPUT_VALIDATION_FAILED",
+                "error_type": type(exc).__name__,
+                "cleanup_succeeded": cleanup(),
+            }
         if not isinstance(validation, dict) or validation.get("valid") is not True:
             return {
                 "published": False,
