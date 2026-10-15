@@ -22,7 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
-        routing_access_controller: Any | None = None,
+        access_controller: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -46,11 +46,30 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
-        if routing_access_controller is not None and not callable(
-            getattr(routing_access_controller, "authorize", None)
+        if access_controller is not None and not callable(
+            getattr(access_controller, "authorize", None)
         ):
-            raise ValueError("routing_access_controller must support authorize")
-        self.routing_access_controller = routing_access_controller
+            raise ValueError("access_controller must support authorize")
+        self.access_controller = access_controller
+
+    def _authorize_if_configured(
+        self, principal: Any, action: str, access_resource: Any
+    ) -> dict[str, Any] | None:
+        """Return a deny decision when configured access control lacks valid scope."""
+        if self.access_controller is None:
+            return None
+        if not isinstance(principal, dict) or not isinstance(access_resource, dict):
+            return {"allowed": False, "status": "ACCESS_CONTEXT_REQUIRED"}
+        try:
+            decision = self.access_controller.authorize(principal, action, access_resource)
+        except Exception as exc:
+            return {"allowed": False, "status": "ACCESS_POLICY_FAILED", "error_type": type(exc).__name__}
+        if not isinstance(decision, dict) or decision.get("allowed") is not True:
+            return {
+                "allowed": False, "status": "ACCESS_DENIED",
+                "authorization": decision if isinstance(decision, dict) else None,
+            }
+        return decision
 
     def verify_provider(
         self,
@@ -59,8 +78,17 @@ class ProviderService:
         *,
         timeout_seconds: float = 5.0,
         environ: dict[str, str] | None = None,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Verify connection using an injected provider-specific probe and record health."""
+        authorization = self._authorize_if_configured(principal, "provider:connect", access_resource)
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {
+                "status": authorization.get("status", "ACCESS_DENIED"),
+                "provider": provider_id, "verified": False,
+                "authorization": authorization.get("authorization"),
+            }
         try:
             connection = self.connection_manager.verify_connectivity(
                 provider_id, probe, timeout_seconds=timeout_seconds, environ=environ
@@ -99,6 +127,8 @@ class ProviderService:
         environ: dict[str, str] | None = None,
         opener: Any = None,
         max_response_bytes: int = 4096,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Verify a configured allowlisted HTTPS endpoint using the built-in safe probe.
 
@@ -125,6 +155,8 @@ class ProviderService:
             probe,
             timeout_seconds=timeout_seconds,
             environ=environ,
+            principal=principal,
+            access_resource=access_resource,
         )
 
     def verify_oauth_provider(
@@ -136,6 +168,8 @@ class ProviderService:
         environ: dict[str, str] | None = None,
         opener: Any = None,
         max_response_bytes: int = 4096,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Verify a provider using an access token held only by an OAuth manager in memory.
 
@@ -183,6 +217,8 @@ class ProviderService:
             environ=ephemeral_environment,
             opener=opener,
             max_response_bytes=max_response_bytes,
+            principal=principal,
+            access_resource=access_resource,
         )
 
     def verify_manual_provider(
@@ -192,8 +228,17 @@ class ProviderService:
         probe: Any,
         *,
         timeout_seconds: float = 5.0,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Verify an externally authorized account session and record safe health metadata."""
+        authorization = self._authorize_if_configured(principal, "provider:connect", access_resource)
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {
+                "status": authorization.get("status", "ACCESS_DENIED"),
+                "provider": provider_id, "verified": False,
+                "authorization": authorization.get("authorization"),
+            }
         try:
             connection = self.connection_manager.verify_manual_connection(
                 provider_id, manual_session, probe, timeout_seconds=timeout_seconds
@@ -229,7 +274,7 @@ class ProviderService:
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         authorization = None
-        if self.routing_access_controller is not None:
+        if self.access_controller is not None:
             # principal must come from the trusted authentication boundary, never
             # directly from an untrusted request body. Authorization happens before
             # routing can create cost, credit, or quota reservations.
@@ -238,7 +283,7 @@ class ProviderService:
             if not isinstance(principal, dict) or not isinstance(access_resource, dict):
                 return {"allowed": False, "status": "ACCESS_CONTEXT_REQUIRED"}
             try:
-                authorization = self.routing_access_controller.authorize(
+                authorization = self.access_controller.authorize(
                     principal, "provider:route", access_resource
                 )
             except Exception as exc:
