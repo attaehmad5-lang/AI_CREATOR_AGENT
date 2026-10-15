@@ -79,31 +79,56 @@ class ProviderExecutionLimiter:
             return {"status": "INVALID_QUEUE_TIMEOUT", "acquired": False}
         if cancel_event is not None and not callable(getattr(cancel_event, "is_set", None)):
             return {"status": "INVALID_CANCEL_EVENT", "acquired": False}
-        deadline = self.clock() + timeout
+        queued_at = self.clock()
+        deadline = queued_at + timeout
         waiting_registered = False
+
+        def queue_wait_ms() -> float:
+            try:
+                elapsed = (self.clock() - queued_at) * 1000
+                return max(0.0, float(elapsed)) if math.isfinite(elapsed) else 0.0
+            except (TypeError, ValueError, OverflowError):
+                return 0.0
+
         with self._condition:
             while self._active.get(provider_id, 0) >= limit:
                 if self._cancelled(cancel_event):
                     if waiting_registered:
                         self._waiting[provider_id] -= 1
-                    return {"status": "EXECUTION_CANCELLED", "acquired": False}
+                    return {
+                        "status": "EXECUTION_CANCELLED", "acquired": False,
+                        "queue_wait_ms": queue_wait_ms(),
+                    }
                 if not waiting_registered:
                     if self._waiting.get(provider_id, 0) >= self.max_waiting_per_provider:
-                        return {"status": "EXECUTION_CAPACITY_REJECTED", "acquired": False}
+                        return {
+                            "status": "EXECUTION_CAPACITY_REJECTED", "acquired": False,
+                            "queue_wait_ms": queue_wait_ms(),
+                        }
                     self._waiting[provider_id] = self._waiting.get(provider_id, 0) + 1
                     waiting_registered = True
                 remaining = deadline - self.clock()
                 if remaining <= 0:
                     self._waiting[provider_id] -= 1
-                    return {"status": "EXECUTION_QUEUE_TIMEOUT", "acquired": False}
+                    return {
+                        "status": "EXECUTION_QUEUE_TIMEOUT", "acquired": False,
+                        "queue_wait_ms": queue_wait_ms(),
+                    }
                 self._condition.wait(timeout=min(remaining, 0.1))
             if waiting_registered:
                 self._waiting[provider_id] -= 1
             if self._cancelled(cancel_event):
-                return {"status": "EXECUTION_CANCELLED", "acquired": False}
+                return {
+                    "status": "EXECUTION_CANCELLED", "acquired": False,
+                    "queue_wait_ms": queue_wait_ms(),
+                }
+            wait_ms = queue_wait_ms()
             self._active[provider_id] = self._active.get(provider_id, 0) + 1
         try:
-            return {"status": "EXECUTED", "acquired": True, "result": operation()}
+            return {
+                "status": "EXECUTED", "acquired": True,
+                "queue_wait_ms": wait_ms, "result": operation(),
+            }
         finally:
             with self._condition:
                 self._active[provider_id] = max(0, self._active.get(provider_id, 1) - 1)
