@@ -124,7 +124,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         def element(element_id, value):
             return element_id + bytes((0x80 | len(value),)) + value
         scale = element(bytes((0x2A, 0xD7, 0xB1)), timecode_scale.to_bytes(3, "big"))
-        duration_element = element(bytes((0x44, 0x89)), struct.pack(">d", duration))
+        duration_element = element(bytes((0x44, 0x89)), struct.pack(">d", duration * 1_000_000_000 / timecode_scale))
         return bytes((0x1A, 0x45, 0xDF, 0xA3)) + scale + duration_element + codec.encode("ascii")
 
     def test_flac_streaminfo_duration_and_sample_rate_are_validated(self):
