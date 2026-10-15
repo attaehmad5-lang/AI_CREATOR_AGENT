@@ -599,7 +599,7 @@ class ConnectionManager:
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
         provider_version = provider.get("adapter_api_version", "1.0")
-        if not isinstance(provider_version, str) or not re.fullmatch(r"\\d+\\.\\d+", provider_version):
+        if not isinstance(provider_version, str) or not re.fullmatch(r"\d+\.\d+", provider_version):
             return {
                 "status": "INVALID_ADAPTER_API_VERSION", "provider": provider_id,
                 "valid": False, "contract_version": "1.0",
