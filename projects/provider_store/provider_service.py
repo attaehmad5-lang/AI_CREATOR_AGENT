@@ -25,6 +25,7 @@ class ProviderService:
         access_controller: Any | None = None,
         sensitive_data_guard: Any | None = None,
         data_retention_policy: Any | None = None,
+        execution_queue: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -54,6 +55,12 @@ class ProviderService:
         if data_retention_policy is not None and not callable(getattr(data_retention_policy, "evaluate", None)):
             raise ValueError("data_retention_policy must support evaluate")
         self.data_retention_policy = data_retention_policy
+        if execution_queue is not None and any(
+            not callable(getattr(execution_queue, method, None))
+            for method in ("enqueue", "claim_next", "complete", "cancel", "stats")
+        ):
+            raise ValueError("execution_queue does not implement the required queue interface")
+        self.execution_queue = execution_queue
         if access_controller is not None and not callable(
             getattr(access_controller, "authorize", None)
         ):
@@ -355,6 +362,51 @@ class ProviderService:
         except Exception as exc:
             return {"status": "PROVIDER_REGISTRATION_FAILED", "saved": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_REGISTRATION_RESPONSE", "saved": False}
+
+    def enqueue_execution(self, **request: Any) -> dict[str, Any]:
+        if self.execution_queue is None:
+            return {"status": "EXECUTION_QUEUE_UNAVAILABLE", "accepted": False}
+        try:
+            result = self.execution_queue.enqueue(**request)
+        except Exception as exc:
+            return {"status": "EXECUTION_QUEUE_FAILED", "accepted": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE", "accepted": False}
+
+    def claim_next_execution(self, **claim: Any) -> dict[str, Any]:
+        if self.execution_queue is None:
+            return {"status": "EXECUTION_QUEUE_UNAVAILABLE", "job": None}
+        try:
+            result = self.execution_queue.claim_next(**claim)
+        except Exception as exc:
+            return {"status": "EXECUTION_QUEUE_FAILED", "job": None, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE", "job": None}
+
+    def complete_execution(self, **completion: Any) -> dict[str, Any]:
+        if self.execution_queue is None:
+            return {"status": "EXECUTION_QUEUE_UNAVAILABLE", "completed": False}
+        try:
+            result = self.execution_queue.complete(**completion)
+        except Exception as exc:
+            return {"status": "EXECUTION_QUEUE_FAILED", "completed": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE", "completed": False}
+
+    def cancel_execution(self, **cancellation: Any) -> dict[str, Any]:
+        if self.execution_queue is None:
+            return {"status": "EXECUTION_QUEUE_UNAVAILABLE", "cancelled": False}
+        try:
+            result = self.execution_queue.cancel(**cancellation)
+        except Exception as exc:
+            return {"status": "EXECUTION_QUEUE_FAILED", "cancelled": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE", "cancelled": False}
+
+    def execution_queue_stats(self) -> dict[str, Any]:
+        if self.execution_queue is None:
+            return {"status": "EXECUTION_QUEUE_UNAVAILABLE"}
+        try:
+            result = self.execution_queue.stats()
+        except Exception as exc:
+            return {"status": "EXECUTION_QUEUE_FAILED", "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE"}
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         authorization = None
