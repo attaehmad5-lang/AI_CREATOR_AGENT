@@ -53,13 +53,16 @@ class ProviderService:
         self.access_controller = access_controller
 
     def _authorize_if_configured(
-        self, principal: Any, action: str, access_resource: Any
+        self, principal: Any, action: str, access_resource: Any,
+        *, target_provider_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Return a deny decision when configured access control lacks valid scope."""
         if self.access_controller is None:
             return None
         if not isinstance(principal, dict) or not isinstance(access_resource, dict):
             return {"allowed": False, "status": "ACCESS_CONTEXT_REQUIRED"}
+        if target_provider_id is not None and access_resource.get("provider_id") != target_provider_id:
+            return {"allowed": False, "status": "ACCESS_RESOURCE_MISMATCH"}
         try:
             decision = self.access_controller.authorize(principal, action, access_resource)
         except Exception as exc:
@@ -82,7 +85,7 @@ class ProviderService:
         access_resource: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Verify connection using an injected provider-specific probe and record health."""
-        authorization = self._authorize_if_configured(principal, "provider:connect", access_resource)
+        authorization = self._authorize_if_configured(principal, "provider:connect", access_resource, target_provider_id=provider_id)
         if authorization is not None and authorization.get("allowed") is not True:
             return {
                 "status": authorization.get("status", "ACCESS_DENIED"),
@@ -278,6 +281,68 @@ class ProviderService:
             "connection": connection,
             "health": health,
         }
+
+    def configure_provider(
+        self, provider_id: str, *, principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None, **configuration: Any,
+    ) -> dict[str, Any]:
+        """Configure a provider only after optional tenant-scoped authorization."""
+        authorization = self._authorize_if_configured(
+            principal, "provider:configure", access_resource, target_provider_id=provider_id
+        )
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {"status": authorization.get("status", "ACCESS_DENIED"), "saved": False}
+        method = getattr(self.connection_manager, "configure_provider", None)
+        if not callable(method):
+            return {"status": "CONFIGURATION_MANAGER_UNAVAILABLE", "saved": False}
+        try:
+            result = method(provider_id, **configuration)
+        except Exception as exc:
+            return {"status": "CONFIGURATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_CONFIGURATION_RESPONSE", "saved": False}
+
+    def set_provider_enabled(
+        self, provider_id: str, enabled: bool, *,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Enable/disable a provider only after optional tenant-scoped authorization."""
+        action = "provider:enable" if enabled is True else "provider:disable"
+        authorization = self._authorize_if_configured(
+            principal, action, access_resource, target_provider_id=provider_id
+        )
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {"status": authorization.get("status", "ACCESS_DENIED"), "saved": False}
+        method = getattr(self.connection_manager, "set_provider_enabled", None)
+        if not callable(method):
+            return {"status": "PROVIDER_LIFECYCLE_UNAVAILABLE", "saved": False}
+        try:
+            result = method(provider_id, enabled)
+        except Exception as exc:
+            return {"status": "PROVIDER_LIFECYCLE_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_LIFECYCLE_RESPONSE", "saved": False}
+
+    def register_provider(
+        self, provider: dict[str, Any], *, overwrite: bool = False,
+        principal: dict[str, Any] | None = None,
+        access_resource: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Register provider metadata only after optional tenant-scoped authorization."""
+        provider_id = provider.get("id") if isinstance(provider, dict) else None
+        authorization = self._authorize_if_configured(
+            principal, "provider:register", access_resource,
+            target_provider_id=provider_id if isinstance(provider_id, str) else None,
+        )
+        if authorization is not None and authorization.get("allowed") is not True:
+            return {"status": authorization.get("status", "ACCESS_DENIED"), "saved": False}
+        method = getattr(self.connection_manager, "register_provider", None)
+        if not callable(method):
+            return {"status": "PROVIDER_REGISTRY_UNAVAILABLE", "saved": False}
+        try:
+            result = method(provider, overwrite=overwrite)
+        except Exception as exc:
+            return {"status": "PROVIDER_REGISTRATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_REGISTRATION_RESPONSE", "saved": False}
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         authorization = None
