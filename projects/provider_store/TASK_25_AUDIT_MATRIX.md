@@ -6,7 +6,7 @@ The exact canonical feature names, original baseline markers and item-by-item ev
 
 ## Latest code verification
 
-GitHub Actions code-verification run [#38793101402](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38793101402) completed successfully on Python 3.13: **350 tests passed on Ubuntu and 350 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This run includes safe persistent execution metrics, trace propagation, bounded per-provider concurrency/backpressure, and latency-aware routing regression coverage.
+GitHub Actions code-verification run [#38794005517](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38794005517) completed successfully on Python 3.13: **351 tests passed on Ubuntu and 351 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This run includes safe persistent execution metrics, trace propagation, bounded per-provider concurrency/backpressure, latency-aware routing, and an explicit error-specific retry classification matrix.
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
@@ -14,7 +14,7 @@ GitHub Actions code-verification run [#38793101402](https://github.com/attaehmad
 | B / 9–16 | Authentication and Connection | PARTIAL | Credential references, OAuth PKCE helper, endpoint/model config, and bounded HTTPS probes exist; provider-specific live auth and scopes are not verified. |
 | C / 17–24 | Multimodal Provider Support | PARTIAL | Image providers and modality contracts are cataloged; real adapters and end-to-end tests for all modalities remain open. |
 | D / 25–32 | Routing and Selection | PARTIAL | Primary/fallback, PRIMARY_ONLY, automatic-fallback on/off, credit/cost/health and declared model/version routing are tested; enabled providers still lack verified live model catalogs and complete project-policy routing remains open. |
-| E / 33–40 | Retry, Failure and Recovery | PARTIAL | Retry/backoff uses bounded exponentiation for extreme attempt values; bounded Retry-After propagation (including account-balance HTTP 429) and circuit-breaker primitives are tested. Cancellation/stalled-job recovery and provider-specific failure injection remain open. |
+| E / 33–40 | Retry, Failure and Recovery | PARTIAL | Error-specific retry classification distinguishes authorization/client errors from retryable rate-limit, server and network failures; bounded exponentiation, Retry-After propagation and circuit-breaker primitives are tested. Cancellation/stalled-job recovery and provider-specific failure injection remain open. |
 | F / 41–48 | Health and Reliability | PARTIAL | Persistent health history, active-probe hooks and stale-health checks exist; live probes and automatic recovery/re-admission remain open. |
 | G / 49–56 | Output and Asset Safety | PARTIAL | Basic output/file validation and atomic helpers exist; full media decoding, codec constraints, malware scanning and asset lineage remain open. |
 | H / 57–64 | Cost, Free Credits and Quotas | PARTIAL | Budgets, approval gates, quotas, credit snapshots, reconciliation and a generic balance probe are tested; provider-specific balance semantics and live credit-first routing remain open. |
@@ -22,7 +22,7 @@ GitHub Actions code-verification run [#38793101402](https://github.com/attaehmad
 | J / 73–80 | Production Orchestration | PARTIAL | Request IDs/idempotency and cross-process manager safety exist; queue/backpressure, async jobs, webhook verification, cancellation and Generation State Manager integration remain open. |
 | K / 81–88 | Quality, Performance and Observability | PARTIAL | Latency-aware routing plus persistent success/error-rate and latency summaries are tested; production quality scoring, benchmarks, distributed trace export, alerts and dashboards remain open. |
 | L / 89–96 | Configuration, Compatibility and Change Control | PARTIAL | Schema validation, safe config checks and catalog restore exist; version migration, hot reload, feature flags and complete backup/rollback verification remain open. |
-| M / 97–110 | Testing, Audit and Release Readiness | PARTIAL | 350 tests pass on Windows and Ubuntu; full 138-item coverage, all-modality end-to-end tests, complete failure injection, secret scanning and release PASS remain open. |
+| M / 97–110 | Testing, Audit and Release Readiness | PARTIAL | 351 tests pass on Windows and Ubuntu; full 138-item coverage, all-modality end-to-end tests, complete failure injection, secret scanning and release PASS remain open. |
 | N / 111–118 | High-Advanced Routing Intelligence | PARTIAL | Cost/health/capability routing foundations exist; confidence-aware, adaptive, region-aware and A/B routing with approval gates remain open. |
 | O / 119–128 | Enterprise and Large-Production Resiliency | OPEN/PARTIAL | Some quotas, health and restore primitives exist; tenant isolation, fair scheduling, regional outage/degraded mode, capacity tests, SLOs and incident runbooks are not complete. |
 | P / 129–138 | Future-Ready Extensibility | PARTIAL | Capability contracts and compatibility facades exist; plugin lifecycle, self-hosted providers, deprecation handling, policy simulation and admin controls remain open. |
