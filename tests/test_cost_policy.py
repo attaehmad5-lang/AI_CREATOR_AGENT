@@ -5,6 +5,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 from projects.provider_store.cost_policy import ProviderCostPolicy
+from projects.provider_store.paid_approval_manager import PaidUsageApprovalManager
 
 
 def _reserve_cost_in_process(args):
@@ -37,7 +38,11 @@ class ProviderCostPolicyTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.ledger = Path(self.temp_dir.name) / "usage_ledger.json"
-        self.policy = ProviderCostPolicy(self.ledger, project_budgets={"documentary": 5.0})
+        self.approvals = PaidUsageApprovalManager(Path(self.temp_dir.name) / "approvals.json", authorizer=lambda action, user, record: True)
+        self.policy = ProviderCostPolicy(
+            self.ledger, project_budgets={"documentary": 5.0},
+            approval_manager=self.approvals,
+        )
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -108,12 +113,120 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertEqual(result["status"], "PAID_APPROVAL_REQUIRED")
 
     def test_paid_usage_requires_budget_and_approval(self):
+        pending = self.approvals.request_approval(
+            project_id="documentary", provider_id="paid", request_id="paid-approval-job",
+            estimated_cost=1.0, unit="USD", requested_by="user-1",
+            reason="User explicitly approved a paid generation request",
+        )
+        self.assertEqual(pending["status"], "APPROVAL_PENDING")
+        self.assertTrue(self.approvals.approve(pending["approval_id"], approved_by="admin-1")["approved"])
         result = self.policy.evaluate_request(
             {"id": "paid", "enabled": True}, project_id="documentary",
             estimated_cost=1.0, paid_usage_approved=True,
+            approval_id=pending["approval_id"], request_id="paid-approval-job",
         )
-        self.assertTrue(result["allowed"])
+        self.assertTrue(result["allowed"], result)
         self.assertEqual(result["billing_mode"], "PAID_APPROVED")
+        self.assertEqual(result["approval_id"], pending["approval_id"])
+
+    def test_legacy_boolean_cannot_bypass_persistent_approval(self):
+        result = self.policy.evaluate_request(
+            {"id": "paid", "enabled": True}, project_id="documentary",
+            estimated_cost=1.0, paid_usage_approved=True, request_id="no-approval-job",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "PAID_APPROVAL_REQUIRED")
+
+    def test_paid_approval_boolean_cannot_bypass_missing_manager(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        result = policy.evaluate_request(
+            {"id": "paid", "enabled": True}, project_id="film",
+            estimated_cost=1.0, paid_usage_approved=True, request_id="legacy-boolean",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "PAID_APPROVAL_MANAGER_REQUIRED")
+
+    def test_approval_cannot_be_reused_for_another_request_or_provider(self):
+        pending = self.approvals.request_approval(
+            project_id="documentary", provider_id="paid", request_id="bound-job",
+            estimated_cost=1.0, unit="USD", requested_by="user-1",
+            reason="Approved only for this exact request",
+        )
+        self.approvals.approve(pending["approval_id"], approved_by="admin-1")
+        other_request = self.policy.evaluate_request(
+            {"id": "paid", "enabled": True}, project_id="documentary",
+            estimated_cost=1.0, approval_id=pending["approval_id"], request_id="other-job",
+        )
+        other_provider = self.policy.evaluate_request(
+            {"id": "different", "enabled": True}, project_id="documentary",
+            estimated_cost=1.0, approval_id=pending["approval_id"], request_id="bound-job",
+        )
+        self.assertEqual(other_request["status"], "APPROVAL_SCOPE_MISMATCH")
+        self.assertEqual(other_provider["status"], "APPROVAL_SCOPE_MISMATCH")
+
+    def test_per_request_budget_50_case_evaluation_matrix(self):
+        policy = ProviderCostPolicy(
+            self.ledger, project_budgets={"documentary": 100.0},
+            per_request_budgets={"documentary": 5.0}, approval_manager=self.approvals,
+        )
+        for index in range(50):
+            with self.subTest(case=index):
+                request_id = f"request-cap-eval-{index}"
+                amount = (index + 1) / 10.0 if index < 25 else 5.0 + (index - 24) / 10.0
+                approval_id = None
+                if amount <= 5.0:
+                    pending = self.approvals.request_approval(
+                        project_id="documentary", provider_id="paid", request_id=request_id,
+                        estimated_cost=amount, unit="USD", requested_by="user-1",
+                        reason="Test approved request budget",
+                    )
+                    approval_id = pending["approval_id"]
+                    if pending["status"] == "APPROVAL_PENDING":
+                        self.approvals.approve(approval_id, approved_by="admin-1")
+                result = policy.evaluate_request(
+                    {"id": "paid", "enabled": True}, project_id="documentary",
+                    estimated_cost=amount, approval_id=approval_id, request_id=request_id,
+                )
+                if amount <= 5.0:
+                    self.assertTrue(result["allowed"], result)
+                else:
+                    self.assertFalse(result["allowed"], result)
+                    self.assertEqual(result["status"], "REQUEST_BUDGET_EXCEEDED")
+
+    def test_per_request_budget_reservation_50_case_matrix(self):
+        policy = ProviderCostPolicy(
+            self.ledger, project_budgets={"documentary": 1000.0},
+            per_request_budgets={"documentary": 5.0}, approval_manager=self.approvals,
+        )
+        for index in range(50):
+            with self.subTest(case=index):
+                result = policy.reserve_usage(
+                    project_id="documentary", provider_id="paid",
+                    estimated_cost=5.01 + index / 100.0,
+                    request_id=f"request-cap-reserve-{index}",
+                )
+                self.assertFalse(result["saved"])
+                self.assertEqual(result["status"], "REQUEST_BUDGET_EXCEEDED")
+        self.assertEqual(policy._reserved("documentary"), 0.0)
+
+    def test_actual_charge_over_request_cap_is_recorded_and_flagged(self):
+        policy = ProviderCostPolicy(
+            self.ledger, project_budgets={"documentary": 10.0},
+            per_request_budgets={"documentary": 1.0}, approval_manager=self.approvals,
+        )
+        reserved = policy.reserve_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=0.8, request_id="actual-overrun",
+        )
+        self.assertTrue(reserved["saved"])
+        result = policy.reconcile_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=0.8, actual_cost=1.5, request_id="actual-overrun",
+        )
+        self.assertTrue(result["saved"])
+        self.assertEqual(result["status"], "REQUEST_BUDGET_OVERRUN")
+        self.assertEqual(result["actual_spend"], 1.5)
+        self.assertTrue(result["request_budget_exceeded"])
 
     def test_paid_usage_requires_a_configured_budget(self):
         policy = ProviderCostPolicy()

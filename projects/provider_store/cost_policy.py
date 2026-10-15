@@ -25,7 +25,12 @@ class ProviderCostPolicy:
         ledger_path: str | os.PathLike[str] | None = None,
         *,
         project_budgets: dict[str, float] | None = None,
+        per_request_budgets: dict[str, float] | None = None,
+        approval_manager: Any | None = None,
     ) -> None:
+        if approval_manager is not None and not callable(getattr(approval_manager, "authorize", None)):
+            raise ValueError("approval_manager must support explicit approval authorization")
+        self.approval_manager = approval_manager
         self.ledger_path = Path(ledger_path) if ledger_path else None
         self._lock = threading.RLock()
         if project_budgets is not None and not isinstance(project_budgets, dict):
@@ -34,6 +39,12 @@ class ProviderCostPolicy:
         for project_id, budget in self.project_budgets.items():
             if not isinstance(project_id, str) or not project_id.strip() or not self._valid_amount(budget):
                 raise ValueError("project budgets require non-empty project IDs and finite non-negative amounts")
+        if per_request_budgets is not None and not isinstance(per_request_budgets, dict):
+            raise ValueError("per_request_budgets must be a mapping")
+        self.per_request_budgets = dict(per_request_budgets or {})
+        for project_id, budget in self.per_request_budgets.items():
+            if not isinstance(project_id, str) or not project_id.strip() or not self._valid_amount(budget):
+                raise ValueError("per-request budgets require non-empty project IDs and finite non-negative amounts")
         self.ledger: dict[str, Any] = {"version": "1.0", "projects": {}}
         self._reload_ledger()
 
@@ -147,6 +158,8 @@ class ProviderCostPolicy:
         estimated_cost: float,
         free_credits_remaining: float = 0.0,
         paid_usage_approved: bool = False,
+        approval_id: str | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(provider, dict) or not isinstance(provider.get("id"), str) or not provider["id"]:
             return {"allowed": False, "status": "INVALID_PROVIDER"}
@@ -195,6 +208,16 @@ class ProviderCostPolicy:
                 }
             if not self._valid_amount(budget):
                 return {"allowed": False, "status": "INVALID_PROJECT_BUDGET", "provider": provider["id"]}
+            request_limit = self.per_request_budgets.get(project_id)
+            if request_limit is not None:
+                if not self._valid_amount(request_limit):
+                    return {"allowed": False, "status": "INVALID_REQUEST_BUDGET", "provider": provider["id"]}
+                if estimated_cost > request_limit:
+                    return {
+                        "allowed": False, "status": "REQUEST_BUDGET_EXCEEDED",
+                        "provider": provider["id"], "estimated_cost": estimated_cost,
+                        "request_budget_limit": request_limit,
+                    }
             remaining = max(0.0, budget - self._spent(project_id) - self._reserved(project_id))
             if estimated_cost > remaining:
                 return {
@@ -203,16 +226,44 @@ class ProviderCostPolicy:
                     "budget_remaining": remaining,
                 }
 
-            # A paid subscription/credit balance is never inferred to be approved.
-            if not paid_usage_approved:
+            # A caller-supplied boolean/set is not an approval record. Paid use
+            # requires a persistent, scoped, unexpired approval from the trusted manager.
+            if self.approval_manager is None:
                 return {
-                    "allowed": False, "status": "PAID_APPROVAL_REQUIRED", "provider": provider["id"],
-                    "estimated_cost": estimated_cost,
+                    "allowed": False, "status": "PAID_APPROVAL_MANAGER_REQUIRED",
+                    "provider": provider["id"], "estimated_cost": estimated_cost,
+                }
+            if not isinstance(approval_id, str) or not approval_id.strip():
+                return {
+                    "allowed": False, "status": "PAID_APPROVAL_REQUIRED",
+                    "provider": provider["id"], "estimated_cost": estimated_cost,
+                }
+            if not isinstance(request_id, str) or not request_id.strip():
+                return {"allowed": False, "status": "PAID_APPROVAL_REQUEST_ID_REQUIRED", "provider": provider["id"]}
+            try:
+                approval = self.approval_manager.authorize(
+                    approval_id,
+                    project_id=project_id,
+                    provider_id=provider["id"],
+                    request_id=request_id,
+                    estimated_cost=estimated_cost,
+                    unit="USD",
+                )
+            except Exception as exc:
+                return {
+                    "allowed": False, "status": "PAID_APPROVAL_LOOKUP_FAILED",
+                    "provider": provider["id"], "error_type": type(exc).__name__,
+                }
+            if not isinstance(approval, dict) or approval.get("approved") is not True:
+                return {
+                    "allowed": False,
+                    "status": approval.get("status", "PAID_APPROVAL_REQUIRED") if isinstance(approval, dict) else "INVALID_APPROVAL_RESPONSE",
+                    "provider": provider["id"], "estimated_cost": estimated_cost,
                 }
             return {
                 "allowed": True, "status": "ALLOWED_PAID", "provider": provider["id"],
                 "billing_mode": "PAID_APPROVED", "estimated_cost": estimated_cost,
-                "approval_recorded": True,
+                "approval_recorded": True, "approval_id": approval.get("approval_id"),
             }
 
     @classmethod
@@ -228,6 +279,8 @@ class ProviderCostPolicy:
         estimated_costs: dict[str, float],
         free_credits: dict[str, float] | None = None,
         paid_approved_providers: set[str] | None = None,
+        paid_approval_ids: dict[str, str] | None = None,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         """Prefer eligible free-credit providers before any explicitly approved paid route."""
         if not isinstance(providers, list) or not isinstance(estimated_costs, dict):
@@ -243,6 +296,12 @@ class ProviderCostPolicy:
             return {"allowed": False, "status": "VERIFIED_CREDIT_MANAGER_REQUIRED"}
         if paid_approved_providers is not None and not isinstance(paid_approved_providers, (set, frozenset)):
             return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
+        approval_ids = {} if paid_approval_ids is None else paid_approval_ids
+        if not isinstance(approval_ids, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in approval_ids.items()
+        ):
+            return {"allowed": False, "status": "INVALID_PAID_APPROVAL_IDS"}
         free_credits = {} if free_credits is None else free_credits
         paid_approved_providers = set() if paid_approved_providers is None else paid_approved_providers
         candidates = sorted(
@@ -266,6 +325,8 @@ class ProviderCostPolicy:
                 estimated_cost=estimate,
                 free_credits_remaining=free_credits.get(provider_id, 0.0),
                 paid_usage_approved=provider_id in paid_approved_providers,
+                approval_id=approval_ids.get(provider_id),
+                request_id=request_id,
             )
             if decision["allowed"]:
                 return {**decision, "selection_order": [d.get("provider") for d in decisions] + [provider_id]}
@@ -291,6 +352,15 @@ class ProviderCostPolicy:
                 return {"status": "PROJECT_BUDGET_REQUIRED", "saved": False}
             if not self._valid_amount(budget):
                 return {"status": "INVALID_PROJECT_BUDGET", "saved": False}
+            request_limit = self.per_request_budgets.get(project_id)
+            if request_limit is not None:
+                if not self._valid_amount(request_limit):
+                    return {"status": "INVALID_REQUEST_BUDGET", "saved": False}
+                if estimated_cost > request_limit:
+                    return {
+                        "status": "REQUEST_BUDGET_EXCEEDED", "saved": False,
+                        "request_budget_limit": request_limit,
+                    }
             project = self.ledger["projects"].setdefault(
                 project_id, {"actual_spend": 0.0, "requests": {}, "reservations": {}}
             )
@@ -631,14 +701,23 @@ class ProviderCostPolicy:
             self._save()
         budget = self.project_budgets.get(project_id)
         budget_exceeded = budget is not None and project["actual_spend"] > budget
+        request_limit = self.per_request_budgets.get(project_id)
+        request_budget_exceeded = request_limit is not None and float(actual_cost) > request_limit
+        status = (
+            "REQUEST_BUDGET_OVERRUN" if request_budget_exceeded
+            else "BUDGET_EXCEEDED" if budget_exceeded
+            else "RECONCILED"
+        )
         return {
-            "status": "BUDGET_EXCEEDED" if budget_exceeded else "RECONCILED",
+            "status": status,
             "saved": True,
             "project_id": project_id,
             "request_id": request_id,
             "actual_spend": project["actual_spend"],
             "budget": budget,
             "budget_exceeded": budget_exceeded,
+            "request_budget_limit": request_limit,
+            "request_budget_exceeded": request_budget_exceeded,
             "variance": record["variance"],
         }
 
