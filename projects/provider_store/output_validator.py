@@ -90,8 +90,8 @@ class ProviderOutputValidator:
         self.max_image_dimension = max_image_dimension
         self.max_image_pixels = max_image_pixels
         self.max_media_duration_seconds = float(max_media_duration_seconds)
-        self.allowed_audio_codecs = set(allowed_audio_codecs or {"pcm", "ieee_float", "alaw", "mulaw", "mp4a", "ac-3", "ec-3", "opus"})
-        self.allowed_video_codecs = set(allowed_video_codecs or {"h264", "avc1", "avc3", "h265", "hvc1", "hev1", "vp9", "vp09", "av1", "av01", "mp4v", "mjpg", "xvid", "divx", "dib"})
+        self.allowed_audio_codecs = set(allowed_audio_codecs or {"pcm", "ieee_float", "alaw", "mulaw", "flac", "vorbis", "mp4a", "ac-3", "ec-3", "opus"})
+        self.allowed_video_codecs = set(allowed_video_codecs or {"h264", "avc1", "avc3", "h265", "hvc1", "hev1", "vp8", "vp9", "vp09", "av1", "av01", "mp4v", "mjpg", "xvid", "divx", "dib"})
 
     @staticmethod
     def _image_dimensions(mime: str, payload: bytes) -> tuple[int, int] | None:
