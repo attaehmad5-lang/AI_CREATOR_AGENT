@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-Latest branch verification run [#38768194708](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38768194708): **367 tests passed on Ubuntu and 367 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This run covers controlled provider recovery, persisted health-state consistency checks, explicit v2-to-v3 catalog migration with backup and fail-closed handling, validated hot reload that retires changed provider instances safely, region routing, adapter versioning, side-effect-free policy simulation, 100 concurrent routing requests, local Ollama-compatible adapter checks, and bounded endpoint security. Production region metadata and a live local-model server test remain unverified.
+Latest branch verification run [#38768970605](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38768970605): **377 tests passed on Ubuntu and 377 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This run covers controlled provider recovery, persisted health-state consistency checks, explicit v2-to-v3 catalog migration with backup and fail-closed handling, validated hot reload that retires changed provider instances safely, deterministic feature flags and routing gates, region routing, adapter versioning, side-effect-free policy simulation, 100 concurrent routing requests, local Ollama-compatible adapter checks, and bounded endpoint security. Production region metadata and a live local-model server test remain unverified.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -232,6 +232,6 @@ Latest branch verification run [#38768194708](https://github.com/attaehmad5-lang
 
 1. Every one of the 138 items must be reviewed against its original wording; do not infer or rename features.
 2. Any `PARTIAL` or `OPEN` item must remain uncompleted until its implementation, tests and required live/operational evidence exist.
-3. The 367 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
+3. The 377 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
 4. The account-balance adapter is generic. It must be configured only with a provider-documented endpoint and a field representing actual available credits; never mistake a per-key budget cap for free credits.
 5. Task #29 Generation State Manager remains paused and must not be started as a separate task during this Task #25 work.
