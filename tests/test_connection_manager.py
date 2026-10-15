@@ -964,6 +964,79 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.unload_provider("public_image")["status"], "NOT_LOADED")
         self.assertEqual(self.manager.unload_provider("missing")["status"], "NOT_FOUND")
 
+    def test_safe_hot_reload_retires_instance_when_provider_is_disabled(self):
+        class Closable:
+            def __init__(self):
+                self.closed = False
+            def generate_image(self, prompt, output_path):
+                return None
+            def close(self):
+                self.closed = True
+
+        instance = Closable()
+        self.assertEqual(self.manager.load_provider("public_image", lambda metadata: instance)["status"], "LOADED")
+        candidate = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        candidate["providers"][0]["enabled"] = False
+        self.catalog_path.write_text(json.dumps(candidate), encoding="utf-8")
+        result = self.manager.reload_catalog()
+        self.assertEqual(result["status"], "CATALOG_RELOADED")
+        self.assertTrue(result["reloaded"])
+        self.assertEqual(result["retired_instances"], ["public_image"])
+        self.assertTrue(instance.closed)
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
+
+    def test_safe_hot_reload_retires_instance_when_provider_metadata_changes(self):
+        class Closable:
+            def __init__(self):
+                self.closed = False
+            def generate_image(self, prompt, output_path):
+                return None
+            def close(self):
+                self.closed = True
+
+        instance = Closable()
+        self.manager.load_provider("public_image", lambda metadata: instance)
+        candidate = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        candidate["providers"][0]["model"] = "new-model-version"
+        self.catalog_path.write_text(json.dumps(candidate), encoding="utf-8")
+        result = self.manager.reload_catalog()
+        self.assertTrue(result["reloaded"])
+        self.assertTrue(instance.closed)
+        self.assertEqual(result["retired_instances"], ["public_image"])
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_safe_hot_reload_rejects_invalid_candidate_without_replacing_memory(self):
+        previous = json.loads(json.dumps(self.manager.catalog))
+        self.catalog_path.write_text(
+            json.dumps({"version": "3.0", "providers": [{"id": "../unsafe"}]}),
+            encoding="utf-8",
+        )
+        result = self.manager.reload_catalog()
+        self.assertEqual(result["status"], "CATALOG_RELOAD_REJECTED")
+        self.assertFalse(result["reloaded"])
+        self.assertEqual(self.manager.catalog, previous)
+
+    def test_safe_hot_reload_preserves_instance_and_old_catalog_if_cleanup_fails(self):
+        class BrokenCleanup:
+            def generate_image(self, prompt, output_path):
+                return None
+            def close(self):
+                raise RuntimeError("private cleanup details")
+
+        instance = BrokenCleanup()
+        previous = json.loads(json.dumps(self.manager.catalog))
+        self.manager.load_provider("public_image", lambda metadata: instance)
+        candidate = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        candidate["providers"][0]["enabled"] = False
+        self.catalog_path.write_text(json.dumps(candidate), encoding="utf-8")
+        result = self.manager.reload_catalog()
+        self.assertEqual(result["status"], "HOT_RELOAD_UNLOAD_FAILED")
+        self.assertFalse(result["reloaded"])
+        self.assertNotIn("private cleanup details", repr(result))
+        self.assertEqual(self.manager.catalog, previous)
+        self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
+
     def test_enable_disable_persists_catalog_flag_without_claiming_connection(self):
         result = self.manager.set_provider_enabled("public_image", False)
         self.assertEqual(result["status"], "DISABLED")
