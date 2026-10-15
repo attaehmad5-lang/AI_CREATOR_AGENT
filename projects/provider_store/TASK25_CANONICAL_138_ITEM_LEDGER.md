@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38774886199](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38774886199): **331 tests passed on Ubuntu and 331 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, runtime enablement rejecting invalid catalogs, and error-specific retry classification.
+GitHub Actions run [#38777017964](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38777017964): **345 tests passed on Ubuntu and 345 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This run includes the 50-case atomic output publication matrix (25 valid + 25 invalid candidates), preserving prior output and cleaning temporary files on handled failure paths.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -96,7 +96,7 @@ GitHub Actions run [#38774886199](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 50 | 🟡 | Output File Existence Validation | VERIFIED | Missing, empty and oversized output files are rejected by output-validator tests. |
 | 51 | 🔴 | Audio/Video Format, Codec and Integrity Validation | OPEN | Full codec/container decoding and integrity checks are not implemented. |
 | 52 | 🟡 | Corrupt/Incomplete Output Rejection | PARTIAL | Basic corrupt/truncated artifact rejection is tested; decoder-level detection remains open. |
-| 53 | 🟡 | Temporary File Cleanup and Atomic Replacement | PARTIAL | `publish_validated_output()` validates and hashes before atomic replacement, preserves prior output on failure, and cleans handled temporary artifacts. Added a 50-case matrix (25 valid publications + 25 invalid candidates), plus symlink, collision, mutation, missing-file, validation-error and replace-failure tests. The new matrix is awaiting CI verification. |
+| 53 | 🟡 | Temporary File Cleanup and Atomic Replacement | VERIFIED | `publish_validated_output()` validates and hashes before atomic replacement, preserves prior output on failure, and cleans handled temporary artifacts. Added a 50-case matrix (25 valid publications + 25 invalid candidates), plus symlink, collision, mutation, missing-file, validation-error and replace-failure tests. GitHub Actions run #38777017964 passed 345 tests on Ubuntu and Windows, 0 failures. |
 | 54 | 🟡 | Previous Output Preservation on Failure | PARTIAL | Some preservation/atomicity tests exist; end-to-end generation replacement behavior is not verified. |
 | 55 | 🔴 | File Size, Dimensions, Duration and Codec Constraints | PARTIAL | Size limits exist; dimensions/duration/codec constraints need modality-specific decoders. |
 | 56 | 🟡 | Provider Attribution and Output Metadata | PARTIAL | Request/provider IDs exist in service records; complete asset lineage metadata is not verified. |
