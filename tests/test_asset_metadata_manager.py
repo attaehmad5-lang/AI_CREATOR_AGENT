@@ -66,7 +66,7 @@ class AssetMetadataManagerTests(unittest.TestCase):
         invalid_cases.extend((("mime_type", value) for value in ("", None, "image", "image/png\\nX: y", "secret=foo")))
         invalid_cases.extend((("size_bytes", value) for value in (0, -1, True, 1.5, 10**13)))
         invalid_cases.extend((("sha256", value) for value in ("", None, "0" * 63, "G" * 64, "a" * 65)))
-        invalid_cases.extend((("created_at", value) for value in ("not-a-time", None, "2026-10-15T12:00:00", "", "secret=timestamp")))
+        invalid_cases.extend((("created_at", value) for value in ("not-a-time", "2026-10-15T12:00:00", "2026-10-15T99:00:00", "secret=timestamp", "2026-10-15")))
         invalid_cases.extend((("mime_type", value) for value in ("application/json; charset=utf-8", "image/png\x00", "*/png", "x/y/z", 12)))
         self.assertEqual(len(invalid_cases), 50)
         for index, (field, value) in enumerate(invalid_cases):
