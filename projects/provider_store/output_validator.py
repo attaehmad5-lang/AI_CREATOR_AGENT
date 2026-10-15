@@ -106,7 +106,7 @@ class ProviderOutputValidator:
             chunk_type = header[4:8]
             if (
                 any(not (65 <= byte <= 90 or 97 <= byte <= 122) for byte in chunk_type)
-                or 65 <= chunk_type[2] <= 90 is False
+                or not (65 <= chunk_type[2] <= 90)
             ):
                 return None
             data_start = offset + 8
