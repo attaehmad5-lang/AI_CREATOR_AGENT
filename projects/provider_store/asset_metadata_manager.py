@@ -30,8 +30,9 @@ class AssetMetadataManager:
         self.lock_path = self.path.with_name(self.path.name + ".lock")
         self._lock = threading.RLock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        if not self.path.exists():
-            self._write({"version": self.VERSION, "assets": {}})
+        with self._lock, interprocess_file_lock(self.lock_path):
+            if not self.path.exists():
+                self._write({"version": self.VERSION, "assets": {}})
 
     @classmethod
     def _safe_identifier(cls, value: Any) -> bool:
