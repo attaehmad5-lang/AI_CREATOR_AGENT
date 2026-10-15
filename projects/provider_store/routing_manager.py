@@ -32,6 +32,7 @@ class ProviderRoutingManager:
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
         project_policy_manager: Any | None = None,
+        feature_flag_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
         require_verified_connection: bool = True,
     ) -> None:
@@ -47,6 +48,8 @@ class ProviderRoutingManager:
             raise ValueError("credit_manager must provide fresh verified balances")
         if project_policy_manager is not None and not callable(getattr(project_policy_manager, "get_policy", None)):
             raise ValueError("project_policy_manager must support policy lookup")
+        if feature_flag_manager is not None and not callable(getattr(feature_flag_manager, "evaluate", None)):
+            raise ValueError("feature_flag_manager must support flag evaluation")
         if not isinstance(require_verified_connection, bool):
             raise ValueError("require_verified_connection must be boolean")
         if require_verified_connection and not callable(getattr(connection_manager, "get_state", None)):
@@ -60,6 +63,7 @@ class ProviderRoutingManager:
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager
         self.project_policy_manager = project_policy_manager
+        self.feature_flag_manager = feature_flag_manager
         self.default_strategy = normalized_strategy
         self.require_verified_connection = require_verified_connection
         self._round_robin_counters: dict[str, int] = {}
@@ -131,6 +135,7 @@ class ProviderRoutingManager:
         capability: str | None = None,
         model: str | None = None,
         model_version: str | None = None,
+        required_region: str | None = None,
         strategy: str | None = None,
         estimated_costs: dict[str, float] | None = None,
         estimated_cost_unit: str = "USD",
@@ -140,29 +145,84 @@ class ProviderRoutingManager:
         excluded_providers: set[str] | frozenset[str] | None = None,
         require_health_evidence: bool = False,
         automatic_fallback: bool = True,
+        dry_run: bool = False,
+        simulation_policy: dict[str, Any] | None = None,
+        required_feature_flag: str | None = None,
+        rollout_subject_id: str | None = None,
     ) -> dict[str, Any]:
         """Return the first policy-compliant provider and the decisions that led to it."""
         if not isinstance(category, str) or not category.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_REQUIRED"}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
+        if required_feature_flag is not None:
+            if self.feature_flag_manager is None:
+                return {"allowed": False, "status": "FEATURE_FLAG_MANAGER_REQUIRED"}
+            try:
+                flag_result = self.feature_flag_manager.evaluate(
+                    required_feature_flag,
+                    project_id=project_id,
+                    subject_id=rollout_subject_id or request_id,
+                )
+            except Exception as exc:
+                return {
+                    "allowed": False,
+                    "status": "FEATURE_FLAG_EVALUATION_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(flag_result, dict) or flag_result.get("enabled") is not True:
+                return {
+                    "allowed": False,
+                    "status": "FEATURE_FLAG_BLOCKED",
+                    "feature_flag_status": flag_result.get("status", "INVALID_FLAG_RESPONSE")
+                    if isinstance(flag_result, dict) else "INVALID_FLAG_RESPONSE",
+                }
+        if required_region is not None and (
+            not isinstance(required_region, str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", required_region.casefold())
+        ):
+            return {"allowed": False, "status": "INVALID_REQUIRED_REGION"}
+        if required_region is not None:
+            required_region = required_region.casefold()
+        if not isinstance(dry_run, bool):
+            return {"allowed": False, "status": "INVALID_DRY_RUN_FLAG"}
+        if simulation_policy is not None and not dry_run:
+            return {"allowed": False, "status": "SIMULATION_POLICY_REQUIRES_DRY_RUN"}
+        if simulation_policy is not None and not isinstance(simulation_policy, dict):
+            return {"allowed": False, "status": "INVALID_SIMULATION_POLICY"}
+        if simulation_policy is not None and self.project_policy_manager is None:
+            return {"allowed": False, "status": "PROJECT_POLICY_MANAGER_REQUIRED"}
 
         project_policy: dict[str, Any] = {}
         if self.project_policy_manager is not None:
-            try:
-                policy_result = self.project_policy_manager.get_policy(project_id)
-            except Exception as exc:
-                return {
-                    "allowed": False, "status": "PROJECT_POLICY_LOOKUP_FAILED",
-                    "error_type": type(exc).__name__,
-                }
-            if (
-                not isinstance(policy_result, dict)
-                or policy_result.get("status") != "PROJECT_POLICY_FOUND"
-                or not isinstance(policy_result.get("policy"), dict)
-            ):
-                return {"allowed": False, "status": "PROJECT_POLICY_REQUIRED"}
-            project_policy = policy_result["policy"]
+            if simulation_policy is not None:
+                try:
+                    validator = getattr(self.project_policy_manager, "validate_policy", None)
+                    validation = validator(project_id, simulation_policy) if callable(validator) else None
+                except Exception:
+                    validation = None
+                if not isinstance(validation, dict) or validation.get("valid") is not True:
+                    return {
+                        "allowed": False,
+                        "status": "INVALID_SIMULATION_POLICY",
+                        "errors": validation.get("errors", []) if isinstance(validation, dict) else [],
+                    }
+                project_policy = validation["policy"]
+            else:
+                try:
+                    policy_result = self.project_policy_manager.get_policy(project_id)
+                except Exception as exc:
+                    return {
+                        "allowed": False, "status": "PROJECT_POLICY_LOOKUP_FAILED",
+                        "error_type": type(exc).__name__,
+                    }
+                if (
+                    not isinstance(policy_result, dict)
+                    or policy_result.get("status") != "PROJECT_POLICY_FOUND"
+                    or not isinstance(policy_result.get("policy"), dict)
+                ):
+                    return {"allowed": False, "status": "PROJECT_POLICY_REQUIRED"}
+                project_policy = policy_result["policy"]
             allowed_models = project_policy.get("allowed_models")
             if allowed_models is not None and (
                 model is None or model not in allowed_models
@@ -171,6 +231,16 @@ class ProviderRoutingManager:
             allowed_capabilities = project_policy.get("allowed_capabilities")
             if allowed_capabilities is not None and capability is not None and capability not in allowed_capabilities:
                 return {"allowed": False, "status": "PROJECT_CAPABILITY_NOT_ALLOWED"}
+            policy_required_region = project_policy.get("required_region")
+            if policy_required_region is not None:
+                if required_region is not None and required_region.casefold() != policy_required_region.casefold():
+                    return {"allowed": False, "status": "PROJECT_REGION_POLICY_CONFLICT"}
+                required_region = policy_required_region
+            allowed_regions = project_policy.get("allowed_regions")
+            if required_region is not None and allowed_regions is not None and required_region.casefold() not in {
+                value.casefold() for value in allowed_regions if isinstance(value, str)
+            }:
+                return {"allowed": False, "status": "PROJECT_REGION_POLICY_CONFLICT"}
             max_estimated_cost = project_policy.get("max_estimated_cost")
             if max_estimated_cost is not None and self._valid_amount(estimated_cost) and estimated_cost > max_estimated_cost:
                 return {"allowed": False, "status": "PROJECT_COST_LIMIT_EXCEEDED"}
@@ -191,6 +261,27 @@ class ProviderRoutingManager:
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,99}", model_version)
         ):
             return {"allowed": False, "status": "INVALID_MODEL_VERSION"}
+        if required_region is not None and (
+            not isinstance(required_region, str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", required_region.casefold())
+        ):
+            return {"allowed": False, "status": "INVALID_REQUIRED_REGION"}
+        if required_region is not None:
+            required_region = required_region.casefold()
+        allowed_regions = project_policy.get("allowed_regions")
+        if allowed_regions is not None and (
+            not isinstance(allowed_regions, list)
+            or not allowed_regions
+            or any(
+                not isinstance(region, str)
+                or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", region.casefold())
+                for region in allowed_regions
+            )
+        ):
+            return {"allowed": False, "status": "INVALID_PROJECT_REGION_POLICY"}
+        allowed_region_set = {
+            region.casefold() for region in allowed_regions
+        } if isinstance(allowed_regions, list) else None
         selected_strategy = str(strategy or self.default_strategy).upper()
         if selected_strategy not in self.STRATEGIES:
             return {"allowed": False, "status": "INVALID_ROUTING_STRATEGY"}
@@ -303,6 +394,26 @@ class ProviderRoutingManager:
                 continue
             if provider.get("enabled") is not True:
                 continue
+            if required_region is not None or allowed_region_set is not None:
+                declared_regions = provider.get("data_residency_regions", provider.get("regions"))
+                if (
+                    not isinstance(declared_regions, list)
+                    or not declared_regions
+                    or any(
+                        not isinstance(region, str)
+                        or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", region.casefold())
+                        for region in declared_regions
+                    )
+                ):
+                    decisions.append({"provider": provider_id, "status": "REGION_METADATA_UNVERIFIED"})
+                    continue
+                normalized_regions = {region.casefold() for region in declared_regions}
+                if required_region is not None and required_region not in normalized_regions:
+                    decisions.append({"provider": provider_id, "status": "REQUIRED_REGION_NOT_SUPPORTED"})
+                    continue
+                if allowed_region_set is not None and not normalized_regions.intersection(allowed_region_set):
+                    decisions.append({"provider": provider_id, "status": "PROJECT_REGION_NOT_SUPPORTED"})
+                    continue
             if model is not None:
                 model_records = provider.get("supported_models")
                 if not isinstance(model_records, list):
@@ -472,6 +583,53 @@ class ProviderRoutingManager:
                     continue
                 billing_mode = decision.get("billing_mode")
 
+            if dry_run:
+                if self.quota_manager is not None:
+                    preview = getattr(self.quota_manager, "preview", None)
+                    if not callable(preview):
+                        decisions.append({
+                            "provider": provider_id,
+                            "status": "QUOTA_SIMULATION_UNAVAILABLE",
+                        })
+                        continue
+                    try:
+                        quota_preview = preview(
+                            provider_id=provider_id,
+                            request_id=request_id,
+                        )
+                    except Exception as exc:
+                        decisions.append({
+                            "provider": provider_id,
+                            "status": "QUOTA_SIMULATION_FAILED",
+                            "error_type": type(exc).__name__,
+                        })
+                        continue
+                    if not isinstance(quota_preview, dict) or quota_preview.get("available") is not True:
+                        decisions.append({
+                            "provider": provider_id,
+                            "status": quota_preview.get("status", "QUOTA_SIMULATION_FAILED")
+                            if isinstance(quota_preview, dict) else "INVALID_QUOTA_PREVIEW",
+                        })
+                        continue
+                return {
+                    "allowed": True,
+                    "status": "SIMULATION_ROUTED",
+                    "dry_run": True,
+                    "reservations_created": False,
+                    "provider": provider_id,
+                    "category": category.strip(),
+                    "strategy": selected_strategy,
+                    "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
+                    "model": model,
+                    "model_version": model_version,
+                    "required_region": required_region,
+                    "estimated_cost": cost,
+                    "estimated_cost_unit": estimated_cost_unit.strip(),
+                    "billing_mode": billing_mode or "ZERO_COST",
+                    "quota_checked": self.quota_manager is not None,
+                    "prior_decisions": decisions,
+                }
+
             cost_reserved = False
             cost_reservation_created = False
             credit_reserved = False
@@ -632,6 +790,23 @@ class ProviderRoutingManager:
             "model_version": model_version,
             "decisions": decisions,
         }
+
+    def simulate_policy(
+        self,
+        *,
+        project_id: str,
+        policy: dict[str, Any],
+        **route_options: Any,
+    ) -> dict[str, Any]:
+        """Evaluate a proposed project policy without saving it or reserving resources."""
+        if any(key in route_options for key in ("project_id", "simulation_policy", "dry_run")):
+            return {"allowed": False, "status": "INVALID_SIMULATION_OPTIONS"}
+        return self.route(
+            project_id=project_id,
+            dry_run=True,
+            simulation_policy=policy,
+            **route_options,
+        )
 
     def select_fallback(
         self,

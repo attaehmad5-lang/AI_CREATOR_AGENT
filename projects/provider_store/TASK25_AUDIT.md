@@ -1,17 +1,17 @@
 # Task #25 — Provider Connection Manager Verification Audit
 
-**Follow-up branch:** `task-25-followup-audit`  
-**Pull request:** #1 (merged; follow-up work requires a new branch/PR)  
+**Active follow-up branch:** `task-25-region-policy-hardening`  
+**Pull request:** #28 (draft; not approved for merge)  
 **Audit status:** In progress — do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#38305883948](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680) completed successfully on Python 3.13:
+GitHub Actions run [#38769374050](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38769374050) completed successfully on Python 3.13:
 
-- Ubuntu: 312 tests passed, 0 failures.
-- Windows: 304 tests passed, 0 failures.
+- Ubuntu: 377 tests passed, 0 failures.
+- Windows: 377 tests passed, 0 failures.
 - Provider module/test compilation and provider JSON catalog validation passed on both platforms.
-- The only changes after that code-verification run are audit/documentation updates. Follow-up work is isolated in draft PR #7; PR #1 is already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
+- Controlled health recovery now requires two consecutive successful results before an unhealthy provider is readmitted; it remains ineligible while `RECOVERING`. PR #1 and PR #7 are merged, while PR #28 remains draft; this audit remains IN PROGRESS because other item-by-item and live integration evidence is incomplete.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
@@ -24,7 +24,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | C — Multimodal Provider Support | 17–24 | Catalog categories/capabilities and modality contract validation | Catalog/contract evidence only; actual provider adapters and live modality checks pending |
 | D — Routing and Selection | 25–32 | Priority, free-credit-first, lowest-cost, healthiest-first, round-robin, PRIMARY_ONLY and explicit automatic-fallback control; declared model/version filtering; verified-connection gating and fallback reservations | Foundation implemented; real generation-path integration pending |
 | E — Retry, Failure and Recovery | 33–40 | Bounded backoff, status/Retry-After handling, idempotency checks, circuit breaker and probe-slot recovery | Unit-tested foundation; provider-specific failure injection pending |
-| F — Health and Reliability | 41–48 | Persisted health history, latency/staleness checks, eligibility and active probe recording | Foundation implemented; live provider health evidence pending |
+| F — Health and Reliability | 41–48 | Persisted health history, latency/staleness checks, eligibility, active probes, and a persisted recovery-success threshold that gates re-admission | Recovery transition is unit-tested; live provider health evidence and operational recovery orchestration remain pending |
 | G — Output and Asset Safety | 49–56 | Size/signature/basic-content checks, bounded reads, mutation detection, JSON nesting limits and SHA-256 | Basic validation implemented; full media decoding, malware scanning and semantic QA pending |
 | H — Cost, Free Credits and Quotas | 57–64 | Paid-approval guard, configured budgets, serialized reservations, usage reconciliation, verified credit snapshots and unit compatibility; new `account_balance_probe.py` provides bounded, allowlisted JSON balance reads with explicit available-credit field semantics | Local policy/ledger and generic balance-probe integration tested; provider-specific live balance adapters and balance-field semantics still need authorized verification |
 | I — Security, Privacy and Governance | 65–72 | Secret-safe catalog/state, endpoint allowlists, HTTPS-only probes, redirect rejection, bounded response reads, rejection of unsupported raw-token Basic auth, and overflow-safe numeric validation across cost, credit, routing, connection, health, retry, and OAuth | Implemented safeguards; threat-model and deployment review pending |

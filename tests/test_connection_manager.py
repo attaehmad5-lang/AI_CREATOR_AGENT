@@ -835,6 +835,56 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertEqual(result["contract_version"], "1.0")
 
+    def test_adapter_api_version_negotiation_runs_50_combinations(self):
+        expected_versions = [None, "1.0", "2.0", "v1", 1, "", "1.1", "1.0.0", "0.9", "99.0"]
+        actual_versions = [None, "1.0", "2.0", "v1", 1]
+        checks = 0
+        for expected in expected_versions:
+            for actual in actual_versions:
+                with self.subTest(expected=expected, actual=actual):
+                    catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+                    if expected is None:
+                        catalog["providers"][0].pop("adapter_api_version", None)
+                    else:
+                        catalog["providers"][0]["adapter_api_version"] = expected
+                    self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+                    manager = ConnectionManager(self.catalog_path, self.state_path)
+                    attrs = {"generate_image": lambda self, *args, **kwargs: None}
+                    if actual is not None:
+                        attrs["adapter_api_version"] = actual
+                    adapter = type("VersionedAdapter", (), attrs)()
+                    result = manager.validate_provider_contract("public_image", adapter)
+                    if expected is None:
+                        self.assertTrue(result["valid"])
+                    elif not isinstance(expected, str) or not __import__("re").fullmatch(r"[0-9]+[.][0-9]+", expected):
+                        self.assertEqual(result["status"], "INVALID_ADAPTER_API_VERSION")
+                    elif expected != "1.0":
+                        self.assertEqual(result["status"], "UNSUPPORTED_ADAPTER_API_VERSION")
+                    elif actual is None:
+                        self.assertEqual(result["status"], "ADAPTER_API_VERSION_REQUIRED")
+                    elif actual != "1.0":
+                        self.assertEqual(result["status"], "ADAPTER_API_VERSION_MISMATCH")
+                    else:
+                        self.assertTrue(result["valid"])
+                    checks += 1
+        self.assertEqual(checks, 50)
+
+    def test_loading_rejects_adapter_api_version_mismatch(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"][0]["adapter_api_version"] = "1.0"
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+
+        class WrongVersionAdapter:
+            API_VERSION = "2.0"
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = manager.load_provider("public_image", lambda metadata: WrongVersionAdapter())
+        self.assertEqual(result["status"], "CONTRACT_VIOLATION")
+        self.assertEqual(result["contract_status"], "ADAPTER_API_VERSION_MISMATCH")
+        self.assertIsNone(manager.get_loaded_provider("public_image"))
+
     def test_provider_contract_rejects_missing_method_and_prevents_loading(self):
         instance = object()
         contract = self.manager.validate_provider_contract("public_image", instance)
@@ -913,6 +963,79 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_unload_provider_reports_not_loaded_and_unknown(self):
         self.assertEqual(self.manager.unload_provider("public_image")["status"], "NOT_LOADED")
         self.assertEqual(self.manager.unload_provider("missing")["status"], "NOT_FOUND")
+
+    def test_safe_hot_reload_retires_instance_when_provider_is_disabled(self):
+        class Closable:
+            def __init__(self):
+                self.closed = False
+            def generate_image(self, prompt, output_path):
+                return None
+            def close(self):
+                self.closed = True
+
+        instance = Closable()
+        self.assertEqual(self.manager.load_provider("public_image", lambda metadata: instance)["status"], "LOADED")
+        candidate = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        candidate["providers"][0]["enabled"] = False
+        self.catalog_path.write_text(json.dumps(candidate), encoding="utf-8")
+        result = self.manager.reload_catalog()
+        self.assertEqual(result["status"], "CATALOG_RELOADED")
+        self.assertTrue(result["reloaded"])
+        self.assertEqual(result["retired_instances"], ["public_image"])
+        self.assertTrue(instance.closed)
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
+
+    def test_safe_hot_reload_retires_instance_when_provider_metadata_changes(self):
+        class Closable:
+            def __init__(self):
+                self.closed = False
+            def generate_image(self, prompt, output_path):
+                return None
+            def close(self):
+                self.closed = True
+
+        instance = Closable()
+        self.manager.load_provider("public_image", lambda metadata: instance)
+        candidate = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        candidate["providers"][0]["model"] = "new-model-version"
+        self.catalog_path.write_text(json.dumps(candidate), encoding="utf-8")
+        result = self.manager.reload_catalog()
+        self.assertTrue(result["reloaded"])
+        self.assertTrue(instance.closed)
+        self.assertEqual(result["retired_instances"], ["public_image"])
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_safe_hot_reload_rejects_invalid_candidate_without_replacing_memory(self):
+        previous = json.loads(json.dumps(self.manager.catalog))
+        self.catalog_path.write_text(
+            json.dumps({"version": "3.0", "providers": [{"id": "../unsafe"}]}),
+            encoding="utf-8",
+        )
+        result = self.manager.reload_catalog()
+        self.assertEqual(result["status"], "CATALOG_RELOAD_REJECTED")
+        self.assertFalse(result["reloaded"])
+        self.assertEqual(self.manager.catalog, previous)
+
+    def test_safe_hot_reload_preserves_instance_and_old_catalog_if_cleanup_fails(self):
+        class BrokenCleanup:
+            def generate_image(self, prompt, output_path):
+                return None
+            def close(self):
+                raise RuntimeError("private cleanup details")
+
+        instance = BrokenCleanup()
+        previous = json.loads(json.dumps(self.manager.catalog))
+        self.manager.load_provider("public_image", lambda metadata: instance)
+        candidate = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        candidate["providers"][0]["enabled"] = False
+        self.catalog_path.write_text(json.dumps(candidate), encoding="utf-8")
+        result = self.manager.reload_catalog()
+        self.assertEqual(result["status"], "HOT_RELOAD_UNLOAD_FAILED")
+        self.assertFalse(result["reloaded"])
+        self.assertNotIn("private cleanup details", repr(result))
+        self.assertEqual(self.manager.catalog, previous)
+        self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
 
     def test_enable_disable_persists_catalog_flag_without_claiming_connection(self):
         result = self.manager.set_provider_enabled("public_image", False)

@@ -172,6 +172,68 @@ class ConnectionManager:
         self.validate_catalog_schema(catalog, raise_on_error=True)
         self.catalog = catalog
 
+    def reload_catalog(self) -> dict[str, Any]:
+        """Safely reload external catalog changes and retire instances with changed metadata."""
+        with self._lock:
+            lock_path = self.catalog_path.with_name(self.catalog_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                try:
+                    candidate = self._load_json(self.catalog_path)
+                except (OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
+                    return {
+                        "status": "CATALOG_RELOAD_REJECTED",
+                        "reloaded": False,
+                        "error_type": type(exc).__name__,
+                    }
+                validation = self.validate_catalog_schema(candidate)
+                if validation.get("valid") is not True:
+                    return {
+                        "status": "CATALOG_RELOAD_REJECTED",
+                        "reloaded": False,
+                        "errors": validation.get("errors", []),
+                    }
+                previous_by_id = {
+                    item.get("id"): item
+                    for item in self.catalog.get("providers", [])
+                    if isinstance(item, dict) and isinstance(item.get("id"), str)
+                }
+                candidate_by_id = {
+                    item.get("id"): item
+                    for item in candidate.get("providers", [])
+                    if isinstance(item, dict) and isinstance(item.get("id"), str)
+                }
+                changed_loaded = [
+                    provider_id
+                    for provider_id in self._loaded_providers
+                    if previous_by_id.get(provider_id) != candidate_by_id.get(provider_id)
+                ]
+                retired: list[str] = []
+                for provider_id in changed_loaded:
+                    instance = self._loaded_providers[provider_id]
+                    cleanup = getattr(instance, "close", None)
+                    if not callable(cleanup):
+                        cleanup = getattr(instance, "shutdown", None)
+                    if callable(cleanup):
+                        try:
+                            cleanup()
+                        except Exception as exc:
+                            return {
+                                "status": "HOT_RELOAD_UNLOAD_FAILED",
+                                "reloaded": False,
+                                "provider": provider_id,
+                                "error_type": type(exc).__name__,
+                                "retired_instances": retired,
+                            }
+                    del self._loaded_providers[provider_id]
+                    retired.append(provider_id)
+                self.catalog = candidate
+                return {
+                    "status": "CATALOG_RELOADED",
+                    "reloaded": True,
+                    "provider_count": len(candidate.get("providers", [])),
+                    "retired_instances": retired,
+                }
+
     def _reload_state(self) -> None:
         state = self._load_json(
             self.state_path,
@@ -598,6 +660,42 @@ class ConnectionManager:
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+        expected_api_version = provider.get("adapter_api_version")
+        if expected_api_version is not None:
+            if not isinstance(expected_api_version, str) or not re.fullmatch(r"[0-9]+[.][0-9]+", expected_api_version):
+                return {
+                    "status": "INVALID_ADAPTER_API_VERSION",
+                    "provider": provider_id,
+                    "valid": False,
+                }
+            if expected_api_version != "1.0":
+                return {
+                    "status": "UNSUPPORTED_ADAPTER_API_VERSION",
+                    "provider": provider_id,
+                    "valid": False,
+                    "supported_versions": ["1.0"],
+                }
+            try:
+                actual_api_version = getattr(
+                    instance, "adapter_api_version",
+                    getattr(instance, "API_VERSION", None),
+                )
+            except Exception:
+                actual_api_version = None
+            if actual_api_version is None:
+                return {
+                    "status": "ADAPTER_API_VERSION_REQUIRED",
+                    "provider": provider_id,
+                    "valid": False,
+                    "expected_version": expected_api_version,
+                }
+            if not isinstance(actual_api_version, str) or actual_api_version != expected_api_version:
+                return {
+                    "status": "ADAPTER_API_VERSION_MISMATCH",
+                    "provider": provider_id,
+                    "valid": False,
+                    "expected_version": expected_api_version,
+                }
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
         contracts: dict[str, tuple[tuple[str, ...], ...]] = {
             "image": (("generate_image",),),

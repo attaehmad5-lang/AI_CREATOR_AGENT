@@ -53,6 +53,51 @@ class ProviderProjectPolicyManagerTests(unittest.TestCase):
                 self.assertEqual(result["status"], "INVALID_PROJECT_POLICY")
         self.assertEqual(self.manager.get_policy("film-project")["status"], "PROJECT_POLICY_NOT_FOUND")
 
+    def test_region_policy_round_trip_and_invalid_region_cases(self):
+        valid = {
+            "allowed_regions": ["eu-west-1", "us-east-1"],
+            "required_region": "eu-west-1",
+        }
+        saved = self.manager.set_policy("film-project", valid)
+        self.assertTrue(saved["saved"])
+        loaded = ProviderProjectPolicyManager(self.path).get_policy("film-project")
+        self.assertEqual(loaded["policy"], valid)
+
+        invalid_policies = [
+            {"allowed_regions": []},
+            {"allowed_regions": "eu-west-1"},
+            {"allowed_regions": ["" ]},
+            {"allowed_regions": ["EU West"]},
+            {"allowed_regions": ["../private"]},
+            {"allowed_regions": ["eu-west-1", "EU-WEST-1"]},
+            {"allowed_regions": ["x" * 65]},
+            {"required_region": ""},
+            {"required_region": "EU West"},
+            {"required_region": "../private"},
+            {"required_region": "x" * 65},
+            {"required_region": 42},
+            {"allowed_regions": ["us-east-1"], "required_region": "eu-west-1"},
+            {"allowed_regions": ["eu-west-1"], "required_region": "EU-WEST-1"},
+            {"allowed_regions": ["eu-west-1"], "required_region": ["eu-west-1"]},
+        ]
+        for policy in invalid_policies:
+            with self.subTest(policy=policy):
+                result = self.manager.set_policy("invalid-region-project", policy)
+                self.assertFalse(result["saved"])
+                self.assertEqual(result["status"], "INVALID_PROJECT_POLICY")
+        self.assertEqual(len(invalid_policies), 15)
+
+    def test_candidate_policy_validation_does_not_persist(self):
+        candidate = {"allowed_providers": ["primary"], "required_region": "eu-west-1"}
+        result = self.manager.validate_policy("film-project", candidate)
+        self.assertTrue(result["valid"])
+        self.assertFalse(result["persisted"])
+        self.assertEqual(self.manager.get_policy("film-project")["status"], "PROJECT_POLICY_NOT_FOUND")
+        invalid = self.manager.validate_policy("film-project", {"unknown": True})
+        self.assertFalse(invalid["valid"])
+        self.assertEqual(invalid["status"], "INVALID_PROJECT_POLICY")
+        self.assertEqual(self.manager.get_policy("film-project")["status"], "PROJECT_POLICY_NOT_FOUND")
+
     def test_policy_updates_across_threads_preserve_all_projects(self):
         policies = [
             (f"project-{index}", {"allowed_providers": [f"provider-{index}"], "automatic_fallback": False})

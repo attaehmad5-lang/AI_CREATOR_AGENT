@@ -104,12 +104,43 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertEqual(result["status"], "UNHEALTHY")
 
-    def test_success_recovers_provider(self):
+    def test_unhealthy_provider_requires_consecutive_successes_before_readmission(self):
         self.manager.record_result("image", success=False)
         self.manager.record_result("image", success=False)
-        self.manager.record_result("image", success=True, latency_ms=10)
+        self.assertEqual(self.manager.data["providers"]["image"]["status"], "UNHEALTHY")
+        first = self.manager.record_result("image", success=True, latency_ms=10)
+        self.assertEqual(first["status"], "RECOVERING")
+        self.assertFalse(first["recovered"])
+        blocked = self.manager.is_eligible("image")
+        self.assertFalse(blocked["eligible"])
+        self.assertEqual(blocked["status"], "RECOVERING")
+        self.assertEqual(blocked["required_successes"], 2)
+
+        second = self.manager.record_result("image", success=True, latency_ms=11)
+        self.assertEqual(second["status"], "HEALTHY")
+        self.assertTrue(second["recovered"])
         self.assertTrue(self.manager.is_eligible("image")["eligible"])
-        self.assertEqual(self.manager.data["providers"]["image"]["status"], "HEALTHY")
+        record = self.manager.data["providers"]["image"]
+        self.assertEqual(record["status"], "HEALTHY")
+        self.assertEqual(record["consecutive_successes"], 2)
+        self.assertIn("last_recovered_at", record)
+        self.assertTrue(record["history"][-1]["recovered"])
+
+    def test_recovery_threshold_must_be_positive_integer(self):
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=0)
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=True)
+
+    def test_recovering_state_survives_reload_and_is_not_eligible(self):
+        self.manager.record_result("image", success=False)
+        self.manager.record_result("image", success=False)
+        self.manager.record_result("image", success=True)
+        loaded = ProviderHealthManager(
+            self.path, clock=lambda: self.now[0], recovery_success_threshold=2
+        )
+        self.assertEqual(loaded.data["providers"]["image"]["status"], "RECOVERING")
+        self.assertFalse(loaded.is_eligible("image")["eligible"])
 
     def test_stale_health_is_excluded(self):
         self.manager.record_result("image", success=True, latency_ms=10)
@@ -202,6 +233,72 @@ class ProviderHealthManagerTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path)
+
+    def test_metrics_summary_aggregates_success_rates_and_latency_without_raw_events(self):
+        self.manager.record_result("image", success=True, latency_ms=10)
+        self.now[0] += timedelta(seconds=1)
+        self.manager.record_result("image", success=False, error_code="HTTP_503")
+        self.now[0] += timedelta(seconds=1)
+        self.manager.record_result("image", success=True, latency_ms=30)
+        result = self.manager.metrics_summary("image", window_seconds=10)
+        self.assertEqual(result["status"], "METRICS_READY")
+        metrics = result["providers"]["image"]
+        self.assertEqual(metrics["sample_count"], 3)
+        self.assertEqual(metrics["success_count"], 2)
+        self.assertEqual(metrics["failure_count"], 1)
+        self.assertEqual(metrics["success_rate"], 0.6667)
+        self.assertEqual(metrics["failure_rate"], 0.3333)
+        self.assertEqual(metrics["average_latency_ms"], 20.0)
+        self.assertEqual(metrics["p95_latency_ms"], 30.0)
+        self.assertNotIn("history", metrics)
+        self.assertNotIn("HTTP_503", repr(result))
+
+    def test_metrics_summary_excludes_stale_and_future_events_and_rejects_invalid_windows(self):
+        self.manager.record_result("image", success=True, latency_ms=5)
+        self.now[0] += timedelta(seconds=301)
+        stale = self.manager.metrics_summary("image", window_seconds=10)
+        self.assertEqual(stale["providers"]["image"]["sample_count"], 0)
+        self.assertIsNone(stale["providers"]["image"]["success_rate"])
+        self.assertEqual(self.manager.metrics_summary(window_seconds=float("nan"))["status"], "INVALID_METRICS_WINDOW")
+        self.assertEqual(self.manager.metrics_summary("missing")["status"], "PROVIDER_NOT_FOUND")
+
+    def test_malformed_persisted_health_state_rejects_counter_status_mismatch(self):
+        malformed_records = (
+            {"status": "HEALTHY", "consecutive_failures": 1, "history": []},
+            {"status": "UNHEALTHY", "consecutive_failures": 0, "history": []},
+            {"status": "RECOVERING", "consecutive_failures": 0, "consecutive_successes": 2, "history": []},
+            {"status": "RECOVERING", "consecutive_failures": 1, "consecutive_successes": 1, "history": []},
+        )
+        for record in malformed_records:
+            with self.subTest(record=record):
+                self.path.write_text(
+                    json.dumps({"version": "1.0", "providers": {"image": record}}),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(ValueError):
+                    ProviderHealthManager(self.path, recovery_success_threshold=2)
+
+    def test_health_history_latest_event_must_match_last_checked_timestamp(self):
+        checked = self.now[0].isoformat()
+        stale_event = (self.now[0] - timedelta(seconds=1)).isoformat()
+        self.path.write_text(
+            json.dumps({
+                "version": "1.0",
+                "providers": {
+                    "image": {
+                        "status": "HEALTHY",
+                        "consecutive_failures": 0,
+                        "consecutive_successes": 0,
+                        "last_checked_at": checked,
+                        "last_success_at": checked,
+                        "history": [{"success": True, "timestamp": stale_event}],
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, clock=lambda: self.now[0])
 
     def test_active_probe_fails_closed_when_health_state_cannot_be_saved(self):
         self.path.write_text("{invalid-json", encoding="utf-8")

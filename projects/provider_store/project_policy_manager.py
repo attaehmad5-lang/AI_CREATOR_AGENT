@@ -29,6 +29,8 @@ class ProviderProjectPolicyManager:
         "automatic_fallback",
         "require_health_evidence",
         "require_verified_connection",
+        "allowed_regions",
+        "required_region",
     }
 
     def __init__(self, path: str | os.PathLike[str] | None = None) -> None:
@@ -97,6 +99,32 @@ class ProviderProjectPolicyManager:
                 or len({value.casefold() for value in values if isinstance(value, str)}) != len(values)
             ):
                 errors.append("allowed_capabilities must be a unique list of lowercase identifiers")
+        for key in ("allowed_regions",):
+            if key not in policy:
+                continue
+            values = policy[key]
+            if (
+                not isinstance(values, list)
+                or not values
+                or len(values) > 100
+                or any(
+                    not isinstance(value, str)
+                    or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", value)
+                    for value in values
+                )
+                or len({value.casefold() for value in values if isinstance(value, str)}) != len(values)
+            ):
+                errors.append(f"{key} must be a non-empty unique list of safe region identifiers")
+        if "required_region" in policy:
+            value = policy["required_region"]
+            if not isinstance(value, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", value):
+                errors.append("required_region must be a safe region identifier")
+        if "required_region" in policy and "allowed_regions" in policy:
+            allowed_regions = policy.get("allowed_regions")
+            required_region = policy.get("required_region")
+            if isinstance(allowed_regions, list) and isinstance(required_region, str):
+                if required_region not in allowed_regions:
+                    errors.append("required_region must be included in allowed_regions")
         if "max_estimated_cost" in policy and finite_number(policy["max_estimated_cost"], minimum=0) is None:
             errors.append("max_estimated_cost must be a finite non-negative number")
         for key in ("automatic_fallback", "require_health_evidence", "require_verified_connection"):
@@ -135,6 +163,23 @@ class ProviderProjectPolicyManager:
                 os.unlink(temp_name)
             except FileNotFoundError:
                 pass
+
+    @classmethod
+    def validate_policy(cls, project_id: str, policy: dict[str, Any]) -> dict[str, Any]:
+        """Validate a candidate policy without writing or changing active policy."""
+        errors = cls._validate_policy(project_id, policy)
+        if errors:
+            return {"status": "INVALID_PROJECT_POLICY", "valid": False, "errors": errors}
+        safe = copy.deepcopy(policy)
+        if "max_estimated_cost" in safe:
+            safe["max_estimated_cost"] = finite_number(safe["max_estimated_cost"], minimum=0)
+        return {
+            "status": "PROJECT_POLICY_VALID",
+            "valid": True,
+            "project_id": project_id,
+            "policy": safe,
+            "persisted": False,
+        }
 
     def set_policy(self, project_id: str, policy: dict[str, Any]) -> dict[str, Any]:
         errors = self._validate_policy(project_id, policy)

@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
+from projects.provider_store.feature_flag_manager import ProviderFeatureFlagManager
 
 
 class ProviderRoutingManagerTests(unittest.TestCase):
@@ -69,6 +71,48 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "primary")
         self.assertFalse(result["health_verified"])
+
+    def test_required_feature_flag_blocks_routing_before_provider_selection(self):
+        flags = ProviderFeatureFlagManager(self.root / "flags.json")
+        flags.set_flag("new_router", enabled=False)
+        quota = ProviderQuotaManager(
+            self.root / "flag-quota.json",
+            limits={"primary": {"hourly": 1}, "fallback": {"hourly": 1}},
+        )
+        router = ProviderRoutingManager(
+            self.connections, feature_flag_manager=flags, quota_manager=quota,
+            require_verified_connection=False,
+        )
+        result = router.route(
+            category="image", project_id="film",
+            required_feature_flag="new_router", request_id="flag-blocked",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "FEATURE_FLAG_BLOCKED")
+        self.assertEqual(result["feature_flag_status"], "FLAG_DISABLED")
+        self.assertEqual(quota.data["requests"], {})
+
+    def test_enabled_feature_flag_allows_normal_routing(self):
+        flags = ProviderFeatureFlagManager(self.root / "flags.json")
+        flags.set_flag("new_router", enabled=True, rollout_percent=100)
+        router = ProviderRoutingManager(
+            self.connections, feature_flag_manager=flags, require_verified_connection=False
+        )
+        result = router.route(
+            category="image", project_id="film",
+            required_feature_flag="new_router", request_id="flag-enabled",
+        )
+        self.assertTrue(result["allowed"], result)
+        self.assertEqual(result["provider"], "primary")
+
+    def test_required_feature_flag_fails_closed_without_manager(self):
+        result = ProviderRoutingManager(
+            self.connections, require_verified_connection=False
+        ).route(
+            category="image", project_id="film", required_feature_flag="new_router"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "FEATURE_FLAG_MANAGER_REQUIRED")
 
     def test_primary_only_never_uses_fallback_when_primary_is_unavailable(self):
         router = ProviderRoutingManager(self.connections)
@@ -744,6 +788,249 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         router = ProviderRoutingManager(self.connections, quota_manager=quota)
         result = router.route(category="image", project_id="film")
         self.assertEqual(result["status"], "QUOTA_REQUEST_ID_REQUIRED")
+
+    def test_region_aware_routing_runs_50_supported_and_unsupported_cases(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        supported = [f"region-{index:02d}" for index in range(25)]
+        for provider in catalog["providers"]:
+            if provider["id"] in {"primary", "fallback"}:
+                provider["data_residency_regions"] = supported
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        connections = ConnectionManager(self.catalog_path, self.state_path)
+        router = ProviderRoutingManager(connections)
+
+        checks = 0
+        for region in supported:
+            with self.subTest(case="supported", region=region):
+                result = router.route(
+                    category="image", project_id="film", required_region=region
+                )
+                self.assertTrue(result["allowed"])
+                self.assertIn(result["provider"], {"primary", "fallback"})
+                checks += 1
+        for index in range(25):
+            region = f"unserved-region-{index:02d}"
+            with self.subTest(case="unsupported", region=region):
+                result = router.route(
+                    category="image", project_id="film", required_region=region
+                )
+                self.assertFalse(result["allowed"])
+                self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+                self.assertTrue(all(
+                    decision["status"] == "REQUIRED_REGION_NOT_SUPPORTED"
+                    for decision in result["decisions"]
+                ))
+                checks += 1
+        self.assertEqual(checks, 50)
+
+    def test_region_routing_fails_closed_when_metadata_is_missing_or_malformed(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        for provider in catalog["providers"]:
+            provider.pop("data_residency_regions", None)
+            provider.pop("regions", None)
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        connections = ConnectionManager(self.catalog_path, self.state_path)
+        result = ProviderRoutingManager(connections).route(
+            category="image", project_id="film", required_region="eu-west-1"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertTrue(all(
+            decision["status"] == "REGION_METADATA_UNVERIFIED"
+            for decision in result["decisions"]
+        ))
+
+        catalog["providers"][0]["data_residency_regions"] = ["EU West"]
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        connections = ConnectionManager(self.catalog_path, self.state_path)
+        malformed = ProviderRoutingManager(connections).route(
+            category="image", project_id="film", required_region="eu-west-1"
+        )
+        self.assertFalse(malformed["allowed"])
+        self.assertEqual(malformed["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertIn("REGION_METADATA_UNVERIFIED", [d["status"] for d in malformed["decisions"]])
+
+    def test_project_region_policy_filters_providers_and_blocks_conflicts(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"][0]["data_residency_regions"] = ["eu-west-1"]
+        catalog["providers"][1]["data_residency_regions"] = ["us-east-1"]
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        connections = ConnectionManager(self.catalog_path, self.state_path)
+        policies = ProviderProjectPolicyManager(self.root / "region-policies.json")
+        self.assertTrue(policies.set_policy("film", {
+            "allowed_regions": ["us-east-1"],
+            "required_region": "us-east-1",
+        })["saved"])
+        router = ProviderRoutingManager(connections, project_policy_manager=policies)
+        result = router.route(category="image", project_id="film")
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        conflict = router.route(
+            category="image", project_id="film", required_region="eu-west-1"
+        )
+        self.assertFalse(conflict["allowed"])
+        self.assertEqual(conflict["status"], "PROJECT_REGION_POLICY_CONFLICT")
+
+    def test_invalid_required_region_fails_closed(self):
+        router = ProviderRoutingManager(self.connections)
+        for invalid in ("", "../private", "EU West", "x" * 65, 7, [], {}):
+            with self.subTest(invalid=invalid):
+                result = router.route(
+                    category="image", project_id="film", required_region=invalid
+                )
+                self.assertFalse(result["allowed"])
+                self.assertEqual(result["status"], "INVALID_REQUIRED_REGION")
+
+    def test_policy_simulation_runs_50_cases_without_persisting_or_reserving(self):
+        policies = ProviderProjectPolicyManager(self.root / "simulation-policies.json")
+        quota = ProviderQuotaManager(
+            self.root / "simulation-quotas.json",
+            limits={"primary": {"daily": 100}, "fallback": {"daily": 100}},
+        )
+        router = ProviderRoutingManager(
+            self.connections,
+            project_policy_manager=policies,
+            quota_manager=quota,
+        )
+        checks = 0
+        for index in range(50):
+            provider_id = "primary" if index % 2 == 0 else "fallback"
+            candidate = {"allowed_providers": [provider_id]}
+            result = router.simulate_policy(
+                project_id="film",
+                policy=candidate,
+                category="image",
+                request_id=f"simulation-{index}",
+            )
+            with self.subTest(index=index, provider=provider_id):
+                self.assertTrue(result["allowed"], result)
+                self.assertEqual(result["status"], "SIMULATION_ROUTED")
+                self.assertTrue(result["dry_run"])
+                self.assertFalse(result["reservations_created"])
+                self.assertEqual(result["provider"], provider_id)
+                self.assertTrue(result["quota_checked"])
+            checks += 1
+        self.assertEqual(checks, 50)
+        self.assertEqual(quota.data["requests"], {})
+        self.assertEqual(policies.get_policy("film")["status"], "PROJECT_POLICY_NOT_FOUND")
+
+    def test_policy_simulation_rejects_invalid_policy_and_does_not_bypass_quota(self):
+        policies = ProviderProjectPolicyManager(self.root / "simulation-invalid-policies.json")
+        quota = ProviderQuotaManager(
+            self.root / "simulation-limited-quotas.json",
+            limits={"primary": {"daily": 1}},
+        )
+        self.assertEqual(quota.reserve(provider_id="primary", request_id="already-used")["status"], "RESERVED")
+        router = ProviderRoutingManager(
+            self.connections,
+            project_policy_manager=policies,
+            quota_manager=quota,
+        )
+        invalid = router.simulate_policy(
+            project_id="film", policy={"unknown": True}, category="image"
+        )
+        self.assertFalse(invalid["allowed"])
+        self.assertEqual(invalid["status"], "INVALID_SIMULATION_POLICY")
+        limited = router.simulate_policy(
+            project_id="film",
+            policy={"allowed_providers": ["primary"]},
+            category="image",
+            request_id="new-simulation",
+        )
+        self.assertFalse(limited["allowed"])
+        self.assertEqual(limited["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertIn("QUOTA_EXCEEDED", [item["status"] for item in limited["decisions"]])
+        self.assertEqual(set(quota.data["requests"]), {"already-used"})
+        self.assertEqual(policies.get_policy("film")["status"], "PROJECT_POLICY_NOT_FOUND")
+
+    def test_policy_simulation_never_reserves_paid_cost_or_free_credits(self):
+        policies = ProviderProjectPolicyManager(self.root / "simulation-billing-policies.json")
+        cost = ProviderCostPolicy(
+            self.root / "simulation-cost-ledger.json",
+            project_budgets={"film": 5.0},
+        )
+        paid_router = ProviderRoutingManager(
+            self.connections,
+            project_policy_manager=policies,
+            cost_policy=cost,
+        )
+        paid = paid_router.simulate_policy(
+            project_id="film",
+            policy={"allowed_providers": ["primary"]},
+            category="image",
+            estimated_cost=1.0,
+            paid_approved_providers={"primary"},
+            request_id="paid-simulation",
+        )
+        self.assertTrue(paid["allowed"], paid)
+        self.assertEqual(paid["status"], "SIMULATION_ROUTED")
+        self.assertEqual(paid["billing_mode"], "PAID_APPROVED")
+        self.assertEqual(cost.ledger["projects"], {})
+
+        credits = ProviderCreditManager(self.root / "simulation-credit-ledger.json")
+        credits.refresh(
+            "primary",
+            lambda _: {
+                "verified": True,
+                "free_credits_remaining": 5.0,
+                "unit": "USD",
+                "source": "official-account-api",
+            },
+        )
+        credit_router = ProviderRoutingManager(
+            self.connections,
+            project_policy_manager=policies,
+            credit_manager=credits,
+        )
+        free = credit_router.simulate_policy(
+            project_id="film",
+            policy={"allowed_providers": ["primary"]},
+            category="image",
+            estimated_cost=1.0,
+            request_id="credit-simulation",
+        )
+        self.assertTrue(free["allowed"], free)
+        self.assertEqual(free["billing_mode"], "FREE_CREDITS")
+        self.assertEqual(credits.data["reservations"], {})
+        self.assertEqual(credits.usable_free_credits(unit="USD"), {"primary": 5.0})
+
+    def test_policy_simulation_flags_and_options_fail_closed(self):
+        router = ProviderRoutingManager(self.connections)
+        self.assertEqual(
+            router.route(category="image", project_id="film", dry_run="yes")["status"],
+            "INVALID_DRY_RUN_FLAG",
+        )
+        self.assertEqual(
+            router.route(
+                category="image", project_id="film",
+                simulation_policy={"allowed_providers": ["primary"]},
+            )["status"],
+            "SIMULATION_POLICY_REQUIRES_DRY_RUN",
+        )
+        self.assertEqual(
+            router.simulate_policy(
+                project_id="film", policy={}, category="image", dry_run=False
+            )["status"],
+            "INVALID_SIMULATION_OPTIONS",
+        )
+
+    def test_round_robin_routing_balances_100_concurrent_requests(self):
+        router = ProviderRoutingManager(self.connections)
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            results = list(pool.map(
+                lambda _: router.route(
+                    category="image",
+                    project_id="film",
+                    strategy="ROUND_ROBIN",
+                ),
+                range(100),
+            ))
+        self.assertEqual(len(results), 100)
+        self.assertTrue(all(result["allowed"] for result in results))
+        counts = {}
+        for result in results:
+            counts[result["provider"]] = counts.get(result["provider"], 0) + 1
+        self.assertEqual(counts, {"primary": 50, "fallback": 50})
 
     def test_invalid_route_inputs_and_missing_health_evidence_fail_closed(self):
         router = ProviderRoutingManager(self.connections)
