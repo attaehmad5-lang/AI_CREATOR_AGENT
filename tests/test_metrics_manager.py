@@ -46,10 +46,10 @@ class ProviderMetricsManagerTests(unittest.TestCase):
         return record
 
     def test_records_safe_metrics_and_aggregates_success_latency(self):
-        self.assertTrue(self.manager.record_request(**self.event())["saved"])
+        self.assertTrue(self.manager.record_request(**self.event(queue_wait_ms=10.0))["saved"])
         self.manager.record_request(**self.event(
             "req-2", trace_id="trace-2", status="EXECUTION_FAILED",
-            success=False, latency_ms=250.0,
+            success=False, latency_ms=250.0, queue_wait_ms=30.0,
         ))
         summary = self.manager.summary(provider_id="image-provider", modality="image")
         self.assertEqual(summary["request_count"], 2)
@@ -58,6 +58,9 @@ class ProviderMetricsManagerTests(unittest.TestCase):
         self.assertEqual(summary["success_rate"], 0.5)
         self.assertEqual(summary["average_latency_ms"], 187.75)
         self.assertEqual(summary["max_latency_ms"], 250.0)
+        self.assertEqual(summary["queue_wait_sample_count"], 2)
+        self.assertEqual(summary["average_queue_wait_ms"], 20.0)
+        self.assertEqual(summary["max_queue_wait_ms"], 30.0)
 
     def test_duplicate_is_idempotent_and_conflicting_request_id_is_rejected(self):
         first = self.manager.record_request(**self.event())
@@ -123,6 +126,8 @@ class ProviderMetricsManagerTests(unittest.TestCase):
             ({"success": 1}, "INVALID_SUCCESS_FLAG"),
             ({"latency_ms": float("inf")}, "INVALID_LATENCY"),
             ({"latency_ms": float("nan")}, "INVALID_LATENCY"),
+            ({"queue_wait_ms": -1.0}, "INVALID_QUEUE_WAIT"),
+            ({"queue_wait_ms": float("inf")}, "INVALID_QUEUE_WAIT"),
         ]
         for override, expected in invalid:
             with self.subTest(override=override):
