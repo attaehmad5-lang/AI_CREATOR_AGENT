@@ -194,7 +194,7 @@ class ProviderMetricsManager:
         window_seconds: float = 300.0,
     ) -> dict[str, Any]:
         window = finite_number(window_seconds, minimum=0)
-        if window is None or window <= 0:
+        if window is None or window <= 0 or window > 31_536_000:
             return {"status": "INVALID_METRICS_WINDOW"}
         if provider_id is not None and not self._valid_id(provider_id, max_length=120):
             return {"status": "INVALID_PROVIDER_ID"}
