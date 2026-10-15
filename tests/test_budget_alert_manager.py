@@ -132,7 +132,8 @@ class BudgetAlertManagerTests(unittest.TestCase):
             project_id="film", provider_id="image",
             estimated_cost=6.0, request_id="reserved-six",
         )
-        self.assertTrue(result["reserved"])
+        self.assertTrue(result["saved"])
+        self.assertEqual(result["status"], "RESERVED")
         snapshot = policy.budget_snapshot("film")
         self.assertEqual(snapshot["status"], "OK")
         self.assertEqual(snapshot["spent"], 0.0)
