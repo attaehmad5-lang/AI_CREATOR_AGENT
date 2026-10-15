@@ -24,18 +24,22 @@ class ProviderHealthManager:
         *,
         history_limit: int = 50,
         failure_threshold: int = 3,
+        recovery_success_threshold: int = 2,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if (
             not isinstance(history_limit, int) or isinstance(history_limit, bool) or history_limit < 1
             or not isinstance(failure_threshold, int) or isinstance(failure_threshold, bool) or failure_threshold < 1
+            or not isinstance(recovery_success_threshold, int)
+            or isinstance(recovery_success_threshold, bool) or recovery_success_threshold < 1
         ):
-            raise ValueError("history_limit and failure_threshold must be positive integers")
+            raise ValueError("history_limit, failure_threshold, and recovery_success_threshold must be positive integers")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.history_limit = history_limit
         self.failure_threshold = failure_threshold
+        self.recovery_success_threshold = recovery_success_threshold
         self._lock = threading.RLock()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}}
@@ -201,18 +205,26 @@ class ProviderHealthManager:
                 event["error_code"] = normalized_error
             history.append(event)
             history = history[-self.history_limit:]
+            previous_status = record.get("status")
             consecutive_failures = 0 if success else int(record.get("consecutive_failures", 0)) + 1
+            consecutive_successes = int(record.get("consecutive_successes", 0)) + 1 if success else 0
             if success:
-                status = "HEALTHY"
+                if previous_status == "UNHEALTHY" and consecutive_successes < self.recovery_success_threshold:
+                    status = "UNHEALTHY"
+                else:
+                    status = "HEALTHY"
             elif consecutive_failures >= self.failure_threshold:
                 status = "UNHEALTHY"
+                consecutive_successes = 0
             else:
                 status = "DEGRADED"
+                consecutive_successes = 0
             record.update({
                 "status": status,
                 "history": history,
                 "request_events": request_events,
                 "consecutive_failures": consecutive_failures,
+                "consecutive_successes": consecutive_successes,
                 "last_checked_at": event["timestamp"],
             })
             if success:
@@ -222,7 +234,12 @@ class ProviderHealthManager:
                 record["last_failure_at"] = event["timestamp"]
             providers[provider_id] = record
             self._save()
-            return {"provider": provider_id, "status": status, "saved": True, "history_size": len(history)}
+            return {
+                "provider": provider_id, "status": status, "saved": True,
+                "history_size": len(history),
+                "recovery_pending": status == "UNHEALTHY" and success,
+                "consecutive_successes": consecutive_successes,
+            }
 
     def active_probe(self, provider_id: str, probe: Any, *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip():
