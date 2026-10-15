@@ -28,6 +28,43 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             + bytes((8, 2, 0, 0, 0)) + b"\x00\x00\x00\x00"
         )
 
+    @staticmethod
+    def wav_bytes(data_bytes=80, sample_rate=8000, channels=1, bits_per_sample=8, format_code=1):
+        block_align = channels * ((bits_per_sample + 7) // 8)
+        byte_rate = sample_rate * block_align
+        fmt = struct.pack(
+            "<HHIIHH", format_code, channels, sample_rate, byte_rate,
+            block_align, bits_per_sample,
+        )
+        data = bytes(data_bytes)
+        chunks = b"fmt " + struct.pack("<I", len(fmt)) + fmt
+        chunks += b"data" + struct.pack("<I", len(data)) + data
+        if len(data) & 1:
+            chunks += b"\\x00"
+        body = b"WAVE" + chunks
+        return b"RIFF" + struct.pack("<I", len(body)) + body
+
+    @staticmethod
+    def avi_bytes(codec="H264", frames=4, micros_per_frame=500000, width=320, height=240):
+        avih = bytearray(40)
+        struct.pack_into("<I", avih, 0, micros_per_frame)
+        struct.pack_into("<I", avih, 16, frames)
+        struct.pack_into("<I", avih, 32, width)
+        struct.pack_into("<I", avih, 36, height)
+        avih_chunk = b"avih" + struct.pack("<I", len(avih)) + bytes(avih)
+        strh_data = b"vids" + codec.encode("ascii") + bytes(48)
+        strh_chunk = b"strh" + struct.pack("<I", len(strh_data)) + strh_data
+        body = b"AVI " + avih_chunk + strh_chunk
+        return b"RIFF" + struct.pack("<I", len(body)) + body
+
+    @staticmethod
+    def mp4_bytes(codec="avc1", timescale=1000, duration=2000):
+        def box(kind, payload):
+            return struct.pack(">I", 8 + len(payload)) + kind + payload
+        mvhd = b"\\x00\\x00\\x00\\x00" + struct.pack(">IIII", 0, 0, timescale, duration)
+        stsd = b"\\x00\\x00\\x00\\x00" + struct.pack(">I", 1) + struct.pack(">I", 8) + codec.encode("ascii")
+        return box(b"ftyp", b"isom" + bytes(4)) + box(b"moov", box(b"mvhd", mvhd) + box(b"stsd", stsd))
+
     def test_valid_image_signature_returns_hash_and_metadata(self):
         path = self.root / "cover.png"
         path.write_bytes(self.png_header(320, 240))
@@ -70,6 +107,73 @@ class ProviderOutputValidatorTests(unittest.TestCase):
                     "IMAGE_DIMENSION_LIMIT_EXCEEDED",
                     "IMAGE_PIXEL_LIMIT_EXCEEDED",
                 })
+
+    def test_media_duration_limit_50_case_matrix(self):
+        validator = ProviderOutputValidator(max_size_bytes=5000, max_media_duration_seconds=0.1)
+        valid_sizes = [index * 8 for index in range(1, 26)]
+        invalid_sizes = [800 + index * 8 for index in range(1, 26)]
+        self.assertEqual(len(valid_sizes) + len(invalid_sizes), 50)
+        for index, data_size in enumerate(valid_sizes):
+            with self.subTest(case=index, data_size=data_size):
+                path = self.root / f"valid-audio-{index}.wav"
+                path.write_bytes(self.wav_bytes(data_bytes=data_size))
+                result = validator.validate_file(path, modality="audio")
+                self.assertTrue(result["valid"], result)
+                self.assertLessEqual(result["duration_seconds"], 0.1)
+                self.assertEqual(result["codec"], "pcm")
+        for index, data_size in enumerate(invalid_sizes):
+            with self.subTest(case=index + 25, data_size=data_size):
+                path = self.root / f"long-audio-{index}.wav"
+                path.write_bytes(self.wav_bytes(data_bytes=data_size))
+                result = validator.validate_file(path, modality="audio")
+                self.assertFalse(result["valid"], result)
+                self.assertEqual(result["status"], "MEDIA_DURATION_LIMIT_EXCEEDED")
+
+    def test_wav_codec_allowlist_and_malformed_riff_are_rejected(self):
+        path = self.root / "codec.wav"
+        path.write_bytes(self.wav_bytes())
+        restricted = ProviderOutputValidator(max_size_bytes=1024, allowed_audio_codecs={"flac"})
+        result = restricted.validate_file(path, modality="audio")
+        self.assertEqual(result["status"], "MEDIA_CODEC_NOT_ALLOWED")
+        malformed = bytearray(self.wav_bytes())
+        malformed[4:8] = struct.pack("<I", len(malformed) + 100)
+        path.write_bytes(malformed)
+        self.assertEqual(
+            ProviderOutputValidator(max_size_bytes=1024).validate_file(path, modality="audio")["status"],
+            "MEDIA_PROPERTIES_UNVERIFIED",
+        )
+
+    def test_avi_duration_dimensions_and_codec_constraints(self):
+        path = self.root / "clip.avi"
+        path.write_bytes(self.avi_bytes(codec="H264", frames=4, micros_per_frame=500000, width=320, height=240))
+        result = ProviderOutputValidator(max_size_bytes=1024, max_media_duration_seconds=3).validate_file(path, modality="video")
+        self.assertTrue(result["valid"], result)
+        self.assertEqual(result["codec"], "h264")
+        self.assertEqual(result["duration_seconds"], 2.0)
+        self.assertEqual((result["width"], result["height"]), (320, 240))
+        short_limit = ProviderOutputValidator(max_size_bytes=1024, max_media_duration_seconds=1)
+        self.assertEqual(short_limit.validate_file(path, modality="video")["status"], "MEDIA_DURATION_LIMIT_EXCEEDED")
+        codec_limit = ProviderOutputValidator(max_size_bytes=1024, allowed_video_codecs={"av1"})
+        self.assertEqual(codec_limit.validate_file(path, modality="video")["status"], "MEDIA_CODEC_NOT_ALLOWED")
+
+    def test_mp4_duration_and_codec_constraints(self):
+        path = self.root / "clip.mp4"
+        path.write_bytes(self.mp4_bytes(codec="avc1", timescale=1000, duration=2000))
+        validator = ProviderOutputValidator(max_size_bytes=1024, max_media_duration_seconds=3)
+        result = validator.validate_file(path, modality="video")
+        self.assertTrue(result["valid"], result)
+        self.assertEqual(result["codec"], "avc1")
+        self.assertEqual(result["duration_seconds"], 2.0)
+        short_limit = ProviderOutputValidator(max_size_bytes=1024, max_media_duration_seconds=1)
+        self.assertEqual(short_limit.validate_file(path, modality="video")["status"], "MEDIA_DURATION_LIMIT_EXCEEDED")
+        codec_limit = ProviderOutputValidator(max_size_bytes=1024, allowed_video_codecs={"av01"})
+        self.assertEqual(codec_limit.validate_file(path, modality="video")["status"], "MEDIA_CODEC_NOT_ALLOWED")
+
+    def test_media_limit_configuration_is_bounded(self):
+        for value in (0, -1, True, float("inf"), 86401):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    ProviderOutputValidator(max_media_duration_seconds=value)
 
     def test_unparseable_image_dimensions_fail_closed(self):
         path = self.root / "truncated.png"
