@@ -117,6 +117,31 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertEqual(probe.calls, 0)
 
+    def test_oauth_token_is_not_accessed_before_authorization(self):
+        class SpyOAuth:
+            def __init__(self):
+                self.calls = 0
+
+            def get_access_token(self, provider_id):
+                self.calls += 1
+                return "must-not-be-read"
+
+        oauth = SpyOAuth()
+        service = ProviderService(
+            self.connections,
+            access_controller=ProviderAccessController(),
+        )
+        result = service.verify_oauth_provider(
+            "image", oauth,
+            principal={
+                "subject_id": "reader-1", "tenant_id": "tenant-a",
+                "roles": ["reader"], "project_ids": ["film"],
+            },
+            access_resource={"provider_id": "image", "tenant_id": "tenant-a"},
+        )
+        self.assertEqual(result["status"], "ACCESS_DENIED")
+        self.assertEqual(oauth.calls, 0)
+
     def test_connection_verification_requires_context_when_policy_enabled(self):
         service = ProviderService(
             self.connections,
