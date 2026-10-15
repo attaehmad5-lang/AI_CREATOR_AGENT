@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-Latest branch verification run [#38767141913](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38767141913): **361 tests passed on Ubuntu and 361 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This run covers controlled provider recovery, explicit v2-to-v3 catalog migration with backup and fail-closed handling, region routing, adapter versioning, side-effect-free policy simulation, 100 concurrent routing requests, local Ollama-compatible adapter checks, and bounded endpoint security. Production region metadata and a live local-model server test remain unverified.
+Latest branch verification run [#38767774200](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38767774200): **365 tests passed on Ubuntu and 365 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This run covers controlled provider recovery, explicit v2-to-v3 catalog migration with backup and fail-closed handling, validated hot reload that retires changed provider instances safely, region routing, adapter versioning, side-effect-free policy simulation, 100 concurrent routing requests, local Ollama-compatible adapter checks, and bounded endpoint security. Production region metadata and a live local-model server test remain unverified.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -160,7 +160,7 @@ Latest branch verification run [#38767141913](https://github.com/attaehmad5-lang
 | 89 | 🟢 | Registry Schema Validation | VERIFIED | Catalog schema, malformed-version, unsafe-link and primary/master synchronization tests pass. |
 | 90 | 🟡 | Safe Defaults and Invalid-Configuration Handling | PARTIAL | Fail-closed validation exists; complete configuration recovery/default audit remains open. |
 | 91 | 🔴 | Configuration Versioning and Migration | PARTIAL | `ProviderCatalogMigrationManager.migrate_file()` supports explicit v2-to-v3 migration, preserves an exact backup, validates before atomic replacement, never infers enablement from legacy status labels, and fails closed on unknown versions or conflicting backups. Tests cover migration and the archived v2 catalog. A general multi-step migration registry and automatic startup migration remain unimplemented. |
-| 92 | 🔴 | Safe Hot Reload | OPEN | Safe runtime hot reload and rollback behavior are not verified. |
+| 92 | 🔴 | Safe Hot Reload | PARTIAL | `ConnectionManager.reload_catalog()` validates candidate catalogs before swapping memory state, retires instances whose metadata changed or were disabled/removed, and preserves the prior in-memory catalog if validation or cleanup fails. Four regression tests cover disable, metadata change, invalid candidates, and cleanup failure. Coordinated rollback of external files and distributed runtime instances remains open. |
 | 93 | 🔴 | Feature Flags and Controlled Rollout | OPEN | Feature-flag rollout controls are not implemented. |
 | 94 | 🔴 | Provider API/Model Version Compatibility | PARTIAL | Model/endpoint validation exists; live API/model version compatibility matrix is incomplete. |
 | 95 | 🔴 | Rollback to Known-Good Configuration | PARTIAL | Catalog restore exists; runtime policy rollback is not fully verified. |
@@ -232,6 +232,6 @@ Latest branch verification run [#38767141913](https://github.com/attaehmad5-lang
 
 1. Every one of the 138 items must be reviewed against its original wording; do not infer or rename features.
 2. Any `PARTIAL` or `OPEN` item must remain uncompleted until its implementation, tests and required live/operational evidence exist.
-3. The 361 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
+3. The 365 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
 4. The account-balance adapter is generic. It must be configured only with a provider-documented endpoint and a field representing actual available credits; never mistake a per-key budget cap for free credits.
 5. Task #29 Generation State Manager remains paused and must not be started as a separate task during this Task #25 work.
