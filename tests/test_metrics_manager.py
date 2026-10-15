@@ -81,6 +81,10 @@ class ProviderMetricsManagerTests(unittest.TestCase):
         self.assertEqual(expired["window_request_count"], 0)
         self.assertEqual(expired["throughput_per_second"], 0.0)
         self.assertEqual(self.manager.summary(window_seconds=0)["status"], "INVALID_METRICS_WINDOW")
+        self.assertEqual(
+            self.manager.summary(window_seconds=10**100)["status"],
+            "INVALID_METRICS_WINDOW",
+        )
 
     def test_duplicate_is_idempotent_and_conflicting_request_id_is_rejected(self):
         first = self.manager.record_request(**self.event())
