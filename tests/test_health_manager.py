@@ -104,12 +104,43 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertEqual(result["status"], "UNHEALTHY")
 
-    def test_success_recovers_provider(self):
+    def test_unhealthy_provider_requires_consecutive_successes_before_readmission(self):
         self.manager.record_result("image", success=False)
         self.manager.record_result("image", success=False)
-        self.manager.record_result("image", success=True, latency_ms=10)
+        self.assertEqual(self.manager.data["providers"]["image"]["status"], "UNHEALTHY")
+        first = self.manager.record_result("image", success=True, latency_ms=10)
+        self.assertEqual(first["status"], "RECOVERING")
+        self.assertFalse(first["recovered"])
+        blocked = self.manager.is_eligible("image")
+        self.assertFalse(blocked["eligible"])
+        self.assertEqual(blocked["status"], "RECOVERING")
+        self.assertEqual(blocked["required_successes"], 2)
+
+        second = self.manager.record_result("image", success=True, latency_ms=11)
+        self.assertEqual(second["status"], "HEALTHY")
+        self.assertTrue(second["recovered"])
         self.assertTrue(self.manager.is_eligible("image")["eligible"])
-        self.assertEqual(self.manager.data["providers"]["image"]["status"], "HEALTHY")
+        record = self.manager.data["providers"]["image"]
+        self.assertEqual(record["status"], "HEALTHY")
+        self.assertEqual(record["consecutive_successes"], 2)
+        self.assertIn("last_recovered_at", record)
+        self.assertTrue(record["history"][-1]["recovered"])
+
+    def test_recovery_threshold_must_be_positive_integer(self):
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=0)
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=True)
+
+    def test_recovering_state_survives_reload_and_is_not_eligible(self):
+        self.manager.record_result("image", success=False)
+        self.manager.record_result("image", success=False)
+        self.manager.record_result("image", success=True)
+        loaded = ProviderHealthManager(
+            self.path, clock=lambda: self.now[0], recovery_success_threshold=2
+        )
+        self.assertEqual(loaded.data["providers"]["image"]["status"], "RECOVERING")
+        self.assertFalse(loaded.is_eligible("image")["eligible"])
 
     def test_stale_health_is_excluded(self):
         self.manager.record_result("image", success=True, latency_ms=10)
