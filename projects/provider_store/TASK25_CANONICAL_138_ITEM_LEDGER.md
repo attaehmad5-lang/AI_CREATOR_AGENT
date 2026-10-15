@@ -136,7 +136,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | Cross-process reservations and locking are tested; worker pools and provider-specific concurrency limits are incomplete. |
 | 76 | 🔴 | Queue, Backpressure and Overload Handling | OPEN | Queue/backpressure orchestration is not implemented end-to-end. |
 | 77 | 🔴 | Async/Long-Running Job and Polling Support | OPEN | Asynchronous job lifecycle/polling is not implemented end-to-end. |
-| 78 | 🔴 | Webhook/Callback Verification | OPEN | Provider webhook/callback verification is not implemented. |
+| 78 | 🔴 | Webhook/Callback Verification | PARTIAL | Added a generic HMAC-SHA256 timestamped signature verifier, constant-time comparison, bounded body/timestamp checks, persistent cross-process replay prevention, and ProviderService entry point. Provider-specific signing conventions and live callback integrations need separate adapter verification; cross-platform CI is pending. |
 | 79 | 🔴 | Cancellation, Deadlines and Graceful Shutdown | PARTIAL | Timeout handling exists; cancellation/deadline/shutdown propagation remains incomplete. |
 | 80 | 🔴 | Generation State Manager/Orchestration Integration Tests | OPEN | Generation State Manager integration is explicitly not complete; Task #29 remains paused. |
 
