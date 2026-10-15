@@ -311,6 +311,96 @@ class ProviderHealthManager:
             }
         return {"provider": provider_id, "status": "HEALTHY", "verified": True, "latency_ms": round(latency, 2)}
 
+    def list_recheck_candidates(
+        self,
+        provider_ids: list[str] | tuple[str, ...] | None = None,
+        *,
+        recheck_after_seconds: float = 60.0,
+        max_candidates: int = 100,
+        include_unknown: bool = True,
+    ) -> dict[str, Any]:
+        """Return deterministic candidates for a caller-managed health recheck scheduler.
+
+        This method does not perform network requests or create background workers.
+        Callers must schedule and authorize the actual probes themselves.
+        """
+        interval = finite_number(recheck_after_seconds, minimum=0)
+        if interval is None or interval <= 0:
+            return {"status": "INVALID_RECHECK_INTERVAL", "candidates": []}
+        if (
+            not isinstance(max_candidates, int) or isinstance(max_candidates, bool)
+            or max_candidates < 1 or max_candidates > 1000
+        ):
+            return {"status": "INVALID_MAX_CANDIDATES", "candidates": []}
+        if not isinstance(include_unknown, bool):
+            return {"status": "INVALID_INCLUDE_UNKNOWN", "candidates": []}
+        if provider_ids is not None:
+            if not isinstance(provider_ids, (list, tuple)):
+                return {"status": "INVALID_PROVIDER_IDS", "candidates": []}
+            if any(not isinstance(item, str) or not item.strip() for item in provider_ids):
+                return {"status": "INVALID_PROVIDER_IDS", "candidates": []}
+            ids = list(dict.fromkeys(item.strip() for item in provider_ids))
+        else:
+            ids = None
+
+        with self._transaction():
+            records = dict(self.data.get("providers", {}))
+        if ids is None:
+            ids = list(records)
+        now = self.clock().astimezone(timezone.utc)
+        candidates: list[dict[str, Any]] = []
+        for provider_id in ids:
+            record = records.get(provider_id)
+            if not isinstance(record, dict) or not record.get("last_checked_at"):
+                if include_unknown:
+                    candidates.append({
+                        "provider": provider_id,
+                        "reason": "NO_HEALTH_EVIDENCE",
+                        "age_seconds": None,
+                        "last_checked_at": None,
+                    })
+                continue
+            try:
+                checked = self._parse_timestamp(record.get("last_checked_at"))
+            except ValueError:
+                candidates.append({
+                    "provider": provider_id,
+                    "reason": "INVALID_HEALTH_TIMESTAMP",
+                    "age_seconds": None,
+                    "last_checked_at": None,
+                })
+                continue
+            age = (now - checked).total_seconds()
+            if age < 0:
+                candidates.append({
+                    "provider": provider_id,
+                    "reason": "FUTURE_HEALTH_TIMESTAMP",
+                    "age_seconds": age,
+                    "last_checked_at": record.get("last_checked_at"),
+                })
+                continue
+            status = record.get("status")
+            if status == "UNHEALTHY":
+                candidates.append({
+                    "provider": provider_id,
+                    "reason": "UNHEALTHY_RECHECK",
+                    "age_seconds": age,
+                    "last_checked_at": record.get("last_checked_at"),
+                })
+            elif age >= interval:
+                candidates.append({
+                    "provider": provider_id,
+                    "reason": "STALE_HEALTH",
+                    "age_seconds": age,
+                    "last_checked_at": record.get("last_checked_at"),
+                })
+        candidates.sort(key=lambda item: (
+            0 if item["reason"] == "UNHEALTHY_RECHECK" else 1,
+            -(item["age_seconds"] if isinstance(item["age_seconds"], (int, float)) else -1),
+            item["provider"],
+        ))
+        return {"status": "RECHECK_CANDIDATES", "candidates": candidates[:max_candidates]}
+
     def is_eligible(
         self,
         provider_id: str,
