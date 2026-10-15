@@ -147,6 +147,13 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_REQUIRED"}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
+        if required_region is not None and (
+            not isinstance(required_region, str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", required_region.casefold())
+        ):
+            return {"allowed": False, "status": "INVALID_REQUIRED_REGION"}
+        if required_region is not None:
+            required_region = required_region.casefold()
 
         project_policy: dict[str, Any] = {}
         if self.project_policy_manager is not None:
