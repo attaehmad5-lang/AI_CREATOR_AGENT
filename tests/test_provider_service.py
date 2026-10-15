@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.access_control import ProviderAccessController
+from projects.provider_store.async_job_manager import AsyncJobManager
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.data_retention import ProviderDataRetentionPolicy
 from projects.provider_store.execution_queue import BoundedExecutionQueue
@@ -461,6 +462,41 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(self.service.enqueue_execution(request_id="job")["status"], "EXECUTION_QUEUE_UNAVAILABLE")
         self.assertEqual(self.service.claim_next_execution(worker_id="worker")["status"], "EXECUTION_QUEUE_UNAVAILABLE")
         self.assertEqual(self.service.execution_queue_stats()["status"], "EXECUTION_QUEUE_UNAVAILABLE")
+
+    def test_async_job_service_facade_supports_submit_poll_cancel_and_completion(self):
+        queue = BoundedExecutionQueue(max_pending=3, max_running=1, max_pending_per_tenant=2)
+        manager = AsyncJobManager(queue)
+        service = ProviderService(self.connections, async_job_manager=manager)
+        submitted = service.submit_async_job(
+            request_id="async-job", tenant_id="tenant-a", project_id="film",
+            category="image",
+        )
+        self.assertEqual(submitted["status"], "QUEUED")
+        self.assertEqual(service.poll_async_job(
+            request_id="async-job", tenant_id="tenant-a"
+        )["job"]["status"], "QUEUED")
+        claim = service.claim_next_async_job(worker_id="worker-1")
+        self.assertEqual(claim["status"], "CLAIMED")
+        self.assertEqual(service.cancel_async_job(
+            request_id="async-job", tenant_id="tenant-a"
+        )["status"], "CANCEL_REQUESTED")
+        self.assertTrue(service.complete_async_job(
+            request_id="async-job", worker_id="worker-1", status="CANCELLED"
+        )["completed"])
+        self.assertEqual(service.poll_async_job(
+            request_id="async-job", tenant_id="tenant-a"
+        )["job"]["status"], "CANCELLED")
+        self.assertEqual(service.async_job_stats()["total_jobs"], 1)
+
+    def test_async_job_service_reports_missing_manager(self):
+        self.assertEqual(
+            self.service.submit_async_job(request_id="job")["status"],
+            "ASYNC_JOB_MANAGER_UNAVAILABLE",
+        )
+        self.assertEqual(
+            self.service.poll_async_job(request_id="job", tenant_id="tenant-a")["status"],
+            "ASYNC_JOB_MANAGER_UNAVAILABLE",
+        )
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
