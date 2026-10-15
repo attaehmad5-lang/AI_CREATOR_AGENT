@@ -20,6 +20,7 @@ This guide describes the current implementation in this branch. It is not a clai
 - `output_validator.py` — bounded file reads, file-mutation detection during validation, file size/extension/signature/basic-content checks, JSON depth limits, and SHA-256 for supported artifacts.
 - `provider_service.py` — integration facade for API/OAuth/manual connection verification, health recording, routing, output checks, retry decisions, and usage finalization. `verify_http_provider()` wires the built-in allowlisted HTTPS probe into connection-state and health recording; `verify_oauth_provider()` passes an OAuth manager's unexpired access token through an ephemeral environment mapping without persisting it. Configure `probe_endpoint` separately from `endpoint` to verify an auth-protected, non-billable account endpoint without replacing the generation endpoint.
 - `provider_catalog.json` and `provider_catalog_master.json` — one synchronized 55-provider registry, including the 18 advanced-provider records. Catalog v3 requires complete provider identity fields and explicit `enabled` / `subscription_required` booleans; provider IDs and documentation/subscription links are validated before acceptance. The master catalog is the fallback copy, and the older v2 backup remains archival.
+- `catalog_migration_manager.py` — explicit, backup-preserving v2-to-v3 migration. It validates the candidate before atomic replacement, never infers enablement from legacy display status, disables API providers with missing/invalid allowlists or required documentation/capabilities, defaults unknown billing semantics to `subscription_required=True`, and refuses unknown source versions or conflicting backups. It does not auto-migrate at startup.
 - Legacy store, category, advanced, unlock, status, and unified-registry/router facades now read the central catalog. Discovery facades distinguish catalog labels from live verified state; actual policy-aware execution still belongs to `ProviderRoutingManager`.
 
 ## Safety contracts
@@ -32,6 +33,26 @@ This guide describes the current implementation in this branch. It is not a clai
 6. **Output validation is not full decoding.** Signatures and basic content checks detect many mismatches, but do not replace media decoding, malware scanning, or semantic quality checks.
 7. **Persistence limits.** Shared JSON state for provider connection/catalog, health, credits, cost budgets, and quotas uses atomic replacement plus OS-level interprocess lock files and reload-before-mutate. This prevents lost read-modify-write updates across local processes when every writer uses these manager APIs. It is not a single transaction across multiple manager files, and it does not coordinate separate devices, containers with non-shared lock semantics, or external writers bypassing these APIs. Routing compensates reservations created by the current attempt when a later quota step rejects the route, and fails closed if that compensation fails; this reduces orphaned reservations but does not make the separate JSON files one atomic transaction. SQLite or a transactional database is preferred for production multi-worker coordination.
 8. **Secrets stay outside the catalog.** Store environment-variable names or references, not credential values. Returned provider metadata and state views redact credential-like fields.
+
+## Explicit catalog schema migration
+
+Run migration only when you intentionally select a v2 catalog file. The source file is backed up byte-for-byte before replacement; an existing different backup causes a safe refusal. Legacy display labels such as `CONNECTED` are not treated as proof of current connectivity, and providers missing required security metadata are disabled rather than assigned invented hostnames.
+
+```python
+from projects.provider_store.catalog_migration_manager import ProviderCatalogMigrationManager
+
+result = ProviderCatalogMigrationManager.migrate_file(
+    "projects/provider_store/provider_catalog.json"
+)
+print({
+    "status": result.get("status"),
+    "migrated": result.get("migrated"),
+    "provider_count": result.get("provider_count"),
+    "disabled_for_safety": result.get("disabled_for_safety"),
+})
+```
+
+The migration currently supports v2-to-v3 only. It is explicit rather than automatic, so operators can review the resulting catalog before enabling any provider.
 
 ## Explicit catalog recovery
 
