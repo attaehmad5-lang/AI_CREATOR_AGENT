@@ -92,30 +92,41 @@ def publish_validated_output(
 
         flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(temporary, flags)
+        validation_failure: str | None = None
         with os.fdopen(descriptor, "rb") as stream:
             initial = os.fstat(stream.fileno())
             if not stat.S_ISREG(initial.st_mode):
-                return {"published": False, "status": "TEMP_OUTPUT_NOT_REGULAR", "cleanup_succeeded": cleanup()}
-            digest = hashlib.sha256()
-            while True:
-                chunk = stream.read(1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
-            final = os.fstat(stream.fileno())
-            if any(
-                getattr(final, field, None) != getattr(initial, field, None)
-                for field in ("st_size", "st_mtime_ns", "st_ctime_ns", "st_dev", "st_ino")
-            ):
-                return {"published": False, "status": "TEMP_OUTPUT_CHANGED", "cleanup_succeeded": cleanup()}
-            if digest.hexdigest() != expected_hash:
-                return {"published": False, "status": "TEMP_OUTPUT_CHANGED", "cleanup_succeeded": cleanup()}
-            try:
-                os.fsync(stream.fileno())
-            except OSError:
-                # Read-only descriptors cannot be fsynced on every platform. Hash and
-                # metadata stability are still required before the atomic rename.
-                pass
+                validation_failure = "TEMP_OUTPUT_NOT_REGULAR"
+            else:
+                digest = hashlib.sha256()
+                while True:
+                    chunk = stream.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                final = os.fstat(stream.fileno())
+                if any(
+                    getattr(final, field, None) != getattr(initial, field, None)
+                    for field in ("st_size", "st_mtime_ns", "st_ctime_ns", "st_dev", "st_ino")
+                ):
+                    validation_failure = "TEMP_OUTPUT_CHANGED"
+                elif digest.hexdigest() != expected_hash:
+                    validation_failure = "TEMP_OUTPUT_CHANGED"
+                else:
+                    try:
+                        os.fsync(stream.fileno())
+                    except OSError:
+                        # Read-only descriptors cannot be fsynced on every platform. Hash and
+                        # metadata stability are still required before the atomic rename.
+                        pass
+
+        # On Windows, an open handle can prevent unlinking. Close it before cleanup.
+        if validation_failure is not None:
+            return {
+                "published": False,
+                "status": validation_failure,
+                "cleanup_succeeded": cleanup(),
+            }
 
         os.replace(temporary, destination)
         return {
