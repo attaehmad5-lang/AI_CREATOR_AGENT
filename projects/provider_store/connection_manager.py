@@ -598,6 +598,42 @@ class ConnectionManager:
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+        expected_api_version = provider.get("adapter_api_version")
+        if expected_api_version is not None:
+            if not isinstance(expected_api_version, str) or not re.fullmatch(r"[0-9]+\\.[0-9]+", expected_api_version):
+                return {
+                    "status": "INVALID_ADAPTER_API_VERSION",
+                    "provider": provider_id,
+                    "valid": False,
+                }
+            if expected_api_version != "1.0":
+                return {
+                    "status": "UNSUPPORTED_ADAPTER_API_VERSION",
+                    "provider": provider_id,
+                    "valid": False,
+                    "supported_versions": ["1.0"],
+                }
+            try:
+                actual_api_version = getattr(
+                    instance, "adapter_api_version",
+                    getattr(instance, "API_VERSION", None),
+                )
+            except Exception:
+                actual_api_version = None
+            if actual_api_version is None:
+                return {
+                    "status": "ADAPTER_API_VERSION_REQUIRED",
+                    "provider": provider_id,
+                    "valid": False,
+                    "expected_version": expected_api_version,
+                }
+            if not isinstance(actual_api_version, str) or actual_api_version != expected_api_version:
+                return {
+                    "status": "ADAPTER_API_VERSION_MISMATCH",
+                    "provider": provider_id,
+                    "valid": False,
+                    "expected_version": expected_api_version,
+                }
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
         contracts: dict[str, tuple[tuple[str, ...], ...]] = {
             "image": (("generate_image",),),
