@@ -7,7 +7,7 @@ class SensitiveDataScannerTests(unittest.TestCase):
     def test_detects_secret_patterns_without_returning_matched_values(self):
         secret = "hf_" + "A" * 25
         value = {
-            "prompt": "Please use this token: Bearer abcdefghijklmnop",
+            "prompt": "Please use this token: Bearer abcdefghijklmnop and -----BEGIN PRIVATE KEY-----",
             "nested": {"api_key": secret, "private_key": "-----BEGIN PRIVATE KEY-----"},
         }
         result = SensitiveDataScanner().scan(value)
@@ -22,7 +22,7 @@ class SensitiveDataScannerTests(unittest.TestCase):
 
     def test_detects_personal_data_fields_and_inline_patterns(self):
         result = SensitiveDataScanner().scan({
-            "contact": "Email alice@example.com or call (415) 555-2671",
+            "contact": "Email alice@example.com or call (415) 555-2671; SSN 123-45-6789",
             "ssn": "123-45-6789",
         })
         categories = {item["category"] for item in result["findings"]}
