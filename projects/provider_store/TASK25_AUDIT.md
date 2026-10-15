@@ -1,17 +1,17 @@
 # Task #25 — Provider Connection Manager Verification Audit
 
-**Follow-up branch:** `task-25-followup-audit`  
-**Pull request:** #1 (merged; follow-up work requires a new branch/PR)  
+**Active follow-up branch:** `task-25-region-policy-hardening`  
+**Pull request:** #28 (draft; not approved for merge)  
 **Audit status:** In progress — do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#38305883948](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680) completed successfully on Python 3.13:
+GitHub Actions run [#38766070416](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38766070416) completed successfully on Python 3.13:
 
-- Ubuntu: 312 tests passed, 0 failures.
-- Windows: 304 tests passed, 0 failures.
+- Ubuntu: 355 tests passed, 0 failures.
+- Windows: 355 tests passed, 0 failures.
 - Provider module/test compilation and provider JSON catalog validation passed on both platforms.
-- The only changes after that code-verification run are audit/documentation updates. Follow-up work is isolated in draft PR #7; PR #1 is already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
+- Controlled health recovery now requires two consecutive successful results before an unhealthy provider is readmitted; it remains ineligible while `RECOVERING`. PR #1 and PR #7 are merged, while PR #28 remains draft; this audit remains IN PROGRESS because other item-by-item and live integration evidence is incomplete.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
