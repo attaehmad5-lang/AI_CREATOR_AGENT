@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+from pathlib import Path
 import re
 import time
 
@@ -22,6 +23,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        asset_metadata_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -33,6 +35,7 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (asset_metadata_manager, "record_published_asset", "asset_metadata_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -45,6 +48,7 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.asset_metadata_manager = asset_metadata_manager
 
     def verify_provider(
         self,
@@ -243,14 +247,57 @@ class ProviderService:
             "valid": False, "status": "INVALID_OUTPUT_VALIDATION_RESPONSE"
         }
 
+    def _record_asset_metadata(
+        self,
+        *,
+        path: Any,
+        validation: dict[str, Any],
+        provider_id: str,
+        request_id: str,
+        project_id: str,
+        modality: str,
+    ) -> dict[str, Any]:
+        if not all(isinstance(value, str) and value.strip() for value in (provider_id, request_id, project_id)):
+            return {"saved": False, "status": "ASSET_ATTRIBUTION_REQUIRED"}
+        if not isinstance(validation, dict) or validation.get("valid") is not True:
+            return {"saved": False, "status": "INVALID_ASSET_VALIDATION"}
+        try:
+            if self.asset_metadata_manager is None:
+                from .asset_metadata_manager import AssetMetadataManager
+
+                artifact = Path(path)
+                manager = AssetMetadataManager(
+                    artifact.parent / ".ai_creator_agent_asset_metadata.json"
+                )
+            else:
+                manager = self.asset_metadata_manager
+            result = manager.record_published_asset(
+                provider_id=provider_id,
+                request_id=request_id,
+                project_id=project_id,
+                filename=Path(path).name,
+                modality=modality,
+                mime_type=validation.get("mime_type"),
+                size_bytes=validation.get("size_bytes"),
+                sha256=validation.get("sha256"),
+            )
+        except Exception as exc:
+            return {"saved": False, "status": "ASSET_METADATA_PERSIST_FAILED", "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "saved": False, "status": "INVALID_ASSET_METADATA_RESPONSE"
+        }
+
     def publish_output(
         self,
         temporary_path: Any,
         destination_path: Any,
         *,
         modality: str,
+        provider_id: str | None = None,
+        request_id: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
-        """Validate a temporary provider artifact and atomically publish it."""
+        """Validate, atomically publish, and attribute an output when request context is supplied."""
         if self.output_validator is None:
             return {
                 "published": False,
@@ -273,11 +320,30 @@ class ProviderService:
                 "error_type": type(exc).__name__,
                 "cleanup_succeeded": False,
             }
-        return result if isinstance(result, dict) else {
-            "published": False,
-            "status": "INVALID_ATOMIC_PUBLISH_RESPONSE",
-            "cleanup_succeeded": False,
-        }
+        if not isinstance(result, dict):
+            return {
+                "published": False,
+                "status": "INVALID_ATOMIC_PUBLISH_RESPONSE",
+                "cleanup_succeeded": False,
+            }
+        if result.get("published") is True:
+            if all(isinstance(value, str) and value.strip() for value in (provider_id, request_id, project_id)):
+                validation = {
+                    "valid": True,
+                    "mime_type": result.get("mime_type"),
+                    "size_bytes": result.get("size_bytes"),
+                    "sha256": result.get("sha256"),
+                }
+                metadata = self._record_asset_metadata(
+                    path=destination_path, validation=validation,
+                    provider_id=provider_id, request_id=request_id,
+                    project_id=project_id, modality=modality,
+                )
+                result["asset_metadata"] = metadata
+                result["metadata_status"] = metadata.get("status", "UNKNOWN")
+            else:
+                result["metadata_status"] = "ASSET_ATTRIBUTION_REQUIRED"
+        return result
 
     @staticmethod
     def _safe_error_code(value: Any, default: str) -> str:
@@ -438,6 +504,19 @@ class ProviderService:
             if not isinstance(output_validation, dict) or output_validation.get("valid") is not True:
                 final_success = False
                 output_error = "OUTPUT_VALIDATION_FAILED"
+            else:
+                asset_metadata = self._record_asset_metadata(
+                    path=final_path,
+                    validation=output_validation,
+                    provider_id=provider_id,
+                    request_id=request_id,
+                    project_id=project_id,
+                    modality=modality,
+                )
+                output_validation = {**output_validation, "asset_metadata": asset_metadata}
+                if asset_metadata.get("saved") is not True:
+                    final_success = False
+                    output_error = "ASSET_METADATA_PERSIST_FAILED"
 
         error_code = self._safe_error_code(
             adapter_result.get("error_code"),
@@ -468,7 +547,7 @@ class ProviderService:
         if accounting_required:
             status = "EXECUTION_ACCOUNTING_REQUIRED"
         elif output_error is not None:
-            status = "OUTPUT_VALIDATION_FAILED"
+            status = output_error
         elif not final_success:
             status = "EXECUTION_FAILED"
         elif finalization.get("finalized") is True:
