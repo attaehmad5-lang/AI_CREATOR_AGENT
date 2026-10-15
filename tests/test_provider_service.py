@@ -508,6 +508,38 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(summary["request_count"], 1)
         self.assertEqual(summary["success_count"], 1)
 
+    def test_generated_trace_ids_are_unique_and_reach_compatible_adapters(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        output_path = self.root / "generated-trace.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        seen = []
+        def adapter(**kwargs):
+            seen.append(kwargs["trace_id"])
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 3.0,
+            }
+        results = [
+            service.execute_routed_request(
+                category="image", project_id="film", request_id=request_id,
+                estimated_cost=0.0, output_path=str(output_path),
+                adapter=adapter, modality="image",
+            )
+            for request_id in ("trace-auto-1", "trace-auto-2")
+        ]
+        self.assertTrue(all(item["status"] == "EXECUTION_SUCCEEDED" for item in results))
+        self.assertTrue(all(item["trace_id"] for item in results))
+        self.assertEqual(len(set(item["trace_id"] for item in results)), 2)
+        self.assertEqual(seen, [item["trace_id"] for item in results])
+
     def test_metrics_persistence_failure_does_not_change_execution_result(self):
         class BrokenMetrics:
             def record_request(self, **kwargs):
