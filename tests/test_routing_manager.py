@@ -264,8 +264,8 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             self.connections, project_policy_manager=policies, require_verified_connection=False
         )
         result = router.route(category="image", project_id="film")
-        self.assertTrue(result["allowed"], result)
-        self.assertNotEqual(result["provider"], "unknown-caps")
+        self.assertFalse(result["allowed"], result)
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
         self.assertTrue(any(
             decision.get("status") == "PROVIDER_CAPABILITIES_UNVERIFIED"
             for decision in result.get("decisions", [])
