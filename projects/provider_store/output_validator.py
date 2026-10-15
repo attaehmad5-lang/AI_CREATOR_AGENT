@@ -125,7 +125,7 @@ class ProviderOutputValidator:
                 index += segment_length
             return None
         if mime == "image/webp":
-            if len(payload) < 30 or payload[:4] != b"RIFF" or payload[8:12] != b"WEBP":
+            if len(payload) < 12 or payload[:4] != b"RIFF" or payload[8:12] != b"WEBP":
                 return None
             chunk_type = payload[12:16]
             if chunk_type == b"VP8X" and len(payload) >= 30:
