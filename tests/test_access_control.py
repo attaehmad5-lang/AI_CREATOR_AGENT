@@ -56,6 +56,9 @@ class ProviderAccessControllerTests(unittest.TestCase):
     def test_unknown_actions_and_missing_scope_fail_closed(self):
         self.assertFalse(self.policy.authorize(self.principal, "provider:root", self.resource)["allowed"])
         self.assertFalse(self.policy.authorize(self.principal, ["provider:route"], self.resource)["allowed"])
+        injected = self.policy.authorize(self.principal, "provider:route\\nforged-event", self.resource)
+        self.assertFalse(injected["allowed"])
+        self.assertIsNone(injected["audit_event"]["action"])
         self.assertFalse(self.policy.authorize(
             {**self.principal, "tenant_id": ""}, "provider:route", self.resource
         )["allowed"])
