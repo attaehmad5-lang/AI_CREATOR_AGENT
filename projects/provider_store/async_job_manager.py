@@ -255,7 +255,8 @@ class AsyncJobManager:
             expired = 0
             running_flagged = 0
             for record in self._jobs.values():
-                deadline = self._deadline(record["deadline_at"])
+                deadline_text = self._deadline(record["deadline_at"])
+                deadline = datetime.fromisoformat(deadline_text) if deadline_text is not None else None
                 if deadline is None or deadline > current:
                     continue
                 if record["status"] == "QUEUED":
