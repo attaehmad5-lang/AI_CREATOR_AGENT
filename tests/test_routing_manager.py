@@ -12,6 +12,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
+from projects.provider_store.feature_flag_manager import ProviderFeatureFlagManager
 
 
 class ProviderRoutingManagerTests(unittest.TestCase):
@@ -70,6 +71,42 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "primary")
         self.assertFalse(result["health_verified"])
+
+    def test_required_feature_flag_blocks_routing_before_provider_selection(self):
+        flags = ProviderFeatureFlagManager(self.root / "flags.json")
+        flags.set_flag("new_router", enabled=False)
+        router = ProviderRoutingManager(
+            self.connections, feature_flag_manager=flags, require_verified_connection=False
+        )
+        result = router.route(
+            category="image", project_id="film",
+            required_feature_flag="new_router", request_id="flag-blocked",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "FEATURE_FLAG_BLOCKED")
+        self.assertEqual(result["feature_flag_status"], "FLAG_DISABLED")
+
+    def test_enabled_feature_flag_allows_normal_routing(self):
+        flags = ProviderFeatureFlagManager(self.root / "flags.json")
+        flags.set_flag("new_router", enabled=True, rollout_percent=100)
+        router = ProviderRoutingManager(
+            self.connections, feature_flag_manager=flags, require_verified_connection=False
+        )
+        result = router.route(
+            category="image", project_id="film",
+            required_feature_flag="new_router", request_id="flag-enabled",
+        )
+        self.assertTrue(result["allowed"], result)
+        self.assertEqual(result["provider"], "primary")
+
+    def test_required_feature_flag_fails_closed_without_manager(self):
+        result = ProviderRoutingManager(
+            self.connections, require_verified_connection=False
+        ).route(
+            category="image", project_id="film", required_feature_flag="new_router"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "FEATURE_FLAG_MANAGER_REQUIRED")
 
     def test_primary_only_never_uses_fallback_when_primary_is_unavailable(self):
         router = ProviderRoutingManager(self.connections)
