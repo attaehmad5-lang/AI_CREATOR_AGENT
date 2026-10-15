@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+Region-aware routing follow-up PR #28 run [#38757388865](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38757388865): **333 tests passed on Ubuntu and 333 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This adds 50 supported/unsupported region-routing subcases, malformed/missing region metadata rejection, project region-policy conflict checks, and 15 invalid policy validation cases. Production region metadata and live residency evidence remain unverified.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -195,7 +195,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 114 | 🔴 | Confidence-Aware Routing and Uncertainty Handling | OPEN | Confidence-aware routing is not implemented. |
 | 115 | 🔴 | Controlled A/B Benchmarking Without Unintended Paid Usage | OPEN | Safe controlled A/B benchmarking and paid-usage isolation are not implemented. |
 | 116 | 🔴 | Adaptive Routing Using Verified Historical Performance | OPEN | Adaptive historical-performance routing is not implemented. |
-| 117 | 🔴 | Region/Data-Residency-Aware Provider Selection | OPEN | Region/data-residency policy routing is not implemented. |
+| 117 | 🔴 | Region/Data-Residency-Aware Provider Selection | PARTIAL | `routing_manager.py` now enforces request `required_region` and project `required_region`/`allowed_regions`, rejects missing/malformed provider region metadata, and has 50 supported/unsupported region subcases. Production provider region declarations still require official-document verification and live residency evidence. |
 | 118 | 🔴 | Human Approval for High-Cost or Sensitive Decisions | PARTIAL | Paid-usage approval gate exists; high-cost/sensitive decision approval workflow is incomplete. |
 
 ## O — Enterprise and Large-Production Resiliency
