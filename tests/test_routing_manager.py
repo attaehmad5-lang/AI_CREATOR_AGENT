@@ -255,6 +255,19 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(routed["provider"], "fallback")
         self.assertTrue(routed["health_verified"])
 
+    def test_healthiest_first_routes_to_lowest_verified_latency(self):
+        health = ProviderHealthManager(self.health_path)
+        health.record_result("primary", success=True, latency_ms=180.0)
+        health.record_result("fallback", success=True, latency_ms=24.0)
+        router = ProviderRoutingManager(self.connections, health_manager=health)
+        result = router.route(
+            category="image", project_id="film", strategy="HEALTHIEST_FIRST",
+            require_health_evidence=True,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["health"]["last_latency_ms"], 24.0)
+
     def test_paid_budget_routing_rejects_incompatible_cost_unit(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
