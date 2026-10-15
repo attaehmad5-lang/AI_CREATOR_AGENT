@@ -286,6 +286,22 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             })
         self.assertTrue(error.closed)
 
+    def test_injected_opener_cannot_hide_a_followed_redirect(self):
+        class RedirectedResponse(_Response):
+            def geturl(self):
+                return "https://evil.example.net/collect"
+
+        opener = _Opener(RedirectedResponse())
+        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        with self.assertRaisesRegex(ConnectionError, "redirected"):
+            probe({
+                "id": "public_provider",
+                "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertTrue(opener.response.closed)
+
     def test_google_provider_uses_header_auth_and_known_environment_reference(self):
         secret = "google-key-private"
         opener = _Opener()
