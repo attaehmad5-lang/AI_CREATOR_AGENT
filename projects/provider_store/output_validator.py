@@ -382,6 +382,35 @@ class ProviderOutputValidator:
         return result
 
     @staticmethod
+    def _ogg_properties(payload: bytes, tail_payload: bytes, total_size: int) -> dict[str, Any] | None:
+        if len(payload) < 27 or payload[:4] != b"OggS" or payload[4] != 0:
+            return None
+        if len(payload) < 27 + payload[26]:
+            return None
+        vorbis = payload.find(bytes((1,)) + b"vorbis")
+        opus = payload.find(b"OpusHead")
+        if vorbis >= 0 and vorbis + 16 <= len(payload):
+            sample_rate = int.from_bytes(payload[vorbis + 12:vorbis + 16], "little")
+            codec = "vorbis"
+        elif opus >= 0:
+            sample_rate = 48000
+            codec = "opus"
+        else:
+            return None
+        last_page = tail_payload.rfind(b"OggS")
+        if last_page < 0 or last_page + 27 > len(tail_payload):
+            return None
+        if tail_payload[last_page + 4] != 0:
+            return None
+        segments = tail_payload[last_page + 26]
+        if last_page + 27 + segments > len(tail_payload):
+            return None
+        granule = int.from_bytes(tail_payload[last_page + 6:last_page + 14], "little")
+        if granule == 0xFFFFFFFFFFFFFFFF or sample_rate <= 0 or total_size < 27:
+            return None
+        return {"duration_seconds": granule / sample_rate, "codec": codec, "sample_rate": sample_rate}
+
+    @staticmethod
     def _avi_properties(payload: bytes, total_size: int) -> dict[str, Any] | None:
         if len(payload) < 12 or payload[:4] != b"RIFF" or payload[8:12] != b"AVI ":
             return None
