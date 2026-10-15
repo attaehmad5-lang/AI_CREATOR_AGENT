@@ -837,6 +837,88 @@ class ProviderRoutingManagerTests(unittest.TestCase):
                 self.assertFalse(result["allowed"])
                 self.assertEqual(result["status"], "INVALID_REQUIRED_REGION")
 
+    def test_policy_simulation_runs_50_cases_without_persisting_or_reserving(self):
+        policies = ProviderProjectPolicyManager(self.root / "simulation-policies.json")
+        quota = ProviderQuotaManager(
+            self.root / "simulation-quotas.json",
+            limits={"primary": {"daily": 100}, "fallback": {"daily": 100}},
+        )
+        router = ProviderRoutingManager(
+            self.connections,
+            project_policy_manager=policies,
+            quota_manager=quota,
+        )
+        checks = 0
+        for index in range(50):
+            provider_id = "primary" if index % 2 == 0 else "fallback"
+            candidate = {"allowed_providers": [provider_id]}
+            result = router.simulate_policy(
+                project_id="film",
+                policy=candidate,
+                category="image",
+                request_id=f"simulation-{index}",
+            )
+            with self.subTest(index=index, provider=provider_id):
+                self.assertTrue(result["allowed"], result)
+                self.assertEqual(result["status"], "SIMULATION_ROUTED")
+                self.assertTrue(result["dry_run"])
+                self.assertFalse(result["reservations_created"])
+                self.assertEqual(result["provider"], provider_id)
+                self.assertTrue(result["quota_checked"])
+            checks += 1
+        self.assertEqual(checks, 50)
+        self.assertEqual(quota.data["requests"], {})
+        self.assertEqual(policies.get_policy("film")["status"], "PROJECT_POLICY_NOT_FOUND")
+
+    def test_policy_simulation_rejects_invalid_policy_and_does_not_bypass_quota(self):
+        policies = ProviderProjectPolicyManager(self.root / "simulation-invalid-policies.json")
+        quota = ProviderQuotaManager(
+            self.root / "simulation-limited-quotas.json",
+            limits={"primary": {"daily": 1}},
+        )
+        self.assertEqual(quota.reserve(provider_id="primary", request_id="already-used")["status"], "RESERVED")
+        router = ProviderRoutingManager(
+            self.connections,
+            project_policy_manager=policies,
+            quota_manager=quota,
+        )
+        invalid = router.simulate_policy(
+            project_id="film", policy={"unknown": True}, category="image"
+        )
+        self.assertFalse(invalid["allowed"])
+        self.assertEqual(invalid["status"], "INVALID_SIMULATION_POLICY")
+        limited = router.simulate_policy(
+            project_id="film",
+            policy={"allowed_providers": ["primary"]},
+            category="image",
+            request_id="new-simulation",
+        )
+        self.assertFalse(limited["allowed"])
+        self.assertEqual(limited["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertIn("QUOTA_EXCEEDED", [item["status"] for item in limited["decisions"]])
+        self.assertEqual(set(quota.data["requests"]), {"already-used"})
+        self.assertEqual(policies.get_policy("film")["status"], "PROJECT_POLICY_NOT_FOUND")
+
+    def test_policy_simulation_flags_and_options_fail_closed(self):
+        router = ProviderRoutingManager(self.connections)
+        self.assertEqual(
+            router.route(category="image", project_id="film", dry_run="yes")["status"],
+            "INVALID_DRY_RUN_FLAG",
+        )
+        self.assertEqual(
+            router.route(
+                category="image", project_id="film",
+                simulation_policy={"allowed_providers": ["primary"]},
+            )["status"],
+            "SIMULATION_POLICY_REQUIRES_DRY_RUN",
+        )
+        self.assertEqual(
+            router.simulate_policy(
+                project_id="film", policy={}, category="image", dry_run=False
+            )["status"],
+            "INVALID_SIMULATION_OPTIONS",
+        )
+
     def test_invalid_route_inputs_and_missing_health_evidence_fail_closed(self):
         router = ProviderRoutingManager(self.connections)
         self.assertEqual(router.route(category="", project_id="film")["status"], "INVALID_ROUTE_REQUEST")
