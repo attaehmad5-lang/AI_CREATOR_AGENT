@@ -701,14 +701,23 @@ class ProviderCostPolicy:
             self._save()
         budget = self.project_budgets.get(project_id)
         budget_exceeded = budget is not None and project["actual_spend"] > budget
+        request_limit = self.per_request_budgets.get(project_id)
+        request_budget_exceeded = request_limit is not None and float(actual_cost) > request_limit
+        status = (
+            "REQUEST_BUDGET_OVERRUN" if request_budget_exceeded
+            else "BUDGET_EXCEEDED" if budget_exceeded
+            else "RECONCILED"
+        )
         return {
-            "status": "BUDGET_EXCEEDED" if budget_exceeded else "RECONCILED",
+            "status": status,
             "saved": True,
             "project_id": project_id,
             "request_id": request_id,
             "actual_spend": project["actual_spend"],
             "budget": budget,
             "budget_exceeded": budget_exceeded,
+            "request_budget_limit": request_limit,
+            "request_budget_exceeded": request_budget_exceeded,
             "variance": record["variance"],
         }
 
