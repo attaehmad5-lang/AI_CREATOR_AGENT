@@ -7,6 +7,7 @@ from pathlib import Path
 from projects.provider_store.access_control import ProviderAccessController
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.data_retention import ProviderDataRetentionPolicy
+from projects.provider_store.execution_queue import BoundedExecutionQueue
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
@@ -432,6 +433,34 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertEqual(result["data_policy_status"], "DATA_POLICY_ALLOWED")
         self.assertEqual(len(seen), 1)
+
+    def test_execution_queue_service_facade_enforces_backpressure_and_worker_ownership(self):
+        queue = BoundedExecutionQueue(max_pending=1, max_running=1, max_pending_per_tenant=1)
+        service = ProviderService(self.connections, execution_queue=queue)
+        common = {
+            "tenant_id": "tenant-a", "project_id": "film",
+            "category": "image",
+        }
+        self.assertEqual(service.enqueue_execution(
+            request_id="queued-1", **common
+        )["status"], "QUEUED")
+        self.assertEqual(service.enqueue_execution(
+            request_id="queued-2", **common
+        )["status"], "QUEUE_FULL")
+        claim = service.claim_next_execution(worker_id="worker-1")
+        self.assertEqual(claim["status"], "CLAIMED")
+        self.assertEqual(service.complete_execution(
+            request_id="queued-1", worker_id="wrong-worker", status="SUCCEEDED"
+        )["status"], "WORKER_OWNERSHIP_MISMATCH")
+        self.assertTrue(service.complete_execution(
+            request_id="queued-1", worker_id="worker-1", status="SUCCEEDED"
+        )["completed"])
+        self.assertEqual(service.execution_queue_stats()["running"], 0)
+
+    def test_execution_queue_service_reports_unavailable_when_not_configured(self):
+        self.assertEqual(self.service.enqueue_execution(request_id="job")["status"], "EXECUTION_QUEUE_UNAVAILABLE")
+        self.assertEqual(self.service.claim_next_execution(worker_id="worker")["status"], "EXECUTION_QUEUE_UNAVAILABLE")
+        self.assertEqual(self.service.execution_queue_stats()["status"], "EXECUTION_QUEUE_UNAVAILABLE")
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
