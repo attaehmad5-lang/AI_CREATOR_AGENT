@@ -2,6 +2,8 @@
 
 **Overall status: IN PROGRESS — do not mark Task #25 complete and do not merge PR #7 without explicit approval.**
 
+**Current audit tally on this feature branch:** 25 VERIFIED, 75 PARTIAL, 38 OPEN (138 total). These are branch-local statuses; other open feature PRs contain additional evidence that is not integrated into this branch.
+
 This file preserves the user's original A–P headings, feature numbers, feature names and baseline status markers. The **Baseline** column is the user's original 🟢/🟡/🔴 status; it is not the current implementation result. **Current audit** is independently evidence-based. A green baseline does not automatically mean the feature is verified today.
 
 ## Latest code verification
@@ -136,7 +138,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | Cross-process reservations and locking are tested; worker pools and provider-specific concurrency limits are incomplete. |
 | 76 | 🔴 | Queue, Backpressure and Overload Handling | OPEN | Queue/backpressure orchestration is not implemented end-to-end. |
 | 77 | 🔴 | Async/Long-Running Job and Polling Support | OPEN | Asynchronous job lifecycle/polling is not implemented end-to-end. |
-| 78 | 🔴 | Webhook/Callback Verification | PARTIAL | Added a generic HMAC-SHA256 timestamped signature verifier, constant-time comparison, bounded body/timestamp checks, persistent cross-process replay prevention, and ProviderService entry point. Provider-specific signing conventions and live callback integrations need separate adapter verification; cross-platform CI is pending. |
+| 78 | 🔴 | Webhook/Callback Verification | VERIFIED | Generic timestamped HMAC-SHA256 signatures are compared in constant time; provider secrets are resolved at verification time; body/timestamp bounds and a persistent cross-process replay ledger reject malformed, expired, future, and duplicate callbacks. A 50-case valid/tampered signature matrix plus replay-after-reload, ledger-capacity/corruption, and ProviderService integration tests passed. Provider-specific signing conventions must be matched before enabling each live provider. Evidence: `tests/test_webhook_verifier.py`; GitHub Actions run #38779411691 passed 338 tests on Ubuntu and Windows. |
 | 79 | 🔴 | Cancellation, Deadlines and Graceful Shutdown | PARTIAL | Timeout handling exists; cancellation/deadline/shutdown propagation remains incomplete. |
 | 80 | 🔴 | Generation State Manager/Orchestration Integration Tests | OPEN | Generation State Manager integration is explicitly not complete; Task #29 remains paused. |
 
