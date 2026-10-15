@@ -69,6 +69,22 @@ class ProviderWebhookVerifier:
         message = timestamp_text.encode("ascii") + b"." + raw_body
         return hmac.new(secret_bytes, message, hashlib.sha256).hexdigest()
 
+    @classmethod
+    def signature_matches(
+        cls, secret: str | bytes, timestamp: str | int, raw_body: bytes, signature: str
+    ) -> bool:
+        """Constant-time compare for a canonical signature; malformed input returns False."""
+        if not isinstance(signature, str):
+            return False
+        supplied = signature[7:] if signature.startswith("sha256=") else signature
+        if len(supplied) != 64 or any(ch not in "0123456789abcdefABCDEF" for ch in supplied):
+            return False
+        try:
+            expected = cls.signature_for(secret, timestamp, raw_body)
+        except (ValueError, UnicodeError):
+            return False
+        return hmac.compare_digest(expected, supplied.casefold())
+
     def _reload(self) -> None:
         if not self.path.exists():
             self._data = {"version": 1, "seen": {}}
@@ -152,8 +168,7 @@ class ProviderWebhookVerifier:
             secret_bytes = b""
         if not secret_bytes:
             return {"status": "SECRET_UNAVAILABLE", "verified": False}
-        expected = self.signature_for(secret_bytes, timestamp_text, raw_body)
-        if not hmac.compare_digest(expected, supplied.casefold()):
+        if not self.signature_matches(secret_bytes, timestamp_text, raw_body, supplied):
             return {"status": "SIGNATURE_MISMATCH", "verified": False}
         replay_key = hashlib.sha256(
             provider_id.encode("utf-8") + b"\0" + timestamp_text.encode("ascii") + b"\0" + supplied.casefold().encode("ascii")
