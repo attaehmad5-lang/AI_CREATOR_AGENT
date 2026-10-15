@@ -485,7 +485,10 @@ class ProviderOutputValidator:
             return None
         return {"duration_seconds": duration / timescale, "codec": codec}
 
-    def _media_properties(self, mime: str, payload: bytes, total_size: int, modality: str) -> dict[str, Any] | None:
+    def _media_properties(
+        self, mime: str, payload: bytes, total_size: int, modality: str,
+        *, stream: Any = None, tail_payload: bytes = b"",
+    ) -> dict[str, Any] | None:
         if mime == "audio/wav":
             return self._wav_properties(payload, total_size)
         if mime == "audio/flac":
@@ -495,7 +498,7 @@ class ProviderOutputValidator:
         if mime == "audio/aac" and stream is not None:
             return self._aac_properties_stream(stream, total_size)
         if mime == "audio/ogg":
-            return None
+            return self._ogg_properties(payload, tail_payload, total_size)
         if mime == "video/webm":
             return self._webm_properties(payload, modality)
         if mime == "video/avi":
