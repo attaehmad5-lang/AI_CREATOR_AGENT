@@ -307,7 +307,9 @@ class ProviderService:
         access_resource: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Enable/disable a provider only after optional tenant-scoped authorization."""
-        action = "provider:enable" if enabled is True else "provider:disable"
+        if not isinstance(enabled, bool):
+            return {"status": "INVALID_ENABLED_VALUE", "saved": False}
+        action = "provider:enable" if enabled else "provider:disable"
         authorization = self._authorize_if_configured(
             principal, action, access_resource, target_provider_id=provider_id
         )
@@ -329,9 +331,11 @@ class ProviderService:
     ) -> dict[str, Any]:
         """Register provider metadata only after optional tenant-scoped authorization."""
         provider_id = provider.get("id") if isinstance(provider, dict) else None
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER", "saved": False}
         authorization = self._authorize_if_configured(
             principal, "provider:register", access_resource,
-            target_provider_id=provider_id if isinstance(provider_id, str) else None,
+            target_provider_id=provider_id,
         )
         if authorization is not None and authorization.get("allowed") is not True:
             return {"status": authorization.get("status", "ACCESS_DENIED"), "saved": False}
