@@ -151,6 +151,65 @@ class AtomicOutputPublicationTests(unittest.TestCase):
         self.assertFalse(temporary.exists())
         self.assertTrue(result["cleanup_succeeded"])
 
+    def test_fifty_failure_cases_preserve_previous_output_exactly(self):
+        # Five independent failure modes x ten prior-output byte patterns.
+        # Each case verifies that failed publication never corrupts/replaces the old artifact.
+        previous_payloads = [
+            b"", b"old", b"previous-good-output", b"\x89PNG\r\n\x1a\nold-image",
+            bytes(range(32)), b"0" * 1024, b"old\x00binary\xff", b"version-1",
+            b"stable-output-" * 31, bytes(reversed(range(256))),
+        ]
+
+        class InvalidValidator:
+            def validate_file(self, path, *, modality):
+                return {"valid": False, "status": "FORCED_INVALID"}
+
+        class MalformedValidator:
+            def validate_file(self, path, *, modality):
+                return {"valid": True, "sha256": "not-a-sha256", "size_bytes": path.stat().st_size}
+
+        class MismatchedValidator:
+            def validate_file(self, path, *, modality):
+                return {"valid": True, "sha256": "0" * 64, "size_bytes": path.stat().st_size}
+
+        class RaisingValidator:
+            def validate_file(self, path, *, modality):
+                raise RuntimeError("forced test failure")
+
+        failure_modes = [
+            ("validator-invalid", InvalidValidator(), None),
+            ("validator-malformed", MalformedValidator(), None),
+            ("validator-hash-mismatch", MismatchedValidator(), None),
+            ("validator-exception", RaisingValidator(), None),
+            ("replace-failure", self.validator, PermissionError("forced replace failure")),
+        ]
+        case_number = 0
+        for mode, validator, replace_error in failure_modes:
+            for payload_index, previous_payload in enumerate(previous_payloads):
+                with self.subTest(mode=mode, payload_index=payload_index):
+                    case_number += 1
+                    destination = self.root / f"preserve-{case_number}.png"
+                    temporary = self.root / f"candidate-{case_number}.png"
+                    destination.write_bytes(previous_payload)
+                    temporary.write_bytes(PNG)
+                    if replace_error is None:
+                        result = publish_validated_output(
+                            temporary, destination, modality="image", validator=validator
+                        )
+                    else:
+                        with patch(
+                            "projects.provider_store.atomic_output.os.replace",
+                            side_effect=replace_error,
+                        ):
+                            result = publish_validated_output(
+                                temporary, destination, modality="image", validator=validator
+                            )
+                    self.assertFalse(result["published"])
+                    self.assertEqual(destination.read_bytes(), previous_payload)
+                    self.assertFalse(temporary.exists())
+                    self.assertTrue(result["status"])
+        self.assertEqual(case_number, 50)
+
     def test_invalid_path_and_missing_validator_fail_closed(self):
         self.assertEqual(
             publish_validated_output(
