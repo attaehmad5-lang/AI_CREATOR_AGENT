@@ -745,6 +745,98 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         result = router.route(category="image", project_id="film")
         self.assertEqual(result["status"], "QUOTA_REQUEST_ID_REQUIRED")
 
+    def test_region_aware_routing_runs_50_supported_and_unsupported_cases(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        supported = [f"region-{index:02d}" for index in range(25)]
+        for provider in catalog["providers"]:
+            if provider["id"] in {"primary", "fallback"}:
+                provider["data_residency_regions"] = supported
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        connections = ConnectionManager(self.catalog_path, self.state_path)
+        router = ProviderRoutingManager(connections)
+
+        checks = 0
+        for region in supported:
+            with self.subTest(case="supported", region=region):
+                result = router.route(
+                    category="image", project_id="film", required_region=region
+                )
+                self.assertTrue(result["allowed"])
+                self.assertIn(result["provider"], {"primary", "fallback"})
+                checks += 1
+        for index in range(25):
+            region = f"unserved-region-{index:02d}"
+            with self.subTest(case="unsupported", region=region):
+                result = router.route(
+                    category="image", project_id="film", required_region=region
+                )
+                self.assertFalse(result["allowed"])
+                self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+                self.assertTrue(all(
+                    decision["status"] == "REQUIRED_REGION_NOT_SUPPORTED"
+                    for decision in result["decisions"]
+                ))
+                checks += 1
+        self.assertEqual(checks, 50)
+
+    def test_region_routing_fails_closed_when_metadata_is_missing_or_malformed(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        for provider in catalog["providers"]:
+            provider.pop("data_residency_regions", None)
+            provider.pop("regions", None)
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        connections = ConnectionManager(self.catalog_path, self.state_path)
+        result = ProviderRoutingManager(connections).route(
+            category="image", project_id="film", required_region="eu-west-1"
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertTrue(all(
+            decision["status"] == "REGION_METADATA_UNVERIFIED"
+            for decision in result["decisions"]
+        ))
+
+        catalog["providers"][0]["data_residency_regions"] = ["EU West"]
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        connections = ConnectionManager(self.catalog_path, self.state_path)
+        malformed = ProviderRoutingManager(connections).route(
+            category="image", project_id="film", required_region="eu-west-1"
+        )
+        self.assertFalse(malformed["allowed"])
+        self.assertEqual(malformed["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertIn("REGION_METADATA_UNVERIFIED", [d["status"] for d in malformed["decisions"]])
+
+    def test_project_region_policy_filters_providers_and_blocks_conflicts(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"][0]["data_residency_regions"] = ["eu-west-1"]
+        catalog["providers"][1]["data_residency_regions"] = ["us-east-1"]
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        connections = ConnectionManager(self.catalog_path, self.state_path)
+        policies = ProviderProjectPolicyManager(self.root / "region-policies.json")
+        self.assertTrue(policies.set_policy("film", {
+            "allowed_regions": ["us-east-1"],
+            "required_region": "us-east-1",
+        })["saved"])
+        router = ProviderRoutingManager(connections, project_policy_manager=policies)
+        result = router.route(category="image", project_id="film")
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        conflict = router.route(
+            category="image", project_id="film", required_region="eu-west-1"
+        )
+        self.assertFalse(conflict["allowed"])
+        self.assertEqual(conflict["status"], "PROJECT_REGION_POLICY_CONFLICT")
+
+    def test_invalid_required_region_fails_closed(self):
+        router = ProviderRoutingManager(self.connections)
+        for invalid in ("", "../private", "EU West", "x" * 65, 7, [], {}):
+            with self.subTest(invalid=invalid):
+                result = router.route(
+                    category="image", project_id="film", required_region=invalid
+                )
+                self.assertFalse(result["allowed"])
+                self.assertEqual(result["status"], "INVALID_REQUIRED_REGION")
+
     def test_invalid_route_inputs_and_missing_health_evidence_fail_closed(self):
         router = ProviderRoutingManager(self.connections)
         self.assertEqual(router.route(category="", project_id="film")["status"], "INVALID_ROUTE_REQUEST")
