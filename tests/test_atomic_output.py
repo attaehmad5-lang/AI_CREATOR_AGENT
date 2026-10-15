@@ -151,6 +151,40 @@ class AtomicOutputPublicationTests(unittest.TestCase):
         self.assertFalse(temporary.exists())
         self.assertTrue(result["cleanup_succeeded"])
 
+    def test_25_valid_publications_preserve_atomicity_and_cleanup(self):
+        for index in range(25):
+            with self.subTest(case=index):
+                payload = PNG + f"-case-{index}".encode()
+                temporary = self._write_temp(f"candidate-{index}.png", payload)
+                destination = self.root / f"final-{index}.png"
+                previous = f"previous-{index}".encode()
+                destination.write_bytes(previous)
+                result = publish_validated_output(
+                    temporary, destination, modality="image", validator=self.validator
+                )
+                self.assertTrue(result["published"])
+                self.assertEqual(destination.read_bytes(), payload)
+                self.assertFalse(temporary.exists())
+                self.assertEqual(result["sha256"], hashlib.sha256(payload).hexdigest())
+
+    def test_25_invalid_publications_preserve_previous_output_and_cleanup(self):
+        for index in range(25):
+            with self.subTest(case=index):
+                # Every candidate is different and deliberately lacks a PNG signature.
+                payload = bytes([index + 1]) + f"-corrupt-candidate-{index}".encode()
+                temporary = self._write_temp(f"corrupt-{index}.png", payload)
+                destination = self.root / f"protected-{index}.png"
+                previous = f"previous-good-{index}".encode()
+                destination.write_bytes(previous)
+                result = publish_validated_output(
+                    temporary, destination, modality="image", validator=self.validator
+                )
+                self.assertFalse(result["published"])
+                self.assertEqual(result["status"], "TEMP_OUTPUT_INVALID")
+                self.assertEqual(destination.read_bytes(), previous)
+                self.assertFalse(temporary.exists())
+                self.assertTrue(result["cleanup_succeeded"])
+
     def test_invalid_path_and_missing_validator_fail_closed(self):
         self.assertEqual(
             publish_validated_output(
