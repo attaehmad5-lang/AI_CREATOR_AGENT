@@ -90,7 +90,7 @@ class ProviderOutputValidator:
         self.max_image_dimension = max_image_dimension
         self.max_image_pixels = max_image_pixels
         self.max_media_duration_seconds = float(max_media_duration_seconds)
-        self.allowed_audio_codecs = set(allowed_audio_codecs or {"pcm", "ieee_float", "alaw", "mulaw", "flac", "vorbis", "mp4a", "ac-3", "ec-3", "opus"})
+        self.allowed_audio_codecs = set(allowed_audio_codecs or {"pcm", "ieee_float", "alaw", "mulaw", "flac", "vorbis", "mp3", "aac", "mp4a", "ac-3", "ec-3", "opus"})
         self.allowed_video_codecs = set(allowed_video_codecs or {"h264", "avc1", "avc3", "h265", "hvc1", "hev1", "vp8", "vp9", "vp09", "av1", "av01", "mp4v", "mjpg", "xvid", "divx", "dib"})
 
     @staticmethod
@@ -208,6 +208,33 @@ class ProviderOutputValidator:
             "channels": channels,
             "bits_per_sample": bits,
         }
+
+    @staticmethod
+    def _aac_properties_stream(stream: Any, total_size: int) -> dict[str, Any] | None:
+        rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350]
+        offset, samples, sample_rate, frames = 0, 0, None, 0
+        while offset + 7 <= total_size:
+            stream.seek(offset)
+            header = stream.read(7)
+            if len(header) != 7 or header[0] != 0xFF or (header[1] & 0xF6) != 0xF0:
+                return None
+            rate_index = (header[2] >> 2) & 15
+            if rate_index >= len(rates):
+                return None
+            rate = rates[rate_index]
+            frame_size = ((header[3] & 3) << 11) | (header[4] << 3) | (header[5] >> 5)
+            blocks = (header[6] & 3) + 1
+            if frame_size < 7 or offset + frame_size > total_size or (sample_rate is not None and rate != sample_rate):
+                return None
+            sample_rate = rate
+            samples += 1024 * blocks
+            frames += 1
+            if frames > 1_000_000:
+                return None
+            offset += frame_size
+        if not frames or offset != total_size or sample_rate is None:
+            return None
+        return {"duration_seconds": samples / sample_rate, "codec": "aac", "sample_rate": sample_rate}
 
     @staticmethod
     def _mp3_properties_stream(stream: Any, total_size: int) -> dict[str, Any] | None:
@@ -463,6 +490,10 @@ class ProviderOutputValidator:
             return self._wav_properties(payload, total_size)
         if mime == "audio/flac":
             return self._flac_properties(payload)
+        if mime == "audio/mpeg" and stream is not None:
+            return self._mp3_properties_stream(stream, total_size)
+        if mime == "audio/aac" and stream is not None:
+            return self._aac_properties_stream(stream, total_size)
         if mime == "audio/ogg":
             return None
         if mime == "video/webm":
@@ -655,7 +686,9 @@ class ProviderOutputValidator:
                 if len(header) < 12 or header[8:12] != expected:
                     continue
             return mime
-        # MP3 files may omit ID3 and start with an MPEG audio frame sync.
+        # AAC ADTS and MP3 may omit container-level magic bytes.
+        if modality == "audio" and len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xF6) == 0xF0:
+            return "audio/aac"
         if modality == "audio" and len(header) >= 2 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0:
             return "audio/mpeg"
         # ISO base media files share the ftyp box, with compatible variants.
