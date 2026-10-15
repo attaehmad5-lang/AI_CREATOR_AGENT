@@ -45,6 +45,8 @@ class ProviderOutputValidator:
     def __init__(
         self, *, min_size_bytes: int = 1, max_size_bytes: int = 1_000_000_000,
         max_json_depth: int = 128,
+        max_image_dimension: int = 16384,
+        max_image_pixels: int = 100_000_000,
     ) -> None:
         if (
             not isinstance(min_size_bytes, int)
@@ -62,9 +64,85 @@ class ProviderOutputValidator:
             or max_json_depth > 4096
         ):
             raise ValueError("max_json_depth must be an integer between 1 and 4096")
+        if (
+            not isinstance(max_image_dimension, int)
+            or isinstance(max_image_dimension, bool)
+            or max_image_dimension < 1
+            or max_image_dimension > 1_000_000
+            or not isinstance(max_image_pixels, int)
+            or isinstance(max_image_pixels, bool)
+            or max_image_pixels < 1
+            or max_image_pixels > 10**12
+        ):
+            raise ValueError("image dimension limits must be positive bounded integers")
         self.min_size_bytes = min_size_bytes
         self.max_size_bytes = max_size_bytes
         self.max_json_depth = max_json_depth
+        self.max_image_dimension = max_image_dimension
+        self.max_image_pixels = max_image_pixels
+
+    @staticmethod
+    def _image_dimensions(mime: str, payload: bytes) -> tuple[int, int] | None:
+        """Read image dimensions from bounded format headers without decoding pixels."""
+        if mime == "image/png":
+            if len(payload) < 24 or payload[12:16] != b"IHDR":
+                return None
+            return int.from_bytes(payload[16:20], "big"), int.from_bytes(payload[20:24], "big")
+        if mime == "image/gif":
+            if len(payload) < 10:
+                return None
+            return int.from_bytes(payload[6:8], "little"), int.from_bytes(payload[8:10], "little")
+        if mime == "image/jpeg":
+            if len(payload) < 4 or payload[:2] != b"\\xff\\xd8":
+                return None
+            index = 2
+            sof_markers = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+            while index + 4 <= len(payload):
+                if payload[index] != 0xFF:
+                    index += 1
+                    continue
+                while index < len(payload) and payload[index] == 0xFF:
+                    index += 1
+                if index >= len(payload):
+                    return None
+                marker = payload[index]
+                index += 1
+                if marker in {0xD8, 0xD9, 0x01} or 0xD0 <= marker <= 0xD7:
+                    continue
+                if index + 2 > len(payload):
+                    return None
+                segment_length = int.from_bytes(payload[index:index + 2], "big")
+                if segment_length < 2 or index + segment_length > len(payload):
+                    return None
+                if marker in sof_markers:
+                    if segment_length < 7:
+                        return None
+                    height = int.from_bytes(payload[index + 3:index + 5], "big")
+                    width = int.from_bytes(payload[index + 5:index + 7], "big")
+                    return width, height
+                if marker == 0xDA:
+                    return None
+                index += segment_length
+            return None
+        if mime == "image/webp":
+            if len(payload) < 30 or payload[:4] != b"RIFF" or payload[8:12] != b"WEBP":
+                return None
+            chunk_type = payload[12:16]
+            if chunk_type == b"VP8X" and len(payload) >= 30:
+                width = 1 + int.from_bytes(payload[24:27], "little")
+                height = 1 + int.from_bytes(payload[27:30], "little")
+                return width, height
+            if chunk_type == b"VP8L" and len(payload) >= 25 and payload[20] == 0x2F:
+                b1, b2, b3, b4 = payload[21:25]
+                width = 1 + b1 + ((b2 & 0x3F) << 8)
+                height = 1 + (b2 >> 6) + (b3 << 2) + ((b4 & 0x0F) << 10)
+                return width, height
+            if chunk_type == b"VP8 " and len(payload) >= 30 and payload[23:26] == b"\\x9d\\x01\\x2a":
+                width = int.from_bytes(payload[26:28], "little") & 0x3FFF
+                height = int.from_bytes(payload[28:30], "little") & 0x3FFF
+                return width, height
+            return None
+        return None
 
     @staticmethod
     def _json_depth_within_limit(stream: Any, max_depth: int) -> bool:
@@ -131,10 +209,24 @@ class ProviderOutputValidator:
                 if size > self.max_size_bytes:
                     return {"valid": False, "status": "OUTPUT_TOO_LARGE", "size_bytes": size}
                 header = stream.read(32)
+                image_dimensions = None
                 if normalized_modality in self.SIGNATURES:
                     mime = self._match_signature(normalized_modality, header)
                     if mime is None:
                         return {"valid": False, "status": "SIGNATURE_MISMATCH"}
+                    if normalized_modality == "image":
+                        stream.seek(0)
+                        image_header = stream.read(min(size, 1_048_576))
+                        image_dimensions = self._image_dimensions(mime, image_header)
+                        if image_dimensions is None:
+                            return {"valid": False, "status": "IMAGE_DIMENSIONS_UNVERIFIED"}
+                        width, height = image_dimensions
+                        if width < 1 or height < 1:
+                            return {"valid": False, "status": "IMAGE_DIMENSIONS_INVALID"}
+                        if width > self.max_image_dimension or height > self.max_image_dimension:
+                            return {"valid": False, "status": "IMAGE_DIMENSION_LIMIT_EXCEEDED", "width": width, "height": height}
+                        if width * height > self.max_image_pixels:
+                            return {"valid": False, "status": "IMAGE_PIXEL_LIMIT_EXCEEDED", "width": width, "height": height}
                 elif normalized_modality == "text":
                     stream.seek(0)
                     decoder = codecs.getincrementaldecoder("utf-8")()
@@ -196,6 +288,10 @@ class ProviderOutputValidator:
             "modality": normalized_modality,
             "mime_type": mime,
             "size_bytes": size,
+            **(
+                {"width": image_dimensions[0], "height": image_dimensions[1]}
+                if normalized_modality == "image" and image_dimensions is not None else {}
+            ),
             "sha256": digest.hexdigest(),
         }
 
