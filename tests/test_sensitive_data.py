@@ -98,6 +98,8 @@ class SensitiveDataGuardTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             SensitiveDataGuard(mode="ignore")
         with self.assertRaises(ValueError):
+            SensitiveDataGuard(mode=[])
+        with self.assertRaises(ValueError):
             SensitiveDataGuard(scanner=object())
 
 
