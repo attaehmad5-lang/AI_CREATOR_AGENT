@@ -59,7 +59,11 @@ class ProviderJSONBalanceProbe:
             raise ValueError("INVALID_CREDENTIAL_ENV_REFERENCE")
         if not isinstance(unit, str) or not re.fullmatch(r"[A-Za-z0-9._/-]{1,32}", unit):
             raise ValueError("INVALID_CREDIT_UNIT")
-        if not isinstance(balance_field, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", balance_field):
+        if (
+            not isinstance(balance_field, str)
+            or len(balance_field) > 256
+            or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}(?:\\.[A-Za-z][A-Za-z0-9_]{0,79}){0,7}", balance_field)
+        ):
             raise ValueError("INVALID_BALANCE_FIELD")
         if (
             not isinstance(source, str) or not source.strip() or len(source) > 120
@@ -169,9 +173,13 @@ class ProviderJSONBalanceProbe:
                 data = json.loads(body.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
                 return {"status": "BALANCE_RESPONSE_INVALID", "provider": provider_id, "verified": False}
-            if not isinstance(data, dict) or self.balance_field not in data:
+            if not isinstance(data, dict):
                 return {"status": "BALANCE_FIELD_MISSING", "provider": provider_id, "verified": False}
-            amount = data[self.balance_field]
+            amount: Any = data
+            for segment in self.balance_field.split("."):
+                if not isinstance(amount, dict) or segment not in amount:
+                    return {"status": "BALANCE_FIELD_MISSING", "provider": provider_id, "verified": False}
+                amount = amount[segment]
             if not isinstance(amount, (int, float)) or isinstance(amount, bool):
                 return {"status": "BALANCE_AMOUNT_INVALID", "provider": provider_id, "verified": False}
             try:
