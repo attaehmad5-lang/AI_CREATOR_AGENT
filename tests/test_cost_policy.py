@@ -38,7 +38,7 @@ class ProviderCostPolicyTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.ledger = Path(self.temp_dir.name) / "usage_ledger.json"
-        self.approvals = PaidUsageApprovalManager(Path(self.temp_dir.name) / "approvals.json")
+        self.approvals = PaidUsageApprovalManager(Path(self.temp_dir.name) / "approvals.json", authorizer=lambda action, user, record: True)
         self.policy = ProviderCostPolicy(
             self.ledger, project_budgets={"documentary": 5.0},
             approval_manager=self.approvals,
