@@ -1,6 +1,7 @@
 import json
 import stat
 import struct
+import zlib
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -14,18 +15,29 @@ class ProviderOutputValidatorTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
-        self.validator = ProviderOutputValidator(max_size_bytes=64)
+        self.validator = ProviderOutputValidator(max_size_bytes=256)
 
     def tearDown(self):
         self.temp_dir.cleanup()
 
     @staticmethod
-    def png_header(width, height):
+    def png_chunk(kind, data):
+        return (
+            struct.pack(">I", len(data)) + kind + data
+            + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+        )
+
+    @classmethod
+    def png_header(cls, width, height):
+        ihdr = (
+            struct.pack(">II", width & 0xFFFFFFFF, height & 0xFFFFFFFF)
+            + bytes((8, 2, 0, 0, 0))
+        )
         return (
             b"\x89PNG\r\n\x1a\n"
-            + struct.pack(">I", 13) + b"IHDR"
-            + struct.pack(">II", width & 0xFFFFFFFF, height & 0xFFFFFFFF)
-            + bytes((8, 2, 0, 0, 0)) + b"\x00\x00\x00\x00"
+            + cls.png_chunk(b"IHDR", ihdr)
+            + cls.png_chunk(b"IDAT", zlib.compress(b"\x00"))
+            + cls.png_chunk(b"IEND", b"")
         )
 
     def test_valid_image_signature_returns_hash_and_metadata(self):
@@ -70,6 +82,33 @@ class ProviderOutputValidatorTests(unittest.TestCase):
                     "IMAGE_DIMENSION_LIMIT_EXCEEDED",
                     "IMAGE_PIXEL_LIMIT_EXCEEDED",
                 })
+
+    def test_png_structure_rejects_50_corruptions(self):
+        validator = ProviderOutputValidator(max_size_bytes=1024)
+        valid = self.png_header(16, 16)
+        ihdr_crc = 8 + 8 + 13
+        idat_start = 8 + 25
+        idat_length = int.from_bytes(valid[idat_start:idat_start + 4], "big")
+        idat_crc = idat_start + 8 + idat_length
+        iend_crc = idat_crc + 4 + 8
+        crc_offsets = list(range(ihdr_crc, ihdr_crc + 4))
+        crc_offsets += list(range(idat_crc, idat_crc + 4))
+        crc_offsets += list(range(iend_crc, iend_crc + 4))
+        truncations = [valid[:index] for index in range(25)]
+        crc_corruptions = []
+        for index in range(25):
+            payload = bytearray(valid)
+            offset = crc_offsets[index % len(crc_offsets)]
+            payload[offset] ^= 1 << (index % 8)
+            crc_corruptions.append(bytes(payload))
+        cases = truncations + crc_corruptions
+        self.assertEqual(len(cases), 50)
+        for index, payload in enumerate(cases):
+            with self.subTest(case=index, payload_size=len(payload)):
+                path = self.root / f"corrupt-{index}.png"
+                path.write_bytes(payload)
+                result = validator.validate_file(path, modality="image")
+                self.assertFalse(result["valid"], result)
 
     def test_unparseable_image_dimensions_fail_closed(self):
         path = self.root / "truncated.png"
@@ -147,7 +186,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             "OUTPUT_TOO_SMALL",
         )
         large = self.root / "large.txt"
-        large.write_bytes(b"x" * 65)
+        large.write_bytes(b"x" * 257)
         self.assertEqual(
             self.validator.validate_file(large, modality="text")["status"],
             "OUTPUT_TOO_LARGE",
