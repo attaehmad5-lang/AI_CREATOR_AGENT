@@ -115,7 +115,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
         result = self.validator.validate_file(path, modality="image")
         self.assertFalse(result["valid"])
-        self.assertEqual(result["status"], "IMAGE_DIMENSIONS_UNVERIFIED")
+        self.assertEqual(result["status"], "IMAGE_STRUCTURE_INVALID")
 
     def test_image_limit_configuration_is_bounded(self):
         invalid_options = [
