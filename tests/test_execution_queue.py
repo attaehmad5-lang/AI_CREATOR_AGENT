@@ -83,8 +83,9 @@ class BoundedExecutionQueueTests(unittest.TestCase):
 
     def test_expired_queued_jobs_are_removed_but_running_deadlines_hold_capacity(self):
         queue = BoundedExecutionQueue(max_running=1)
-        self.enqueue(queue, "queued-expired", deadline_at=(self.now + timedelta(seconds=5)).isoformat())
-        self.enqueue(queue, "running-expired", deadline_at=(self.now + timedelta(seconds=5)).isoformat())
+        self.enqueue(queue, "queued-expired", priority=1, deadline_at=(self.now + timedelta(seconds=5)).isoformat())
+        self.enqueue(queue, "running-expired", priority=10, deadline_at=(self.now + timedelta(seconds=5)).isoformat())
+        self.enqueue(queue, "pending-next", priority=0)
         claimed = queue.claim_next(worker_id="worker", now=self.now)
         running_id = claimed["job"]["request_id"]
         result = queue.reap_expired(now=self.now + timedelta(seconds=6))
