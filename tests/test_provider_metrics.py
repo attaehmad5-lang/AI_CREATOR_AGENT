@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from projects.provider_store.provider_metrics import ProviderMetricsManager
@@ -123,12 +124,15 @@ class ProviderMetricsManagerTests(unittest.TestCase):
     def test_metrics_persistence_failure_does_not_keep_uncommitted_event(self):
         path = self.root / "metrics-failure.json"
         manager = ProviderMetricsManager(path)
-        # A directory at the destination forces atomic replacement to fail.
-        path.mkdir()
-        result = manager.record_request(
-            "p", success=True, latency_ms=1.0, request_id="failed-write", timestamp=1000
-        )
+        with patch(
+            "projects.provider_store.provider_metrics.atomic_replace_with_retry",
+            side_effect=OSError("private storage detail"),
+        ):
+            result = manager.record_request(
+                "p", success=True, latency_ms=1.0, request_id="failed-write", timestamp=1000
+            )
         self.assertEqual(result["status"], "METRICS_PERSISTENCE_FAILED")
+        self.assertNotIn("private storage detail", repr(result))
         self.assertEqual(manager.list_events("p")["events"], [])
 
 
