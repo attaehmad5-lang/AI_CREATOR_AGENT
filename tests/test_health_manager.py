@@ -118,6 +118,34 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertEqual(result["status"], "STALE")
 
+    def test_unhealthy_provider_requires_consecutive_successes_before_readmission(self):
+        self.manager.record_result("image", success=False, error_code="HTTP_503")
+        failed = self.manager.record_result("image", success=False, error_code="HTTP_503")
+        self.assertEqual(failed["status"], "UNHEALTHY")
+        self.assertFalse(self.manager.is_eligible("image")["eligible"])
+
+        first = self.manager.record_result("image", success=True, request_id="recovery-check-1")
+        self.assertEqual(first["status"], "UNHEALTHY")
+        self.assertTrue(first["recovery_pending"])
+        self.assertFalse(self.manager.is_eligible("image")["eligible"])
+
+        second = self.manager.record_result("image", success=True, request_id="recovery-check-2")
+        self.assertEqual(second["status"], "HEALTHY")
+        self.assertFalse(second["recovery_pending"])
+        self.assertTrue(self.manager.is_eligible("image")["eligible"])
+        self.assertEqual(self.manager.data["providers"]["image"]["consecutive_successes"], 2)
+
+    def test_failure_resets_recovery_success_streak(self):
+        self.manager.record_result("image", success=False, error_code="HTTP_503")
+        self.manager.record_result("image", success=False, error_code="HTTP_503")
+        self.manager.record_result("image", success=True, request_id="recovery-check-1")
+        result = self.manager.record_result(
+            "image", success=False, error_code="HTTP_503", request_id="recovery-failure"
+        )
+        self.assertEqual(result["status"], "UNHEALTHY")
+        self.assertEqual(self.manager.data["providers"]["image"]["consecutive_successes"], 0)
+        self.assertFalse(self.manager.is_eligible("image")["eligible"])
+
     def test_latency_limit_excludes_slow_provider(self):
         self.manager.record_result("image", success=True, latency_ms=900)
         result = self.manager.is_eligible("image", max_latency_ms=500)
@@ -150,6 +178,8 @@ class ProviderHealthManagerTests(unittest.TestCase):
             ProviderHealthManager(self.path, history_limit=True)
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path, failure_threshold=1.5)
+        with self.assertRaises(ValueError):
+            ProviderHealthManager(self.path, recovery_success_threshold=0)
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path, clock="not-callable")
         self.assertEqual(
