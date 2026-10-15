@@ -141,6 +141,40 @@ class ProviderHealthManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path, recovery_success_threshold=True)
 
+    def test_recheck_candidates_prioritize_unhealthy_and_include_unknown(self):
+        self.manager.record_result("unhealthy", success=False, error_code="HTTP_503")
+        self.manager.record_result("unhealthy", success=False, error_code="HTTP_503")
+        self.manager.record_result("stale", success=True)
+        self.now[0] += timedelta(seconds=120)
+        self.manager.record_result("fresh", success=True)
+        result = self.manager.list_recheck_candidates(
+            ["unhealthy", "stale", "fresh", "unknown"],
+            recheck_after_seconds=60,
+            include_unknown=True,
+        )
+        self.assertEqual(result["status"], "RECHECK_CANDIDATES")
+        self.assertEqual(
+            [item["provider"] for item in result["candidates"]],
+            ["unhealthy", "stale", "unknown"],
+        )
+        self.assertEqual(result["candidates"][0]["reason"], "UNHEALTHY_RECHECK")
+        self.assertEqual(result["candidates"][1]["reason"], "STALE_HEALTH")
+        self.assertEqual(result["candidates"][2]["reason"], "NO_HEALTH_EVIDENCE")
+
+    def test_recheck_candidate_inputs_fail_closed(self):
+        self.assertEqual(
+            self.manager.list_recheck_candidates(recheck_after_seconds=0)["status"],
+            "INVALID_RECHECK_INTERVAL",
+        )
+        self.assertEqual(
+            self.manager.list_recheck_candidates(max_candidates=True)["status"],
+            "INVALID_MAX_CANDIDATES",
+        )
+        self.assertEqual(
+            self.manager.list_recheck_candidates(["ok", ""])["status"],
+            "INVALID_PROVIDER_IDS",
+        )
+
     def test_stale_health_is_excluded(self):
         self.manager.record_result("image", success=True, latency_ms=10)
         self.now[0] += timedelta(seconds=301)
