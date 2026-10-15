@@ -97,6 +97,29 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertEqual(len(record["history"]), 2)
         self.assertEqual(record["history"][-1]["error_code"], "HTTP_503")
 
+    def test_health_freshness_boundary_matrix_50_cases(self):
+        base = self.now[0]
+        for index in range(25):
+            checked_at = base + timedelta(seconds=index * 10)
+            self.now[0] = checked_at
+            recorded = self.manager.record_result(
+                "image", success=True, latency_ms=1.0
+            )
+            self.assertTrue(recorded["saved"])
+            with self.subTest(case=index, boundary="fresh"):
+                self.now[0] = checked_at + timedelta(seconds=index)
+                fresh = self.manager.is_eligible(
+                    "image", stale_after_seconds=index
+                )
+                self.assertTrue(fresh["eligible"], fresh)
+            with self.subTest(case=index + 25, boundary="stale"):
+                self.now[0] = checked_at + timedelta(seconds=index + 1)
+                stale = self.manager.is_eligible(
+                    "image", stale_after_seconds=index
+                )
+                self.assertFalse(stale["eligible"], stale)
+                self.assertEqual(stale["status"], "STALE")
+
     def test_failure_threshold_excludes_unhealthy_provider(self):
         self.manager.record_result("image", success=False, error_code="TIMEOUT")
         self.manager.record_result("image", success=False, error_code="TIMEOUT")
