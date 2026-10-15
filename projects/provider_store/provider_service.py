@@ -335,6 +335,7 @@ class ProviderService:
         if accepts_trace_id:
             options["trace_id"] = trace_id
         started_at = time.monotonic()
+        queue_wait_ms: float | None = 0.0 if self.execution_limiter is None else None
         try:
             if self.execution_limiter is None:
                 adapter_result = adapter(**options)
@@ -345,6 +346,8 @@ class ProviderService:
                     queue_timeout_seconds=queue_timeout_seconds,
                     cancel_event=cancel_event,
                 )
+                if isinstance(limited, dict) and self._valid_amount(limited.get("queue_wait_ms")):
+                    queue_wait_ms = float(limited["queue_wait_ms"])
                 if not isinstance(limited, dict) or limited.get("acquired") is not True:
                     limit_status = (
                         limited.get("status", "EXECUTION_CAPACITY_REJECTED")
@@ -358,6 +361,7 @@ class ProviderService:
                         request_id=request_id, trace_id=trace_id, provider_id=provider_id,
                         modality=modality, status=result_status, success=False,
                         latency_ms=(time.monotonic() - started_at) * 1000,
+                        queue_wait_ms=queue_wait_ms,
                     )
                     return {
                         "status": result_status,
@@ -377,7 +381,7 @@ class ProviderService:
             metrics = self._record_execution_metric(
                 request_id=request_id, trace_id=trace_id, provider_id=provider_id,
                 modality=modality, status="EXECUTION_OUTCOME_UNKNOWN",
-                success=False, latency_ms=latency_ms,
+                success=False, latency_ms=latency_ms, queue_wait_ms=queue_wait_ms,
             )
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
@@ -394,7 +398,7 @@ class ProviderService:
             metrics = self._record_execution_metric(
                 request_id=request_id, trace_id=trace_id, provider_id=provider_id,
                 modality=modality, status="EXECUTION_OUTCOME_UNKNOWN",
-                success=False, latency_ms=latency_ms,
+                success=False, latency_ms=latency_ms, queue_wait_ms=queue_wait_ms,
             )
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
@@ -423,7 +427,7 @@ class ProviderService:
                 metrics = self._record_execution_metric(
                     request_id=request_id, trace_id=trace_id, provider_id=provider_id,
                     modality=modality, status="INCONSISTENT_START_RESULT",
-                    success=False, latency_ms=latency_ms,
+                    success=False, latency_ms=latency_ms, queue_wait_ms=queue_wait_ms,
                 )
                 return {
                     "status": "INCONSISTENT_START_RESULT",
@@ -442,6 +446,7 @@ class ProviderService:
                 request_id=request_id, trace_id=trace_id, provider_id=provider_id,
                 modality=modality, status=execution_status, success=False,
                 latency_ms=(time.monotonic() - started_at) * 1000,
+                queue_wait_ms=queue_wait_ms,
             )
             return {
                 "status": execution_status,
@@ -540,7 +545,7 @@ class ProviderService:
         metrics = self._record_execution_metric(
             request_id=request_id, trace_id=trace_id, provider_id=provider_id,
             modality=modality, status=status, success=final_success,
-            latency_ms=latency_ms,
+            latency_ms=latency_ms, queue_wait_ms=queue_wait_ms,
         )
         return {
             "status": status,
@@ -558,6 +563,7 @@ class ProviderService:
     def _record_execution_metric(
         self, *, request_id: str, trace_id: str, provider_id: str,
         modality: str, status: str, success: bool, latency_ms: float,
+        queue_wait_ms: float | None = None,
     ) -> dict[str, Any] | None:
         if self.metrics_manager is None:
             return None
@@ -565,6 +571,7 @@ class ProviderService:
             result = self.metrics_manager.record_request(
                 request_id=request_id, trace_id=trace_id, provider_id=provider_id,
                 modality=modality, status=status, success=success, latency_ms=latency_ms,
+                queue_wait_ms=queue_wait_ms,
             )
         except Exception as exc:
             return {"status": "METRICS_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
