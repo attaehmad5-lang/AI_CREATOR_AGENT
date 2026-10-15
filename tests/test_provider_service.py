@@ -453,6 +453,60 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
+    def test_execution_fails_closed_without_health_manager(self):
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost)
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            require_health_check_before_execution=True,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-required",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: called.append(True) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "HEALTH_CHECK_MANAGER_REQUIRED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(called, [])
+
+    def test_execution_fails_closed_when_service_and_router_health_managers_differ(self):
+        other_health = ProviderHealthManager(self.root / "other-health.json")
+        router = ProviderRoutingManager(
+            self.connections, health_manager=self.health, cost_policy=self.cost
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=other_health,
+            require_health_check_before_execution=True,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-mismatch",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: called.append(True) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "HEALTH_MANAGER_MISMATCH")
+        self.assertEqual(called, [])
+
+    def test_execution_rejects_missing_fresh_health_evidence_before_adapter(self):
+        router = ProviderRoutingManager(
+            self.connections, health_manager=self.health, cost_policy=self.cost
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-evidence-missing",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: called.append(True) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "ROUTING_REJECTED")
+        self.assertEqual(called, [])
+        self.assertNotIn("health-evidence-missing", self.quota.data["requests"])
+
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
             self.connections, health_manager=self.health, cost_policy=self.cost, quota_manager=self.quota
