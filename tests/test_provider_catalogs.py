@@ -14,6 +14,31 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         self.assertEqual(primary.get("version"), master.get("version"))
         self.assertEqual(primary.get("providers"), master.get("providers"))
 
+    def test_local_ollama_provider_is_cataloged_disabled_and_matches_adapter_contract(self):
+        from projects.provider_store.openai_compatible_text_adapter import OpenAICompatibleTextAdapter
+
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        primary = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        master = json.loads((root / "provider_catalog_master.json").read_text(encoding="utf-8"))
+        provider = next(item for item in primary["providers"] if item["id"] == "ollama_local")
+        self.assertEqual(provider, next(item for item in master["providers"] if item["id"] == "ollama_local"))
+        self.assertFalse(provider["enabled"])
+        self.assertEqual(provider["connection_type"], "LOCAL")
+        self.assertEqual(provider["adapter_api_version"], "1.0")
+        self.assertTrue(ConnectionManager.validate_catalog_schema(primary)["valid"])
+
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = ConnectionManager(root / "provider_catalog.json", Path(temporary) / "state.json")
+            adapter = OpenAICompatibleTextAdapter(
+                endpoint="http://localhost:11434/v1/chat/completions",
+                model="local-model",
+            )
+            contract = manager.validate_provider_contract("ollama_local", adapter)
+            self.assertTrue(contract["valid"], contract)
+            loaded = manager.load_provider("ollama_local", lambda metadata: adapter)
+            self.assertEqual(loaded["status"], "DISABLED")
+            self.assertIsNone(manager.get_loaded_provider("ollama_local"))
+
     def test_catalog_rejects_paid_subscription_marked_as_zero_cost(self):
         result = ConnectionManager.validate_catalog_schema({
             "version": "3.0",
