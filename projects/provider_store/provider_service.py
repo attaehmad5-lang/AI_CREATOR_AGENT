@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        sensitive_data_guard: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -45,6 +46,9 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        if sensitive_data_guard is not None and not callable(getattr(sensitive_data_guard, "sanitize", None)):
+            raise ValueError("sensitive_data_guard must support sanitize")
+        self.sensitive_data_guard = sensitive_data_guard
 
     def verify_provider(
         self,
@@ -284,6 +288,27 @@ class ProviderService:
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
 
+        safe_adapter_options = dict(adapter_options or {})
+        privacy_status = None
+        if self.sensitive_data_guard is not None:
+            try:
+                privacy = self.sensitive_data_guard.sanitize(safe_adapter_options)
+            except Exception as exc:
+                return {
+                    "status": "PRIVACY_GUARD_FAILED", "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(privacy, dict) or privacy.get("allowed") is not True or "value" not in privacy:
+                return {
+                    "status": privacy.get("status", "PRIVACY_GUARD_FAILED") if isinstance(privacy, dict) else "PRIVACY_GUARD_FAILED",
+                    "executed": False,
+                    "privacy_scan": privacy.get("scan") if isinstance(privacy, dict) else None,
+                }
+            if not isinstance(privacy["value"], dict):
+                return {"status": "PRIVACY_GUARD_FAILED", "executed": False}
+            safe_adapter_options = privacy["value"]
+            privacy_status = privacy.get("status", "CLEAR")
+
         route = self.route_request(
             category=category,
             project_id=project_id,
@@ -298,7 +323,7 @@ class ProviderService:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
 
-        options = dict(adapter_options or {})
+        options = dict(safe_adapter_options)
         options["provider_id"] = provider_id
         options["request_id"] = request_id
         started_at = time.monotonic()
