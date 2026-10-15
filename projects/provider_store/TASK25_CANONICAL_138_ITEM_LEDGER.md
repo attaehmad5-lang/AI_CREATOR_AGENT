@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38794005517](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38794005517): **351 tests passed on Ubuntu and 351 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite includes safe persistent execution metrics, trace propagation, bounded per-provider concurrency/backpressure, latency-aware routing, cross-process metrics writes, overflow-safe latency aggregation, and an explicit error-specific retry matrix.
+GitHub Actions run [#38794819081](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38794819081): **354 tests passed on Ubuntu and 354 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite includes safe persistent execution metrics, unique trace propagation, mandatory fresh-enough health evidence before generation, bounded per-provider concurrency/backpressure, latency-aware routing, cross-process metrics writes, overflow-safe latency aggregation, and an explicit error-specific retry matrix.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -81,7 +81,7 @@ GitHub Actions run [#38794005517](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 41 | 🟢 | Provider Health State Tracking | VERIFIED | Persistent provider health states are stored and covered by state/reload tests. |
 | 42 | 🟢 | Basic Success/Failure History | VERIFIED | Success/failure history persistence, bounded history and idempotent request recording are tested. |
-| 43 | 🟡 | Health Check Before Generation | PARTIAL | Health eligibility hooks exist; not every generation path enforces a fresh check. |
+| 43 | 🟡 | Health Check Before Generation | VERIFIED | ProviderService forces health evidence for every generation execution; missing or stale health is rejected before adapter invocation. Tests: `test_generation_fails_closed_without_health_evidence_even_if_override_is_false`, `test_generation_rejects_stale_health_evidence_before_adapter_call`. |
 | 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
 | 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
@@ -131,10 +131,10 @@ GitHub Actions run [#38794005517](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 73 | 🔴 | Unique Request ID and Trace ID | PARTIAL | ProviderService validates or generates trace IDs and propagates them to adapters that accept the trace keyword; persistent request/trace metrics are covered. Full distributed trace propagation across every adapter and backend remains open. |
+| 73 | 🔴 | Unique Request ID and Trace ID | VERIFIED | Request IDs are validated; each execution generates a unique trace ID or validates the caller's ID, passes it to compatible adapters, and records it in the metrics ledger. Explicit trace IDs fail closed if the adapter cannot accept them. Distributed export remains under item 87. |
 | 74 | 🔴 | Idempotency and Duplicate Prevention | PARTIAL | Manager-level idempotency is tested; full external-provider request idempotency is not verified. |
 | 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | ProviderExecutionLimiter enforces per-provider in-process concurrency and releases permits on exceptions; global multi-process worker coordination remains open. |
-| 76 | 🔴 | Queue, Backpressure and Overload Handling | PARTIAL | Bounded in-process waiting, queue timeouts, queued cancellation and overload rejection are tested; durable/distributed queue orchestration remains open. |
+| 76 | 🔴 | Queue, Backpressure and Overload Handling | VERIFIED | ProviderExecutionLimiter bounds in-process waiting, rejects overload, handles queue timeout/cancellation and safely releases reservations when execution never starts. Durable long-running jobs and distributed queueing remain separate open requirements. |
 | 77 | 🔴 | Async/Long-Running Job and Polling Support | OPEN | Asynchronous job lifecycle/polling is not implemented end-to-end. |
 | 78 | 🔴 | Webhook/Callback Verification | OPEN | Provider webhook/callback verification is not implemented. |
 | 79 | 🔴 | Cancellation, Deadlines and Graceful Shutdown | PARTIAL | Timeout handling exists; cancellation/deadline/shutdown propagation remains incomplete. |
@@ -170,7 +170,7 @@ GitHub Actions run [#38794005517](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 351-test cross-platform suite covers helper/routing, metrics, concurrency and error-specific retry paths; exact item-level coverage matrix remains incomplete. |
+| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 354-test cross-platform suite covers helper/routing, metrics, concurrency, health-gated execution and error-specific retry paths; exact item-level coverage matrix remains incomplete. |
 | 98 | 🟢 | Mock Provider Fallback Integration Test | VERIFIED | Mock/fallback integration regression coverage passes in the cross-platform suite. |
 | 99 | 🔴 | PRIMARY_ONLY and Fallback-Disabled Regression Tests | VERIFIED | PRIMARY_ONLY and automatic-fallback-disabled regression cases now have explicit tests. |
 | 100 | 🟡 | Retry, Backoff and Timeout Tests | VERIFIED | Retry, backoff, Retry-After, timeout and invalid numeric inputs are covered by regression tests. |
@@ -181,7 +181,7 @@ GitHub Actions run [#38794005517](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 351 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 354 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
