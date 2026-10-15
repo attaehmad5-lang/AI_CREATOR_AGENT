@@ -97,6 +97,56 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertEqual(len(record["history"]), 2)
         self.assertEqual(record["history"][-1]["error_code"], "HTTP_503")
 
+    def test_recovery_transition_matrix_50_cases(self):
+        fixed_now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        for index in range(25):
+            with self.subTest(case=index, scenario="recovery"):
+                manager = ProviderHealthManager(
+                    self.path.parent / f"recovery-{index}.json",
+                    history_limit=100, failure_threshold=index + 1,
+                    clock=lambda: fixed_now,
+                )
+                for _ in range(index + 1):
+                    failure = manager.record_result(
+                        "image", success=False, error_code="HTTP_503"
+                    )
+                    self.assertTrue(failure["saved"])
+                self.assertEqual(manager.data["providers"]["image"]["status"], "UNHEALTHY")
+                recovered = manager.record_result(
+                    "image", success=True, latency_ms=5.0
+                )
+                self.assertTrue(recovered["saved"])
+                self.assertTrue(recovered["recovered"])
+                record = manager.data["providers"]["image"]
+                self.assertEqual(record["status"], "HEALTHY")
+                self.assertIn("last_recovered_at", record)
+                self.assertTrue(record["history"][-1]["recovered"])
+                self.assertTrue(manager.is_eligible("image")["eligible"])
+
+        for index in range(25):
+            with self.subTest(case=index + 25, scenario="initial-success"):
+                manager = ProviderHealthManager(
+                    self.path.parent / f"initial-success-{index}.json",
+                    history_limit=100, failure_threshold=index + 1,
+                    clock=lambda: fixed_now,
+                )
+                success = manager.record_result("image", success=True, latency_ms=1.0)
+                self.assertTrue(success["saved"])
+                self.assertFalse(success["recovered"])
+                record = manager.data["providers"]["image"]
+                self.assertNotIn("last_recovered_at", record)
+                self.assertNotIn("recovered", record["history"][-1])
+
+    def test_recovery_transition_persists_after_reload(self):
+        self.manager.record_result("image", success=False, error_code="HTTP_503")
+        recovered = self.manager.record_result("image", success=True, latency_ms=4.0)
+        self.assertTrue(recovered["recovered"])
+        loaded = ProviderHealthManager(self.path, clock=lambda: self.now[0])
+        record = loaded.data["providers"]["image"]
+        self.assertEqual(record["status"], "HEALTHY")
+        self.assertIn("last_recovered_at", record)
+        self.assertTrue(record["history"][-1]["recovered"])
+
     def test_failure_threshold_excludes_unhealthy_provider(self):
         self.manager.record_result("image", success=False, error_code="TIMEOUT")
         self.manager.record_result("image", success=False, error_code="TIMEOUT")
