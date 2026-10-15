@@ -94,6 +94,13 @@ class OpenAICompatibleTextAdapterTests(unittest.TestCase):
                 checks += 1
         self.assertEqual(checks, 50)
 
+    def test_remote_https_endpoint_requires_explicit_allowlist(self):
+        with self.assertRaises(ValueError):
+            OpenAICompatibleTextAdapter(
+                endpoint="https://api.example.com/v1/chat/completions",
+                model="text-model",
+            )
+
     def test_generation_posts_chat_payload_and_returns_only_content(self):
         opener = _Opener()
         adapter = OpenAICompatibleTextAdapter(
