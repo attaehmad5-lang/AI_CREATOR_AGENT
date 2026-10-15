@@ -51,7 +51,7 @@ class BoundedExecutionQueue:
 
     @staticmethod
     def _utc_now(value: datetime | None = None) -> datetime:
-        current = value or datetime.now(timezone.utc)
+        current = datetime.now(timezone.utc) if value is None else value
         if not isinstance(current, datetime) or current.tzinfo is None or current.utcoffset() is None:
             raise ValueError("time must be timezone-aware")
         return current.astimezone(timezone.utc)
@@ -162,10 +162,10 @@ class BoundedExecutionQueue:
             return {"status": "INVALID_CURRENT_TIME", "job": None}
         with self._lock:
             self._expire_pending(current)
-            if len(self._running) >= self.max_running:
-                return {"status": "WORKER_CAPACITY_FULL", "job": None}
             if not self._pending:
                 return {"status": "QUEUE_EMPTY", "job": None}
+            if len(self._running) >= self.max_running:
+                return {"status": "WORKER_CAPACITY_FULL", "job": None}
             record = min(
                 self._pending.values(),
                 key=lambda item: (-item["priority"], item["sequence"]),
