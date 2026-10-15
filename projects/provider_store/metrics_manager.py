@@ -162,7 +162,11 @@ class ProviderMetricsManager:
             self.data = self._load_unlocked()
             existing = self.data["events"].get(request_id)
             if existing is not None:
-                if existing == event:
+                same_payload = all(
+                    existing.get(key) == event.get(key)
+                    for key in ("request_id", "trace_id", "provider_id", "modality", "status", "success", "latency_ms")
+                )
+                if same_payload:
                     return {"status": "ALREADY_RECORDED", "saved": True, "duplicate": True}
                 return {"status": "REQUEST_ID_CONFLICT", "saved": False}
             self.data["events"][request_id] = event
