@@ -68,14 +68,28 @@ class ProviderCatalogMigrationManager:
                 # Unknown billing semantics must default to paid/approval-required.
                 provider.setdefault("subscription_required", True)
                 provider.setdefault("capabilities", [])
-                provider.setdefault("allowed_hosts", [])
                 connection_type = str(provider.get("connection_type", "API")).upper()
+                hosts = provider.get("allowed_hosts")
+                hosts_valid = (
+                    isinstance(hosts, list)
+                    and bool(hosts)
+                    and len(hosts) <= 100
+                    and all(
+                        isinstance(host, str)
+                        and bool(host)
+                        and len(host) <= 253
+                        and __import__("re").fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", host)
+                        and ".." not in host
+                        for host in hosts
+                    )
+                )
                 required_api_metadata_missing = (
                     connection_type == "API"
                     and (
                         not isinstance(provider.get("official_api_url"), str)
                         or not provider["official_api_url"].startswith("https://")
-                        or not provider.get("allowed_hosts")
+                        or not hosts_valid
+                        or not isinstance(provider.get("capabilities"), list)
                         or not provider.get("capabilities")
                     )
                 )
@@ -83,6 +97,13 @@ class ProviderCatalogMigrationManager:
                     provider["enabled"] = False
                     provider["status"] = "LOCKED"
                     disabled_for_safety += 1
+                # Empty or malformed legacy host metadata is removed rather than
+                # fabricated; a provider without a valid allowlist remains disabled.
+                if not hosts_valid:
+                    provider.pop("allowed_hosts", None)
+                    if connection_type == "API":
+                        provider["enabled"] = False
+                        provider["status"] = "LOCKED"
 
             candidate["version"] = cls.CURRENT_VERSION
             validation = ConnectionManager.validate_catalog_schema(candidate)
