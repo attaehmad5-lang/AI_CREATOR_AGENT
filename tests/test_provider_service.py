@@ -52,6 +52,18 @@ class ProviderServiceTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def _prepare_execution_health(self):
+        result = self.health.record_result("image", success=True, latency_ms=1.0)
+        self.assertTrue(result["saved"])
+        self.health.data["providers"]["image"]["history"] = []
+        self.health._save()
+
+    def _prepare_execution_health(self):
+        result = self.health.record_result("image", success=True, latency_ms=1.0)
+        self.assertTrue(result["saved"])
+        self.health.data["providers"]["image"]["history"] = []
+        self.health._save()
+
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
         self.assertTrue(result["verified"])
@@ -447,9 +459,65 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
+    def test_execution_fails_closed_without_health_manager(self):
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost)
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            require_health_check_before_execution=True,
+        )
+        called = []
+        self._prepare_execution_health()
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-required",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: called.append(True) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "HEALTH_CHECK_MANAGER_REQUIRED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(called, [])
+
+    def test_execution_fails_closed_when_service_and_router_health_managers_differ(self):
+        other_health = ProviderHealthManager(self.root / "other-health.json")
+        router = ProviderRoutingManager(
+            self.connections, health_manager=self.health, cost_policy=self.cost
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=other_health,
+            require_health_check_before_execution=True,
+        )
+        called = []
+        self._prepare_execution_health()
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-mismatch",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: called.append(True) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "HEALTH_MANAGER_MISMATCH")
+        self.assertEqual(called, [])
+
+    def test_execution_rejects_missing_fresh_health_evidence_before_adapter(self):
+        router = ProviderRoutingManager(
+            self.connections, health_manager=self.health, cost_policy=self.cost
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-evidence-missing",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: called.append(True) or {"started": False, "success": False},
+            modality="image",
+        )
+        self.assertEqual(result["status"], "ROUTING_REJECTED")
+        self.assertEqual(called, [])
+        self.assertNotIn("health-evidence-missing", self.quota.data["requests"])
+
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
@@ -458,6 +526,7 @@ class ProviderServiceTests(unittest.TestCase):
         )
         output_path = self.root / "generated.png"
         output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        self._prepare_execution_health()
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-success",
             estimated_cost=0.0, output_path=str(output_path),
@@ -475,12 +544,13 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
             cost_policy=self.cost, quota_manager=self.quota,
         )
+        self._prepare_execution_health()
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-not-started",
             estimated_cost=1.0, paid_approved_providers={"image"},
@@ -495,12 +565,13 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_failure_uses_supported_retry_metadata_and_requires_idempotency(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
             retry_policy=self.retry, cost_policy=self.cost, quota_manager=self.quota,
         )
+        self._prepare_execution_health()
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="retryable-provider-failure",
             estimated_cost=0.0,
@@ -530,12 +601,13 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_routed_request_rejects_contradictory_not_started_result(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
-            self.connections, routing_manager=router,
+            self.connections, routing_manager=router, health_manager=self.health,
             cost_policy=self.cost, quota_manager=self.quota,
         )
+        self._prepare_execution_health()
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-contradictory-start",
             estimated_cost=1.0, paid_approved_providers={"image"},
@@ -554,7 +626,7 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_routed_request_retains_reservations_after_ambiguous_adapter_error(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
@@ -562,6 +634,7 @@ class ProviderServiceTests(unittest.TestCase):
         )
         def adapter(**kwargs):
             raise TimeoutError("secret endpoint details")
+        self._prepare_execution_health()
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-unknown",
             estimated_cost=1.0, paid_approved_providers={"image"},
@@ -575,7 +648,7 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_routed_request_keeps_reservations_on_invalid_cost_report(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
@@ -583,6 +656,7 @@ class ProviderServiceTests(unittest.TestCase):
         )
         output_path = self.root / "cost-report.png"
         output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        self._prepare_execution_health()
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-invalid-cost",
             estimated_cost=1.0, paid_approved_providers={"image"},
@@ -598,7 +672,7 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_routed_request_rejects_invalid_output_but_accounts_for_started_call(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
@@ -606,6 +680,7 @@ class ProviderServiceTests(unittest.TestCase):
         )
         output_path = self.root / "not-image.png"
         output_path.write_text("not an image", encoding="utf-8")
+        self._prepare_execution_health()
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-bad-output",
             estimated_cost=0.0, adapter=lambda **kwargs: {
