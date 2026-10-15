@@ -1,6 +1,6 @@
 # Task #25 — A–P Verification Matrix
 
-**Overall status: IN PROGRESS.** PR #1 was merged before Task #25 was complete. Follow-up hardening is isolated in draft PR #7; do not merge it without explicit user approval.
+**Overall status: IN PROGRESS.** PR #1 and follow-up PR #7 are already merged, but Task #25 is not complete. The current metrics/concurrency slice is in draft PR #46; do not merge it without explicit user approval.
 
 The exact canonical feature names, original baseline markers and item-by-item evidence are maintained in the [canonical 138-item verification ledger](TASK25_CANONICAL_138_ITEM_LEDGER.md). This summary preserves the original A–P headings and ranges; it does not replace the detailed ledger.
 
@@ -20,9 +20,9 @@ GitHub Actions code-verification run [#38434905299](https://github.com/attaehmad
 | H / 57–64 | Cost, Free Credits and Quotas | PARTIAL | Budgets, approval gates, quotas, credit snapshots, reconciliation and a generic balance probe are tested; provider-specific balance semantics and live credit-first routing remain open. |
 | I / 65–72 | Security, Privacy and Governance | PARTIAL | Redaction, environment-only credentials, HTTPS allowlists and safe probes exist; least-privilege roles, sensitive-data enforcement, retention rules and complete audit logs remain open. |
 | J / 73–80 | Production Orchestration | PARTIAL | Request IDs/idempotency and cross-process manager safety exist; queue/backpressure, async jobs, webhook verification, cancellation and Generation State Manager integration remain open. |
-| K / 81–88 | Quality, Performance and Observability | PARTIAL | Health latency/history and safe status metadata exist; production metrics, quality scoring, benchmarks, tracing, alerts and dashboards remain open. |
+| K / 81–88 | Quality, Performance and Observability | PARTIAL | Latency-aware routing plus persistent success/error-rate and latency summaries are tested; production quality scoring, benchmarks, distributed trace export, alerts and dashboards remain open. |
 | L / 89–96 | Configuration, Compatibility and Change Control | PARTIAL | Schema validation, safe config checks and catalog restore exist; version migration, hot reload, feature flags and complete backup/rollback verification remain open. |
-| M / 97–110 | Testing, Audit and Release Readiness | PARTIAL | 303 tests pass on Windows and Ubuntu; full 138-item coverage, all-modality end-to-end tests, complete failure injection, secret scanning and release PASS remain open. |
+| M / 97–110 | Testing, Audit and Release Readiness | PARTIAL | 350 tests pass on Windows and Ubuntu; full 138-item coverage, all-modality end-to-end tests, complete failure injection, secret scanning and release PASS remain open. |
 | N / 111–118 | High-Advanced Routing Intelligence | PARTIAL | Cost/health/capability routing foundations exist; confidence-aware, adaptive, region-aware and A/B routing with approval gates remain open. |
 | O / 119–128 | Enterprise and Large-Production Resiliency | OPEN/PARTIAL | Some quotas, health and restore primitives exist; tenant isolation, fair scheduling, regional outage/degraded mode, capacity tests, SLOs and incident runbooks are not complete. |
 | P / 129–138 | Future-Ready Extensibility | PARTIAL | Capability contracts and compatibility facades exist; plugin lifecycle, self-hosted providers, deprecation handling, policy simulation and admin controls remain open. |
