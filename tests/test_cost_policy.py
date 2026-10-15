@@ -137,6 +137,15 @@ class ProviderCostPolicyTests(unittest.TestCase):
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "PAID_APPROVAL_REQUIRED")
 
+    def test_paid_approval_boolean_cannot_bypass_missing_manager(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        result = policy.evaluate_request(
+            {"id": "paid", "enabled": True}, project_id="film",
+            estimated_cost=1.0, paid_usage_approved=True, request_id="legacy-boolean",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "PAID_APPROVAL_MANAGER_REQUIRED")
+
     def test_approval_cannot_be_reused_for_another_request_or_provider(self):
         pending = self.approvals.request_approval(
             project_id="documentary", provider_id="paid", request_id="bound-job",
