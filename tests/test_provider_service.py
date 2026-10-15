@@ -429,7 +429,7 @@ class ProviderServiceTests(unittest.TestCase):
                 "unit": "USD", "source": "official-account-api",
             },
         )
-        router = ProviderRoutingManager(self.connections, credit_manager=credits)
+        router = ProviderRoutingManager(self.connections, health_manager=self.routing_health, credit_manager=credits)
         service = ProviderService(
             self.connections, routing_manager=router,
             health_manager=self.health, credit_manager=credits,
@@ -480,7 +480,7 @@ class ProviderServiceTests(unittest.TestCase):
     def test_execute_propagates_trace_id_and_records_safe_metrics(self):
         metrics = ProviderMetricsManager(self.root / "execution-metrics.json")
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
@@ -512,7 +512,7 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_generated_trace_ids_are_unique_and_reach_compatible_adapters(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
@@ -547,7 +547,7 @@ class ProviderServiceTests(unittest.TestCase):
             def record_request(self, **kwargs):
                 raise OSError("private metrics storage path")
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
@@ -580,7 +580,7 @@ class ProviderServiceTests(unittest.TestCase):
             holder = pool.submit(limiter.run, "image", occupy)
             self.assertTrue(started.wait(1))
             router = ProviderRoutingManager(
-                self.connections, cost_policy=self.cost, quota_manager=self.quota
+                self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
             )
             service = ProviderService(
                 self.connections, routing_manager=router, health_manager=self.health,
@@ -604,7 +604,7 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
@@ -624,7 +624,7 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_failure_uses_supported_retry_metadata_and_requires_idempotency(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
@@ -659,7 +659,7 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_routed_request_rejects_contradictory_not_started_result(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router,
@@ -683,7 +683,7 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_routed_request_retains_reservations_after_ambiguous_adapter_error(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
@@ -704,7 +704,7 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_routed_request_keeps_reservations_on_invalid_cost_report(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
@@ -727,7 +727,7 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_execute_routed_request_rejects_invalid_output_but_accounts_for_started_call(self):
         router = ProviderRoutingManager(
-            self.connections, cost_policy=self.cost, quota_manager=self.quota
+            self.connections, health_manager=self.routing_health, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
             self.connections, routing_manager=router, health_manager=self.health,
