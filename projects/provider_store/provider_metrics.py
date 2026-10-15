@@ -162,7 +162,7 @@ class ProviderMetricsManager:
                 "event_id": event_id,
                 "provider_id": provider_id,
                 "success": success,
-                "latency_ms": float(latency_ms),
+                "latency_ms": None if latency_ms is None else float(latency_ms),
                 "queue_wait_ms": float(queue_wait_ms),
                 "timed_out": timed_out,
                 "request_id": request_id,
