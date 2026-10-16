@@ -8,6 +8,7 @@ from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.provider_feature_flags import ProviderFeatureFlagManager
 from projects.provider_store.provider_incident_manager import ProviderIncidentManager
 from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
+from projects.provider_store.provider_ab_manager import ProviderABExperimentManager
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
@@ -36,6 +37,7 @@ class ProviderServiceTests(unittest.TestCase):
                 "id": "image", "name": "Image", "category": "image",
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
                 "zero_cost_allowed": True,
+                "supported_models": [{"id": "model-a", "versions": ["1"]}, {"id": "model-b", "versions": ["1"]}],
             }]
         }), encoding="utf-8")
         self.state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
@@ -61,6 +63,76 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_ab_experiment_routes_only_to_assigned_free_provider_model(self):
+        experiments = ProviderABExperimentManager(self.root / "ab-experiments.json")
+        created = experiments.create_experiment(
+            experiment_id="free-ab", project_id="film", modality="image",
+            arms=[
+                {"arm_id": "A", "provider_id": "image", "model_id": "model-a", "estimated_cost": 0.0},
+                {"arm_id": "B", "provider_id": "image", "model_id": "model-b", "estimated_cost": 0.0},
+            ],
+        )
+        self.assertTrue(created["saved"])
+        service = ProviderService(
+            self.connections, routing_manager=ProviderRoutingManager(
+                self.connections, cost_policy=self.cost, quota_manager=self.quota
+            ),
+            health_manager=self.health, retry_policy=self.retry,
+            output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
+            ab_experiment_manager=experiments,
+        )
+        seen = {}
+        def adapter(**kwargs):
+            seen.update(kwargs)
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred",
+            }
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="ab-free-1",
+            estimated_cost=0.0, adapter=adapter, modality="image",
+            experiment_id="free-ab",
+        )
+        self.assertTrue(result["executed"])
+        self.assertEqual(result["provider"], "image")
+        self.assertIn(seen["model_id"], {"model-a", "model-b"})
+        self.assertEqual(result["ab_experiment"]["outcome"]["status"], "OUTCOME_RECORDED")
+        summary = experiments.summary(experiment_id="free-ab", project_id="film")
+        self.assertEqual(sum(x["outcome_count"] for x in summary["results"]), 1)
+
+    def test_ab_experiment_service_blocks_paid_arm_without_real_budget_reservation(self):
+        experiments = ProviderABExperimentManager(self.root / "ab-paid.json")
+        created = experiments.create_experiment(
+            experiment_id="paid-ab", project_id="film", modality="image",
+            arms=[
+                {"arm_id": "A", "provider_id": "image", "model_id": "model-a", "estimated_cost": 0.5},
+                {"arm_id": "B", "provider_id": "image", "model_id": "model-b", "estimated_cost": 0.5},
+            ],
+            paid_usage_approved=True, approval_reference="approval-123",
+            experiment_budget_cap=2.0, project_budget_cap=10.0,
+            verify_paid_approval=lambda **kwargs: {
+                "approved": True, "project_id": "film", "approved_budget_cap": 2.0,
+            },
+        )
+        self.assertTrue(created["saved"])
+        service = ProviderService(
+            self.connections, routing_manager=ProviderRoutingManager(
+                self.connections, cost_policy=self.cost, quota_manager=self.quota
+            ),
+            health_manager=self.health, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota,
+            ab_experiment_manager=experiments,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="ab-paid-1",
+            estimated_cost=0.5, adapter=lambda **kwargs: called.append(kwargs) or {"started": True, "success": True},
+            modality="image", experiment_id="paid-ab",
+        )
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["status"], "PAID_ARM_BLOCKED_NO_RESERVATION")
+        self.assertEqual(called, [])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
