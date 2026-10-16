@@ -23,7 +23,7 @@ class BudgetAlertManagerTests(unittest.TestCase):
             project_id="film", spend=4.0, budget=10.0, request_id="job-1"
         )
         self.assertEqual(first["status"], "NO_BUDGET_ALERT")
-        self.assertEqual([x["threshold"] for x in first["alerts"]], [0.5])
+        self.assertEqual(first["alerts"], [])
         second = self.manager.record(
             project_id="film", spend=8.5, budget=10.0, request_id="job-2"
         )
