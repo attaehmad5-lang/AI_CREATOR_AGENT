@@ -300,10 +300,18 @@ class ProviderService:
         now: float | None = None,
     ) -> dict[str, Any]:
         """Verify a callback before application code acts on it; never expose secrets."""
-        if not callable(getattr(verifier, "verify", None)):
+        try:
+            verify = getattr(verifier, "verify", None)
+        except Exception as exc:
+            return {
+                "status": "WEBHOOK_VERIFIER_LOOKUP_FAILED",
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        if not callable(verify):
             return {"status": "WEBHOOK_VERIFIER_UNAVAILABLE", "verified": False}
         try:
-            result = verifier.verify(
+            result = verify(
                 body,
                 signature_header=signature_header,
                 timestamp_header=timestamp_header,
