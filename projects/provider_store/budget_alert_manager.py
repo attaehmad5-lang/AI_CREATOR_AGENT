@@ -161,6 +161,50 @@ class BudgetAlertManager:
             events.sort(key=lambda item: (float(item.get("threshold", 0)), item.get("created_at", "")))
             return {"status": "PENDING_ALERTS", "alerts": events[:limit]}
 
+    def dispatch_pending(self, sender: Any, *, limit: int = 20) -> dict[str, Any]:
+        """Attempt delivery through an injected notifier; failures remain retryable."""
+        if not callable(sender):
+            return {"status": "INVALID_DELIVERY_CALLBACK", "attempted": 0, "delivered": 0, "failed": 0}
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            return {"status": "INVALID_LIMIT", "attempted": 0, "delivered": 0, "failed": 0}
+        pending = self.pending_alerts(limit=limit)
+        outcomes = []
+        for alert in pending.get("alerts", []):
+            try:
+                response = sender(dict(alert))
+                delivered = response is True or (
+                    isinstance(response, dict) and response.get("delivered") is True
+                )
+                failure_code = None if delivered else "DELIVERY_CALLBACK_REJECTED"
+            except Exception:
+                delivered = False
+                failure_code = "DELIVERY_CALLBACK_FAILED"
+            if delivered:
+                result = self.mark_delivered(alert["event_id"])
+                outcomes.append({
+                    "event_id": alert["event_id"],
+                    "status": result.get("status", "DELIVERY_STATUS_UNKNOWN"),
+                })
+                continue
+            now = self.clock().astimezone(timezone.utc).isoformat()
+            with self._transaction():
+                event = self.data["events"].get(alert["event_id"])
+                if isinstance(event, dict) and event.get("status") == "PENDING":
+                    event["delivery_attempts"] = min(int(event.get("delivery_attempts", 0)) + 1, 2**31 - 1)
+                    event["last_delivery_attempt_at"] = now
+                    event["last_delivery_error_code"] = failure_code
+                    self._save()
+            outcomes.append({"event_id": alert["event_id"], "status": failure_code})
+        delivered_count = sum(item["status"] in {"ALERT_DELIVERED", "ALREADY_DELIVERED"} for item in outcomes)
+        failed_count = len(outcomes) - delivered_count
+        return {
+            "status": "DELIVERY_ATTEMPTS_COMPLETED",
+            "attempted": len(outcomes),
+            "delivered": delivered_count,
+            "failed": failed_count,
+            "results": outcomes,
+        }
+
     def mark_delivered(self, event_id: str) -> dict[str, Any]:
         if not isinstance(event_id, str) or not event_id.strip():
             return {"status": "INVALID_EVENT_ID", "saved": False}

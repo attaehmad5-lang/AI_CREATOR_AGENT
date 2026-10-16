@@ -55,6 +55,42 @@ class BudgetAlertManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.mark_delivered(event_id)["status"], "ALREADY_DELIVERED")
         self.assertEqual(len(self.manager.pending_alerts()["alerts"]), 1)
 
+    def test_dispatch_pending_delivers_events_and_marks_them_idempotently(self):
+        self.manager.record(
+            project_id="film", spend=9.0, budget=10.0, request_id="job-dispatch"
+        )
+        seen = []
+        result = self.manager.dispatch_pending(
+            lambda alert: seen.append(alert["event_id"]) or True,
+            limit=10,
+        )
+        self.assertEqual(result["status"], "DELIVERY_ATTEMPTS_COMPLETED")
+        self.assertEqual(result["attempted"], 2)
+        self.assertEqual(result["delivered"], 2)
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(self.manager.pending_alerts()["alerts"], [])
+
+    def test_failed_delivery_remains_pending_and_can_be_retried_without_leaking_error(self):
+        self.manager.record(
+            project_id="film", spend=9.0, budget=10.0, request_id="job-retry"
+        )
+        failed = self.manager.dispatch_pending(
+            lambda alert: (_ for _ in ()).throw(RuntimeError("private webhook response")),
+            limit=1,
+        )
+        self.assertEqual(failed["failed"], 1)
+        pending = self.manager.pending_alerts(limit=1)["alerts"][0]
+        self.assertEqual(pending["delivery_attempts"], 1)
+        self.assertEqual(pending["last_delivery_error_code"], "DELIVERY_CALLBACK_FAILED")
+        self.assertNotIn("private webhook response", repr(pending))
+        retried = self.manager.dispatch_pending(lambda alert: {"delivered": True}, limit=10)
+        self.assertEqual(retried["delivered"], 2)
+        self.assertEqual(len(self.manager.pending_alerts()["alerts"]), 0)
+
+    def test_dispatch_rejects_invalid_callback_and_limit(self):
+        self.assertEqual(self.manager.dispatch_pending(None)["status"], "INVALID_DELIVERY_CALLBACK")
+        self.assertEqual(self.manager.dispatch_pending(lambda _: True, limit=0)["status"], "INVALID_LIMIT")
+
     def test_invalid_inputs_fail_closed(self):
         cases = [
             {"project_id": "", "spend": 1, "budget": 2, "request_id": "r"},
