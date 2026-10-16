@@ -56,6 +56,35 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         malformed.write_bytes((1000).to_bytes(4, "big") + b"ftyp" + b"tiny")
         self.assertEqual(self.validator.validate(malformed, modality="video")["status"], "MP4_BOX_SIZE_INVALID")
 
+    def test_mp4_movie_header_enforces_duration_limit(self):
+        def box(kind, body):
+            return (8 + len(body)).to_bytes(4, "big") + kind + body
+
+        ftyp = box(b"ftyp", b"isom0000")
+        mdat = box(b"mdat", b"frame")
+        def mp4_with_duration(duration_ticks):
+            mvhd = (
+                b"\x00\x00\x00\x00"
+                + b"\x00" * 8
+                + (1000).to_bytes(4, "big")
+                + duration_ticks.to_bytes(4, "big")
+            )
+            moov = box(b"moov", box(b"mvhd", mvhd))
+            return ftyp + moov + mdat
+
+        too_long = self.root / "too-long.mp4"
+        too_long.write_bytes(mp4_with_duration(31_000))
+        result = self.validator.validate(too_long, modality="video")
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "MEDIA_DURATION_EXCEEDED")
+        self.assertEqual(result["duration_seconds"], 31.0)
+
+        within_limit = self.root / "within-limit.mp4"
+        within_limit.write_bytes(mp4_with_duration(10_000))
+        result = self.validator.validate(within_limit, modality="video")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["duration_seconds"], 10.0)
+
     def test_webm_requires_ebml_header_and_segment(self):
         path = self.root / "sample.webm"
         path.write_bytes(b"\x1a\x45\xdf\xa3" + b"\x42\x86\x81\x01" + b"\x18\x53\x80\x67" + b"\x00")
