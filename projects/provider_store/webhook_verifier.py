@@ -46,15 +46,6 @@ class ProviderWebhookVerifier:
         self._seen: OrderedDict[str, float] = OrderedDict()
         self._lock = threading.Lock()
 
-    @staticmethod
-    def sign_for_testing(secret: str, body: bytes, timestamp: int) -> str:
-        """Generate a compatible signature for local tests and provider adapter development."""
-        if not isinstance(secret, str) or not isinstance(body, bytes) or not isinstance(timestamp, int):
-            raise ValueError("invalid signature inputs")
-        message = str(timestamp).encode("ascii") + b"." + body
-        digest = hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
-        return "sha256=" + digest
-
     def verify(
         self,
         body: bytes,
