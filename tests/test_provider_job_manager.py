@@ -52,6 +52,38 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(claimed["job"]["job_id"], "high")
         self.assertEqual(self.manager.claim_next(worker_id="worker-2")["status"], "CONCURRENCY_LIMIT")
 
+    def test_equal_priority_projects_are_served_round_robin(self):
+        manager = ProviderJobManager(
+            self.root / "fair-jobs.json", max_queue_size=10,
+            max_concurrent=1, clock=lambda: self.now[0],
+        )
+        for job_id, project in (
+            ("a-1", "alpha"), ("a-2", "alpha"),
+            ("b-1", "beta"), ("c-1", "gamma"),
+        ):
+            result = manager.submit(
+                job_id=job_id, project_id=project, provider_id="image",
+                payload_ref=f"payload:{job_id}", priority=50,
+            )
+            self.assertTrue(result["accepted"])
+        claimed_projects = []
+        for index in range(4):
+            claimed = manager.claim_next(worker_id=f"worker-{index}")
+            claimed_projects.append(claimed["job"]["project_id"])
+            manager.complete(
+                job_id=claimed["job"]["job_id"], worker_id=f"worker-{index}",
+                success=True, result_ref=f"asset:{index}",
+            )
+        self.assertEqual(claimed_projects, ["alpha", "beta", "gamma", "alpha"])
+        reloaded = ProviderJobManager(
+            self.root / "fair-jobs.json", max_queue_size=10,
+            max_concurrent=1, clock=lambda: self.now[0],
+        )
+        self.assertEqual(
+            reloaded.data["scheduler_state"]["last_project_by_priority"]["50"],
+            "alpha",
+        )
+
     def test_job_lifecycle_poll_and_result_reference(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
