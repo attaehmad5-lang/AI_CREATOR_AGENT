@@ -28,11 +28,16 @@ class FallbackManager:
 
             if getattr(provider, "requires_paid_approval", False) is True:
                 if not callable(self.paid_execution_handler):
-                    errors.append({
+                    # Do not silently route sensitive prompts to another provider when
+                    # the selected provider requires paid-use approval/policy handling.
+                    return {
+                        "status": "PAID_EXECUTION_HANDLER_REQUIRED",
                         "provider": provider_name,
-                        "error": "PAID_EXECUTION_HANDLER_REQUIRED",
-                    })
-                    continue
+                        "attempted_providers": errors + [{
+                            "provider": provider_name,
+                            "status": "PAID_EXECUTION_HANDLER_REQUIRED",
+                        }],
+                    }
                 try:
                     paid_result = self.paid_execution_handler(
                         provider_name=provider_name,
