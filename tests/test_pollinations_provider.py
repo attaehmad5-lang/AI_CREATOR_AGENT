@@ -215,6 +215,7 @@ class PollinationsProviderTests(unittest.TestCase):
         from projects.generation.providers.fallback_manager import FallbackManager
         from projects.generation.providers.provider_health import ProviderHealth
         from projects.generation.providers.provider_manager import ProviderManager
+        from projects.provider_store.execution_limiter import ProviderExecutionLimiter
 
         secret = "never-expose-this-key"
         provider = PollinationsProvider(
@@ -225,17 +226,20 @@ class PollinationsProviderTests(unittest.TestCase):
         manager = ProviderManager()
         manager.providers["Pollinations"] = provider
         health = ProviderHealth()
+        limiter = ProviderExecutionLimiter(max_concurrent=1)
         fallback = FallbackManager(
             manager,
             health,
             paid_execution_handler=lambda **kwargs: kwargs["provider"].generate_image(
                 kwargs["prompt"], kwargs["output_path"]
             ),
+            execution_limiter=limiter,
         )
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "nested" / "cinematic.png"
             result = fallback.generate_image(
-                ["Pollinations"], "cinematic documentary landscape", str(output)
+                ["Pollinations"], "cinematic documentary landscape", str(output),
+                request_id="pollinations-image-request",
             )
             self.assertEqual(result["status"], "COMPLETED")
             self.assertEqual(result["provider"], "Pollinations")
@@ -244,6 +248,7 @@ class PollinationsProviderTests(unittest.TestCase):
             self.assertEqual(health.get_status("Pollinations")["healthy"], True)
             self.assertNotIn(secret, repr(result))
             self.assertNotIn(secret, repr(health.get_status("Pollinations")))
+            self.assertEqual(limiter.summary()["active"], 0)
 
     def test_http_failure_from_real_adapter_uses_fallback_without_secret_leak(self):
         from projects.generation.providers.fallback_manager import FallbackManager
