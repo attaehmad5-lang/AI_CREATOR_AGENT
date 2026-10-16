@@ -34,6 +34,7 @@ class ProviderService:
         benchmark_manager: Any | None = None,
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
+        media_integrity_validator: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -56,6 +57,7 @@ class ProviderService:
             (benchmark_manager, "record", "benchmark_manager"),
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
+            (media_integrity_validator, "validate", "media_integrity_validator"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -79,6 +81,7 @@ class ProviderService:
         self.benchmark_manager = benchmark_manager
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
+        self.media_integrity_validator = media_integrity_validator
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -655,6 +658,7 @@ class ProviderService:
         if not self._valid_amount(latency_ms):
             latency_ms = (time.monotonic() - started_at) * 1000
         output_validation = None
+        media_integrity_result = None
         quality_result = None
         quality_error = None
         final_success = reported_success
@@ -665,6 +669,26 @@ class ProviderService:
                 output_validation = {"valid": False, "status": "OUTPUT_PATH_REQUIRED"}
             else:
                 output_validation = self.validate_output(final_path, modality=modality)
+            if (
+                isinstance(output_validation, dict)
+                and output_validation.get("valid") is True
+                and modality in {"audio", "video"}
+                and self.media_integrity_validator is not None
+            ):
+                try:
+                    media_integrity_result = self.media_integrity_validator.validate(
+                        final_path, modality=modality
+                    )
+                except Exception as exc:
+                    media_integrity_result = {
+                        "valid": False, "status": "MEDIA_INTEGRITY_CHECK_FAILED",
+                        "error_type": type(exc).__name__,
+                    }
+                if not isinstance(media_integrity_result, dict) or media_integrity_result.get("valid") is not True:
+                    output_validation = {
+                        "valid": False,
+                        "status": "MEDIA_INTEGRITY_VALIDATION_FAILED",
+                    }
             if not isinstance(output_validation, dict) or output_validation.get("valid") is not True:
                 final_success = False
                 output_error = "OUTPUT_VALIDATION_FAILED"
@@ -837,6 +861,7 @@ class ProviderService:
             "request_id": request_id,
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
+            "media_integrity": media_integrity_result,
             "quality": quality_result,
             "finalization": finalization,
             "metrics": metrics_result,

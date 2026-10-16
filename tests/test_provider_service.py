@@ -1216,6 +1216,46 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.assertEqual(calls, {"route": 0, "adapter": 0})
 
+    def test_invalid_media_container_blocks_audio_video_success(self):
+        outer = self
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                cost = outer.cost.reserve_usage(
+                    project_id=kwargs["project_id"], provider_id="image",
+                    estimated_cost=kwargs["estimated_cost"], request_id=kwargs["request_id"],
+                )
+                quota = outer.quota.reserve(provider_id="image", request_id=kwargs["request_id"])
+                if cost.get("status") != "RESERVED" or quota.get("status") != "RESERVED":
+                    return {"allowed": False, "status": "RESERVATION_FAILED"}
+                return {"allowed": True, "provider": "image", "billing_mode": "PAID_APPROVED"}
+
+        class OutputStub:
+            def validate_file(self, path, *, modality):
+                return {"valid": True, "status": "BASIC_OUTPUT_VALID"}
+
+        class MediaStub:
+            def validate(self, path, *, modality):
+                return {"valid": False, "status": "MEDIA_CONTAINER_INVALID"}
+
+        service = ProviderService(
+            self.connections, routing_manager=RoutingStub(),
+            output_validator=OutputStub(), media_integrity_validator=MediaStub(),
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="bad-media-job",
+            estimated_cost=1.0, modality="audio",
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": "fake.wav",
+                "latency_ms": 1.0,
+            },
+        )
+        self.assertEqual(result["status"], "OUTPUT_VALIDATION_FAILED")
+        self.assertEqual(result["media_integrity"]["status"], "MEDIA_CONTAINER_INVALID")
+        self.assertFalse(result["output"]["valid"])
+
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
         self.assertEqual(service.route_request(category="image", project_id="film")["status"], "ROUTING_MANAGER_UNAVAILABLE")
