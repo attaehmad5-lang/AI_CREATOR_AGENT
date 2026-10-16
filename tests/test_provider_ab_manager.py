@@ -12,6 +12,10 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.path = Path(self.tmp.name) / "experiments.json"
         self.manager = ProviderABExperimentManager(self.path)
+        self.approval_verifier = lambda **kwargs: {
+            "approved": True, "project_id": kwargs["project_id"],
+            "approved_budget_cap": kwargs["experiment_budget_cap"],
+        }
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -48,6 +52,7 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
             arms=self.arms(0.1, 0.2), paid_usage_approved=True,
             approval_reference="approval-ticket-123",
             experiment_budget_cap=2.0, project_budget_cap=5.0,
+            verify_paid_approval=self.approval_verifier,
         )
         self.assertTrue(approved["saved"])
 
@@ -56,6 +61,7 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
             arms=self.arms(0.1, 0.2), paid_usage_approved=True,
             approval_reference="approval-ticket-123",
             experiment_budget_cap=2.0, project_budget_cap=5.0,
+            verify_paid_approval=self.approval_verifier,
         )
         results = [
             self.manager.assign(experiment_id="exp-1", project_id="project-1", request_id=f"req-{i}")
@@ -69,6 +75,7 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
             arms=self.arms(0.1, 0.2), paid_usage_approved=True,
             approval_reference="approval-ticket-123",
             experiment_budget_cap=2.0, project_budget_cap=5.0,
+            verify_paid_approval=self.approval_verifier,
         )
         reservations = []
         def reserve(**kwargs):
@@ -82,6 +89,8 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
         self.assertEqual(len(reservations), 1)
         self.assertEqual(reservations[0]["approval_reference"], "approval-ticket-123")
         self.assertEqual(reservations[0]["request_id"], "ab:exp-1:req-paid")
+        self.assertIn(reservations[0]["provider_id"], {"provider-a", "provider-b"})
+        self.assertIn(reservations[0]["model_id"], {"model-a", "model-b"})
         duplicate = self.manager.assign(
             experiment_id="exp-1", project_id="project-1", request_id="req-paid",
             reserve_paid_usage=reserve,
@@ -94,6 +103,7 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
             arms=self.arms(0.1, 0.2), paid_usage_approved=True,
             approval_reference="approval-ticket-123",
             experiment_budget_cap=2.0, project_budget_cap=5.0,
+            verify_paid_approval=self.approval_verifier,
         )
         result = self.manager.assign(
             experiment_id="exp-1", project_id="project-1", request_id="req-paid",
@@ -108,6 +118,7 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
                   {"arm_id":"B","provider_id":"provider-b","model_id":"model-b","estimated_cost":0.5}],
             paid_usage_approved=True, approval_reference="approved-1",
             experiment_budget_cap=0.5, project_budget_cap=3.0,
+            verify_paid_approval=self.approval_verifier,
         )
         reserve = lambda **kwargs: {"saved": True}
         assigned = self.manager.assign(
