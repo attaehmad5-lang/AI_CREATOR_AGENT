@@ -147,8 +147,8 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 81 | 🔴 | Latency-Aware Routing | PARTIAL | Health latency data exists; verified latency-aware routing policy coverage is incomplete. |
 | 82 | 🔴 | Provider Success/Error-Rate Metrics | PARTIAL | `provider_metrics_manager.py` records success/failure/timeout counters and success rate from provider executions; metrics history is bounded and does not store payloads. Export to production telemetry remains open. |
 | 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | PARTIAL | `ProviderMetricsManager` aggregates bounded latency percentiles, queue-wait averages, timeout counts, and sample throughput; `ProviderService` records execution latency and queue wait. External telemetry export and load-tested throughput metrics remain open. |
-| 84 | 🔴 | Output Quality Validation/Score Integration | OPEN | Output quality scoring is not integrated with routing/execution. |
-| 85 | 🔴 | Task-Specific Quality Thresholds | OPEN | Task-specific quality threshold policy is not implemented. |
+| 84 | 🔴 | Output Quality Validation/Score Integration | PARTIAL | `provider_quality_policy.py` adds an injected output scorer and `ProviderService` applies its result after file validation; below-threshold or invalid scores prevent an output from being reported successful. A production semantic scorer and modality-specific QA remain open. |
+| 85 | 🔴 | Task-Specific Quality Thresholds | PARTIAL | `ProviderOutputQualityPolicy` supports per-category and category/modality thresholds with bounded [0,1] scores and fail-closed invalid scorer handling; task thresholds and scorer calibration still require production evaluation. |
 | 86 | 🔴 | Provider/Model Benchmarking | OPEN | Repeatable provider/model benchmark suite is not implemented. |
 | 87 | 🔴 | Structured Logs, Metrics and Distributed Traces | PARTIAL | Some structured status metadata exists; end-to-end metrics/tracing is incomplete. |
 | 88 | 🔴 | Alerts, Dashboards and Incident Diagnostics | OPEN | Alerting/dashboard/incident tooling is not implemented end-to-end. |
