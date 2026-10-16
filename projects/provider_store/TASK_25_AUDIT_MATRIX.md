@@ -59,6 +59,14 @@ These dispositions describe repository/test evidence only; no item is called liv
 | 23 | Transcription, Translation and Dubbing | Catalog metadata and contract foundations only | OPEN | Implement audio input handling, transcription/translation/dubbing adapters, language metadata, and live end-to-end tests. |
 | 24 | Future Modality Support and Contract Tests | Capability-aware contract v2 rejects unknown capability IDs and validates declared callable methods; regression coverage exists | PARTIAL | Contract surface is tested, but a new modality still needs an adapter implementation and end-to-end evidence before it is supported. |
 
+| 25 | Primary Provider Selection | `routing_manager.py`, `tests/test_routing_manager.py` cover deterministic priority selection | VERIFIED | Keep verified connection/capability requirements enabled for execution; validate against real generation paths. |
+| 26 | Fallback Provider Selection | `routing_manager.py`, `tests/test_routing_manager.py` cover fallback selection and exclusion of the failed provider | VERIFIED | Real provider failure injection and end-to-end fallback remain open. |
+| 27 | PRIMARY_THEN_FALLBACK Strategy | `routing_manager.py`, `tests/test_routing_manager.py` cover default primary-then-fallback strategy | VERIFIED | Verify strategy behavior with live provider outcomes and reservation finalization. |
+| 28 | PRIMARY_ONLY Strategy Testing | `routing_manager.py`, `tests/test_routing_manager.py` assert PRIMARY_ONLY does not select a fallback | VERIFIED | Preserve regression coverage when new routing policies are added. |
+| 29 | Automatic Fallback On/Off Testing | `routing_manager.py`, `tests/test_routing_manager.py` cover fallback disabled and reject invalid flags | VERIFIED | Confirm user/project configuration propagates the setting through every execution entry point. |
+| 30 | Capability-Based Routing | Capability filtering and contract-v2 metadata validation are present in `connection_manager.py` and routing tests | PARTIAL | Complete routing truth for every fine-grained capability; catalog declarations alone are not proof that adapters work. |
+| 31 | Model/Version-Aware Routing | Router/catalog support declared model identifiers and versions; tests cover filtering and fail-closed missing metadata | PARTIAL | Populate and verify live model catalogs for enabled providers and keep model compatibility data current. |
+| 32 | User/Project Policy | Project IDs and paid-approval/budget gates exist in `cost_policy.py`, `routing_manager.py`, and `provider_service.py` | PARTIAL | Complete user/project authorization, isolation, and enforcement across every generation path. |
 ## Non-negotiable completion gates
 
 1. Preserve the exact canonical 138-item A–P list; do not infer individual item names from group headings.
