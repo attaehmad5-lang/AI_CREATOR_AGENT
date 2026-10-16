@@ -211,6 +211,47 @@ class ProviderService:
             "health": health,
         }
 
+    def verify_webhook_callback(
+        self,
+        verifier: Any,
+        body: bytes,
+        *,
+        signature_header: str,
+        timestamp_header: str,
+        event_id: str,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Verify a callback before application code acts on it; never expose secrets."""
+        if not callable(getattr(verifier, "verify", None)):
+            return {"status": "WEBHOOK_VERIFIER_UNAVAILABLE", "verified": False}
+        try:
+            result = verifier.verify(
+                body,
+                signature_header=signature_header,
+                timestamp_header=timestamp_header,
+                event_id=event_id,
+                now=now,
+            )
+        except Exception as exc:
+            return {
+                "status": "WEBHOOK_VERIFICATION_FAILED",
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict) or not isinstance(result.get("valid"), bool):
+            return {"status": "WEBHOOK_VERIFIER_INVALID_RESULT", "verified": False}
+        status = result.get("status")
+        if not isinstance(status, str) or not re.fullmatch(r"[A-Z0-9_]{1,80}", status):
+            status = "WEBHOOK_VERIFIER_INVALID_RESULT"
+        response = {"status": status, "verified": result["valid"]}
+        if result["valid"] is True:
+            safe_event_id = result.get("event_id")
+            if isinstance(safe_event_id, str) and re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", safe_event_id):
+                response["event_id"] = safe_event_id
+            else:
+                return {"status": "WEBHOOK_VERIFIER_INVALID_RESULT", "verified": False}
+        return response
+
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
