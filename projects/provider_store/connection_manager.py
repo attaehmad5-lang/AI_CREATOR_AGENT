@@ -786,6 +786,57 @@ class ConnectionManager:
                 "overwritten": existing is not None,
             }
 
+    def onboard_provider(self, provider: dict[str, Any]) -> dict[str, Any]:
+        """Register a provider only after metadata validation; keep it disabled until separately verified."""
+        if not isinstance(provider, dict):
+            return {"status": "INVALID_PROVIDER", "saved": False}
+        candidate = dict(provider)
+        if self._contains_credential_value_field(candidate):
+            return {"status": "SENSITIVE_METADATA_REJECTED", "saved": False}
+        required_strings = ("id", "name", "category", "auth_type", "connection_type")
+        if any(not isinstance(candidate.get(key), str) or not candidate[key].strip() for key in required_strings):
+            return {"status": "INVALID_PROVIDER", "saved": False}
+        if not isinstance(candidate.get("subscription_required"), bool):
+            return {"status": "INVALID_PROVIDER_POLICY", "saved": False}
+        capabilities = candidate.get("capabilities")
+        if not isinstance(capabilities, list) or not capabilities:
+            return {"status": "CAPABILITIES_REQUIRED", "saved": False}
+        connection_type = candidate["connection_type"].strip().upper()
+        if connection_type == "API":
+            official_docs = candidate.get("official_api_url")
+            if not isinstance(official_docs, str) or not official_docs.strip():
+                return {"status": "OFFICIAL_DOCUMENTATION_REQUIRED", "saved": False}
+            allowed_hosts = candidate.get("allowed_hosts")
+            if not isinstance(allowed_hosts, list) or not allowed_hosts:
+                return {"status": "HOST_ALLOWLIST_REQUIRED", "saved": False}
+        # Registration is not approval to execute: all new providers begin disabled.
+        candidate["enabled"] = False
+        if "status" not in candidate:
+            candidate["status"] = "READY"
+        with self._catalog_transaction():
+            providers = self._list_providers_unlocked()
+            if any(item.get("id") == candidate.get("id") for item in providers):
+                return {"status": "ALREADY_EXISTS", "provider": candidate.get("id"), "saved": False}
+            new_catalog = dict(self.catalog)
+            new_catalog["providers"] = [*providers, candidate]
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation.get("valid"):
+                return {
+                    "status": "INVALID_PROVIDER_METADATA",
+                    "provider": candidate.get("id"),
+                    "saved": False,
+                    "error_count": len(validation.get("errors", [])),
+                }
+            self._atomic_write_json(self.catalog_path, new_catalog)
+            self.catalog = new_catalog
+        return {
+            "status": "ONBOARDING_READY",
+            "provider": candidate["id"],
+            "saved": True,
+            "enabled": False,
+            "next_step": "VERIFY_ADAPTER_CONTRACT_AND_AUTHORIZED_CONNECTIVITY",
+        }
+
     @staticmethod
     def _sanitize_public_data(value: Any) -> Any:
         """Recursively remove credential-like values from data returned to callers."""
