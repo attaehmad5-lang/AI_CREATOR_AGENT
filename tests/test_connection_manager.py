@@ -848,6 +848,12 @@ class ConnectionManagerTests(unittest.TestCase):
         secret = dict(base, id="secret_onboard", official_api_url="https://docs.example.com/api", api_key="must-not-store")
         self.assertEqual(self.manager.onboard_provider(secret)["status"], "SENSITIVE_METADATA_REJECTED")
         self.assertFalse(self.manager.provider_exists("secret_onboard"))
+        unsupported = dict(
+            base, id="unknown_modality", category="unknown_modality",
+            official_api_url="https://docs.example.com/api",
+        )
+        self.assertEqual(self.manager.onboard_provider(unsupported)["status"], "UNSUPPORTED_MODALITY")
+        self.assertFalse(self.manager.provider_exists("unknown_modality"))
 
     def test_onboard_provider_rejects_duplicate_provider_ids(self):
         original_name = self.manager.get_provider("token_image")["name"]
