@@ -2,7 +2,7 @@
 
 **Current follow-up branch:** `task-25-production-hardening`  
 **Merged foundation PRs:** #1 and #7. **Current draft PR:** #69 (not merged)  
-**Audit status:** In progress — do not mark Task #25 complete yet.
+**Audit status:** In progress — **24 VERIFIED, 77 PARTIAL, 37 OPEN** across the canonical 138 items. Do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
