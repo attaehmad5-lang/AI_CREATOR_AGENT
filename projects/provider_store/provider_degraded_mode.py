@@ -131,7 +131,8 @@ class ProviderDegradedModeManager:
         providers = [] if allowed_providers is None else allowed_providers
         if (
             not self._valid_id(project_id) or not self._valid_id(service_id)
-            or mode not in _MODES or not isinstance(reason_code, str)
+            or not isinstance(mode, str) or mode not in _MODES
+            or not isinstance(reason_code, str)
             or not _REASON_RE.fullmatch(reason_code)
             or not isinstance(providers, list)
             or any(not self._valid_id(provider) for provider in providers)
@@ -165,7 +166,7 @@ class ProviderDegradedModeManager:
     ) -> dict[str, Any]:
         if (
             not self._valid_id(project_id) or not self._valid_id(service_id)
-            or operation not in _OPERATIONS
+            or not isinstance(operation, str) or operation not in _OPERATIONS
             or (provider_id is not None and not self._valid_id(provider_id))
         ):
             return {"allowed": False, "status": "INVALID_DEGRADED_MODE_REQUEST"}
