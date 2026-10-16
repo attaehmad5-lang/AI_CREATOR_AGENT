@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import re
 import threading
 import time
@@ -74,7 +75,12 @@ class ProviderWebhookVerifier:
         if not isinstance(event_id, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", event_id):
             return {"valid": False, "status": "INVALID_EVENT_ID"}
         current = time.time() if now is None else now
-        if not isinstance(current, (int, float)) or isinstance(current, bool) or current < 0:
+        if (
+            not isinstance(current, (int, float))
+            or isinstance(current, bool)
+            or not math.isfinite(current)
+            or current < 0
+        ):
             return {"valid": False, "status": "INVALID_CLOCK"}
         timestamp = int(timestamp_header)
         if abs(current - timestamp) > self.max_age_seconds:
