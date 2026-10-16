@@ -26,7 +26,7 @@ class ProviderBenchmarkManagerTests(unittest.TestCase):
         self.assertEqual(a["success_rate"], 0.5)
         self.assertEqual(a["p50_latency_ms"], 100)
         self.assertEqual(a["p95_latency_ms"], 300)
-        self.assertEqual(a["avg_cost_per_attempt"], 0.15)
+        self.assertAlmostEqual(a["avg_cost_per_attempt"], 0.15)
         self.assertEqual(a["avg_cost_per_success"], 0.2)
         self.assertEqual(a["avg_quality_score"], 0.9)
         self.assertEqual(result["results"][0]["provider_id"], "provider-b")
