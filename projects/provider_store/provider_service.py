@@ -533,15 +533,45 @@ class ProviderService:
                 or self.ab_experiment_manager is None
             ):
                 return {"status": "AB_EXPERIMENT_MANAGER_UNAVAILABLE", "executed": False}
+            def reserve_ab_paid_usage(
+                *, project_id: str, provider_id: str, model_id: str,
+                request_id: str, estimated_cost: float, approval_reference: str,
+            ) -> dict[str, Any]:
+                if self.cost_policy is None or self.authorization_manager is None:
+                    return {"saved": False, "status": "PAID_AB_MANAGERS_REQUIRED"}
+                try:
+                    billing_authorization = self.authorization_manager.authorize(
+                        principal_id, "billing.approve"
+                    )
+                except Exception:
+                    return {"saved": False, "status": "PAID_APPROVAL_AUTHORIZATION_FAILED"}
+                if not isinstance(billing_authorization, dict) or billing_authorization.get("allowed") is not True:
+                    return {"saved": False, "status": "BILLING_APPROVAL_REQUIRED"}
+                try:
+                    reservation = self.cost_policy.reserve_usage(
+                        project_id=project_id, provider_id=provider_id,
+                        estimated_cost=estimated_cost, request_id=request_id,
+                    )
+                except Exception:
+                    return {"saved": False, "status": "PAID_BUDGET_RESERVATION_FAILED"}
+                # CostPolicy only returns ALREADY_RESERVED when provider and amount
+                # match the existing idempotency key, so this is safe recovery.
+                if isinstance(reservation, dict) and reservation.get("status") in {"RESERVED", "ALREADY_RESERVED"}:
+                    return {"saved": True, "status": reservation["status"]}
+                return {"saved": False, "status": reservation.get("status", "PAID_BUDGET_RESERVATION_FAILED") if isinstance(reservation, dict) else "INVALID_BUDGET_RESERVATION"}
+
             try:
                 assignment = self.ab_experiment_manager.assign(
-                    experiment_id=experiment_id, project_id=project_id, request_id=request_id
+                    experiment_id=experiment_id, project_id=project_id, request_id=request_id,
+                    reserve_paid_usage=reserve_ab_paid_usage,
                 )
             except Exception as exc:
                 return {
                     "status": "AB_ASSIGNMENT_FAILED", "executed": False,
                     "error_type": type(exc).__name__,
                 }
+            if isinstance(assignment, dict) and assignment.get("status") == "ALREADY_ASSIGNED":
+                return {"status": "AB_REQUEST_ALREADY_ASSIGNED", "executed": False, "ab_experiment_id": experiment_id}
             if not isinstance(assignment, dict) or assignment.get("assigned") is not True:
                 return {
                     "status": assignment.get("status", "INVALID_AB_ASSIGNMENT") if isinstance(assignment, dict) else "INVALID_AB_ASSIGNMENT",
@@ -588,6 +618,12 @@ class ProviderService:
                 return {"status": "AB_ASSIGNED_PROVIDER_EXCLUDED", "executed": False}
             route_options["excluded_providers"] = set(excluded) | (available_ids - {assigned_provider})
             route_options["model"] = assigned_model
+            if assigned_cost > 0:
+                approved = route_options.get("paid_approved_providers", frozenset())
+                if not isinstance(approved, (set, frozenset)):
+                    return {"status": "INVALID_PAID_APPROVAL_SET", "executed": False}
+                route_options["paid_approved_providers"] = set(approved) | {assigned_provider}
+                route_options["allow_existing_cost_reservation"] = True
 
         route = self.route_request(
             category=category,
@@ -598,7 +634,28 @@ class ProviderService:
             **route_options,
         )
         if not isinstance(route, dict) or route.get("allowed") is not True:
-            return {"status": "ROUTING_REJECTED", "executed": False, "route": route}
+            release = None
+            if (
+                ab_assignment is not None
+                and ab_assignment.get("estimated_cost", 0) > 0
+                and isinstance(route, dict)
+                and route.get("status") not in {"REQUEST_ALREADY_RESERVED", "RESERVATION_CLEANUP_FAILED"}
+            ):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=ab_assignment["provider_id"], request_id=request_id
+                )
+            return {"status": "ROUTING_REJECTED", "executed": False, "route": route, "release": release}
+        if ab_assignment is not None:
+            expected_billing = "PAID_APPROVED" if ab_assignment.get("estimated_cost", 0) > 0 else "ZERO_COST"
+            if route.get("billing_mode") != expected_billing:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=route.get("provider", ab_assignment["provider_id"]),
+                    request_id=request_id,
+                )
+                return {
+                    "status": "AB_BILLING_MODE_MISMATCH", "executed": False,
+                    "release": release, "route": route,
+                }
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
