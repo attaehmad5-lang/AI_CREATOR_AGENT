@@ -77,6 +77,8 @@ class ProviderServiceTests(unittest.TestCase):
             health_manager=self.health, output_validator=self.validator,
             cost_policy=self.cost, quota_manager=self.quota, slo_manager=slo,
         )
+        artifact = self.root / "slo-output.png"
+        artifact.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n")
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="slo-request-1",
             estimated_cost=0.0,
@@ -84,7 +86,8 @@ class ProviderServiceTests(unittest.TestCase):
                 "started": True, "success": True, "actual_cost": 0.0,
                 "charge_outcome": "not_incurred",
             },
-            modality="image", slo_id="image-slo", slo_service_id="image",
+            modality="image", output_path=artifact,
+            slo_id="image-slo", slo_service_id="image",
         )
         self.assertTrue(result["executed"])
         self.assertEqual(result["slo"]["status"], "SLO_OBSERVATION_RECORDED")
