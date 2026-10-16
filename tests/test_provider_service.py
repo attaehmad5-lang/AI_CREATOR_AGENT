@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
@@ -1028,6 +1029,47 @@ class ProviderServiceTests(unittest.TestCase):
             service.poll_job(job_id="job-1", principal_id="viewer-job-user")["job"]["status"],
             "SUCCEEDED",
         )
+
+    def test_execution_records_latency_queue_wait_and_failure_metrics(self):
+        outer = self
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                cost = outer.cost.reserve_usage(
+                    project_id=kwargs["project_id"],
+                    provider_id="image",
+                    estimated_cost=kwargs["estimated_cost"],
+                    request_id=kwargs["request_id"],
+                )
+                quota = outer.quota.reserve(
+                    provider_id="image", request_id=kwargs["request_id"]
+                )
+                if cost.get("status") != "RESERVED" or quota.get("status") != "RESERVED":
+                    return {"allowed": False, "status": "RESERVATION_FAILED"}
+                return {"allowed": True, "provider": "image", "billing_mode": "PAID_APPROVED"}
+
+        metrics = ProviderMetricsManager()
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            metrics_manager=metrics,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="metrics-job",
+            estimated_cost=2.0, modality="image",
+            adapter=lambda **kwargs: {
+                "started": True, "success": False, "actual_cost": 1.0,
+                "charge_outcome": "incurred", "status_code": 503,
+                "latency_ms": 25.0, "queue_wait_ms": 12.0,
+            },
+        )
+        self.assertEqual(result["metrics"]["status"], "METRIC_RECORDED")
+        snapshot = metrics.snapshot(provider_id="image")["metrics"]
+        self.assertEqual(snapshot["failure_count"], 1)
+        self.assertEqual(snapshot["avg_latency_ms"], 25.0)
+        self.assertEqual(snapshot["avg_queue_wait_ms"], 12.0)
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
