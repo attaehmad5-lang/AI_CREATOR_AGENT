@@ -202,15 +202,18 @@ class GenerationProviderManagerSecurityTests(unittest.TestCase):
             requires_paid_approval = True
         manager.providers["paid"] = PaidProvider()
         limiter = ProviderExecutionLimiter(max_concurrent=1)
+        seen = []
         fallback = FallbackManager(
             manager,
             execution_limiter=limiter,
-            paid_execution_handler=lambda **kwargs: {"status": "COMPLETED", "provider": "paid"},
+            paid_execution_handler=lambda **kwargs: seen.append(kwargs.get("request_id"))
+            or {"status": "COMPLETED", "provider": "paid"},
         )
         result = fallback.generate_image(
             ["paid"], "prompt", "out.png", request_id="paid-request"
         )
         self.assertEqual(result["status"], "COMPLETED")
+        self.assertEqual(seen, ["paid-request"])
         self.assertEqual(limiter.summary()["active"], 0)
 
     def test_invalid_registry_shape_is_rejected(self):
