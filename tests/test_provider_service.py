@@ -5,6 +5,10 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
+from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
+from projects.provider_store.provider_authorization import ProviderAuthorizationManager
+from projects.provider_store.budget_alert_manager import BudgetAlertManager
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
@@ -764,6 +768,171 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(retry_spy.calls, 0)
         self.assertNotIn("provider_code", result["provider_error"])
         self.assertTrue(self.cost.ledger["projects"]["film"]["reservations"]["credits-exhausted-job"])
+
+    def test_execution_queues_budget_alert_after_spend_crosses_threshold(self):
+        self.cost.reserve_usage(
+            project_id="film", provider_id="image", estimated_cost=4.0,
+            request_id="prior-budget-job",
+        )
+        prior = self.cost.finalize_usage(
+            project_id="film", provider_id="image", estimated_cost=4.0,
+            actual_cost=4.0, request_id="prior-budget-job", success=True,
+            charge_outcome="incurred",
+        )
+        self.assertTrue(prior.get("saved"))
+        outer = self
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                reserved = outer.cost.reserve_usage(
+                    project_id=kwargs["project_id"],
+                    provider_id="image",
+                    estimated_cost=kwargs["estimated_cost"],
+                    request_id=kwargs["request_id"],
+                )
+                quota = outer.quota.reserve(
+                    provider_id="image", request_id=kwargs["request_id"]
+                )
+                if reserved.get("status") != "RESERVED" or quota.get("status") != "RESERVED":
+                    return {"allowed": False, "status": "RESERVATION_FAILED"}
+                return {
+                    "allowed": True,
+                    "provider": "image",
+                    "billing_mode": "PAID_APPROVED",
+                }
+
+        alerts = BudgetAlertManager(self.root / "budget-alerts.json")
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            budget_alert_manager=alerts,
+        )
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="budget-alert-job",
+            estimated_cost=2.0,
+            modality="image",
+            adapter=lambda **kwargs: {
+                "started": True,
+                "success": False,
+                "actual_cost": 2.0,
+                "charge_outcome": "incurred",
+                "error_code": "PROVIDER_EXECUTION_FAILED",
+            },
+        )
+        self.assertEqual(result["budget_alerts"]["status"], "BUDGET_ALERTS_QUEUED")
+        self.assertEqual(
+            [item["threshold"] for item in result["budget_alerts"]["alerts"]],
+            [0.5],
+        )
+        self.assertEqual(len(alerts.pending_alerts()["alerts"]), 1)
+
+    def test_least_privilege_authorization_blocks_generation_before_adapter(self):
+        authorization = ProviderAuthorizationManager(self.root / "service-auth.json")
+        authorization.assign_role("read-only-user", "viewer")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="auth-denied-job",
+            estimated_cost=0.0,
+            modality="image",
+            principal_id="read-only-user",
+            adapter=lambda **kwargs: called.append(kwargs),
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(result["authorization"]["status"], "ACCESS_DENIED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(called, [])
+        missing_identity = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="auth-missing-principal-job",
+            estimated_cost=0.0,
+            modality="image",
+            adapter=lambda **kwargs: called.append(kwargs),
+        )
+        self.assertEqual(missing_identity["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(missing_identity["authorization"]["status"], "INVALID_PRINCIPAL_ID")
+        self.assertEqual(called, [])
+
+    def test_sensitive_credentials_are_blocked_before_routing_and_adapter(self):
+        calls = {"route": 0, "adapter": 0}
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls["route"] += 1
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            sensitive_data_policy=SensitiveDataPolicy(),
+        )
+        secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+
+        def adapter(**kwargs):
+            calls["adapter"] += 1
+            return {"started": False, "success": False}
+
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="sensitive-data-job",
+            estimated_cost=0.0,
+            modality="image",
+            adapter=adapter,
+            adapter_options={"prompt": "generate with Authorization: Bearer " + secret},
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, {"route": 0, "adapter": 0})
+        self.assertNotIn(secret, repr(result))
+        self.assertNotIn("Bearer", repr(result))
+
+    def test_unknown_provider_data_policy_blocks_adapter_execution(self):
+        calls = []
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "provider": "unlisted-provider",
+                    "billing_mode": "ZERO_COST",
+                }
+
+        policy = ProviderDataHandlingPolicy({
+            "image": {
+                "allowed_categories": ["public", "user_content"],
+                "max_retention_days": 0,
+                "training_use_allowed": False,
+                "source_url": "https://provider.example.com/privacy",
+            }
+        })
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            data_handling_policy=policy,
+        )
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="data-policy-job",
+            estimated_cost=0.0,
+            modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+        )
+        self.assertEqual(result["status"], "PROVIDER_DATA_POLICY_REJECTED")
+        self.assertEqual(result["data_policy"]["status"], "PROVIDER_DATA_POLICY_UNKNOWN")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
