@@ -76,9 +76,9 @@ class GenerationProviderManagerSecurityTests(unittest.TestCase):
         provider = PaidProvider()
         manager.providers["paid"] = provider
         result = FallbackManager(manager).generate_image(["paid"], "prompt", "out.png")
-        self.assertEqual(result["status"], "FAILED")
+        self.assertEqual(result["status"], "PAID_EXECUTION_HANDLER_REQUIRED")
         self.assertFalse(provider.called)
-        self.assertEqual(result["errors"][0]["error"], "PAID_EXECUTION_HANDLER_REQUIRED")
+        self.assertEqual(result["attempted_providers"][0]["status"], "PAID_EXECUTION_HANDLER_REQUIRED")
 
     def test_paid_handler_failure_does_not_silently_try_another_provider(self):
         manager = ProviderManager()
