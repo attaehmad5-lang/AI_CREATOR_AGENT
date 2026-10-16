@@ -87,3 +87,8 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+
+## Tenant/project scope
+
+`provider_tenant_policy.py` binds projects to one tenant and enforces provider/modality allowlists. When configured in `ProviderService`, scope is checked before routing and the selected provider is rechecked before adapter execution. This is an execution gate only; credentials, quota/usage ledgers, jobs and result storage still require tenant-specific partitioning.
