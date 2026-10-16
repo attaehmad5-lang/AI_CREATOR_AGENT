@@ -79,8 +79,8 @@ class ProviderJobManagerTests(unittest.TestCase):
             self.path, max_queue_size=10, max_concurrent=10,
             max_consecutive_project_jobs=1, clock=lambda: self.now[0],
         )
-        manager.submit(job_id="film-1", project_id="film", provider_id="image", payload_ref="payload:film-1")
-        manager.submit(job_id="education-1", project_id="education", provider_id="image", payload_ref="payload:education-1")
+        manager.submit(job_id="film-1", project_id="film", provider_id="image", payload_ref="payload:film-1", priority=100)
+        manager.submit(job_id="education-1", project_id="education", provider_id="image", payload_ref="payload:education-1", priority=10)
         self.assertEqual(manager.claim_next(worker_id="worker-1")["job"]["project_id"], "film")
         reloaded = ProviderJobManager(
             self.path, max_queue_size=10, max_concurrent=1,
@@ -92,7 +92,7 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.path.write_text('{"version":"1.0","jobs":{}}', encoding="utf-8")
         manager = ProviderJobManager(self.path, clock=lambda: self.now[0])
         self.assertEqual(manager.claim_next(worker_id="worker-1")["status"], "QUEUE_EMPTY")
-        self.assertIn("scheduler", __import__("json").loads(self.path.read_text(encoding="utf-8")))
+        self.assertIn("scheduler", manager.data)
 
     def test_job_lifecycle_poll_and_result_reference(self):
         self.submit("job-1")
