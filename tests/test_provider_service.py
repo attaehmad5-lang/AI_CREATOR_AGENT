@@ -720,10 +720,21 @@ class ProviderServiceTests(unittest.TestCase):
             charge_outcome="incurred",
         )
         self.assertTrue(prior.get("saved"))
-        self.quota.reserve(provider_id="image", request_id="budget-alert-job")
+        outer = self
 
         class RoutingStub:
             def route(self, **kwargs):
+                reserved = outer.cost.reserve_usage(
+                    project_id=kwargs["project_id"],
+                    provider_id="image",
+                    estimated_cost=kwargs["estimated_cost"],
+                    request_id=kwargs["request_id"],
+                )
+                quota = outer.quota.reserve(
+                    provider_id="image", request_id=kwargs["request_id"]
+                )
+                if reserved.get("status") != "RESERVED" or quota.get("status") != "RESERVED":
+                    return {"allowed": False, "status": "RESERVATION_FAILED"}
                 return {
                     "allowed": True,
                     "provider": "image",
