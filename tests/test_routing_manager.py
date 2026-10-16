@@ -44,7 +44,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def _confidence_router(self, benchmark_results):
+    def _confidence_router(self, benchmark_results, quota_manager=None):
         catalog = self.root / "confidence-providers.json"
         state = self.root / "confidence-connections.json"
         models = [{"id": "stable-diffusion-xl", "versions": ["1"]}]
@@ -69,7 +69,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             def compare(self, *, modality=None):
                 return {"status": "BENCHMARKS_AVAILABLE", "results": benchmark_results}
 
-        return ProviderRoutingManager(connections, benchmark_manager=BenchmarkStub())
+        return ProviderRoutingManager(connections, benchmark_manager=BenchmarkStub(), quota_manager=quota_manager)
 
     def test_confidence_aware_routing_adapts_to_verified_benchmark_history(self):
         router = self._confidence_router([
@@ -89,6 +89,33 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["provider"], "fallback")
         self.assertEqual(result["confidence_routing_status"], "CONFIDENCE_AWARE_ROUTING")
         self.assertEqual(result["benchmark_evidence"]["sample_count"], 50)
+
+    def test_benchmark_evidence_matches_provider_selected_after_quota_rejection(self):
+        results = [
+            {"provider_id": "primary", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 100, "success_rate": 0.99, "p95_latency_ms": 100,
+             "avg_cost_per_success": 0.0, "avg_quality_score": 0.95},
+            {"provider_id": "fallback", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 20, "success_rate": 0.9, "p95_latency_ms": 200,
+             "avg_cost_per_success": 0.0, "avg_quality_score": 0.85},
+        ]
+
+        class QuotaStub:
+            def reserve(self, *, provider_id, request_id):
+                if provider_id == "primary":
+                    return {"status": "QUOTA_EXCEEDED"}
+                return {"status": "RESERVED"}
+
+        router = self._confidence_router(results, quota_manager=QuotaStub())
+        result = router.route(
+            category="image", project_id="film", model="stable-diffusion-xl",
+            request_id="quota-job", confidence_aware=True,
+            min_benchmark_samples=10, min_benchmark_success_rate=0.8,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["benchmark_evidence"]["sample_count"], 20)
+        self.assertEqual(result["benchmark_evidence"]["success_rate"], 0.9)
 
     def test_low_confidence_can_fallback_or_fail_closed(self):
         results = [
