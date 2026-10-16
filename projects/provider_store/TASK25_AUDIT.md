@@ -12,7 +12,7 @@ GitHub Actions run [#38435397071](https://github.com/attaehmad5-lang/AI_CREATOR_
 - Windows: 312 tests passed, 0 failures.
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
-- **Important:** this run predates the latest commits on this branch, including paid-use fallback gating, webhook verification and bounded execution admission. The latest commits require a fresh full CI run; they are not claimed as verified by run #38435397071.
+- **Important:** this run predates the latest commits on this branch, including paid-use fallback gating, webhook verification, bounded execution admission, safe provider onboarding, adapter API version checks and PNG dimension limits. The latest commits require a fresh full CI run; they are not claimed as verified by run #38435397071.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
