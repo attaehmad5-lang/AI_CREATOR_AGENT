@@ -202,8 +202,8 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 119 | 🔴 | Multi-Project/Multi-Tenant Provider Policies | OPEN | Complete multi-tenant provider policy isolation is not implemented. |
-| 120 | 🔴 | Tenant Isolation for Credentials, Quotas and Job Data | OPEN | Credential, quota and job data tenant isolation is not implemented. |
+| 119 | 🔴 | Multi-Project/Multi-Tenant Provider Policies | PARTIAL | `provider_tenant_policy.py` persistently binds each project to exactly one tenant and enforces tenant/project enablement plus provider/modality allowlists. `ProviderService` checks tenant scope before routing and validates the selected provider before adapter invocation. Tenant-specific credentials, quota/usage partitioning, job data isolation, identity-provider binding and cross-service policy enforcement remain open. |
+| 120 | 🔴 | Tenant Isolation for Credentials, Quotas and Job Data | OPEN | The new tenant/project execution gate is only a foundation; credentials, quotas, usage ledgers, persisted jobs and result references are still not partitioned by tenant. Dedicated storage/key scoping and cross-tenant leakage tests are required. |
 | 121 | 🔴 | Separate User/Project/Tenant Usage Limits | PARTIAL | Project quotas exist; distinct user/project/tenant limits are not fully implemented. |
 | 122 | 🔴 | Fair Scheduling and Workload Prioritization | OPEN | Fair scheduling and priority queues are not implemented. |
 | 123 | 🔴 | Provider/Regional Outage Handling | PARTIAL | Health and fallback primitives exist; region-wide outage handling is not integrated. |
