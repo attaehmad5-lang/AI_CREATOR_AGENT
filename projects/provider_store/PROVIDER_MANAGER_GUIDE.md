@@ -91,4 +91,4 @@ Live provider API/account probes, provider-specific OAuth registration/token-ref
 
 ## Controlled A/B experiments
 
-`provider_ab_manager.py` provides persistent deterministic A/B assignments, idempotent outcome capture, and aggregate summaries. Paid arms are blocked unless an explicit approval reference, experiment/project budget caps, and a successful idempotent budget-reservation callback are supplied. This is a policy primitive, not a substitute for wiring the gate into every execution path.
+`provider_ab_manager.py` provides persistent deterministic A/B assignments, idempotent outcome capture, aggregate summaries, and fail-closed state validation. `ProviderService.execute_routed_request(experiment_id=...)` can execute free-only experiments pinned to the selected provider/model and records outcome metrics. Paid arms are deliberately blocked in the service until the verified approval and budget reservation path can be reconciled with normal cost finalization. The manager itself requires an approval verifier, experiment/project budget caps, and a successful idempotent reservation callback before assigning a paid arm.
