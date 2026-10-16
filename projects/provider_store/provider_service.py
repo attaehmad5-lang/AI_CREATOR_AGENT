@@ -31,6 +31,7 @@ class ProviderService:
         job_manager: Any | None = None,
         metrics_manager: Any | None = None,
         quality_policy: Any | None = None,
+        benchmark_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -50,6 +51,7 @@ class ProviderService:
             (job_manager, "submit", "job_manager"),
             (metrics_manager, "record", "metrics_manager"),
             (quality_policy, "evaluate", "quality_policy"),
+            (benchmark_manager, "record", "benchmark_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -70,6 +72,7 @@ class ProviderService:
         self.job_manager = job_manager
         self.metrics_manager = metrics_manager
         self.quality_policy = quality_policy
+        self.benchmark_manager = benchmark_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -674,6 +677,29 @@ class ProviderService:
             credit_outcome=credit_outcome,
             actual_credit_amount=actual_credit_amount,
         )
+        benchmark_result = None
+        if self.benchmark_manager is not None:
+            model_id = adapter_result.get("model_id", route.get("model_id"))
+            if not isinstance(model_id, str) or not model_id.strip():
+                benchmark_result = {"status": "MODEL_ID_UNAVAILABLE", "saved": False}
+            else:
+                try:
+                    benchmark_result = self.benchmark_manager.record(
+                        provider_id=provider_id,
+                        model_id=model_id,
+                        modality=modality,
+                        run_id=adapter_result.get("benchmark_run_id", request_id),
+                        success=final_success,
+                        latency_ms=latency_ms,
+                        actual_cost=actual_cost,
+                        quality_score=quality_result.get("score") if isinstance(quality_result, dict) else None,
+                    )
+                except Exception as exc:
+                    benchmark_result = {
+                        "status": "BENCHMARK_RECORD_FAILED",
+                        "saved": False,
+                        "error_type": type(exc).__name__,
+                    }
         metrics_result = None
         if self.metrics_manager is not None:
             try:
@@ -762,6 +788,7 @@ class ProviderService:
             "quality": quality_result,
             "finalization": finalization,
             "metrics": metrics_result,
+            "benchmark": benchmark_result,
             "provider_error": provider_error,
             "budget_alerts": budget_alerts,
             "authorization": authorization,
