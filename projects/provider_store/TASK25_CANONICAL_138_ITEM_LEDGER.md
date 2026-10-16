@@ -151,7 +151,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 85 | 🔴 | Task-Specific Quality Thresholds | PARTIAL | `ProviderOutputQualityPolicy` supports per-category and category/modality thresholds with bounded [0,1] scores and fail-closed invalid scorer handling; task thresholds and scorer calibration still require production evaluation. |
 | 86 | 🔴 | Provider/Model Benchmarking | PARTIAL | `provider_benchmark_manager.py` aggregates bounded provider/model samples by success rate, p50/p95 latency, cost per attempt/success, and optional quality score; `ProviderService` can record execution samples when a model ID is available. Controlled benchmark suites, sample-size confidence, and live provider comparisons remain open. |
 | 87 | 🔴 | Structured Logs, Metrics and Distributed Traces | PARTIAL | Some structured status metadata exists; end-to-end metrics/tracing is incomplete. |
-| 88 | 🔴 | Alerts, Dashboards and Incident Diagnostics | OPEN | Alerting/dashboard/incident tooling is not implemented end-to-end. |
+| 88 | 🔴 | Alerts, Dashboards and Incident Diagnostics | PARTIAL | `provider_incident_manager.py` persists deduplicated provider incidents with severity escalation, occurrence counts, acknowledgement/resolution, and safe status summaries; `ProviderService` opens critical incidents for explicit billing/credit exhaustion and records other execution failures. Dashboard and external alert delivery remain open. |
 
 ## L — Configuration, Compatibility and Change Control
 
