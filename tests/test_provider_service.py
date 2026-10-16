@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_authorization import ProviderAuthorizationManager
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
@@ -707,6 +708,39 @@ class ProviderServiceTests(unittest.TestCase):
             estimated_cost=2.0, actual_cost=0.0, success=False, billing_mode=[],
         )
         self.assertEqual(malformed_billing["status"], "INVALID_BILLING_MODE")
+
+    def test_least_privilege_authorization_blocks_generation_before_adapter(self):
+        authorization = ProviderAuthorizationManager(self.root / "service-auth.json")
+        authorization.assign_role("read-only-user", "viewer")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="auth-denied-job",
+            estimated_cost=0.0,
+            modality="image",
+            principal_id="read-only-user",
+            adapter=lambda **kwargs: called.append(kwargs),
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(result["authorization"]["status"], "ACCESS_DENIED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(called, [])
+        missing_identity = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="auth-missing-principal-job",
+            estimated_cost=0.0,
+            modality="image",
+            adapter=lambda **kwargs: called.append(kwargs),
+        )
+        self.assertEqual(missing_identity["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(missing_identity["authorization"]["status"], "INVALID_PRINCIPAL_ID")
+        self.assertEqual(called, [])
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
