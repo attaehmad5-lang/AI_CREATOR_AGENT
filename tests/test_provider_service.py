@@ -78,7 +78,7 @@ class ProviderServiceTests(unittest.TestCase):
             cost_policy=self.cost, quota_manager=self.quota, slo_manager=slo,
         )
         artifact = self.root / "slo-output.png"
-        artifact.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n")
+        artifact.write_bytes(b"\x89PNG\r\n\x1a\n")
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="slo-request-1",
             estimated_cost=0.0,
