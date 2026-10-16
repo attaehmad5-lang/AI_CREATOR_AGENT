@@ -76,6 +76,7 @@ class MediaIntegrityValidator:
     def _validate_mp4(self, path: Path, size: int) -> dict[str, Any]:
         offset = 0
         boxes: list[str] = []
+        duration_seconds = None
         with path.open("rb") as stream:
             while offset < size:
                 if len(boxes) >= 10000 or size - offset < 8:
@@ -100,11 +101,66 @@ class MediaIntegrityValidator:
                     box_size = size - offset
                 if box_size < header_size or box_size > size - offset:
                     return {"valid": False, "status": "MP4_BOX_SIZE_INVALID", "size_bytes": size}
+                if box_type == "moov":
+                    moov_end = offset + box_size
+                    child_offset = offset + header_size
+                    child_count = 0
+                    while child_offset < moov_end:
+                        child_count += 1
+                        if child_count > 10000 or moov_end - child_offset < 8:
+                            return {"valid": False, "status": "MP4_MOOV_STRUCTURE_INVALID", "size_bytes": size}
+                        stream.seek(child_offset)
+                        child_header = stream.read(8)
+                        if len(child_header) != 8:
+                            return {"valid": False, "status": "MP4_MOOV_STRUCTURE_INVALID", "size_bytes": size}
+                        child_size = struct.unpack(">I", child_header[:4])[0]
+                        child_type = child_header[4:8]
+                        child_header_size = 8
+                        if child_size == 1:
+                            ext = stream.read(8)
+                            if len(ext) != 8:
+                                return {"valid": False, "status": "MP4_EXTENDED_BOX_HEADER_TRUNCATED", "size_bytes": size}
+                            child_size = struct.unpack(">Q", ext)[0]
+                            child_header_size = 16
+                        elif child_size == 0:
+                            child_size = moov_end - child_offset
+                        if child_size < child_header_size or child_size > moov_end - child_offset:
+                            return {"valid": False, "status": "MP4_MOOV_BOX_SIZE_INVALID", "size_bytes": size}
+                        if child_type == b"mvhd":
+                            payload_length = child_size - child_header_size
+                            stream.seek(child_offset + child_header_size)
+                            prefix = stream.read(min(payload_length, 32))
+                            if len(prefix) < 20:
+                                return {"valid": False, "status": "MP4_MVHD_TRUNCATED", "size_bytes": size}
+                            version = prefix[0]
+                            if version == 0:
+                                timescale = struct.unpack(">I", prefix[12:16])[0]
+                                duration = struct.unpack(">I", prefix[16:20])[0]
+                            elif version == 1:
+                                if len(prefix) < 32:
+                                    return {"valid": False, "status": "MP4_MVHD_TRUNCATED", "size_bytes": size}
+                                timescale = struct.unpack(">I", prefix[20:24])[0]
+                                duration = struct.unpack(">Q", prefix[24:32])[0]
+                            else:
+                                return {"valid": False, "status": "MP4_MVHD_VERSION_UNSUPPORTED", "size_bytes": size}
+                            if timescale == 0:
+                                return {"valid": False, "status": "MP4_MVHD_TIMESCALE_INVALID", "size_bytes": size}
+                            if duration != (0xFFFFFFFF if version == 0 else 0xFFFFFFFFFFFFFFFF):
+                                duration_seconds = duration / timescale
+                                if duration_seconds > self.max_duration_seconds:
+                                    return {
+                                        "valid": False, "status": "MEDIA_DURATION_EXCEEDED",
+                                        "duration_seconds": duration_seconds, "size_bytes": size,
+                                    }
+                        child_offset += child_size
                 boxes.append(box_type)
                 offset += box_size
         if "ftyp" not in boxes or "mdat" not in boxes or not ({"moov", "moof"} & set(boxes)):
             return {"valid": False, "status": "MP4_REQUIRED_BOX_MISSING", "boxes": boxes, "size_bytes": size}
-        return {"valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "MP4", "boxes": boxes, "size_bytes": size}
+        result = {"valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "MP4", "boxes": boxes, "size_bytes": size}
+        if duration_seconds is not None:
+            result["duration_seconds"] = duration_seconds
+        return result
 
     def _validate_webm(self, path: Path, size: int) -> dict[str, Any]:
         needle = b"\x18\x53\x80\x67"
