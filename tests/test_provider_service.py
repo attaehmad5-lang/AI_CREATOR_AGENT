@@ -958,6 +958,33 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(allowed["verified"])
         self.assertEqual(calls, ["image"])
 
+    def test_webhook_verification_is_delegated_without_echoing_secret(self):
+        class WebhookStub:
+            def verify(self, **kwargs):
+                return {
+                    "verified": True,
+                    "status": "WEBHOOK_VERIFIED",
+                    "provider": kwargs["provider_id"],
+                    "event_id": kwargs["event_id"],
+                }
+
+        service = ProviderService(
+            self.connections,
+            webhook_verifier=WebhookStub(),
+        )
+        secret = "do-not-echo-webhook-secret"
+        result = service.verify_webhook(
+            provider_id="video",
+            payload=b'{"event":"done"}',
+            signature="sha256=" + "a" * 64,
+            timestamp="1792152000",
+            event_id="event-1",
+            secret=secret,
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["status"], "WEBHOOK_VERIFIED")
+        self.assertNotIn(secret, repr(result))
+
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
         self.assertEqual(service.route_request(category="image", project_id="film")["status"], "ROUTING_MANAGER_UNAVAILABLE")
