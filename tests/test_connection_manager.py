@@ -831,7 +831,7 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(provider["enabled"], "onboarding must not mutate caller metadata")
         saved_provider = self.manager.get_provider("new_image_api")
         self.assertFalse(saved_provider["enabled"])
-        self.assertEqual(saved_provider["status"], "READY")
+        self.assertEqual(saved_provider["catalog_status"], "READY")
         self.assertNotIn("verified", saved_provider)
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertFalse(reloaded.get_provider("new_image_api")["enabled"])
