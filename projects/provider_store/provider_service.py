@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        data_handling_policy: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -33,6 +34,7 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (data_handling_policy, "evaluate", "data_handling_policy"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -45,6 +47,7 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.data_handling_policy = data_handling_policy
 
     def verify_provider(
         self,
@@ -261,6 +264,10 @@ class ProviderService:
         estimated_cost: float,
         adapter: Any,
         modality: str,
+        data_categories: tuple[str, ...] | list[str] = ("user_content",),
+        retention_days: int = 0,
+        provider_training_use: bool = False,
+        user_training_consent: bool = False,
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
@@ -297,6 +304,39 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+
+        data_policy_result = None
+        if self.data_handling_policy is not None:
+            try:
+                data_policy_result = self.data_handling_policy.evaluate(
+                    provider_id=provider_id,
+                    data_categories=data_categories,
+                    retention_days=retention_days,
+                    provider_training_use=provider_training_use,
+                    user_training_consent=user_training_consent,
+                )
+            except Exception as exc:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "PROVIDER_DATA_POLICY_CHECK_FAILED",
+                    "executed": False,
+                    "release": release,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(data_policy_result, dict) or data_policy_result.get("allowed") is not True:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "PROVIDER_DATA_POLICY_REJECTED",
+                    "executed": False,
+                    "data_policy": data_policy_result if isinstance(data_policy_result, dict) else {
+                        "allowed": False, "status": "INVALID_DATA_POLICY_RESPONSE"
+                    },
+                    "release": release,
+                }
 
         options = dict(adapter_options or {})
         options["provider_id"] = provider_id
@@ -447,6 +487,7 @@ class ProviderService:
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "finalization": finalization,
+            "data_policy": data_policy_result,
             "retry_decision": retry,
         }
 
