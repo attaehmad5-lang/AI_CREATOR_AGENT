@@ -108,7 +108,7 @@ class ProviderABExperimentManager:
                     or (reserved_cost > experiment_cap and exp.get("status") == "ACTIVE")
                 ):
                     raise ValueError("paid experiment approval/budget state is invalid")
-            elif reserved_cost != 0:
+            elif reserved_cost != 0 and exp.get("status") != "STOPPED":
                 raise ValueError("free-only experiment cannot contain paid reservations")
             for request_id, assignment in requests.items():
                 if not self._valid_id(request_id, 200) or not isinstance(assignment, dict):
