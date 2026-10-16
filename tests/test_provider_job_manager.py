@@ -54,7 +54,7 @@ class ProviderJobManagerTests(unittest.TestCase):
 
     def test_fair_scheduling_prevents_one_project_monopolizing_claims(self):
         manager = ProviderJobManager(
-            self.path, max_queue_size=10, max_concurrent=1,
+            self.path, max_queue_size=10, max_concurrent=10,
             max_consecutive_project_jobs=2, clock=lambda: self.now[0],
         )
         for index in range(4):
@@ -76,7 +76,7 @@ class ProviderJobManagerTests(unittest.TestCase):
 
     def test_fair_scheduler_state_persists_across_manager_reload(self):
         manager = ProviderJobManager(
-            self.path, max_queue_size=10, max_concurrent=1,
+            self.path, max_queue_size=10, max_concurrent=10,
             max_consecutive_project_jobs=1, clock=lambda: self.now[0],
         )
         manager.submit(job_id="film-1", project_id="film", provider_id="image", payload_ref="payload:film-1")
