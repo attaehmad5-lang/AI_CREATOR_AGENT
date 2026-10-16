@@ -934,6 +934,30 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.assertEqual(calls, [])
 
+    def test_provider_verification_requires_verify_permission(self):
+        authorization = ProviderAuthorizationManager(self.root / "verify-auth.json")
+        authorization.assign_role("creator-only", "creator")
+        authorization.assign_role("operator-user", "operator")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+        )
+        calls = []
+        denied = service.verify_provider(
+            "image",
+            lambda provider, **kwargs: calls.append(provider["id"]) or {"ok": True},
+            principal_id="creator-only",
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(calls, [])
+        allowed = service.verify_provider(
+            "image",
+            lambda provider, **kwargs: calls.append(provider["id"]) or {"ok": True},
+            principal_id="operator-user",
+        )
+        self.assertTrue(allowed["verified"])
+        self.assertEqual(calls, ["image"])
+
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
         self.assertEqual(service.route_request(category="image", project_id="film")["status"], "ROUTING_MANAGER_UNAVAILABLE")
