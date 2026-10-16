@@ -54,7 +54,7 @@ class ProviderJobManagerTests(unittest.TestCase):
 
     def test_equal_priority_projects_are_served_round_robin(self):
         manager = ProviderJobManager(
-            self.root / "fair-jobs.json", max_queue_size=10,
+            Path(self.temp_dir.name) / "fair-jobs.json", max_queue_size=10,
             max_concurrent=1, clock=lambda: self.now[0],
         )
         for job_id, project in (
@@ -76,7 +76,7 @@ class ProviderJobManagerTests(unittest.TestCase):
             )
         self.assertEqual(claimed_projects, ["alpha", "beta", "gamma", "alpha"])
         reloaded = ProviderJobManager(
-            self.root / "fair-jobs.json", max_queue_size=10,
+            Path(self.temp_dir.name) / "fair-jobs.json", max_queue_size=10,
             max_concurrent=1, clock=lambda: self.now[0],
         )
         self.assertEqual(
