@@ -57,6 +57,7 @@ class ProviderService:
             (quality_policy, "evaluate", "quality_policy"),
             (benchmark_manager, "record", "benchmark_manager"),
             (ab_experiment_manager, "assign", "ab_experiment_manager"),
+            (ab_experiment_manager, "record_outcome", "ab_experiment_manager"),
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
