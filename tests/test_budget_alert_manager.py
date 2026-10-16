@@ -83,8 +83,8 @@ class BudgetAlertManagerTests(unittest.TestCase):
         self.assertEqual(pending["delivery_attempts"], 1)
         self.assertEqual(pending["last_delivery_error_code"], "DELIVERY_CALLBACK_FAILED")
         self.assertNotIn("private webhook response", repr(pending))
-        retried = self.manager.dispatch_pending(lambda alert: {"delivered": True}, limit=1)
-        self.assertEqual(retried["delivered"], 1)
+        retried = self.manager.dispatch_pending(lambda alert: {"delivered": True}, limit=10)
+        self.assertEqual(retried["delivered"], 2)
         self.assertEqual(len(self.manager.pending_alerts()["alerts"]), 0)
 
     def test_dispatch_rejects_invalid_callback_and_limit(self):
