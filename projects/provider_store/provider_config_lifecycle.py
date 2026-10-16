@@ -102,6 +102,81 @@ class ProviderConfigLifecycleManager:
             "config": candidate,
         }
 
+    @staticmethod
+    def _changed_paths(
+        previous: Any, candidate: Any, *, limit: int = 500, max_depth: int = 32
+    ) -> tuple[list[str], bool]:
+        paths: list[str] = []
+        truncated = False
+
+        def safe_key(value: Any) -> str:
+            import re
+            if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", value):
+                return value
+            return "<key>"
+
+        def walk(left: Any, right: Any, path: str, depth: int) -> None:
+            nonlocal truncated
+            if truncated or left == right:
+                return
+            if len(paths) >= limit:
+                truncated = True
+                return
+            if depth >= max_depth:
+                paths.append(path or "<root>")
+                return
+            if isinstance(left, dict) and isinstance(right, dict):
+                for key in sorted(set(left) | set(right), key=lambda item: str(item)):
+                    child = f"{path}.{safe_key(key)}" if path else safe_key(key)
+                    if key not in left or key not in right:
+                        paths.append(child)
+                        if len(paths) >= limit:
+                            truncated = True
+                            return
+                    else:
+                        walk(left[key], right[key], child, depth + 1)
+                return
+            if isinstance(left, list) and isinstance(right, list):
+                if len(left) != len(right):
+                    paths.append(f"{path}.__length__" if path else "__length__")
+                    if len(paths) >= limit:
+                        truncated = True
+                        return
+                for index in range(min(len(left), len(right))):
+                    walk(left[index], right[index], f"{path}[{index}]", depth + 1)
+                return
+            paths.append(path or "<root>")
+
+        walk(previous, candidate, "", 0)
+        return paths, truncated
+
+    def simulate_reload(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        """Validate a candidate and describe its impact without changing active state."""
+        with self._lock:
+            generation = self.generation
+            current = copy.deepcopy(self.active_config) if self.active_config is not None else {}
+        valid, reason = self._validate(candidate)
+        if not valid:
+            return {
+                "status": "POLICY_SIMULATION_REJECTED",
+                "valid": False,
+                "would_reload": False,
+                "reason": reason,
+                "generation": generation,
+                "changed_paths": [],
+            }
+        paths, truncated = self._changed_paths(current, candidate)
+        return {
+            "status": "POLICY_SIMULATION_VALID",
+            "valid": True,
+            "would_reload": paths != [],
+            "generation": generation,
+            "changed_path_count": len(paths),
+            "changed_paths": paths,
+            "changed_paths_truncated": truncated,
+            "applies_changes": False,
+        }
+
     def reload(self, candidate: dict[str, Any]) -> dict[str, Any]:
         valid, reason = self._validate(candidate)
         if not valid:
