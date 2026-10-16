@@ -48,6 +48,17 @@ class ProviderServiceWebhookTests(unittest.TestCase):
             timestamp_header=str(self.timestamp), event_id="evt_invalid", now=self.timestamp,
         )
         self.assertEqual(missing, {"status": "WEBHOOK_VERIFIER_UNAVAILABLE", "verified": False})
+        class ExplodingVerifier:
+            @property
+            def verify(self):
+                raise RuntimeError("private verifier lookup detail")
+        exploding = self.service.verify_webhook_callback(
+            ExplodingVerifier(), self.body, signature_header=self.signature,
+            timestamp_header=str(self.timestamp), event_id="evt_invalid", now=self.timestamp,
+        )
+        self.assertEqual(exploding["status"], "WEBHOOK_VERIFIER_LOOKUP_FAILED")
+        self.assertEqual(exploding["error_type"], "RuntimeError")
+        self.assertNotIn("private verifier lookup detail", repr(exploding))
 
     def test_service_rejects_malformed_verifier_results(self):
         class InvalidVerifier:
