@@ -39,6 +39,10 @@ class SensitiveDataPolicyTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["status"], "SENSITIVE_DATA_CLEAR")
         self.assertEqual(result["findings"], [])
+        self.assertEqual(
+            SensitiveDataPolicy().inspect({"date": "2026-10-16"})["findings"],
+            [],
+        )
 
     def test_oversized_or_deep_payload_fails_closed(self):
         policy = SensitiveDataPolicy(max_text_chars=10, max_depth=2)
