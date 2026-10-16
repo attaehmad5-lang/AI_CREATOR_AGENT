@@ -56,6 +56,25 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
         )
         self.assertTrue(approved["saved"])
 
+    def test_paid_experiment_rejects_unverified_or_wrong_project_approval(self):
+        denied = self.create(
+            arms=self.arms(0.1, 0.2), paid_usage_approved=True,
+            approval_reference="approval-ticket-123",
+            experiment_budget_cap=2.0, project_budget_cap=5.0,
+            verify_paid_approval=lambda **kwargs: {"approved": False},
+        )
+        self.assertEqual(denied["status"], "PAID_APPROVAL_NOT_VERIFIED")
+        wrong_project = self.create(
+            arms=self.arms(0.1, 0.2), paid_usage_approved=True,
+            approval_reference="approval-ticket-123",
+            experiment_budget_cap=2.0, project_budget_cap=5.0,
+            verify_paid_approval=lambda **kwargs: {
+                "approved": True, "project_id": "another-project",
+                "approved_budget_cap": 5.0,
+            },
+        )
+        self.assertEqual(wrong_project["status"], "PAID_APPROVAL_NOT_VERIFIED")
+
     def test_paid_assignment_is_blocked_without_budget_reserver(self):
         self.create(
             arms=self.arms(0.1, 0.2), paid_usage_approved=True,
