@@ -1,4 +1,4 @@
-# Task #25 — Canonical 138-Item Verification Ledger
+| 70 | 🔴 | Data Retention and Provider Data-Handling Rules | PARTIAL | `provider_data_policy.py` requires explicit HTTPS-sourced provider terms, allowed data categories, maximum retention, and training-use permission/consent; `ProviderService` blocks execution when a configured policy is missing or rejects the request. Provider-specific verified policy catalog coverage and downstream deletion/retention enforcement remain open. |
 
 **Overall status: IN PROGRESS — do not mark Task #25 complete and do not merge PR #7 without explicit approval.**
 
