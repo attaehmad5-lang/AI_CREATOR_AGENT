@@ -5,6 +5,9 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_feature_flags import ProviderFeatureFlagManager
+from projects.provider_store.provider_incident_manager import ProviderIncidentManager
+from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
@@ -1107,6 +1110,111 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertFalse(result["quality"]["allowed"])
         self.assertTrue(result["output"]["valid"])
         self.assertNotEqual(result["status"], "EXECUTION_SUCCEEDED")
+
+    def test_execution_records_provider_model_benchmark_sample(self):
+        outer = self
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                cost = outer.cost.reserve_usage(
+                    project_id=kwargs["project_id"], provider_id="image",
+                    estimated_cost=kwargs["estimated_cost"], request_id=kwargs["request_id"],
+                )
+                quota = outer.quota.reserve(provider_id="image", request_id=kwargs["request_id"])
+                if cost.get("status") != "RESERVED" or quota.get("status") != "RESERVED":
+                    return {"allowed": False, "status": "RESERVATION_FAILED"}
+                return {
+                    "allowed": True, "provider": "image",
+                    "billing_mode": "PAID_APPROVED", "model_id": "sdxl-base",
+                }
+
+        benchmark = ProviderBenchmarkManager()
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            output_validator=self.validator,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            benchmark_manager=benchmark,
+        )
+        output_path = self.root / "benchmark-output.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="benchmark-job",
+            estimated_cost=1.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 12.0, "model_id": "sdxl-base",
+                "benchmark_run_id": "nightly-run-1",
+            },
+            modality="image",
+        )
+        self.assertEqual(result["benchmark"]["status"], "BENCHMARK_SAMPLE_RECORDED")
+        summary = benchmark.compare()["results"][0]
+        self.assertEqual(summary["model_id"], "sdxl-base")
+        self.assertEqual(summary["sample_count"], 1)
+        self.assertEqual(summary["success_rate"], 1.0)
+
+    def test_credit_exhaustion_opens_critical_incident(self):
+        outer = self
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                cost = outer.cost.reserve_usage(
+                    project_id=kwargs["project_id"], provider_id="image",
+                    estimated_cost=kwargs["estimated_cost"], request_id=kwargs["request_id"],
+                )
+                quota = outer.quota.reserve(provider_id="image", request_id=kwargs["request_id"])
+                if cost.get("status") != "RESERVED" or quota.get("status") != "RESERVED":
+                    return {"allowed": False, "status": "RESERVATION_FAILED"}
+                return {"allowed": True, "provider": "image", "billing_mode": "PAID_APPROVED"}
+
+        incidents = ProviderIncidentManager(self.root / "service-incidents.json")
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            incident_manager=incidents,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="credits-incident-job",
+            estimated_cost=2.0, modality="image",
+            adapter=lambda **kwargs: {
+                "started": True, "success": False, "actual_cost": 0.0,
+                "charge_outcome": "unknown", "status_code": 429,
+                "provider_error_code": "insufficient_quota",
+            },
+        )
+        self.assertEqual(result["provider_error"]["status"], "CREDITS_EXHAUSTED")
+        self.assertEqual(result["incident"]["status"], "INCIDENT_OPENED")
+        self.assertEqual(result["incident"]["incident"]["severity"], "critical")
+        self.assertEqual(incidents.snapshot()["counts"]["OPEN"], 1)
+
+    def test_disabled_generation_feature_flag_blocks_routing_and_adapter(self):
+        calls = {"route": 0, "adapter": 0}
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls["route"] += 1
+                return {"allowed": True, "provider": "image"}
+
+        flags = ProviderFeatureFlagManager(self.root / "service-flags.json")
+        flags.set_flag("provider_generation", enabled=False, rollout_percent=100)
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            feature_flag_manager=flags,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="feature-disabled-job",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.__setitem__("adapter", calls["adapter"] + 1),
+        )
+        self.assertEqual(result["status"], "FEATURE_DISABLED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, {"route": 0, "adapter": 0})
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)

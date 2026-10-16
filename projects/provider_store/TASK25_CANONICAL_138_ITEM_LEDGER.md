@@ -149,9 +149,9 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | PARTIAL | `ProviderMetricsManager` aggregates bounded latency percentiles, queue-wait averages, timeout counts, and sample throughput; `ProviderService` records execution latency and queue wait. External telemetry export and load-tested throughput metrics remain open. |
 | 84 | 🔴 | Output Quality Validation/Score Integration | PARTIAL | `provider_quality_policy.py` adds an injected output scorer and `ProviderService` applies its result after file validation; below-threshold or invalid scores prevent an output from being reported successful. A production semantic scorer and modality-specific QA remain open. |
 | 85 | 🔴 | Task-Specific Quality Thresholds | PARTIAL | `ProviderOutputQualityPolicy` supports per-category and category/modality thresholds with bounded [0,1] scores and fail-closed invalid scorer handling; task thresholds and scorer calibration still require production evaluation. |
-| 86 | 🔴 | Provider/Model Benchmarking | OPEN | Repeatable provider/model benchmark suite is not implemented. |
+| 86 | 🔴 | Provider/Model Benchmarking | PARTIAL | `provider_benchmark_manager.py` aggregates bounded provider/model samples by success rate, p50/p95 latency, cost per attempt/success, and optional quality score; `ProviderService` can record execution samples when a model ID is available. Controlled benchmark suites, sample-size confidence, and live provider comparisons remain open. |
 | 87 | 🔴 | Structured Logs, Metrics and Distributed Traces | PARTIAL | Some structured status metadata exists; end-to-end metrics/tracing is incomplete. |
-| 88 | 🔴 | Alerts, Dashboards and Incident Diagnostics | OPEN | Alerting/dashboard/incident tooling is not implemented end-to-end. |
+| 88 | 🔴 | Alerts, Dashboards and Incident Diagnostics | PARTIAL | `provider_incident_manager.py` persists deduplicated provider incidents with severity escalation, occurrence counts, acknowledgement/resolution, and safe status summaries; `ProviderService` opens critical incidents for explicit billing/credit exhaustion and records other execution failures. Dashboard and external alert delivery remain open. |
 
 ## L — Configuration, Compatibility and Change Control
 
@@ -159,9 +159,9 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 89 | 🟢 | Registry Schema Validation | VERIFIED | Catalog schema, malformed-version, unsafe-link and primary/master synchronization tests pass. |
 | 90 | 🟡 | Safe Defaults and Invalid-Configuration Handling | PARTIAL | Fail-closed validation exists; complete configuration recovery/default audit remains open. |
-| 91 | 🔴 | Configuration Versioning and Migration | OPEN | Versioned migration workflow is not implemented end-to-end. |
-| 92 | 🔴 | Safe Hot Reload | OPEN | Safe runtime hot reload and rollback behavior are not verified. |
-| 93 | 🔴 | Feature Flags and Controlled Rollout | OPEN | Feature-flag rollout controls are not implemented. |
+| 91 | 🔴 | Configuration Versioning and Migration | PARTIAL | `provider_config_lifecycle.py` requires explicit version-to-version migration functions, validates each intermediate configuration, and writes migrated JSON via atomic replacement with a backup. Repository-wide migration coverage and cross-process crash-injection tests remain open. |
+| 92 | 🔴 | Safe Hot Reload | PARTIAL | `ProviderConfigLifecycleManager` validates candidate configuration before swapping active state, preserves the last-known-good configuration, and supports rollback after reload failures. Integration into every runtime catalog consumer remains open. |
+| 93 | 🔴 | Feature Flags and Controlled Rollout | PARTIAL | `provider_feature_flags.py` persists kill switches, project allow/deny lists, and deterministic request-scoped percentage rollout; `ProviderService` blocks generation when `provider_generation` is disabled or outside rollout. Admin authorization/audit integration and cross-service rollout coordination remain open. |
 | 94 | 🔴 | Provider API/Model Version Compatibility | PARTIAL | Model/endpoint validation exists; live API/model version compatibility matrix is incomplete. |
 | 95 | 🔴 | Rollback to Known-Good Configuration | PARTIAL | Catalog restore exists; runtime policy rollback is not fully verified. |
 | 96 | 🔴 | Configuration Backup/Restore Verification | PARTIAL | Master catalog backup/restore is tested; full config/state backup verification is incomplete. |
