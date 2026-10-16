@@ -6,10 +6,10 @@
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#38957787840](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38957787840) completed successfully on Python 3.13:
+GitHub Actions code-verification run [#38958293670](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38958293670) completed successfully on Python 3.13:
 
-- Ubuntu: 428 tests passed, 0 failures.
-- Windows: 428 tests passed, 0 failures.
+- Ubuntu: 430 tests passed, 0 failures.
+- Windows: 430 tests passed, 0 failures.
 - Provider module/test compilation and provider JSON catalog validation passed on both platforms.
 - The latest canonical ledger/guide documentation update was also verified by run [#38957954038](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38957954038): 428 tests passed on both Ubuntu and Windows.
 - Draft PR #69 contains additional media-validation hardening and remains unmerged. Task #25 remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
@@ -31,7 +31,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | I — Security, Privacy and Governance | 65–72 | Secret-safe catalog/state, endpoint allowlists, HTTPS-only probes, redirect rejection, bounded response reads, rejection of unsupported raw-token Basic auth, and overflow-safe numeric validation across cost, credit, routing, connection, health, retry, and OAuth | Implemented safeguards; threat-model and deployment review pending |
 | J — Production Orchestration | 73–80 | Request reservation/finalization integration and idempotency tests in the provider service | Provider-request lifecycle foundation; full end-to-end generation jobs pending |
 | K — Quality, Performance and Observability | 81–88 | Health/latency history, bounded histories, concurrency tests and structured safe statuses | Partial evidence; production metrics/telemetry and load benchmarks pending |
-| L — Configuration, Compatibility and Change Control | 89–96 | Validated endpoint/model configuration, atomic writes, catalog backup validation and explicit restore path | Foundation implemented; mobile/Pydroid and crash-recovery verification pending |
+| L — Configuration, Compatibility and Change Control | 89–96 | Validated endpoint/model configuration, atomic writes, catalog backup validation, explicit restore path, and non-mutating candidate configuration simulation | Foundation implemented; full runtime integration, mobile/Pydroid and crash-recovery verification pending |
 | M — Testing, Audit and Release Readiness | 97–110 | Legacy facade compatibility, shared catalog behavior, cross-process state protection and cross-platform CI | Partial evidence; full integration matrix and cross-manager transaction guarantees pending |
 | N — High-Advanced Routing Intelligence | 111–118 | Multiple selection policies, verified credit data, cost guards and quota-aware fallback | Foundation implemented; full canonical behavior matrix pending |
 | O — Enterprise and Large-Production Resiliency | 119–128 | Request IDs, reservations, committed usage, budget/quota records and duplicate/conflict protection | Local usage controls tested; real provider billing reconciliation pending |
