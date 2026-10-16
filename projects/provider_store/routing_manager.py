@@ -433,6 +433,7 @@ class ProviderRoutingManager:
 
         confidence_status = None
         confidence_evidence = None
+        confidence_evidence_by_provider: dict[str, dict[str, Any]] = {}
         if confidence_aware:
             try:
                 benchmark_snapshot = self.benchmark_manager.compare(modality=category.strip())
@@ -475,7 +476,10 @@ class ProviderRoutingManager:
             if ranked:
                 ranked.sort(key=lambda item: item[0])
                 candidates = [item[1] for item in ranked]
-                confidence_evidence = dict(ranked[0][2])
+                confidence_evidence_by_provider = {
+                    item[1]["id"]: dict(item[2]) for item in ranked
+                    if isinstance(item[1].get("id"), str)
+                }
                 confidence_status = "CONFIDENCE_AWARE_ROUTING"
             elif allow_low_confidence_fallback:
                 confidence_status = "CONFIDENCE_FALLBACK"
@@ -506,6 +510,7 @@ class ProviderRoutingManager:
 
         for provider in candidates:
             provider_id = provider["id"]
+            confidence_evidence = confidence_evidence_by_provider.get(provider_id)
             cost = provider["_route_cost"]
             credit = credits.get(provider_id, 0.0)
             billing_mode = None
