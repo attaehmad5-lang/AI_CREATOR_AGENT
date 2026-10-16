@@ -80,6 +80,25 @@ class GenerationProviderManagerSecurityTests(unittest.TestCase):
         self.assertFalse(provider.called)
         self.assertEqual(result["attempted_providers"][0]["status"], "PAID_EXECUTION_HANDLER_REQUIRED")
 
+    def test_missing_paid_handler_does_not_send_prompt_to_fallback_provider(self):
+        manager = ProviderManager()
+        calls = []
+        class PaidProvider:
+            requires_paid_approval = True
+            def generate_image(self, prompt, output_path):
+                raise AssertionError("paid provider must not execute directly")
+        class AlternateProvider:
+            def generate_image(self, prompt, output_path):
+                calls.append(prompt)
+                return {"status": "COMPLETED"}
+        manager.providers.update({"paid": PaidProvider(), "alternate": AlternateProvider()})
+        result = FallbackManager(manager).generate_image(
+            ["paid", "alternate"], "sensitive documentary prompt", "out.png"
+        )
+        self.assertEqual(result["status"], "PAID_EXECUTION_HANDLER_REQUIRED")
+        self.assertEqual(result["provider"], "paid")
+        self.assertEqual(calls, [])
+
     def test_paid_handler_failure_does_not_silently_try_another_provider(self):
         manager = ProviderManager()
         calls = []
