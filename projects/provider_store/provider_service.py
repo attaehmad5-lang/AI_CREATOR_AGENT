@@ -48,6 +48,30 @@ class ProviderService:
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
         self.execution_limiter = execution_limiter
 
+    @staticmethod
+    def _sanitize_operation_result(value: Any) -> Any:
+        """Remove credential-bearing fields from operation results before returning them."""
+        if isinstance(value, dict):
+            safe: dict[str, Any] = {}
+            safe_reference_keys = {"token_env", "token_expiry_env", "api_key_env", "credential_env", "secret_ref"}
+            secret_fragments = (
+                "password", "secret", "credential", "api_key", "apikey", "access_token",
+                "refresh_token", "authorization", "bearer", "private_key", "signing_key",
+                "encryption_key", "cookie", "session",
+            )
+            for key, item in value.items():
+                normalized = str(key).casefold().replace("-", "_")
+                if normalized in safe_reference_keys:
+                    safe[key] = item
+                elif normalized == "token" or any(fragment in normalized for fragment in secret_fragments):
+                    continue
+                else:
+                    safe[key] = ProviderService._sanitize_operation_result(item)
+            return safe
+        if isinstance(value, (list, tuple)):
+            return [ProviderService._sanitize_operation_result(item) for item in value]
+        return value
+
     def verify_provider(
         self,
         provider_id: str,
@@ -286,7 +310,7 @@ class ProviderService:
             "status": "EXECUTED",
             "provider": provider_id,
             "request_id": request_id,
-            "result": operation_result,
+            "result": self._sanitize_operation_result(operation_result),
         }
 
     def verify_webhook_callback(
