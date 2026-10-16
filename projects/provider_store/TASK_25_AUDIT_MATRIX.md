@@ -67,6 +67,22 @@ These dispositions describe repository/test evidence only; no item is called liv
 | 30 | Capability-Based Routing | Capability filtering and contract-v2 metadata validation are present in `connection_manager.py` and routing tests | PARTIAL | Complete routing truth for every fine-grained capability; catalog declarations alone are not proof that adapters work. |
 | 31 | Model/Version-Aware Routing | Router/catalog support declared model identifiers and versions; tests cover filtering and fail-closed missing metadata | PARTIAL | Populate and verify live model catalogs for enabled providers and keep model compatibility data current. |
 | 32 | User/Project Policy | Project IDs and paid-approval/budget gates exist in `cost_policy.py`, `routing_manager.py`, and `provider_service.py` | PARTIAL | Complete user/project authorization, isolation, and enforcement across every generation path. |
+| 33 | Configurable Retry Limit | `retry_policy.py` and retry tests cover configurable attempt limits and bounded retries | VERIFIED | Add provider-specific failure injection to validate policy decisions against real adapter errors. |
+| 34 | Error-Specific Retry Policy | Status/error classification and typed provider errors exist in retry/probe code | PARTIAL | Expand provider-specific transient/permanent error mappings and test real API semantics. |
+| 35 | Exponential Backoff and Jitter | `retry_policy.py` tests cover exponential backoff, jitter, and extreme-attempt capping | VERIFIED | Keep upper bounds and deterministic test injection for jitter behavior. |
+| 36 | HTTP 429/Rate-Limit Handling | HTTP and account-balance probes preserve bounded `Retry-After`; retry tests cover parsing and maximum delay | VERIFIED | Verify provider-specific rate-limit behavior and retry budgets with authorized integration tests. |
+| 37 | Quota Exhaustion Detection | `quota_manager.py` and routing tests reject exhausted local quota | PARTIAL | Map provider-side quota/credit exhaustion errors and reconcile ambiguous billable requests. |
+| 38 | Circuit Breaker | `retry_policy.py` tests cover threshold, cooldown, half-open single-probe concurrency, cancellation and recovery | VERIFIED | Connect circuit-breaker decisions to all real provider execution entry points. |
+| 39 | Cooldown and Provider Recheck | Health staleness and cooldown primitives exist in health/retry managers | PARTIAL | Add automatic scheduled recheck and controlled provider re-admission orchestration. |
+| 40 | Timeout, Cancellation and Stalled-Request Handling | Bounded HTTP timeout and timeout classification are tested | PARTIAL | Propagate deadlines/cancellation to generation jobs and recover stalled external requests. |
+| 41 | Provider Health State Tracking | `health_manager.py` persists provider health state with reload/concurrency tests | VERIFIED | Verify health state with authorized live provider probes. |
+| 42 | Basic Success/Failure History | Health history is bounded, persisted and idempotent under repeated request finalization | VERIFIED | Define production retention policy and verify cross-manager consistency. |
+| 43 | Health Check Before Generation | Routing can require verified connection and health eligibility | PARTIAL | Enforce fresh health checks consistently on every generation path, not only selected routing paths. |
+| 44 | Configurable Health-Check Policy | Staleness/latency thresholds and health eligibility behavior have regression coverage | VERIFIED | Add provider-specific threshold tuning from measured live latency/error data. |
+| 45 | Active Health Probes | Generic allowlisted HTTPS probe and health recording integration are implemented and mock-tested | PARTIAL | Run provider-specific authorized probes and verify authentication, account status, and endpoint semantics. |
+| 46 | Unhealthy Provider Exclusion | Health eligibility and routing regression tests exclude unhealthy providers | VERIFIED | Validate behavior under live outages and cross-process state updates. |
+| 47 | Provider Recovery Detection | Basic health state can record recovery, but automatic recovery/re-admission orchestration is absent | OPEN | Implement recovery policy, probe scheduling, and safe re-admission with tests. |
+| 48 | Stale Health and Consistency Checks | Staleness exclusion and malformed persisted-state checks exist | PARTIAL | Add reconciliation across connection, health, credit, and routing state. |
 ## Non-negotiable completion gates
 
 1. Preserve the exact canonical 138-item A–P list; do not infer individual item names from group headings.
