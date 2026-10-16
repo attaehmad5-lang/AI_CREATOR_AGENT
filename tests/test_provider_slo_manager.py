@@ -99,6 +99,14 @@ class ProviderSLOManagerTests(unittest.TestCase):
         self.assertTrue(self.define()["saved"])
         self.assertFalse(self.record("bad", latency=float("nan"))["saved"])
         self.assertFalse(self.record("bad-success", success=1)["saved"])
+        self.assertEqual(
+            self.manager.evaluate(slo_id=[], service_id="service")["status"],
+            "INVALID_SLO_SCOPE",
+        )
+        self.assertEqual(
+            self.manager.set_status(slo_id=[], status="PAUSED")["status"],
+            "INVALID_SLO_ID",
+        )
 
     def test_duplicate_slo_id_and_observation_limit_are_handled(self):
         self.assertTrue(self.define()["saved"])
