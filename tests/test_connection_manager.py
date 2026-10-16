@@ -818,6 +818,8 @@ class ConnectionManagerTests(unittest.TestCase):
             "connection_type": "API",
             "subscription_required": False,
             "enabled": True,
+            "status": "CONNECTED",
+            "verified": True,
             "allowed_hosts": ["api.example.com"],
             "capabilities": ["image_generation"],
             "official_api_url": "https://docs.example.com/image-api",
@@ -827,7 +829,10 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(result["saved"])
         self.assertFalse(result["enabled"])
         self.assertTrue(provider["enabled"], "onboarding must not mutate caller metadata")
-        self.assertFalse(self.manager.get_provider("new_image_api")["enabled"])
+        saved_provider = self.manager.get_provider("new_image_api")
+        self.assertFalse(saved_provider["enabled"])
+        self.assertEqual(saved_provider["status"], "READY")
+        self.assertNotIn("verified", saved_provider)
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertFalse(reloaded.get_provider("new_image_api")["enabled"])
 
