@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
@@ -984,6 +985,49 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["verified"])
         self.assertEqual(result["status"], "WEBHOOK_VERIFIED")
         self.assertNotIn(secret, repr(result))
+
+    def test_async_job_queue_facade_enforces_access_and_backpressure(self):
+        jobs = ProviderJobManager(
+            self.root / "service-jobs.json",
+            max_queue_size=1,
+            max_concurrent=1,
+        )
+        authorization = ProviderAuthorizationManager(self.root / "job-auth.json")
+        authorization.assign_role("viewer-job-user", "viewer")
+        authorization.assign_role("creator-job-user", "creator")
+        service = ProviderService(
+            self.connections,
+            job_manager=jobs,
+            authorization_manager=authorization,
+        )
+        denied = service.submit_job(
+            job_id="job-denied", project_id="film", provider_id="image",
+            payload_ref="payload:denied", principal_id="viewer-job-user",
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        accepted = service.submit_job(
+            job_id="job-1", project_id="film", provider_id="image",
+            payload_ref="payload:job-1", principal_id="creator-job-user",
+        )
+        self.assertEqual(accepted["status"], "JOB_QUEUED")
+        full = service.submit_job(
+            job_id="job-2", project_id="film", provider_id="image",
+            payload_ref="payload:job-2", principal_id="creator-job-user",
+        )
+        self.assertEqual(full["status"], "QUEUE_FULL")
+        claimed = service.claim_next_job(
+            worker_id="worker-1", principal_id="creator-job-user",
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        completed = service.complete_job(
+            job_id="job-1", worker_id="worker-1", success=True,
+            result_ref="asset:job-1", principal_id="creator-job-user",
+        )
+        self.assertEqual(completed["job"]["status"], "SUCCEEDED")
+        self.assertEqual(
+            service.poll_job(job_id="job-1", principal_id="viewer-job-user")["job"]["status"],
+            "SUCCEEDED",
+        )
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
