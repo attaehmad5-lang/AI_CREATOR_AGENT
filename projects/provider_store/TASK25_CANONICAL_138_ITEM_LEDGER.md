@@ -192,9 +192,9 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 111 | 🔴 | Multi-Factor Routing: Quality, Latency, Cost and Capability | PARTIAL | Cost/health/capability foundations exist; unified quality-aware scoring is incomplete. |
 | 112 | 🔴 | Project-Specific Provider Selection | PARTIAL | Project identifiers and policies exist; full per-project selection policy is incomplete. |
 | 113 | 🔴 | Automatic Exclusion of Providers That Cannot Meet Constraints | PARTIAL | Capability/health/credit filtering exists; all constraint classes are not covered. |
-| 114 | 🔴 | Confidence-Aware Routing and Uncertainty Handling | OPEN | Confidence-aware routing is not implemented. |
+| 114 | 🔴 | Confidence-Aware Routing and Uncertainty Handling | PARTIAL | `ProviderRoutingManager.route(confidence_aware=True)` requires model-specific benchmark evidence, configurable minimum sample count/success rate/optional p95 latency, and either explicitly allowed deterministic fallback or fail-closed `CONFIDENCE_INSUFFICIENT`. Confidence-aware route decisions expose bounded benchmark evidence. Calibration and production confidence intervals remain open. |
 | 115 | 🔴 | Controlled A/B Benchmarking Without Unintended Paid Usage | OPEN | Safe controlled A/B benchmarking and paid-usage isolation are not implemented. |
-| 116 | 🔴 | Adaptive Routing Using Verified Historical Performance | OPEN | Adaptive historical-performance routing is not implemented. |
+| 116 | 🔴 | Adaptive Routing Using Verified Historical Performance | PARTIAL | `ProviderRoutingManager` can rank eligible candidates using `ProviderBenchmarkManager` history and exclude low-success/low-sample candidates when confidence-aware routing is enabled. Continuous online adaptation, drift detection, and production experiment validation remain open. |
 | 117 | 🔴 | Region/Data-Residency-Aware Provider Selection | OPEN | Region/data-residency policy routing is not implemented. |
 | 118 | 🔴 | Human Approval for High-Cost or Sensitive Decisions | PARTIAL | Paid-usage approval gate exists; high-cost/sensitive decision approval workflow is incomplete. |
 
