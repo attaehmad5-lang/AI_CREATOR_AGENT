@@ -94,7 +94,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 49 | 🟢 | Image Output Validation | PARTIAL | Signature/basic file validation is tested; real provider images and decoder-level validation remain open. |
 | 50 | 🟡 | Output File Existence Validation | VERIFIED | Missing, empty and oversized output files are rejected by output-validator tests. |
-| 51 | 🔴 | Audio/Video Format, Codec and Integrity Validation | OPEN | Full codec/container decoding and integrity checks are not implemented. |
+| 51 | 🔴 | Audio/Video Format, Codec and Integrity Validation | PARTIAL | `media_integrity_validator.py` checks WAV frame/data integrity and bounded MP4/WebM/Ogg container structure, and `ProviderService` can reject malformed audio/video containers after basic output validation. Full codec decoding, codec allowlists, and semantic media validation remain open. |
 | 52 | 🟡 | Corrupt/Incomplete Output Rejection | PARTIAL | Basic corrupt/truncated artifact rejection is tested; decoder-level detection remains open. |
 | 53 | 🟡 | Temporary File Cleanup and Atomic Replacement | PARTIAL | Atomic replacement helpers exist; output-pipeline cleanup integration is incomplete. |
 | 54 | 🟡 | Previous Output Preservation on Failure | PARTIAL | Some preservation/atomicity tests exist; end-to-end generation replacement behavior is not verified. |
