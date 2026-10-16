@@ -52,8 +52,14 @@ class ProviderJobManager:
         self.backpressure_retry_seconds = backpressure_retry_seconds
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
-        self.data: dict[str, Any] = {"version": "1.0", "jobs": {}}
-        self._reload()
+        self.data: dict[str, Any] = {
+            "version": "1.0", "jobs": {},
+            "scheduler_state": {"last_project_by_priority": {}},
+        }
+        # Initialization must not read the shared JSON file while another process
+        # is atomically replacing it (notably on Windows).
+        with interprocess_file_lock(self.state_path.with_name(self.state_path.name + ".lock")):
+            self._reload()
 
     def _reload(self) -> None:
         if not self.state_path.exists():
@@ -66,6 +72,21 @@ class ProviderJobManager:
             raise ValueError("invalid provider job state JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("jobs"), dict):
             raise ValueError("invalid provider job state schema")
+        loaded.setdefault("scheduler_state", {"last_project_by_priority": {}})
+        scheduler_state = loaded.get("scheduler_state")
+        if not isinstance(scheduler_state, dict):
+            raise ValueError("invalid provider job scheduler state")
+        last_project_by_priority = scheduler_state.get("last_project_by_priority", {})
+        if not isinstance(last_project_by_priority, dict):
+            raise ValueError("invalid provider job scheduler cursor")
+        for priority, project_id in last_project_by_priority.items():
+            if (
+                not isinstance(priority, str) or not priority.isdigit()
+                or not 0 <= int(priority) <= 100
+                or not isinstance(project_id, str) or not _ID_RE.fullmatch(project_id)
+            ):
+                raise ValueError("invalid provider job scheduler cursor")
+        scheduler_state["last_project_by_priority"] = last_project_by_priority
         for job_id, job in loaded["jobs"].items():
             if (
                 not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
@@ -206,12 +227,21 @@ class ProviderJobManager:
                 job for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "QUEUED"
             ]
-            queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
             if not queued:
                 if changed:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
-            job = queued[0]
+            highest_priority = max(job["priority"] for job in queued)
+            priority_queue = [job for job in queued if job["priority"] == highest_priority]
+            projects = sorted({job["project_id"] for job in priority_queue})
+            cursors = self.data["scheduler_state"]["last_project_by_priority"]
+            last_project = cursors.get(str(highest_priority))
+            next_projects = [project for project in projects if last_project is None or project > last_project]
+            selected_project = next_projects[0] if next_projects else projects[0]
+            project_jobs = [job for job in priority_queue if job["project_id"] == selected_project]
+            project_jobs.sort(key=lambda job: (job["created_at"], job["job_id"]))
+            job = project_jobs[0]
+            cursors[str(highest_priority)] = selected_project
             job["status"] = "RUNNING"
             job["worker_id"] = worker_id
             job["attempts"] += 1
