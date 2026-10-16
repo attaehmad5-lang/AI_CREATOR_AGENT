@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.budget_alert_manager import BudgetAlertManager
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
@@ -707,6 +708,56 @@ class ProviderServiceTests(unittest.TestCase):
             estimated_cost=2.0, actual_cost=0.0, success=False, billing_mode=[],
         )
         self.assertEqual(malformed_billing["status"], "INVALID_BILLING_MODE")
+
+    def test_execution_queues_budget_alert_after_spend_crosses_threshold(self):
+        self.cost.reserve_usage(
+            project_id="film", provider_id="image", estimated_cost=4.0,
+            request_id="prior-budget-job",
+        )
+        prior = self.cost.finalize_usage(
+            project_id="film", provider_id="image", estimated_cost=4.0,
+            actual_cost=4.0, request_id="prior-budget-job", success=True,
+            charge_outcome="incurred",
+        )
+        self.assertTrue(prior.get("saved"))
+        self.quota.reserve(provider_id="image", request_id="budget-alert-job")
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "provider": "image",
+                    "billing_mode": "PAID_APPROVED",
+                }
+
+        alerts = BudgetAlertManager(self.root / "budget-alerts.json")
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            budget_alert_manager=alerts,
+        )
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="budget-alert-job",
+            estimated_cost=2.0,
+            modality="image",
+            adapter=lambda **kwargs: {
+                "started": True,
+                "success": False,
+                "actual_cost": 2.0,
+                "charge_outcome": "incurred",
+                "error_code": "PROVIDER_EXECUTION_FAILED",
+            },
+        )
+        self.assertEqual(result["budget_alerts"]["status"], "BUDGET_ALERTS_QUEUED")
+        self.assertEqual(
+            [item["threshold"] for item in result["budget_alerts"]["alerts"]],
+            [0.5],
+        )
+        self.assertEqual(len(alerts.pending_alerts()["alerts"]), 1)
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
