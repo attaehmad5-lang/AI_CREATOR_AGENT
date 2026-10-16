@@ -78,7 +78,8 @@ class ProviderExecutionLimiterTests(unittest.TestCase):
             time.sleep(0.005)
         self.assertEqual(limiter.cancel_pending("cancel-me")["status"], "CANCELLED")
         thread.join(1)
-        self.assertEqual(outcome[0]["status"], "QUEUE_TIMEOUT")
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(outcome[0]["status"], "CANCELLED")
         limiter.release("image", "active")
 
     def test_duplicate_request_ids_and_invalid_releases_fail_closed(self):
