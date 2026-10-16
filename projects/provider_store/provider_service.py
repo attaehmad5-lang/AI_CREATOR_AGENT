@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        budget_alert_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -33,6 +34,7 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (budget_alert_manager, "record", "budget_alert_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -45,6 +47,7 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.budget_alert_manager = budget_alert_manager
 
     def verify_provider(
         self,
@@ -421,6 +424,34 @@ class ProviderService:
             credit_outcome=credit_outcome,
             actual_credit_amount=actual_credit_amount,
         )
+        budget_alerts = None
+        if self.budget_alert_manager is not None and self.cost_policy is not None:
+            try:
+                budgets = getattr(self.cost_policy, "project_budgets", {})
+                budget = budgets.get(project_id) if isinstance(budgets, dict) else None
+                ledger = getattr(self.cost_policy, "ledger", {})
+                projects = ledger.get("projects", {}) if isinstance(ledger, dict) else {}
+                project = projects.get(project_id, {}) if isinstance(projects, dict) else {}
+                reservations = project.get("reservations", {}) if isinstance(project, dict) else {}
+                reserved = sum(
+                    float(item.get("estimated_cost", 0.0))
+                    for item in reservations.values()
+                    if isinstance(item, dict) and self._valid_amount(item.get("estimated_cost"))
+                ) if isinstance(reservations, dict) else 0.0
+                spend = float(project.get("actual_spend", 0.0)) + reserved if isinstance(project, dict) else reserved
+                if self._valid_amount(budget) and budget > 0:
+                    budget_alerts = self.budget_alert_manager.record(
+                        project_id=project_id, spend=spend, budget=budget,
+                        request_id=request_id,
+                    )
+                else:
+                    budget_alerts = {"status": "PROJECT_BUDGET_UNAVAILABLE", "alerts": []}
+            except Exception as exc:
+                budget_alerts = {
+                    "status": "BUDGET_ALERT_RECORD_FAILED",
+                    "error_type": type(exc).__name__,
+                    "alerts": [],
+                }
         retry = None
         if not final_success and self.retry_policy is not None:
             retry = self.retry_decision(
@@ -447,6 +478,7 @@ class ProviderService:
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "finalization": finalization,
+            "budget_alerts": budget_alerts,
             "retry_decision": retry,
         }
 
