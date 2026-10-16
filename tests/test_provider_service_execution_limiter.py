@@ -68,6 +68,15 @@ class ProviderServiceExecutionLimiterTests(unittest.TestCase):
         bad_callable = service.execute_with_provider_slot("image", "req-5", None)
         self.assertEqual(bad_callable["status"], "INVALID_PROVIDER_OPERATION")
 
+    def test_cyclic_operation_result_is_rejected_after_slot_release(self):
+        limiter = ProviderExecutionLimiter(max_concurrent=1)
+        service = ProviderService(_ConnectionManager(), execution_limiter=limiter)
+        cyclic = {"status": "COMPLETED"}
+        cyclic["self"] = cyclic
+        result = service.execute_with_provider_slot("image", "req-cycle", lambda: cyclic)
+        self.assertEqual(result["status"], "PROVIDER_OPERATION_RESULT_INVALID")
+        self.assertEqual(limiter.summary()["active"], 0)
+
     def test_slot_release_failure_is_reported(self):
         class BrokenReleaseLimiter:
             def acquire(self, provider_id, request_id, **kwargs):
