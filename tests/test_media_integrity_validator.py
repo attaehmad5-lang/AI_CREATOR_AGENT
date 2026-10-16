@@ -11,7 +11,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
-        self.validator = MediaIntegrityValidator(max_bytes=1024, max_duration_seconds=30)
+        self.validator = MediaIntegrityValidator(max_bytes=2048, max_duration_seconds=30)
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -65,7 +65,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
 
     def test_unsupported_modality_and_size_limit_fail_closed(self):
         path = self.root / "unknown.bin"
-        path.write_bytes(b"x" * 2000)
+        path.write_bytes(b"x" * 3000)
         self.assertEqual(self.validator.validate(path, modality="video")["status"], "MEDIA_FILE_TOO_LARGE")
         self.assertEqual(self.validator.validate(path, modality="text")["status"], "UNSUPPORTED_MEDIA_MODALITY")
 
