@@ -4,6 +4,10 @@
 
 This matrix preserves the canonical feature-ID ranges and group names. It is an evidence tracker, not a replacement for the user's exact 138-item checklist. A group is not complete merely because a supporting module or test exists; every original item still requires individual verification.
 
+## Item-level progress snapshot
+
+The current item-level audit covers all 138 canonical IDs. Provisional status counts: **18 VERIFIED**, **7 IMPLEMENTED / TESTED**, **76 PARTIAL**, and **37 OPEN**. Thus **101/138 (73.2%)** have at least some implementation/test evidence, while only **25/138 (18.1%)** are currently classified as verified or implemented/tested. This is not a completion claim: the latest code/test commits still need a fresh full CI run, and all PARTIAL/OPEN items remain incomplete.
+
 ## Latest confirmed verification
 
 Last previously confirmed verification: GitHub Actions run [#38435397071](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38435397071) passed on Ubuntu and Windows with Python 3.13: **312 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation also passed. Since that run, the follow-up branch has received additional code and test commits (paid-use fallback gating, webhook verification, and new integration/regression tests); those commits are **not covered by run #38435397071** and require a fresh CI run before they can be called verified.
