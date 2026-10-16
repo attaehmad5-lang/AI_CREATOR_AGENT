@@ -727,31 +727,6 @@ class ProviderService:
                         "saved": False,
                         "error_type": type(exc).__name__,
                     }
-        incident_result = None
-        if self.incident_manager is not None and not final_success:
-            if isinstance(provider_error, dict) and provider_error.get("category") in {"billing", "credits_exhausted"}:
-                severity = "critical"
-            elif isinstance(provider_error, dict) and provider_error.get("category") == "transient":
-                severity = "warning"
-            else:
-                severity = "error"
-            incident_code = (
-                provider_error.get("status") if isinstance(provider_error, dict)
-                else quality_error or output_error or error_code
-            )
-            try:
-                incident_result = self.incident_manager.record(
-                    provider_id=provider_id,
-                    category=category,
-                    severity=severity,
-                    code=incident_code,
-                )
-            except Exception as exc:
-                incident_result = {
-                    "status": "INCIDENT_RECORD_FAILED",
-                    "saved": False,
-                    "error_type": type(exc).__name__,
-                }
         metrics_result = None
         if self.metrics_manager is not None:
             try:
@@ -818,6 +793,31 @@ class ProviderService:
                     retry_after=adapter_result.get("retry_after"),
                     idempotent=adapter_result.get("idempotent", False),
                 )
+        incident_result = None
+        if self.incident_manager is not None and not final_success:
+            if isinstance(provider_error, dict) and provider_error.get("category") in {"billing", "credits_exhausted"}:
+                severity = "critical"
+            elif isinstance(provider_error, dict) and provider_error.get("category") == "transient":
+                severity = "warning"
+            else:
+                severity = "error"
+            incident_code = (
+                provider_error.get("status") if isinstance(provider_error, dict)
+                else quality_error or output_error or error_code
+            )
+            try:
+                incident_result = self.incident_manager.record(
+                    provider_id=provider_id,
+                    category=category,
+                    severity=severity,
+                    code=incident_code,
+                )
+            except Exception as exc:
+                incident_result = {
+                    "status": "INCIDENT_RECORD_FAILED",
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
         if accounting_required:
             status = "EXECUTION_ACCOUNTING_REQUIRED"
         elif quality_error is not None:
