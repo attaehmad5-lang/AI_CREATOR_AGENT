@@ -3,6 +3,7 @@ import unittest
 from projects.generation.providers.provider_manager import ProviderManager
 from projects.generation.providers.fallback_manager import FallbackManager
 from projects.generation.providers.provider_health import ProviderHealth
+from projects.provider_store.execution_limiter import ProviderExecutionLimiter
 
 
 class GenerationProviderManagerSecurityTests(unittest.TestCase):
@@ -148,6 +149,69 @@ class GenerationProviderManagerSecurityTests(unittest.TestCase):
         self.assertEqual(result["status"], "COMPLETED")
         self.assertEqual(result["attempted_providers"][0]["provider"], "missing")
         self.assertEqual(result["attempted_providers"][-1]["status"], "COMPLETED")
+
+    def test_fallback_manager_enforces_provider_slots_and_releases_them(self):
+        manager = ProviderManager()
+        class ImageProvider:
+            provider_id = "image-provider"
+            def __init__(self):
+                self.calls = 0
+            def generate_image(self, prompt, output_path):
+                self.calls += 1
+                return {"status": "COMPLETED", "output_path": output_path}
+        provider = ImageProvider()
+        manager.providers["image"] = provider
+        limiter = ProviderExecutionLimiter(max_concurrent=1, max_pending=0)
+        limiter.acquire("image-provider", "occupied")
+        fallback = FallbackManager(manager, execution_limiter=limiter)
+        blocked = fallback.generate_image(
+            ["image"], "prompt", "out.png", request_id="blocked"
+        )
+        self.assertEqual(blocked["status"], "OVERLOADED")
+        self.assertEqual(provider.calls, 0)
+        limiter.release("image-provider", "occupied")
+
+        completed = fallback.generate_image(
+            ["image"], "prompt", "out.png", request_id="allowed"
+        )
+        self.assertEqual(completed["status"], "COMPLETED")
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(limiter.summary()["active"], 0)
+
+    def test_limited_fallback_requires_request_id_and_does_not_execute(self):
+        manager = ProviderManager()
+        calls = []
+        class ImageProvider:
+            provider_id = "image-provider"
+            def generate_image(self, prompt, output_path):
+                calls.append(True)
+                return {"status": "COMPLETED"}
+        manager.providers["image"] = ImageProvider()
+        fallback = FallbackManager(
+            manager,
+            execution_limiter=ProviderExecutionLimiter(max_concurrent=1),
+        )
+        result = fallback.generate_image(["image"], "prompt", "out.png")
+        self.assertEqual(result["status"], "REQUEST_ID_REQUIRED")
+        self.assertEqual(calls, [])
+
+    def test_paid_handler_runs_under_limiter_and_releases_slot(self):
+        manager = ProviderManager()
+        class PaidProvider:
+            provider_id = "paid-provider"
+            requires_paid_approval = True
+        manager.providers["paid"] = PaidProvider()
+        limiter = ProviderExecutionLimiter(max_concurrent=1)
+        fallback = FallbackManager(
+            manager,
+            execution_limiter=limiter,
+            paid_execution_handler=lambda **kwargs: {"status": "COMPLETED", "provider": "paid"},
+        )
+        result = fallback.generate_image(
+            ["paid"], "prompt", "out.png", request_id="paid-request"
+        )
+        self.assertEqual(result["status"], "COMPLETED")
+        self.assertEqual(limiter.summary()["active"], 0)
 
     def test_invalid_registry_shape_is_rejected(self):
         manager = ProviderManager()
