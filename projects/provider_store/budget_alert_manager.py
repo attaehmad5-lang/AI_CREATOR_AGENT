@@ -110,6 +110,8 @@ class BudgetAlertManager:
         if spend_value is None or budget_value is None or budget_value <= 0:
             return {"status": "INVALID_BUDGET_USAGE", "alerts": []}
         ratio = spend_value / budget_value
+        if not math.isfinite(ratio):
+            ratio = 1e12
         now = self.clock().astimezone(timezone.utc).isoformat()
         alerts = []
         with self._transaction():
