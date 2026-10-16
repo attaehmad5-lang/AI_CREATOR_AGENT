@@ -33,6 +33,7 @@ class ProviderService:
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
             (execution_limiter, "acquire", "execution_limiter"),
+            (execution_limiter, "release", "execution_limiter"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
