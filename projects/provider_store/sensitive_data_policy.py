@@ -12,7 +12,7 @@ _PATTERNS = (
     ("credential", re.compile(r"(?i)\b(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=]\s*[^\s,;]{6,}")),
     ("credential", re.compile(r"\b(?:sk-[A-Za-z0-9_-]{16,}|hf_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\b")),
     ("email", re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)),
-    ("phone", re.compile(r"(?<!\w)(?=(?:\D*\d){10,15}(?!\d))\+?\d[\d .()/-]{8,}\d(?!\w)")),
+    ("phone", re.compile(r"(?<!\w)(?:\+\d{1,3}[ .-]?)?(?:\(\d{2,4}\)|\d{2,4})[ .-]?\d{3,4}[ .-]?\d{3,4}(?!\w)")),
 )
 _SAFE_KEY = re.compile(r"[A-Za-z0-9_.-]{1,64}\Z")
 
