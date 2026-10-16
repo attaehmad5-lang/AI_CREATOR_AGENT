@@ -32,6 +32,7 @@ class ProviderService:
         metrics_manager: Any | None = None,
         quality_policy: Any | None = None,
         benchmark_manager: Any | None = None,
+        incident_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -52,6 +53,7 @@ class ProviderService:
             (metrics_manager, "record", "metrics_manager"),
             (quality_policy, "evaluate", "quality_policy"),
             (benchmark_manager, "record", "benchmark_manager"),
+            (incident_manager, "record", "incident_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -73,6 +75,7 @@ class ProviderService:
         self.metrics_manager = metrics_manager
         self.quality_policy = quality_policy
         self.benchmark_manager = benchmark_manager
+        self.incident_manager = incident_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -700,6 +703,31 @@ class ProviderService:
                         "saved": False,
                         "error_type": type(exc).__name__,
                     }
+        incident_result = None
+        if self.incident_manager is not None and not final_success:
+            if isinstance(provider_error, dict) and provider_error.get("category") in {"billing", "credits_exhausted"}:
+                severity = "critical"
+            elif isinstance(provider_error, dict) and provider_error.get("category") == "transient":
+                severity = "warning"
+            else:
+                severity = "error"
+            incident_code = (
+                provider_error.get("status") if isinstance(provider_error, dict)
+                else quality_error or output_error or error_code
+            )
+            try:
+                incident_result = self.incident_manager.record(
+                    provider_id=provider_id,
+                    category=category,
+                    severity=severity,
+                    code=incident_code,
+                )
+            except Exception as exc:
+                incident_result = {
+                    "status": "INCIDENT_RECORD_FAILED",
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
         metrics_result = None
         if self.metrics_manager is not None:
             try:
@@ -789,6 +817,7 @@ class ProviderService:
             "finalization": finalization,
             "metrics": metrics_result,
             "benchmark": benchmark_result,
+            "incident": incident_result,
             "provider_error": provider_error,
             "budget_alerts": budget_alerts,
             "authorization": authorization,
