@@ -107,7 +107,7 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
         self.assertTrue(result["assigned"])
         self.assertEqual(len(reservations), 1)
         self.assertEqual(reservations[0]["approval_reference"], "approval-ticket-123")
-        self.assertEqual(reservations[0]["request_id"], "ab:exp-1:req-paid")
+        self.assertEqual(reservations[0]["request_id"], "req-paid")
         self.assertIn(reservations[0]["provider_id"], {"provider-a", "provider-b"})
         self.assertIn(reservations[0]["model_id"], {"model-a", "model-b"})
         duplicate = self.manager.assign(
@@ -173,6 +173,45 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
         self.assertEqual(summary["status"], "AB_SUMMARY_AVAILABLE")
         self.assertEqual(sum(arm["outcome_count"] for arm in summary["results"]), 1)
         self.assertNotIn("request_id", repr(summary))
+
+    def test_unexpected_charge_on_free_arm_stops_experiment(self):
+        self.create()
+        assignment = self.manager.assign(
+            experiment_id="exp-1", project_id="project-1", request_id="free-req"
+        )
+        self.assertTrue(assignment["assigned"])
+        result = self.manager.record_outcome(
+            experiment_id="exp-1", project_id="project-1", request_id="free-req",
+            success=True, latency_ms=100, actual_cost=0.25,
+        )
+        self.assertEqual(result["status"], "OUTCOME_RECORDED")
+        blocked = self.manager.assign(
+            experiment_id="exp-1", project_id="project-1", request_id="another-free-req"
+        )
+        self.assertEqual(blocked["status"], "EXPERIMENT_NOT_ACTIVE")
+
+    def test_actual_cost_over_experiment_cap_pauses_future_assignments(self):
+        self.create(
+            arms=[{"arm_id":"A","provider_id":"provider-a","model_id":"model-a","estimated_cost":0.5},
+                  {"arm_id":"B","provider_id":"provider-b","model_id":"model-b","estimated_cost":0.5}],
+            paid_usage_approved=True, approval_reference="approved-1",
+            experiment_budget_cap=0.5, project_budget_cap=3.0,
+            verify_paid_approval=self.approval_verifier,
+        )
+        assignment = self.manager.assign(
+            experiment_id="exp-1", project_id="project-1", request_id="paid-overrun",
+            reserve_paid_usage=lambda **kwargs: {"saved": True},
+        )
+        self.assertTrue(assignment["assigned"])
+        self.manager.record_outcome(
+            experiment_id="exp-1", project_id="project-1", request_id="paid-overrun",
+            success=True, latency_ms=100, actual_cost=0.75,
+        )
+        blocked = self.manager.assign(
+            experiment_id="exp-1", project_id="project-1", request_id="next-paid",
+            reserve_paid_usage=lambda **kwargs: {"saved": True},
+        )
+        self.assertEqual(blocked["status"], "EXPERIMENT_NOT_ACTIVE")
 
     def test_corrupt_state_fails_closed(self):
         self.path.write_text("{bad-json", encoding="utf-8")
