@@ -796,6 +796,17 @@ class ConnectionManager:
         required_strings = ("id", "name", "category", "auth_type", "connection_type")
         if any(not isinstance(candidate.get(key), str) or not candidate[key].strip() for key in required_strings):
             return {"status": "INVALID_PROVIDER", "saved": False}
+        category = candidate["category"].casefold().replace("-", "_").replace(" ", "_")
+        supported_categories = {
+            "image", "video", "voice", "audio", "music", "text", "language_model",
+            "transcription", "translation", "dubbing", "image_editing",
+            "advanced_image_editing", "upscaling", "advanced_upscaling", "lipsync",
+            "script_story", "advanced_transcription", "advanced_audio",
+            "video_editing", "advanced_video_editing",
+        }
+        if category not in supported_categories:
+            return {"status": "UNSUPPORTED_MODALITY", "saved": False}
+        candidate["category"] = category
         if not isinstance(candidate.get("subscription_required"), bool):
             return {"status": "INVALID_PROVIDER_POLICY", "saved": False}
         capabilities = candidate.get("capabilities")
