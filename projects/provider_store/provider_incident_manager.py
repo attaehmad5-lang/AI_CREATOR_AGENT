@@ -90,7 +90,7 @@ class ProviderIncidentManager:
             return {"status": "INVALID_PROVIDER_ID", "saved": False}
         if not isinstance(category, str) or not _ID_RE.fullmatch(category):
             return {"status": "INVALID_INCIDENT_CATEGORY", "saved": False}
-        if severity not in _SEVERITIES:
+        if not isinstance(severity, str) or severity not in _SEVERITIES:
             return {"status": "INVALID_INCIDENT_SEVERITY", "saved": False}
         if not isinstance(code, str) or not _CODE_RE.fullmatch(code):
             return {"status": "INVALID_INCIDENT_CODE", "saved": False}
