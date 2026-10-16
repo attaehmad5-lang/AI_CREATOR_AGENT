@@ -129,7 +129,12 @@ class ProviderOutputValidatorTests(unittest.TestCase):
 
     def test_file_growth_during_validation_is_detected(self):
         path = self.root / "changing.png"
-        signature = b"\x89PNG\r\n\x1a\n"
+        signature = (
+            b"\x89PNG\r\n\x1a\n"
+            + (13).to_bytes(4, "big") + b"IHDR"
+            + (32).to_bytes(4, "big") + (24).to_bytes(4, "big")
+            + bytes([8, 2, 0, 0, 0])
+        )
         path.write_bytes(signature + b"extra bytes")
         actual = path.stat()
         fake_stat = SimpleNamespace(
@@ -199,6 +204,10 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             ProviderOutputValidator(min_size_bytes=10, max_size_bytes=1)
         with self.assertRaises(ValueError):
             ProviderOutputValidator(max_json_depth=0)
+        with self.assertRaises(ValueError):
+            ProviderOutputValidator(max_image_dimension=0)
+        with self.assertRaises(ValueError):
+            ProviderOutputValidator(max_image_pixels=0)
         self.assertEqual(
             ProviderOutputValidator().validate_file("bad\x00path.txt", modality="text")["status"],
             "INVALID_PATH",
