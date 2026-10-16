@@ -9,6 +9,17 @@ from pathlib import Path
 from projects.provider_store.output_validator import ProviderOutputValidator
 
 
+def png_header(width: int, height: int) -> bytes:
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + b"\x00\x00\x00\x0dIHDR"
+        + width.to_bytes(4, "big")
+        + height.to_bytes(4, "big")
+        + b"\x08\x06\x00\x00\x00"
+        + b"\x00" * 4
+    )
+
+
 class ProviderOutputValidatorTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -20,11 +31,36 @@ class ProviderOutputValidatorTests(unittest.TestCase):
 
     def test_valid_image_signature_returns_hash_and_metadata(self):
         path = self.root / "cover.png"
-        path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
+        path.write_bytes(png_header(1, 1))
         result = self.validator.validate_file(path, modality="image")
         self.assertTrue(result["valid"])
         self.assertEqual(result["mime_type"], "image/png")
         self.assertEqual(len(result["sha256"]), 64)
+
+    def test_png_dimensions_are_reported_and_resource_limits_are_enforced(self):
+        valid = self.root / "dimensioned.png"
+        valid.write_bytes(png_header(320, 240))
+        result = self.validator.validate_file(valid, modality="image")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["dimensions"], {"width": 320, "height": 240})
+
+        zero = self.root / "zero-dimensions.png"
+        zero.write_bytes(png_header(0, 240))
+        self.assertEqual(
+            self.validator.validate_file(zero, modality="image")["status"],
+            "INVALID_IMAGE_DIMENSIONS",
+        )
+
+        oversized = self.root / "oversized-dimensions.png"
+        oversized.write_bytes(png_header(2000, 2000))
+        limited = ProviderOutputValidator(
+            max_size_bytes=64, max_image_width=1000,
+            max_image_height=1000, max_image_pixels=1_000_000,
+        )
+        self.assertEqual(
+            limited.validate_file(oversized, modality="image")["status"],
+            "IMAGE_DIMENSIONS_EXCEEDED",
+        )
 
     def test_mismatched_signature_and_extension_are_rejected(self):
         wrong_signature = self.root / "cover.png"
@@ -92,7 +128,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
 
     def test_file_growth_during_validation_is_detected(self):
         path = self.root / "changing.png"
-        signature = b"\x89PNG\r\n\x1a\n"
+        signature = png_header(1, 1)
         path.write_bytes(signature + b"extra bytes")
         actual = path.stat()
         fake_stat = SimpleNamespace(
@@ -162,6 +198,8 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             ProviderOutputValidator(min_size_bytes=10, max_size_bytes=1)
         with self.assertRaises(ValueError):
             ProviderOutputValidator(max_json_depth=0)
+        with self.assertRaises(ValueError):
+            ProviderOutputValidator(max_image_width=0)
         self.assertEqual(
             ProviderOutputValidator().validate_file("bad\x00path.txt", modality="text")["status"],
             "INVALID_PATH",
