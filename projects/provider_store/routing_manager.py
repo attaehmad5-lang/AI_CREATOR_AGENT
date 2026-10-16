@@ -142,6 +142,7 @@ class ProviderRoutingManager:
         request_id: str | None = None,
         paid_approved_providers: set[str] | frozenset[str] | None = None,
         excluded_providers: set[str] | frozenset[str] | None = None,
+        allow_existing_cost_reservation: bool = False,
         require_health_evidence: bool = False,
         automatic_fallback: bool = True,
         confidence_aware: bool = False,
@@ -231,6 +232,8 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_PAID_APPROVAL_SET"}
         if excluded_providers is not None and not isinstance(excluded_providers, (set, frozenset)):
             return {"allowed": False, "status": "INVALID_EXCLUDED_PROVIDER_SET"}
+        if not isinstance(allow_existing_cost_reservation, bool):
+            return {"allowed": False, "status": "INVALID_COST_RESERVATION_REUSE_POLICY"}
         if not isinstance(require_health_evidence, bool):
             return {"allowed": False, "status": "INVALID_HEALTH_POLICY"}
 
@@ -636,18 +639,25 @@ class ProviderRoutingManager:
                 except Exception as exc:
                     decisions.append({"provider": provider_id, "status": "COST_RESERVATION_FAILED", "error_type": type(exc).__name__})
                     continue
-                if isinstance(cost_reservation, dict) and cost_reservation.get("status") == "ALREADY_RESERVED":
+                reused_cost_reservation = (
+                    isinstance(cost_reservation, dict)
+                    and cost_reservation.get("status") == "ALREADY_RESERVED"
+                    and allow_existing_cost_reservation
+                )
+                if isinstance(cost_reservation, dict) and cost_reservation.get("status") == "ALREADY_RESERVED" and not allow_existing_cost_reservation:
                     return {
                         "allowed": False, "status": "REQUEST_ALREADY_RESERVED",
                         "provider": provider_id, "request_id": request_id,
                         "decisions": decisions,
                     }
-                if not isinstance(cost_reservation, dict) or cost_reservation.get("status") != "RESERVED":
+                if not reused_cost_reservation and (
+                    not isinstance(cost_reservation, dict) or cost_reservation.get("status") != "RESERVED"
+                ):
                     status = cost_reservation.get("status", "COST_RESERVATION_REJECTED") if isinstance(cost_reservation, dict) else "INVALID_COST_RESERVATION_RESPONSE"
                     decisions.append({"provider": provider_id, "status": status})
                     continue
                 cost_reserved = True
-                cost_reservation_created = True
+                cost_reservation_created = not reused_cost_reservation
 
             if self.quota_manager is not None:
                 try:
