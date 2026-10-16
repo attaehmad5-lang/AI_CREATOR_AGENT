@@ -104,7 +104,8 @@ class ProviderABExperimentManager:
                     or not self._valid_id(exp.get("approval_reference"), 200)
                     or experiment_cap is None or experiment_cap <= 0
                     or project_cap is None or project_cap <= 0
-                    or experiment_cap > project_cap or reserved_cost > experiment_cap
+                    or experiment_cap > project_cap
+                    or (reserved_cost > experiment_cap and exp.get("status") == "ACTIVE")
                 ):
                     raise ValueError("paid experiment approval/budget state is invalid")
             elif reserved_cost != 0:
@@ -310,7 +311,7 @@ class ProviderABExperimentManager:
                 try:
                     reservation = reserve_paid_usage(
                         project_id=project_id, provider_id=chosen["provider_id"],
-                        model_id=chosen["model_id"], request_id=f"ab:{experiment_id}:{request_id}",
+                        model_id=chosen["model_id"], request_id=request_id,
                         estimated_cost=cost, approval_reference=exp["approval_reference"],
                     )
                 except Exception:
@@ -357,6 +358,16 @@ class ProviderABExperimentManager:
                 if existing == outcome:
                     return {"status": "ALREADY_RECORDED", "saved": True}
                 return {"status": "OUTCOME_CONFLICT", "saved": False}
+            assignment = exp["requests"][request_id]
+            estimated = float(assignment["estimated_cost"])
+            adjusted_reserved = max(0.0, float(exp.get("reserved_cost", 0.0)) - estimated + cost)
+            if cost > 0 and estimated == 0:
+                # A supposedly free arm incurred a charge: stop the experiment immediately.
+                exp["status"] = "STOPPED"
+            elif exp.get("experiment_budget_cap") is not None and adjusted_reserved > exp["experiment_budget_cap"]:
+                # Record actual usage truthfully, but prevent any further assignments.
+                exp["status"] = "PAUSED"
+            exp["reserved_cost"] = round(adjusted_reserved, 8)
             exp["outcomes"][request_id] = outcome
         return {"status": "OUTCOME_RECORDED", "saved": True}
 
