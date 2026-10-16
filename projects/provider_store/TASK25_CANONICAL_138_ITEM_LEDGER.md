@@ -120,7 +120,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 65 | 🟡 | Secrets Manager Integration | PARTIAL | Environment variable references are supported; managed secret vault/rotation integration is not complete. |
 | 66 | 🟡 | Secret/Token Leak Prevention in Logs | PARTIAL | Credential redaction and no-response-body probes are tested; full application log scan is pending. |
-| 67 | 🔴 | Least-Privilege Access Control | OPEN | Role/permission-based access control is not fully implemented. |
+| 67 | 🔴 | Least-Privilege Access Control | PARTIAL | `provider_authorization.py` persists explicit viewer/creator/operator/billing-manager/admin role assignments and denies unknown principals/operations; `ProviderService.execute_routed_request` checks `provider.generate` authorization before routing or invoking an adapter. Other management endpoints, tenant-bound resource checks, and end-to-end identity-provider integration remain open. |
 | 68 | 🔴 | Provider Permissions and Allowed Operations | PARTIAL | Catalog capabilities and OAuth scope checks exist; operation-level authorization coverage is incomplete. |
 | 69 | 🔴 | Sensitive-Data Detection and Privacy Enforcement | OPEN | Sensitive-data detection and policy enforcement are not complete. |
 | 70 | 🔴 | Data Retention and Provider Data-Handling Rules | OPEN | Provider-specific retention/data-handling policy enforcement is not complete. |
