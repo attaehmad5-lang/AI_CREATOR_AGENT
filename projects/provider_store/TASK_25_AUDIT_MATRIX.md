@@ -27,7 +27,7 @@ Latest confirmed verification: GitHub Actions run [#38435397071](https://github.
 | O / 119–128 | Usage & Management | Reservation, quota, cost reconciliation, and credit accounting managers | PARTIAL | Complete usage/reporting and management requirements from the canonical checklist. |
 | P / 129–138 | Extensibility & Administration | Central registry and legacy/unified compatibility facades | PARTIAL | Verify provider/plugin lifecycle requirements and any required administration surfaces against the original items. |
 
-## Individual evidence audit — first 16 canonical items
+## Individual evidence audit — canonical items 1–24
 
 These dispositions describe repository/test evidence only; no item is called live-verified without a real, authorized provider check.
 
@@ -49,6 +49,15 @@ These dispositions describe repository/test evidence only; no item is called liv
 | 14 | Endpoint / Model Configuration | Model and endpoint validation, allowlist checks, query-string rejection, separate probe_endpoint | IMPLEMENTED / TESTED | Validate model/endpoint combinations against official provider docs and live non-billable probes. |
 | 15 | TLS / HTTPS / Certificate Verification | HTTPS required, TLS verification by standard-library opener, redirects rejected, unsafe hosts blocked | IMPLEMENTED / TESTED | Exercise certificate/handshake failures against controlled endpoints and provider-specific hosts. |
 | 16 | Authentication / Permission / Access Error Handling | Safe classification for 401/403, 429, 5xx, timeout/network failures and bounded Retry-After | IMPLEMENTED / TESTED | Confirm provider-specific error bodies/status semantics without logging secrets or response bodies. |
+
+| 17 | Image Generation Providers | Pollinations authenticated image adapter has bounded HTTP handling, response size/signature checks, atomic output writes, and mock-tested integration through the paid-policy handler; the adapter is marked as requiring paid-use handling | PARTIAL | No authorized live image generation or provider billing/account reconciliation was run; Hugging Face output quality and model availability are also not proven by mocks. |
+| 18 | Video Generation Providers | Catalog metadata only; no verified video generation adapter or end-to-end video artifact test | OPEN | Implement a provider-specific video adapter, async job/polling lifecycle, and output validation with authorized live testing. |
+| 19 | Voice/Speech/Audio Providers | Catalog metadata and callable-contract foundations only | OPEN | Implement and test actual provider-specific voice/audio generation, codec checks, and live output. |
+| 20 | Text/Script/Language Model Providers | Catalog metadata and modality contract foundations only | OPEN | Implement provider-specific text/script generation adapters and validate structured outputs and usage reconciliation. |
+| 21 | Music Generation Providers | Catalog metadata only; no verified music generation adapter | OPEN | Implement a music generation adapter, output integrity checks, and authorized live generation tests. |
+| 22 | Image Editing/Upscaling/Restoration | Capability labels and contract validation exist, but no complete end-to-end editing/upscaling/restoration adapter is verified | OPEN | Add modality-specific adapters and input/output validation with real provider artifacts. |
+| 23 | Transcription, Translation and Dubbing | Catalog metadata and contract foundations only | OPEN | Implement audio input handling, transcription/translation/dubbing adapters, language metadata, and live end-to-end tests. |
+| 24 | Future Modality Support and Contract Tests | Capability-aware contract v2 rejects unknown capability IDs and validates declared callable methods; regression coverage exists | PARTIAL | Contract surface is tested, but a new modality still needs an adapter implementation and end-to-end evidence before it is supported. |
 
 ## Non-negotiable completion gates
 
