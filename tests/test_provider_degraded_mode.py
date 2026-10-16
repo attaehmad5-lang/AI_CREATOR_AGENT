@@ -62,8 +62,16 @@ class ProviderDegradedModeManagerTests(unittest.TestCase):
     def test_invalid_mode_and_empty_degraded_allowlist_are_rejected(self):
         self.assertFalse(self.set_mode("DEGRADED", [])["saved"])
         self.assertFalse(self.set_mode("UNKNOWN")["saved"])
+        self.assertFalse(self.manager.set_mode(
+            project_id="film", service_id="image", mode=[],
+            reason_code="INVALID_MODE",
+        )["saved"])
         self.assertEqual(
             self.manager.evaluate(project_id=[], service_id="image", operation="provider.generate")["status"],
+            "INVALID_DEGRADED_MODE_REQUEST",
+        )
+        self.assertEqual(
+            self.manager.evaluate(project_id="film", service_id="image", operation=[])["status"],
             "INVALID_DEGRADED_MODE_REQUEST",
         )
 
