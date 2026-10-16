@@ -809,6 +809,59 @@ class ConnectionManagerTests(unittest.TestCase):
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertEqual(reloaded.get_provider("local_image")["name"], "Local Image")
 
+    def test_onboard_provider_validates_metadata_and_keeps_new_provider_disabled(self):
+        provider = {
+            "id": "new_image_api",
+            "name": "New Image API",
+            "category": "image",
+            "auth_type": "API_TOKEN",
+            "connection_type": "API",
+            "subscription_required": False,
+            "enabled": True,
+            "allowed_hosts": ["api.example.com"],
+            "capabilities": ["image_generation"],
+            "official_api_url": "https://docs.example.com/image-api",
+        }
+        result = self.manager.onboard_provider(provider)
+        self.assertEqual(result["status"], "ONBOARDING_READY")
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["enabled"])
+        self.assertTrue(provider["enabled"], "onboarding must not mutate caller metadata")
+        self.assertFalse(self.manager.get_provider("new_image_api")["enabled"])
+        reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertFalse(reloaded.get_provider("new_image_api")["enabled"])
+
+    def test_onboard_provider_requires_docs_capabilities_and_safe_metadata(self):
+        base = {
+            "id": "onboard_api", "name": "Onboard API", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API",
+            "subscription_required": False, "allowed_hosts": ["api.example.com"],
+            "capabilities": ["image_generation"],
+        }
+        missing_docs = self.manager.onboard_provider(base)
+        self.assertEqual(missing_docs["status"], "OFFICIAL_DOCUMENTATION_REQUIRED")
+        missing_caps = dict(base, id="no_caps", official_api_url="https://docs.example.com/api")
+        missing_caps.pop("capabilities")
+        self.assertEqual(self.manager.onboard_provider(missing_caps)["status"], "CAPABILITIES_REQUIRED")
+        unsafe_docs = dict(base, id="unsafe_docs", official_api_url="https://docs.example.com/api?token=secret")
+        self.assertEqual(self.manager.onboard_provider(unsafe_docs)["status"], "INVALID_OFFICIAL_DOCUMENTATION_URL")
+        secret = dict(base, id="secret_onboard", official_api_url="https://docs.example.com/api", api_key="must-not-store")
+        self.assertEqual(self.manager.onboard_provider(secret)["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertFalse(self.manager.provider_exists("secret_onboard"))
+
+    def test_onboard_provider_rejects_duplicate_provider_ids(self):
+        provider = {
+            "id": "token_image", "name": "Duplicate", "category": "image",
+            "auth_type": "API_TOKEN", "connection_type": "API",
+            "subscription_required": False, "allowed_hosts": ["api.example.com"],
+            "capabilities": ["image_generation"],
+            "official_api_url": "https://docs.example.com/image-api",
+        }
+        result = self.manager.onboard_provider(provider)
+        self.assertEqual(result["status"], "ALREADY_EXISTS")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.manager.get_provider("token_image")["name"], "Token Image")
+
     def test_register_provider_rejects_duplicate_without_overwrite(self):
         provider = {
             "id": "token_image", "name": "Replacement", "category": "image",
