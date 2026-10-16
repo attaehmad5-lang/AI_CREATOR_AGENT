@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
@@ -1070,6 +1071,42 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["failure_count"], 1)
         self.assertEqual(snapshot["avg_latency_ms"], 25.0)
         self.assertEqual(snapshot["avg_queue_wait_ms"], 12.0)
+
+    def test_low_output_quality_score_prevents_success_status(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        quality = ProviderOutputQualityPolicy(
+            lambda path, **kwargs: 0.2,
+            thresholds={"image:image": 0.8},
+        )
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            health_manager=self.health,
+            retry_policy=self.retry,
+            output_validator=self.validator,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            quality_policy=quality,
+        )
+        output_path = self.root / "low-quality.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="low-quality-job",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 5.0,
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "OUTPUT_QUALITY_FAILED")
+        self.assertEqual(result["quality"]["status"], "QUALITY_BELOW_THRESHOLD")
+        self.assertFalse(result["quality"]["allowed"])
+        self.assertTrue(result["output"]["valid"])
+        self.assertFalse(result["finalization"].get("success", True))
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
