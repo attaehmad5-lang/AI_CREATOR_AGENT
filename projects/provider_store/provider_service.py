@@ -32,6 +32,7 @@ class ProviderService:
         metrics_manager: Any | None = None,
         quality_policy: Any | None = None,
         benchmark_manager: Any | None = None,
+        ab_experiment_manager: Any | None = None,
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
@@ -55,6 +56,7 @@ class ProviderService:
             (metrics_manager, "record", "metrics_manager"),
             (quality_policy, "evaluate", "quality_policy"),
             (benchmark_manager, "record", "benchmark_manager"),
+            (ab_experiment_manager, "assign", "ab_experiment_manager"),
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
@@ -79,6 +81,7 @@ class ProviderService:
         self.metrics_manager = metrics_manager
         self.quality_policy = quality_policy
         self.benchmark_manager = benchmark_manager
+        self.ab_experiment_manager = ab_experiment_manager
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
@@ -445,6 +448,7 @@ class ProviderService:
         adapter: Any,
         modality: str,
         principal_id: str | None = None,
+        experiment_id: str | None = None,
         data_categories: tuple[str, ...] | list[str] = ("user_content",),
         retention_days: int = 0,
         provider_training_use: bool = False,
@@ -521,6 +525,69 @@ class ProviderService:
                     },
                 }
 
+        ab_assignment = None
+        if experiment_id is not None:
+            if (
+                not isinstance(experiment_id, str) or not experiment_id.strip()
+                or self.ab_experiment_manager is None
+            ):
+                return {"status": "AB_EXPERIMENT_MANAGER_UNAVAILABLE", "executed": False}
+            try:
+                assignment = self.ab_experiment_manager.assign(
+                    experiment_id=experiment_id, project_id=project_id, request_id=request_id
+                )
+            except Exception as exc:
+                return {
+                    "status": "AB_ASSIGNMENT_FAILED", "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(assignment, dict) or assignment.get("assigned") is not True:
+                return {
+                    "status": assignment.get("status", "INVALID_AB_ASSIGNMENT") if isinstance(assignment, dict) else "INVALID_AB_ASSIGNMENT",
+                    "executed": False,
+                    "ab_experiment_id": experiment_id,
+                }
+            ab_assignment = assignment
+            assigned_provider = assignment.get("provider_id")
+            assigned_model = assignment.get("model_id")
+            assigned_cost = finite_number(assignment.get("estimated_cost"), minimum=0)
+            if (
+                not isinstance(assigned_provider, str) or not assigned_provider.strip()
+                or not isinstance(assigned_model, str) or not assigned_model.strip()
+                or assigned_cost is None or assigned_cost != float(estimated_cost)
+            ):
+                return {"status": "AB_ASSIGNMENT_CONSTRAINT_MISMATCH", "executed": False}
+            supplied_model = route_options.get("model")
+            option_model = (adapter_options or {}).get("model_id")
+            if (supplied_model is not None and supplied_model != assigned_model) or (
+                option_model is not None and option_model != assigned_model
+            ):
+                return {"status": "AB_MODEL_CONFLICT", "executed": False}
+            try:
+                discovered = self.connection_manager.discover_providers(
+                    category=category, capability=route_options.get("capability"), enabled_only=True
+                )
+            except Exception as exc:
+                return {
+                    "status": "AB_PROVIDER_DISCOVERY_FAILED", "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(discovered, list):
+                return {"status": "AB_PROVIDER_DISCOVERY_FAILED", "executed": False}
+            available_ids = {
+                item.get("id") for item in discovered
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            }
+            if assigned_provider not in available_ids:
+                return {"status": "AB_ASSIGNED_PROVIDER_UNAVAILABLE", "executed": False}
+            excluded = route_options.get("excluded_providers", frozenset())
+            if not isinstance(excluded, (set, frozenset)):
+                return {"status": "INVALID_EXCLUDED_PROVIDER_SET", "executed": False}
+            if assigned_provider in excluded:
+                return {"status": "AB_ASSIGNED_PROVIDER_EXCLUDED", "executed": False}
+            route_options["excluded_providers"] = set(excluded) | (available_ids - {assigned_provider})
+            route_options["model"] = assigned_model
+
         route = self.route_request(
             category=category,
             project_id=project_id,
@@ -568,6 +635,8 @@ class ProviderService:
         options = dict(adapter_options or {})
         options["provider_id"] = provider_id
         options["request_id"] = request_id
+        if ab_assignment is not None:
+            options["model_id"] = ab_assignment["model_id"]
         started_at = time.monotonic()
         try:
             adapter_result = adapter(**options)
@@ -854,11 +923,26 @@ class ProviderService:
             status = "EXECUTION_SUCCEEDED"
         else:
             status = "EXECUTION_FINALIZATION_PARTIAL"
+        ab_outcome = None
+        if ab_assignment is not None and self.ab_experiment_manager is not None:
+            quality_score = quality_result.get("score") if isinstance(quality_result, dict) else None
+            try:
+                ab_outcome = self.ab_experiment_manager.record_outcome(
+                    experiment_id=experiment_id, project_id=project_id, request_id=request_id,
+                    success=bool(final_success), latency_ms=max(0.0, (time.monotonic() - started_at) * 1000),
+                    actual_cost=actual_cost, quality_score=quality_score,
+                )
+            except Exception as exc:
+                ab_outcome = {"status": "AB_OUTCOME_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
         return {
             "status": status,
             "executed": True,
             "provider": provider_id,
             "request_id": request_id,
+            "ab_experiment": (
+                {"experiment_id": experiment_id, "assignment": ab_assignment, "outcome": ab_outcome}
+                if ab_assignment is not None else None
+            ),
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "media_integrity": media_integrity_result,
