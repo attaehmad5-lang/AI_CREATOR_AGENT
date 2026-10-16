@@ -44,7 +44,8 @@ class ProviderOutputValidator:
 
     def __init__(
         self, *, min_size_bytes: int = 1, max_size_bytes: int = 1_000_000_000,
-        max_json_depth: int = 128,
+        max_json_depth: int = 128, max_image_width: int = 16384,
+        max_image_height: int = 16384, max_image_pixels: int = 100_000_000,
     ) -> None:
         if (
             not isinstance(min_size_bytes, int)
@@ -62,9 +63,19 @@ class ProviderOutputValidator:
             or max_json_depth > 4096
         ):
             raise ValueError("max_json_depth must be an integer between 1 and 4096")
+        for name, value, maximum in (
+            ("max_image_width", max_image_width, 100_000),
+            ("max_image_height", max_image_height, 100_000),
+            ("max_image_pixels", max_image_pixels, 1_000_000_000),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= maximum:
+                raise ValueError(f"{name} must be a positive integer no greater than {maximum}")
         self.min_size_bytes = min_size_bytes
         self.max_size_bytes = max_size_bytes
         self.max_json_depth = max_json_depth
+        self.max_image_width = max_image_width
+        self.max_image_height = max_image_height
+        self.max_image_pixels = max_image_pixels
 
     @staticmethod
     def _json_depth_within_limit(stream: Any, max_depth: int) -> bool:
@@ -131,10 +142,28 @@ class ProviderOutputValidator:
                 if size > self.max_size_bytes:
                     return {"valid": False, "status": "OUTPUT_TOO_LARGE", "size_bytes": size}
                 header = stream.read(32)
+                image_dimensions: dict[str, int] | None = None
                 if normalized_modality in self.SIGNATURES:
                     mime = self._match_signature(normalized_modality, header)
                     if mime is None:
                         return {"valid": False, "status": "SIGNATURE_MISMATCH"}
+                    if mime == "image/png":
+                        if len(header) < 24 or header[8:12] != b"\x00\x00\x00\x0d" or header[12:16] != b"IHDR":
+                            return {"valid": False, "status": "INVALID_IMAGE_HEADER"}
+                        width = int.from_bytes(header[16:20], "big")
+                        height = int.from_bytes(header[20:24], "big")
+                        if width < 1 or height < 1:
+                            return {"valid": False, "status": "INVALID_IMAGE_DIMENSIONS"}
+                        if (
+                            width > self.max_image_width
+                            or height > self.max_image_height
+                            or width * height > self.max_image_pixels
+                        ):
+                            return {
+                                "valid": False, "status": "IMAGE_DIMENSIONS_EXCEEDED",
+                                "width": width, "height": height,
+                            }
+                        image_dimensions = {"width": width, "height": height}
                 elif normalized_modality == "text":
                     stream.seek(0)
                     decoder = codecs.getincrementaldecoder("utf-8")()
@@ -189,7 +218,7 @@ class ProviderOutputValidator:
             if artifact.is_symlink():
                 return {"valid": False, "status": "SYMLINK_REJECTED"}
             return {"valid": False, "status": "OUTPUT_READ_FAILED"}
-        return {
+        result = {
             "valid": True,
             "status": "VALID",
             "name": artifact.name,
@@ -198,6 +227,9 @@ class ProviderOutputValidator:
             "size_bytes": size,
             "sha256": digest.hexdigest(),
         }
+        if image_dimensions is not None:
+            result["dimensions"] = image_dimensions
+        return result
 
     @classmethod
     def _match_signature(cls, modality: str, header: bytes) -> str | None:
