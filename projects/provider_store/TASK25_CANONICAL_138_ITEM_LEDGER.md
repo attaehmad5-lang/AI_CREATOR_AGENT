@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38956979463](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38956979463): **425 tests passed on Ubuntu and 425 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. In addition to the existing retry, OAuth, deprecation and catalog safeguards, this run verifies bounded-memory streaming checks for WAV, MP4, WebM and OGG containers, plus MP4 movie-header duration limits when `mvhd` metadata is present. The media checks validate container structure only; codec decoding and semantic QA remain open.
+GitHub Actions run [#38957540601](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38957540601): **427 tests passed on Ubuntu and 427 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite now also covers bounded-memory WAV/MP4/WebM/OGG container checks, MP4 movie-header duration limits when `mvhd` metadata is present, and PNG/JPEG/GIF/WebP image dimension/pixel caps. The media checks validate headers/container structure only; codec decoding, complete image decoding, malware scanning and semantic QA remain open.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -92,13 +92,13 @@ GitHub Actions run [#38956979463](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 49 | 🟢 | Image Output Validation | PARTIAL | Signature/basic file validation is tested; real provider images and decoder-level validation remain open. |
+| 49 | 🟢 | Image Output Validation | PARTIAL | Signature, bounded header parsing, PNG/JPEG/GIF/WebP dimension extraction, and configurable dimension/pixel caps are tested; complete image decoding, corruption detection, and real provider images remain open. |
 | 50 | 🟡 | Output File Existence Validation | VERIFIED | Missing, empty and oversized output files are rejected by output-validator tests. |
 | 51 | 🔴 | Audio/Video Format, Codec and Integrity Validation | PARTIAL | `media_integrity_validator.py` checks WAV frame/data integrity and bounded MP4/WebM/Ogg container structure using streaming/bounded-memory reads; `ProviderService` can reject malformed audio/video containers after basic output validation. Full codec decoding, codec allowlists, and semantic media validation remain open. Regression tests ensure MP4/WebM/OGG do not require whole-file reads and WAV frame reads are chunked. |
 | 52 | 🟡 | Corrupt/Incomplete Output Rejection | PARTIAL | Basic corrupt/truncated artifact rejection is tested; decoder-level detection remains open. |
 | 53 | 🟡 | Temporary File Cleanup and Atomic Replacement | PARTIAL | Atomic replacement helpers exist; output-pipeline cleanup integration is incomplete. |
 | 54 | 🟡 | Previous Output Preservation on Failure | PARTIAL | Some preservation/atomicity tests exist; end-to-end generation replacement behavior is not verified. |
-| 55 | 🔴 | File Size, Dimensions, Duration and Codec Constraints | PARTIAL | File-size limits and WAV duration checks exist; MP4 duration is enforced when a valid `mvhd` movie header is present. Image dimensions, codec allowlists/decoding, and duration verification for other video/audio containers still need modality-specific decoders. |
+| 55 | 🔴 | File Size, Dimensions, Duration and Codec Constraints | PARTIAL | File-size limits, WAV duration checks, MP4 `mvhd` duration limits, and PNG/JPEG/GIF/WebP image dimension/pixel caps are tested. Codec allowlists/decoding and duration verification for other video/audio containers still need modality-specific decoders. |
 | 56 | 🟡 | Provider Attribution and Output Metadata | PARTIAL | Request/provider IDs exist in service records; complete asset lineage metadata is not verified. |
 
 ## H — Cost, Free Credits and Quotas
@@ -170,7 +170,7 @@ GitHub Actions run [#38956979463](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 425-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
+| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 427-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
 | 98 | 🟢 | Mock Provider Fallback Integration Test | VERIFIED | Mock/fallback integration regression coverage passes in the cross-platform suite. |
 | 99 | 🔴 | PRIMARY_ONLY and Fallback-Disabled Regression Tests | VERIFIED | PRIMARY_ONLY and automatic-fallback-disabled regression cases now have explicit tests. |
 | 100 | 🟡 | Retry, Backoff and Timeout Tests | VERIFIED | Retry, backoff, Retry-After, timeout and invalid numeric inputs are covered by regression tests. |
@@ -181,7 +181,7 @@ GitHub Actions run [#38956979463](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 425 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 427 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
