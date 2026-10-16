@@ -112,7 +112,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 61 | 🔴 | Estimated vs Actual Usage Reconciliation | PARTIAL | Cost reservation/reconciliation is implemented and tested; provider-specific actual usage adapters are missing. |
 | 62 | 🔴 | Credit Exhaustion and Billing Error Handling | PARTIAL | `provider_error_policy.py` normalizes explicit billing/credit/auth/permission/rate-limit/transient signals; `ProviderService.execute_routed_request` blocks retry for non-retryable billing/credit outcomes, including HTTP 429 with `insufficient_quota`; focused unit and service regression tests added. Provider-specific documented error-code mappings and authorized live account tests remain open. |
 | 63 | 🔴 | Cost-Aware Provider/Model Selection | PARTIAL | Cost/credit-aware routing foundations exist; reliable live prices and model-level cost comparisons remain open. |
-| 64 | 🔴 | Budget Alerts and Hard-Stop Policy | PARTIAL | `budget_alert_manager.py` persists idempotent 50%/80%/100% threshold events, tracks pending/delivered state, and is wired into `ProviderService` after usage finalization using actual spend plus outstanding reservations. External notification delivery remains an application-owned integration and is not claimed complete. |
+| 64 | 🔴 | Budget Alerts and Hard-Stop Policy | PARTIAL | `BudgetAlertManager` persists idempotent 50/80/100% threshold events, keeps failed deliveries pending with bounded attempt metadata, and supports injected notification dispatch with retry-safe outcomes. External channel setup, scheduling, and end-to-end delivery monitoring remain open. |
 
 ## I — Security, Privacy and Governance
 
