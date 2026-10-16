@@ -2,6 +2,7 @@
 import tempfile
 import unittest
 import wave
+from unittest.mock import patch
 from pathlib import Path
 
 from projects.provider_store.media_integrity_validator import MediaIntegrityValidator
@@ -74,8 +75,8 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         webm = self.root / "streamed.webm"
         webm.write_bytes(b"\\x1a\\x45\\xdf\\xa3" + b"\\x42\\x86\\x81\\x01" + b"\\x18\\x53\\x80\\x67" + b"\\x00")
         ogg = self.root / "sample.ogg"
-        ogg.write_bytes(b"OggS" + bytes([0]) + b"\\x00" * 22 + bytes([0]))
-        with unittest.mock.patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read forbidden")):
+        ogg.write_bytes(b"OggS" + bytes([0]) + b"\\x00" * 21 + bytes([0]))
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read forbidden")):
             self.assertTrue(self.validator.validate(mp4, modality="video")["valid"])
             self.assertTrue(self.validator.validate(webm, modality="video")["valid"])
             self.assertTrue(self.validator.validate(ogg, modality="audio")["valid"])
