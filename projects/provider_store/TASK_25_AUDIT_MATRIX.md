@@ -6,7 +6,7 @@ This matrix preserves the canonical feature-ID ranges and group names. It is an 
 
 ## Latest confirmed verification
 
-Latest confirmed verification: GitHub Actions run [#38435397071](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38435397071) passed on Ubuntu and Windows with Python 3.13: **312 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation also passed.
+Last previously confirmed verification: GitHub Actions run [#38435397071](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38435397071) passed on Ubuntu and Windows with Python 3.13: **312 tests passed on each platform, 0 failures**. Compilation and provider JSON catalog validation also passed. Since that run, the follow-up branch has received additional code and test commits (paid-use fallback gating, webhook verification, and new integration/regression tests); those commits are **not covered by run #38435397071** and require a fresh CI run before they can be called verified.
 
 | Group / IDs | Canonical group | Current evidence | Status | Remaining verification |
 |---|---|---|---|---|
