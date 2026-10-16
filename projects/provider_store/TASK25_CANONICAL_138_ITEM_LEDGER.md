@@ -1,12 +1,12 @@
 # Task #25 — Canonical 138-Item Verification Ledger
 
-**Overall status: IN PROGRESS — 24 VERIFIED, 77 PARTIAL, 37 OPEN (138 total).** PR #1 and PR #7 have been merged, but neither merge means Task #25 is complete. Current hardening work is in draft PR #69; do not merge it without explicit user approval.
+**Overall status: IN PROGRESS — 24 VERIFIED, 78 PARTIAL, 36 OPEN (138 total).** PR #1 and PR #7 have been merged, but neither merge means Task #25 is complete. Current hardening work is in draft PR #69; do not merge it without explicit user approval.
 
 This file preserves the user's original A–P headings, feature numbers, feature names and baseline status markers. The **Baseline** column is the user's original 🟢/🟡/🔴 status; it is not the current implementation result. **Current audit** is independently evidence-based. A green baseline does not automatically mean the feature is verified today.
 
 ## Latest code verification
 
-GitHub Actions run [#38958293670](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38958293670): **430 tests passed on Ubuntu and 430 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded-memory WAV/MP4/WebM/OGG container checks, MP4 movie-header duration limits when `mvhd` metadata is present, PNG/JPEG/GIF/WebP image dimension/pixel caps, and non-mutating configuration-policy simulation. These are bounded header/container checks only; codec decoding, complete image decoding, malware scanning, semantic QA and full routing-policy simulation remain open.
+GitHub Actions run [#38959082545](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38959082545): **435 tests passed on Ubuntu and 435 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded-memory WAV/MP4/WebM/OGG container checks, MP4 movie-header duration limits when `mvhd` metadata is present, PNG/JPEG/GIF/WebP image dimension/pixel caps, non-mutating configuration-policy simulation, and provider SLO target evaluation with bounded history. These are bounded header/container checks only; codec decoding, complete image decoding, malware scanning, semantic QA and full routing-policy simulation remain open.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -170,7 +170,7 @@ GitHub Actions run [#38958293670](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 430-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
+| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 435-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
 | 98 | 🟢 | Mock Provider Fallback Integration Test | VERIFIED | Mock/fallback integration regression coverage passes in the cross-platform suite. |
 | 99 | 🔴 | PRIMARY_ONLY and Fallback-Disabled Regression Tests | VERIFIED | PRIMARY_ONLY and automatic-fallback-disabled regression cases now have explicit tests. |
 | 100 | 🟡 | Retry, Backoff and Timeout Tests | VERIFIED | Retry, backoff, Retry-After, timeout and invalid numeric inputs are covered by regression tests. |
@@ -181,7 +181,7 @@ GitHub Actions run [#38958293670](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 430 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 435 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
@@ -210,7 +210,7 @@ GitHub Actions run [#38958293670](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 124 | 🔴 | Disaster Recovery and Restore Procedures | PARTIAL | Catalog restore and atomic persistence exist; full disaster recovery/restore drills are not verified. |
 | 125 | 🔴 | Degraded Mode During Partial Service Outages | OPEN | Explicit degraded-mode orchestration is not implemented. |
 | 126 | 🔴 | Capacity Planning and Load Testing | OPEN | Capacity planning and sustained load tests are not complete. |
-| 127 | 🔴 | Service-Level Objectives (SLOs) | OPEN | SLO definitions and tracking are not implemented. |
+| 127 | 🔴 | Service-Level Objectives (SLOs) | PARTIAL | `ProviderSLOManager` defines provider/category targets for minimum samples, success rate, p95 latency and timeout rate; evaluates bounded `ProviderMetricsManager` snapshots, records bounded aggregate evaluation history, and fails closed on insufficient/invalid metrics. Persistent SLO definitions, time-windowed durable history, alert delivery and production telemetry integration remain open. |
 | 128 | 🔴 | Operational Runbooks and Incident Recovery | PARTIAL | A provider guide exists; full operational runbooks and incident drills are incomplete. |
 
 ## P — Future-Ready Extensibility
