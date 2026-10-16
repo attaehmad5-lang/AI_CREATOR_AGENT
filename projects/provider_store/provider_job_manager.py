@@ -63,7 +63,10 @@ class ProviderJobManager:
 
     def _reload(self) -> None:
         if not self.state_path.exists():
-            self.data = {"version": "1.0", "jobs": {}}
+            self.data = {
+                "version": "1.0", "jobs": {},
+                "scheduler": {"last_project_id": None, "consecutive_claims": 0},
+            }
             return
         try:
             with self.state_path.open("r", encoding="utf-8") as stream:
