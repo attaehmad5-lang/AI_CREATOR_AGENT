@@ -131,8 +131,54 @@ class ProviderServiceTests(unittest.TestCase):
             modality="image", experiment_id="paid-ab",
         )
         self.assertFalse(result["executed"])
-        self.assertEqual(result["status"], "PAID_ARM_BLOCKED_NO_RESERVATION")
+        self.assertEqual(result["status"], "PAID_BUDGET_RESERVATION_FAILED")
         self.assertEqual(called, [])
+
+    def test_approved_paid_ab_experiment_reuses_budget_reservation_safely(self):
+        experiments = ProviderABExperimentManager(self.root / "ab-paid-approved.json")
+        self.assertTrue(experiments.create_experiment(
+            experiment_id="paid-ab-approved", project_id="film", modality="image",
+            arms=[
+                {"arm_id": "A", "provider_id": "image", "model_id": "model-a", "estimated_cost": 0.5},
+                {"arm_id": "B", "provider_id": "image", "model_id": "model-b", "estimated_cost": 0.5},
+            ],
+            paid_usage_approved=True, approval_reference="approved-ticket",
+            experiment_budget_cap=2.0, project_budget_cap=10.0,
+            verify_paid_approval=lambda **kwargs: {
+                "approved": True, "project_id": "film", "approved_budget_cap": 2.0,
+            },
+        )["saved"])
+        authorization = ProviderAuthorizationManager(self.root / "ab-auth.json")
+        self.assertTrue(authorization.assign_role("creator-user", "admin")["saved"])
+        service = ProviderService(
+            self.connections, routing_manager=ProviderRoutingManager(
+                self.connections, cost_policy=self.cost, quota_manager=self.quota
+            ),
+            health_manager=self.health, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota,
+            authorization_manager=authorization, ab_experiment_manager=experiments,
+        )
+        artifact = self.root / "paid-ab-output.png"
+        artifact.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n")
+        called = {}
+        def adapter(**kwargs):
+            called.update(kwargs)
+            return {
+                "started": True, "success": True, "actual_cost": 0.4,
+                "charge_outcome": "incurred", "output_path": artifact,
+            }
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="paid-ab-request",
+            estimated_cost=0.5, adapter=adapter, modality="image",
+            principal_id="creator-user", experiment_id="paid-ab-approved",
+        )
+        self.assertTrue(result["executed"])
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(result["billing_mode"], "PAID_APPROVED")
+        self.assertIn(called["model_id"], {"model-a", "model-b"})
+        self.assertEqual(result["ab_experiment"]["outcome"]["status"], "OUTCOME_RECORDED")
+        summary = experiments.summary(experiment_id="paid-ab-approved", project_id="film")
+        self.assertEqual(sum(x["outcome_count"] for x in summary["results"]), 1)
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
