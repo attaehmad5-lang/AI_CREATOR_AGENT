@@ -142,6 +142,7 @@ class ProviderABExperimentManager:
         approval_reference: str | None = None,
         experiment_budget_cap: float | None = None,
         project_budget_cap: float | None = None,
+        verify_paid_approval: Callable[..., Any] | None = None,
         max_assignments: int = 1000,
     ) -> dict[str, Any]:
         if not self._valid_id(experiment_id, 128) or not self._valid_id(project_id, 128) or not self._valid_id(modality, 64):
@@ -176,9 +177,23 @@ class ProviderABExperimentManager:
             if (
                 not paid_usage_approved or not self._valid_id(approval_reference, 200)
                 or exp_cap is None or exp_cap <= 0 or project_cap is None or project_cap <= 0
-                or exp_cap > project_cap
+                or exp_cap > project_cap or not callable(verify_paid_approval)
             ):
                 return {"status": "PAID_AB_REQUIRES_APPROVAL_AND_BUDGET_CAPS", "saved": False}
+            try:
+                approval = verify_paid_approval(
+                    project_id=project_id, approval_reference=approval_reference,
+                    experiment_budget_cap=exp_cap, project_budget_cap=project_cap,
+                )
+            except Exception:
+                return {"status": "PAID_APPROVAL_VERIFICATION_FAILED", "saved": False}
+            if (
+                not isinstance(approval, dict) or approval.get("approved") is not True
+                or approval.get("project_id") != project_id
+                or finite_number(approval.get("approved_budget_cap"), minimum=0) is None
+                or approval.get("approved_budget_cap") < exp_cap
+            ):
+                return {"status": "PAID_APPROVAL_NOT_VERIFIED", "saved": False}
             budget_cap = exp_cap
         elif paid_usage_approved and not self._valid_id(approval_reference, 200):
             return {"status": "APPROVAL_REFERENCE_REQUIRED", "saved": False}
@@ -243,7 +258,8 @@ class ProviderABExperimentManager:
                     return {"status": "PROJECT_BUDGET_CAP_REACHED", "assigned": False}
                 try:
                     reservation = reserve_paid_usage(
-                        project_id=project_id, request_id=f"ab:{experiment_id}:{request_id}",
+                        project_id=project_id, provider_id=chosen["provider_id"],
+                        model_id=chosen["model_id"], request_id=f"ab:{experiment_id}:{request_id}",
                         estimated_cost=cost, approval_reference=exp["approval_reference"],
                     )
                 except Exception:
