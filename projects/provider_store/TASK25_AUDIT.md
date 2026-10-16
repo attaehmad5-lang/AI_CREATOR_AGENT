@@ -2,14 +2,14 @@
 
 **Current follow-up branch:** `task-25-production-hardening`  
 **Merged foundation PRs:** #1 and #7. **Current draft PR:** #69 (not merged)  
-**Audit status:** In progress — **24 VERIFIED, 77 PARTIAL, 37 OPEN** across the canonical 138 items. Do not mark Task #25 complete yet.
+**Audit status:** In progress — **24 VERIFIED, 78 PARTIAL, 36 OPEN** across the canonical 138 items. Do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#38958293670](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38958293670) completed successfully on Python 3.13:
+GitHub Actions code-verification run [#38959082545](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38959082545) completed successfully on Python 3.13:
 
-- Ubuntu: 430 tests passed, 0 failures.
-- Windows: 430 tests passed, 0 failures.
+- Ubuntu: 435 tests passed, 0 failures.
+- Windows: 435 tests passed, 0 failures.
 - Provider module/test compilation and provider JSON catalog validation passed on both platforms.
 - The latest canonical ledger/guide documentation update was also verified by run [#38957954038](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38957954038): 428 tests passed on both Ubuntu and Windows.
 - Draft PR #69 contains additional media-validation hardening and remains unmerged. Task #25 remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
@@ -30,7 +30,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | H — Cost, Free Credits and Quotas | 57–64 | Paid-approval guard, configured budgets, serialized reservations, usage reconciliation, verified credit snapshots and unit compatibility; new `account_balance_probe.py` provides bounded, allowlisted JSON balance reads with explicit available-credit field semantics | Local policy/ledger and generic balance-probe integration tested; provider-specific live balance adapters and balance-field semantics still need authorized verification |
 | I — Security, Privacy and Governance | 65–72 | Secret-safe catalog/state, endpoint allowlists, HTTPS-only probes, redirect rejection, bounded response reads, rejection of unsupported raw-token Basic auth, and overflow-safe numeric validation across cost, credit, routing, connection, health, retry, and OAuth | Implemented safeguards; threat-model and deployment review pending |
 | J — Production Orchestration | 73–80 | Request reservation/finalization integration and idempotency tests in the provider service | Provider-request lifecycle foundation; full end-to-end generation jobs pending |
-| K — Quality, Performance and Observability | 81–88 | Health/latency history, bounded histories, concurrency tests and structured safe statuses | Partial evidence; production metrics/telemetry and load benchmarks pending |
+| K — Quality, Performance and Observability | 81–88 | Health/latency history, bounded histories, concurrency tests, structured safe statuses, and a `ProviderSLOManager` evaluating success-rate, p95-latency and timeout-rate targets from bounded metrics snapshots | Partial evidence; durable/time-windowed SLO history, production telemetry export, alerting and load benchmarks pending |
 | L — Configuration, Compatibility and Change Control | 89–96 | Validated endpoint/model configuration, atomic writes, catalog backup validation, explicit restore path, and non-mutating candidate configuration simulation | Foundation implemented; full runtime integration, mobile/Pydroid and crash-recovery verification pending |
 | M — Testing, Audit and Release Readiness | 97–110 | Legacy facade compatibility, shared catalog behavior, cross-process state protection and cross-platform CI | Partial evidence; full integration matrix and cross-manager transaction guarantees pending |
 | N — High-Advanced Routing Intelligence | 111–118 | Multiple selection policies, verified credit data, cost guards and quota-aware fallback | Foundation implemented; full canonical behavior matrix pending |
