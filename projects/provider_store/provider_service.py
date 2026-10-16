@@ -6,6 +6,7 @@ import re
 import time
 
 from .safe_numbers import finite_number
+from .provider_error_policy import classify_provider_error
 
 
 class ProviderService:
@@ -22,6 +23,11 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        budget_alert_manager: Any | None = None,
+        authorization_manager: Any | None = None,
+        sensitive_data_policy: Any | None = None,
+        data_handling_policy: Any | None = None,
+        webhook_verifier: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -33,6 +39,11 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (budget_alert_manager, "record", "budget_alert_manager"),
+            (authorization_manager, "authorize", "authorization_manager"),
+            (sensitive_data_policy, "inspect", "sensitive_data_policy"),
+            (data_handling_policy, "evaluate", "data_handling_policy"),
+            (webhook_verifier, "verify", "webhook_verifier"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -45,6 +56,24 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.budget_alert_manager = budget_alert_manager
+        self.authorization_manager = authorization_manager
+        self.sensitive_data_policy = sensitive_data_policy
+        self.data_handling_policy = data_handling_policy
+        self.webhook_verifier = webhook_verifier
+
+    def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
+        if self.authorization_manager is None:
+            return None
+        try:
+            result = self.authorization_manager.authorize(principal_id, operation)
+        except Exception as exc:
+            return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("allowed") is not True:
+            return result if isinstance(result, dict) else {
+                "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
+            }
+        return None
 
     def verify_provider(
         self,
@@ -53,8 +82,15 @@ class ProviderService:
         *,
         timeout_seconds: float = 5.0,
         environ: dict[str, str] | None = None,
+        principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify connection using an injected provider-specific probe and record health."""
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "verified": False, "authorization": authorization,
+            }
         try:
             connection = self.connection_manager.verify_connectivity(
                 provider_id, probe, timeout_seconds=timeout_seconds, environ=environ
@@ -93,12 +129,19 @@ class ProviderService:
         environ: dict[str, str] | None = None,
         opener: Any = None,
         max_response_bytes: int = 4096,
+        principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify a configured allowlisted HTTPS endpoint using the built-in safe probe.
 
         This checks reachability and authentication only; it does not certify model
         support, account credits, generation quality, or provider-specific capabilities.
         """
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "verified": False, "authorization": authorization,
+            }
         try:
             from .http_probe import ProviderHTTPConnectivityProbe
 
@@ -119,6 +162,7 @@ class ProviderService:
             probe,
             timeout_seconds=timeout_seconds,
             environ=environ,
+            principal_id=principal_id,
         )
 
     def verify_oauth_provider(
@@ -130,6 +174,7 @@ class ProviderService:
         environ: dict[str, str] | None = None,
         opener: Any = None,
         max_response_bytes: int = 4096,
+        principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify a provider using an access token held only by an OAuth manager in memory.
 
@@ -138,6 +183,12 @@ class ProviderService:
         Token refresh is explicit: call the OAuth manager's refresh method only when the
         provider supports it and the user-authorized session allows it.
         """
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "verified": False, "authorization": authorization,
+            }
         if not callable(getattr(oauth_manager, "get_access_token", None)):
             return {"status": "OAUTH_MANAGER_INVALID", "provider": provider_id, "verified": False}
         try:
@@ -177,6 +228,7 @@ class ProviderService:
             environ=ephemeral_environment,
             opener=opener,
             max_response_bytes=max_response_bytes,
+            principal_id=principal_id,
         )
 
     def verify_manual_provider(
@@ -186,8 +238,15 @@ class ProviderService:
         probe: Any,
         *,
         timeout_seconds: float = 5.0,
+        principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify an externally authorized account session and record safe health metadata."""
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "verified": False, "authorization": authorization,
+            }
         try:
             connection = self.connection_manager.verify_manual_connection(
                 provider_id, manual_session, probe, timeout_seconds=timeout_seconds
@@ -219,6 +278,38 @@ class ProviderService:
             "verified": connection.get("verified") is True,
             "connection": connection,
             "health": health,
+        }
+
+    def verify_webhook(
+        self,
+        *,
+        provider_id: str,
+        payload: bytes,
+        signature: str,
+        timestamp: int | str,
+        event_id: str,
+        secret: str,
+    ) -> dict[str, Any]:
+        """Verify a provider callback without persisting its secret or body."""
+        if self.webhook_verifier is None:
+            return {"verified": False, "status": "WEBHOOK_VERIFIER_UNAVAILABLE"}
+        try:
+            result = self.webhook_verifier.verify(
+                provider_id=provider_id,
+                payload=payload,
+                signature=signature,
+                timestamp=timestamp,
+                event_id=event_id,
+                secret=secret,
+            )
+        except Exception as exc:
+            return {
+                "verified": False,
+                "status": "WEBHOOK_VERIFICATION_FAILED",
+                "error_type": type(exc).__name__,
+            }
+        return result if isinstance(result, dict) else {
+            "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
@@ -261,6 +352,11 @@ class ProviderService:
         estimated_cost: float,
         adapter: Any,
         modality: str,
+        principal_id: str | None = None,
+        data_categories: tuple[str, ...] | list[str] = ("user_content",),
+        retention_days: int = 0,
+        provider_training_use: bool = False,
+        user_training_consent: bool = False,
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
@@ -284,6 +380,34 @@ class ProviderService:
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
 
+        authorization = None
+        if self.authorization_manager is not None:
+            try:
+                authorization = self.authorization_manager.authorize(principal_id, "provider.generate")
+            except Exception as exc:
+                return {"status": "AUTHORIZATION_CHECK_FAILED", "executed": False, "error_type": type(exc).__name__}
+            if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+                return {
+                    "status": "AUTHORIZATION_DENIED", "executed": False,
+                    "authorization": authorization if isinstance(authorization, dict) else {
+                        "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
+                    },
+                }
+
+        sensitive_data_scan = None
+        if self.sensitive_data_policy is not None:
+            try:
+                sensitive_data_scan = self.sensitive_data_policy.inspect(adapter_options or {})
+            except Exception as exc:
+                return {"status": "SENSITIVE_DATA_SCAN_FAILED", "executed": False, "error_type": type(exc).__name__}
+            if not isinstance(sensitive_data_scan, dict) or sensitive_data_scan.get("allowed") is not True:
+                return {
+                    "status": "SENSITIVE_DATA_BLOCKED", "executed": False,
+                    "sensitive_data_scan": sensitive_data_scan if isinstance(sensitive_data_scan, dict) else {
+                        "allowed": False, "status": "INVALID_SENSITIVE_DATA_SCAN_RESPONSE"
+                    },
+                }
+
         route = self.route_request(
             category=category,
             project_id=project_id,
@@ -297,6 +421,36 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+
+        data_policy_result = None
+        if self.data_handling_policy is not None:
+            try:
+                data_policy_result = self.data_handling_policy.evaluate(
+                    provider_id=provider_id,
+                    data_categories=data_categories,
+                    retention_days=retention_days,
+                    provider_training_use=provider_training_use,
+                    user_training_consent=user_training_consent,
+                )
+            except Exception as exc:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "PROVIDER_DATA_POLICY_CHECK_FAILED", "executed": False,
+                    "release": release, "error_type": type(exc).__name__,
+                }
+            if not isinstance(data_policy_result, dict) or data_policy_result.get("allowed") is not True:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "PROVIDER_DATA_POLICY_REJECTED", "executed": False,
+                    "data_policy": data_policy_result if isinstance(data_policy_result, dict) else {
+                        "allowed": False, "status": "INVALID_DATA_POLICY_RESPONSE"
+                    },
+                    "release": release,
+                }
 
         options = dict(adapter_options or {})
         options["provider_id"] = provider_id
@@ -421,14 +575,55 @@ class ProviderService:
             credit_outcome=credit_outcome,
             actual_credit_amount=actual_credit_amount,
         )
+        budget_alerts = None
+        if self.budget_alert_manager is not None and self.cost_policy is not None:
+            try:
+                budgets = getattr(self.cost_policy, "project_budgets", {})
+                budget = budgets.get(project_id) if isinstance(budgets, dict) else None
+                ledger = getattr(self.cost_policy, "ledger", {})
+                projects = ledger.get("projects", {}) if isinstance(ledger, dict) else {}
+                project = projects.get(project_id, {}) if isinstance(projects, dict) else {}
+                reservations = project.get("reservations", {}) if isinstance(project, dict) else {}
+                reserved = sum(
+                    float(item.get("estimated_cost", 0.0))
+                    for item in reservations.values()
+                    if isinstance(item, dict) and self._valid_amount(item.get("estimated_cost"))
+                ) if isinstance(reservations, dict) else 0.0
+                spend = float(project.get("actual_spend", 0.0)) + reserved if isinstance(project, dict) else reserved
+                if self._valid_amount(budget) and budget > 0:
+                    budget_alerts = self.budget_alert_manager.record(
+                        project_id=project_id, spend=spend, budget=budget, request_id=request_id
+                    )
+                else:
+                    budget_alerts = {"status": "PROJECT_BUDGET_UNAVAILABLE", "alerts": []}
+            except Exception as exc:
+                budget_alerts = {
+                    "status": "BUDGET_ALERT_RECORD_FAILED",
+                    "error_type": type(exc).__name__, "alerts": [],
+                }
         retry = None
-        if not final_success and self.retry_policy is not None:
-            retry = self.retry_decision(
-                attempt=adapter_result.get("attempt", 1),
-                status_code=adapter_result.get("status_code"),
-                retry_after=adapter_result.get("retry_after"),
-                idempotent=adapter_result.get("idempotent", False),
+        provider_error = None
+        status_code = adapter_result.get("status_code")
+        provider_code = adapter_result.get("provider_error_code", adapter_result.get("error_code"))
+        if not final_success and status_code is not None:
+            provider_error = classify_provider_error(
+                status_code,
+                provider_code=provider_code,
+                retry_after_seconds=adapter_result.get("retry_after_seconds"),
             )
+        if not final_success and self.retry_policy is not None:
+            if provider_error is not None and provider_error.get("retryable") is False:
+                # Billing, exhausted-credit, authentication, permission and invalid
+                # request errors must not be retried just because the retry policy
+                # sees a status such as 429.
+                retry = {"retry": False, "reason": provider_error["status"]}
+            else:
+                retry = self.retry_decision(
+                    attempt=adapter_result.get("attempt", 1),
+                    status_code=adapter_result.get("status_code"),
+                    retry_after=adapter_result.get("retry_after"),
+                    idempotent=adapter_result.get("idempotent", False),
+                )
         if accounting_required:
             status = "EXECUTION_ACCOUNTING_REQUIRED"
         elif output_error is not None:
@@ -447,6 +642,11 @@ class ProviderService:
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "finalization": finalization,
+            "provider_error": provider_error,
+            "budget_alerts": budget_alerts,
+            "authorization": authorization,
+            "sensitive_data_scan": sensitive_data_scan,
+            "data_policy": data_policy_result,
             "retry_decision": retry,
         }
 

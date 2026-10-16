@@ -110,9 +110,9 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 59 | 🔴 | Explicit Approval Before Paid Usage | PARTIAL | Paid-usage approval guard and tests exist; approval workflow integration is not complete. |
 | 60 | 🔴 | Per-Request/Project Budgets | PARTIAL | Project budget and quota managers are tested; end-to-end tenant/user budgeting is incomplete. |
 | 61 | 🔴 | Estimated vs Actual Usage Reconciliation | PARTIAL | Cost reservation/reconciliation is implemented and tested; provider-specific actual usage adapters are missing. |
-| 62 | 🔴 | Credit Exhaustion and Billing Error Handling | PARTIAL | Known billing/quota failures fail closed; provider-specific exhaustion behavior needs live tests. |
+| 62 | 🔴 | Credit Exhaustion and Billing Error Handling | PARTIAL | `provider_error_policy.py` normalizes explicit billing/credit/auth/permission/rate-limit/transient signals; `ProviderService.execute_routed_request` blocks retry for non-retryable billing/credit outcomes, including HTTP 429 with `insufficient_quota`; focused unit and service regression tests added. Provider-specific documented error-code mappings and authorized live account tests remain open. |
 | 63 | 🔴 | Cost-Aware Provider/Model Selection | PARTIAL | Cost/credit-aware routing foundations exist; reliable live prices and model-level cost comparisons remain open. |
-| 64 | 🔴 | Budget Alerts and Hard-Stop Policy | PARTIAL | Budget hard-stop logic exists; alerting/notification delivery is not implemented end-to-end. |
+| 64 | 🔴 | Budget Alerts and Hard-Stop Policy | PARTIAL | `budget_alert_manager.py` persists idempotent 50%/80%/100% threshold events, tracks pending/delivered state, and is wired into `ProviderService` after usage finalization using actual spend plus outstanding reservations. External notification delivery remains an application-owned integration and is not claimed complete. |
 
 ## I — Security, Privacy and Governance
 
@@ -120,10 +120,10 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 65 | 🟡 | Secrets Manager Integration | PARTIAL | Environment variable references are supported; managed secret vault/rotation integration is not complete. |
 | 66 | 🟡 | Secret/Token Leak Prevention in Logs | PARTIAL | Credential redaction and no-response-body probes are tested; full application log scan is pending. |
-| 67 | 🔴 | Least-Privilege Access Control | OPEN | Role/permission-based access control is not fully implemented. |
-| 68 | 🔴 | Provider Permissions and Allowed Operations | PARTIAL | Catalog capabilities and OAuth scope checks exist; operation-level authorization coverage is incomplete. |
-| 69 | 🔴 | Sensitive-Data Detection and Privacy Enforcement | OPEN | Sensitive-data detection and policy enforcement are not complete. |
-| 70 | 🔴 | Data Retention and Provider Data-Handling Rules | OPEN | Provider-specific retention/data-handling policy enforcement is not complete. |
+| 67 | 🔴 | Least-Privilege Access Control | PARTIAL | `provider_authorization.py` persists explicit viewer/creator/operator/billing-manager/admin role assignments and denies unknown principals/operations; `ProviderService.execute_routed_request` checks `provider.generate` authorization before routing or invoking an adapter. Other management endpoints, tenant-bound resource checks, and end-to-end identity-provider integration remain open. |
+| 68 | 🔴 | Provider Permissions and Allowed Operations | PARTIAL | Explicit role-to-operation permissions are persisted; `ProviderService` checks `provider.generate` before execution and `provider.verify` before connectivity, HTTP, OAuth, and manual-session probes. Provider-specific scopes and management-endpoint authorization remain open. |
+| 69 | 🔴 | Sensitive-Data Detection and Privacy Enforcement | PARTIAL | `sensitive_data_policy.py` detects credential-like tokens, email addresses and phone numbers with bounded traversal, returns only categories/paths (never matched values), and blocks configured sensitive categories before `ProviderService` routes or invokes an adapter. Broader data-at-rest/retention enforcement and end-to-end privacy controls remain open. |
+| 70 | 🔴 | Data Retention and Provider Data-Handling Rules | PARTIAL | `provider_data_policy.py` requires explicit HTTPS-sourced provider terms, allowed data categories, maximum retention, and training-use permission/consent; `ProviderService` blocks execution when a configured policy is missing or rejects the request. Provider-specific verified policy catalog coverage and downstream deletion/retention enforcement remain open. |
 | 71 | 🔴 | Provider Endpoint Allowlisting and Network Security | PARTIAL | HTTPS host allowlists, redirect rejection and bounded reads are tested; deployment threat-model review remains open. |
 | 72 | 🔴 | Routing, Credential and Approval Audit Logs | PARTIAL | Some cost/state ledgers exist; complete immutable routing/credential/approval audit trail is not verified. |
 
@@ -136,7 +136,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | Cross-process reservations and locking are tested; worker pools and provider-specific concurrency limits are incomplete. |
 | 76 | 🔴 | Queue, Backpressure and Overload Handling | OPEN | Queue/backpressure orchestration is not implemented end-to-end. |
 | 77 | 🔴 | Async/Long-Running Job and Polling Support | OPEN | Asynchronous job lifecycle/polling is not implemented end-to-end. |
-| 78 | 🔴 | Webhook/Callback Verification | OPEN | Provider webhook/callback verification is not implemented. |
+| 78 | 🔴 | Webhook/Callback Verification | PARTIAL | `provider_webhook_verifier.py` validates HMAC-SHA256 signatures with constant-time comparison, bounded timestamps/payloads, and persistent event replay rejection; `ProviderService.verify_webhook` delegates without echoing secrets. Provider-specific header/signature conventions and production callback ingress integration remain open. |
 | 79 | 🔴 | Cancellation, Deadlines and Graceful Shutdown | PARTIAL | Timeout handling exists; cancellation/deadline/shutdown propagation remains incomplete. |
 | 80 | 🔴 | Generation State Manager/Orchestration Integration Tests | OPEN | Generation State Manager integration is explicitly not complete; Task #29 remains paused. |
 
