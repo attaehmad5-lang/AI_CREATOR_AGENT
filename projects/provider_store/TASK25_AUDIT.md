@@ -20,7 +20,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 | Canonical section | Scope range | Current evidence | Audit disposition |
 |---|---:|---|---|
-| A — Provider Registry & Lifecycle | 1–8 | Versioned 54-provider catalog, synchronized primary/master registry, all records declare baseline capability metadata, schema validation, registration and enabled/disabled lifecycle, catalog recovery, fixed allowlist for legacy generation provider imports, catalog compatibility tests | Foundation implemented; item-by-item audit pending |
+| A — Provider Registry & Lifecycle | 1–8 | Versioned 54-provider catalog, synchronized primary/master registry, safe disabled-by-default onboarding with official docs/host allowlist and full candidate validation, adapter API version checks, registration and enabled/disabled lifecycle, catalog recovery, fixed allowlist for legacy generation provider imports | Foundation implemented; live adapters and authorized connectivity verification remain open |
 | B — Credentials & Connection | 9–16 | Environment-reference validation, secret redaction, expiry checks, configured endpoint/model checks, verified state gating, manual-session verification hooks, bounded HTTPS probe requiring a separate non-billable probe endpoint, provider-specific auth header handling, safe HTTP error classification | Foundation implemented; provider-specific live verification pending |
 | C — Provider Modalities | 17–24 | Every provider declares baseline capability metadata; contract v2 validates only methods required by each declared capability and rejects unknown capabilities | Catalog/contract evidence only; actual provider adapters and live modality checks pending |
 | D — Routing & Fallback | 25–32 | Priority, free-credit-first, lowest-cost, healthiest-first and round-robin selection; verified-connection gating; fallback reservations | Foundation implemented; real generation-path integration pending |
@@ -35,7 +35,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | M — Integration & Reliability | 97–110 | Legacy facade compatibility, shared catalog behavior, cross-process state protection and cross-platform CI | Partial evidence; full integration matrix and cross-manager transaction guarantees pending |
 | N — Advanced Routing | 111–118 | Multiple selection policies, verified credit data, cost guards and quota-aware fallback | Foundation implemented; full canonical behavior matrix pending |
 | O — Usage & Management | 119–128 | Request IDs, reservations, committed usage, budget/quota records and duplicate/conflict protection | Local usage controls tested; real provider billing reconciliation pending |
-| P — Extensibility & Administration | 129–138 | Provider registration, metadata validation and compatibility facades | Partial evidence; complete canonical administration/extension checks pending |
+| P — Extensibility & Administration | 129–138 | Safe provider onboarding, adapter API version compatibility checks, metadata validation and compatibility facades | Partial evidence; complete canonical administration/extension checks pending |
 
 ## Known open verification requirements
 
