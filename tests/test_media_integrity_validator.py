@@ -44,7 +44,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         path = self.root / "sample.mp4"
         boxes = (
             (b"ftyp", b"isom0000"),
-            (b"moov", b"metadata"),
+            (b"moov", (8).to_bytes(4, "big") + b"free"),
             (b"mdat", b"frame"),
         )
         data = b"".join((8 + len(body)).to_bytes(4, "big") + kind + body for kind, body in boxes)
