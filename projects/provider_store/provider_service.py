@@ -33,6 +33,7 @@ class ProviderService:
         quality_policy: Any | None = None,
         benchmark_manager: Any | None = None,
         incident_manager: Any | None = None,
+        feature_flag_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -54,6 +55,7 @@ class ProviderService:
             (quality_policy, "evaluate", "quality_policy"),
             (benchmark_manager, "record", "benchmark_manager"),
             (incident_manager, "record", "incident_manager"),
+            (feature_flag_manager, "evaluate", "feature_flag_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -76,6 +78,7 @@ class ProviderService:
         self.quality_policy = quality_policy
         self.benchmark_manager = benchmark_manager
         self.incident_manager = incident_manager
+        self.feature_flag_manager = feature_flag_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -466,6 +469,27 @@ class ProviderService:
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
 
+        feature_flag_result = None
+        if self.feature_flag_manager is not None:
+            try:
+                feature_flag_result = self.feature_flag_manager.evaluate(
+                    "provider_generation", project_id=project_id, request_id=request_id
+                )
+            except Exception as exc:
+                return {
+                    "status": "FEATURE_FLAG_CHECK_FAILED",
+                    "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(feature_flag_result, dict) or feature_flag_result.get("enabled") is not True:
+                return {
+                    "status": "FEATURE_DISABLED",
+                    "executed": False,
+                    "feature_flag": feature_flag_result if isinstance(feature_flag_result, dict) else {
+                        "enabled": False, "status": "INVALID_FEATURE_FLAG_RESPONSE"
+                    },
+                }
+
         authorization = None
         if self.authorization_manager is not None:
             try:
@@ -821,6 +845,7 @@ class ProviderService:
             "provider_error": provider_error,
             "budget_alerts": budget_alerts,
             "authorization": authorization,
+            "feature_flag": feature_flag_result,
             "sensitive_data_scan": sensitive_data_scan,
             "data_policy": data_policy_result,
             "retry_decision": retry,
