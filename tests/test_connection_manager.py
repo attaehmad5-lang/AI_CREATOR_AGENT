@@ -977,6 +977,43 @@ class ConnectionManagerTests(unittest.TestCase):
             "NOT_FOUND",
         )
 
+    def test_provider_contract_enforces_adapter_api_version_compatibility(self):
+        for item in self.manager.catalog["providers"]:
+            if item.get("id") == "public_image":
+                item["adapter_api_version"] = "2.0"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+
+        class LegacyImage:
+            def generate_image(self, prompt, output_path):
+                return {"status": "COMPLETED"}
+
+        class Version2Image:
+            adapter_api_version = "2.0"
+            def generate_image(self, prompt, output_path):
+                return {"status": "COMPLETED"}
+
+        class MalformedVersionImage:
+            adapter_api_version = []
+            def generate_image(self, prompt, output_path):
+                return {"status": "COMPLETED"}
+
+        legacy = self.manager.validate_provider_contract("public_image", LegacyImage())
+        self.assertEqual(legacy["status"], "ADAPTER_API_VERSION_TOO_OLD")
+        current = self.manager.validate_provider_contract("public_image", Version2Image())
+        self.assertTrue(current["valid"])
+        self.assertEqual(current["adapter_api_version"], "2.0")
+        malformed = self.manager.validate_provider_contract("public_image", MalformedVersionImage())
+        self.assertEqual(malformed["status"], "UNSUPPORTED_ADAPTER_API_VERSION")
+
+        invalid_catalog = dict(self.manager.catalog)
+        invalid_catalog["providers"] = [dict(item) for item in self.manager.catalog["providers"]]
+        for item in invalid_catalog["providers"]:
+            if item.get("id") == "public_image":
+                item["adapter_api_version"] = []
+        validation = ConnectionManager.validate_catalog_schema(invalid_catalog)
+        self.assertFalse(validation["valid"])
+        self.assertTrue(any("adapter_api_version" in error for error in validation["errors"]))
+
     def test_provider_contract_accepts_required_modality_method(self):
         class ImageProvider:
             def generate_image(self, prompt, output_path):
