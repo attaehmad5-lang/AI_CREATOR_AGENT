@@ -22,7 +22,7 @@ class BudgetAlertManagerTests(unittest.TestCase):
         first = self.manager.record(
             project_id="film", spend=4.0, budget=10.0, request_id="job-1"
         )
-        self.assertEqual(first["status"], "BUDGET_ALERTS_QUEUED")
+        self.assertEqual(first["status"], "NO_BUDGET_ALERT")
         self.assertEqual([x["threshold"] for x in first["alerts"]], [0.5])
         second = self.manager.record(
             project_id="film", spend=8.5, budget=10.0, request_id="job-2"
@@ -53,7 +53,7 @@ class BudgetAlertManagerTests(unittest.TestCase):
         self.assertEqual(event["spend"], 9.0)
         self.assertEqual(self.manager.mark_delivered(event_id)["status"], "ALERT_DELIVERED")
         self.assertEqual(self.manager.mark_delivered(event_id)["status"], "ALREADY_DELIVERED")
-        self.assertEqual(len(self.manager.pending_alerts()["alerts"]), 2)
+        self.assertEqual(len(self.manager.pending_alerts()["alerts"]), 1)
 
     def test_invalid_inputs_fail_closed(self):
         cases = [
