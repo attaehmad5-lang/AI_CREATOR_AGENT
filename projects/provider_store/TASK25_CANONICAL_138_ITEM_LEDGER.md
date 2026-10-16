@@ -211,7 +211,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 125 | 🔴 | Degraded Mode During Partial Service Outages | OPEN | Explicit degraded-mode orchestration is not implemented. |
 | 126 | 🔴 | Capacity Planning and Load Testing | OPEN | Capacity planning and sustained load tests are not complete. |
 | 127 | 🔴 | Service-Level Objectives (SLOs) | OPEN | SLO definitions and tracking are not implemented. |
-| 128 | 🔴 | Operational Runbooks and Incident Recovery | PARTIAL | A provider guide exists; full operational runbooks and incident drills are incomplete. |
+| 128 | 🔴 | Operational Runbooks and Incident Recovery | PARTIAL | `PROVIDER_OPERATIONS_RUNBOOK.md` documents outage triage, ambiguous paid-request handling, budget/credit exhaustion, unsafe output, worker/queue recovery, tenant-scope incidents, restore/rollback and release checks. It is explicitly marked as an operational draft; deployment-specific owners/contacts, alert channels, timed restore drills and incident exercises remain unverified. |
 
 ## P — Future-Ready Extensibility
 
