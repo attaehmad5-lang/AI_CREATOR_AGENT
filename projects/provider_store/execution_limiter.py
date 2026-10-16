@@ -103,6 +103,8 @@ class ProviderExecutionLimiter:
 
             self._pending.append((provider_id, request_id))
             while True:
+                if (provider_id, request_id) not in self._pending:
+                    return {"acquired": False, "status": "CANCELLED"}
                 if self._can_acquire(provider_id) and not self._has_earlier_same_provider(provider_id, request_id):
                     self._pending.remove((provider_id, request_id))
                     self._active[request_id] = provider_id
