@@ -87,3 +87,8 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+
+## Degraded-mode policy
+
+`provider_degraded_mode.py` provides explicit NORMAL, DEGRADED, READ_ONLY and FAIL_CLOSED modes with a provider allowlist for degraded generation. `ProviderService` enforces the policy before routing and checks the selected provider before adapter invocation. Automatic health-driven transitions remain open.
