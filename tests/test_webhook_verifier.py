@@ -62,6 +62,15 @@ class ProviderWebhookVerifierTests(unittest.TestCase):
         )
         self.assertEqual(bad_time["status"], "INVALID_TIMESTAMP")
         self.assertEqual(self._verify(event_id="../unsafe")["status"], "INVALID_EVENT_ID")
+        for invalid_clock in (float("nan"), float("inf"), float("-inf")):
+            result = self.verifier.verify(
+                self.body,
+                signature_header=self.verifier.sign_for_testing(self.secret, self.body, self.timestamp),
+                timestamp_header=str(self.timestamp),
+                event_id="evt_clock",
+                now=invalid_clock,
+            )
+            self.assertEqual(result["status"], "INVALID_CLOCK")
 
     def test_replay_cache_is_bounded(self):
         verifier = ProviderWebhookVerifier(self.secret, max_replay_entries=2)
