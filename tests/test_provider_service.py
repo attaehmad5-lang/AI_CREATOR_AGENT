@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
@@ -707,6 +708,40 @@ class ProviderServiceTests(unittest.TestCase):
             estimated_cost=2.0, actual_cost=0.0, success=False, billing_mode=[],
         )
         self.assertEqual(malformed_billing["status"], "INVALID_BILLING_MODE")
+
+    def test_sensitive_credentials_are_blocked_before_routing_and_adapter(self):
+        calls = {"route": 0, "adapter": 0}
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls["route"] += 1
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            sensitive_data_policy=SensitiveDataPolicy(),
+        )
+        secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+
+        def adapter(**kwargs):
+            calls["adapter"] += 1
+            return {"started": False, "success": False}
+
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="sensitive-data-job",
+            estimated_cost=0.0,
+            modality="image",
+            adapter=adapter,
+            adapter_options={"prompt": "generate with Authorization: Bearer " + secret},
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, {"route": 0, "adapter": 0})
+        self.assertNotIn(secret, repr(result))
+        self.assertNotIn("Bearer", repr(result))
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
