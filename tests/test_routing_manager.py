@@ -141,6 +141,57 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(fallback["provider"], "primary")
         self.assertEqual(fallback["confidence_routing_status"], "CONFIDENCE_FALLBACK")
 
+    def test_required_data_residency_region_filters_provider_candidates(self):
+        catalog = self.root / "region-providers.json"
+        state = self.root / "region-connections.json"
+        catalog.write_text(json.dumps({
+            "providers": [
+                {"id": "primary", "name": "Primary", "category": "image", "auth_type": "NONE",
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                 "priority": 1, "capabilities": ["image"], "supported_regions": ["eu-west"]},
+                {"id": "fallback", "name": "Fallback", "category": "image", "auth_type": "NONE",
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                 "priority": 2, "capabilities": ["image"], "data_residency_regions": ["saudi-arabia"]},
+            ]
+        }), encoding="utf-8")
+        state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        connections = ConnectionManager(catalog, state)
+        for provider_id in ("primary", "fallback"):
+            self.assertTrue(connections.verify_connectivity(
+                provider_id, lambda provider, **kwargs: {"ok": True}
+            )["verified"])
+        router = ProviderRoutingManager(connections)
+        result = router.route(
+            category="image", project_id="film", required_region="SAUDI-ARABIA"
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["required_region"], "SAUDI-ARABIA")
+        self.assertIn(
+            {"provider": "primary", "status": "DATA_RESIDENCY_REGION_NOT_SUPPORTED"},
+            result["prior_decisions"],
+        )
+
+        no_region_catalog = self.root / "no-region-provider.json"
+        no_region_state = self.root / "no-region-connections.json"
+        no_region_catalog.write_text(json.dumps({
+            "providers": [{
+                "id": "unverified-region", "name": "Unverified", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "zero_cost_allowed": True, "priority": 1, "capabilities": ["image"],
+            }]
+        }), encoding="utf-8")
+        no_region_state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        no_region_connections = ConnectionManager(no_region_catalog, no_region_state)
+        no_region_connections.verify_connectivity(
+            "unverified-region", lambda provider, **kwargs: {"ok": True}
+        )
+        rejected = ProviderRoutingManager(no_region_connections).route(
+            category="image", project_id="film", required_region="saudi-arabia"
+        )
+        self.assertFalse(rejected["allowed"])
+        self.assertEqual(rejected["decisions"][0]["status"], "REGION_METADATA_UNVERIFIED")
+
     def test_routing_rejects_unverified_provider_even_if_catalog_label_says_connected(self):
         self.connections.set_state("primary", "READY")
         router = ProviderRoutingManager(self.connections)
