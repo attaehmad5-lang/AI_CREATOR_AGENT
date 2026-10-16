@@ -124,6 +124,7 @@ class FallbackManager:
                         provider=provider,
                         prompt=prompt,
                         output_path=output_path,
+                        request_id=request_id,
                     ),
                     request_id=request_id,
                     queue_timeout_seconds=queue_timeout_seconds,
