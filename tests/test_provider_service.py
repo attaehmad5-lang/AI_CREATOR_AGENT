@@ -708,6 +708,63 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertEqual(malformed_billing["status"], "INVALID_BILLING_MODE")
 
+    def test_credit_exhaustion_error_blocks_retry_even_when_http_429(self):
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "provider": "image",
+                    "billing_mode": "PAID_APPROVED",
+                }
+
+        class RetrySpy:
+            def __init__(self):
+                self.calls = 0
+
+            def decide(self, **kwargs):
+                self.calls += 1
+                return type("Decision", (), {
+                    "retry": True, "attempt": 1, "delay_seconds": 1.0,
+                    "reason": "TRANSIENT_HTTP_FAILURE",
+                })()
+
+        self.cost.reserve_usage(
+            project_id="film", provider_id="image", estimated_cost=2.0,
+            request_id="credits-exhausted-job",
+        )
+        self.quota.reserve(provider_id="image", request_id="credits-exhausted-job")
+        retry_spy = RetrySpy()
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            retry_policy=retry_spy,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+        )
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="credits-exhausted-job",
+            estimated_cost=2.0,
+            modality="image",
+            adapter=lambda **kwargs: {
+                "started": True,
+                "success": False,
+                "actual_cost": 0.0,
+                "charge_outcome": "unknown",
+                "status_code": 429,
+                "provider_error_code": "insufficient_quota",
+                "idempotent": True,
+            },
+        )
+        self.assertEqual(result["provider_error"]["status"], "CREDITS_EXHAUSTED")
+        self.assertFalse(result["provider_error"]["retryable"])
+        self.assertFalse(result["retry_decision"]["retry"])
+        self.assertEqual(result["retry_decision"]["reason"], "CREDITS_EXHAUSTED")
+        self.assertEqual(retry_spy.calls, 0)
+        self.assertNotIn("provider_code", result["provider_error"])
+        self.assertTrue(self.cost.ledger["projects"]["film"]["reservations"]["credits-exhausted-job"])
+
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
         self.assertEqual(service.route_request(category="image", project_id="film")["status"], "ROUTING_MANAGER_UNAVAILABLE")
