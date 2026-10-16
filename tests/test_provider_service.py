@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_feature_flags import ProviderFeatureFlagManager
 from projects.provider_store.provider_incident_manager import ProviderIncidentManager
 from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
@@ -1190,6 +1191,30 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["incident"]["status"], "INCIDENT_OPENED")
         self.assertEqual(result["incident"]["incident"]["severity"], "critical")
         self.assertEqual(incidents.snapshot()["counts"]["OPEN"], 1)
+
+    def test_disabled_generation_feature_flag_blocks_routing_and_adapter(self):
+        calls = {"route": 0, "adapter": 0}
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls["route"] += 1
+                return {"allowed": True, "provider": "image"}
+
+        flags = ProviderFeatureFlagManager(self.root / "service-flags.json")
+        flags.set_flag("provider_generation", enabled=False, rollout_percent=100)
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            feature_flag_manager=flags,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="feature-disabled-job",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.__setitem__("adapter", calls["adapter"] + 1),
+        )
+        self.assertEqual(result["status"], "FEATURE_DISABLED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, {"route": 0, "adapter": 0})
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
