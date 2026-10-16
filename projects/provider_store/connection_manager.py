@@ -382,7 +382,10 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].auth_scheme is not permitted")
                     if "subscription_required" in provider and not isinstance(provider["subscription_required"], bool):
                         errors.append(f"providers[{index}].subscription_required must be boolean")
-                    if "adapter_api_version" in provider and provider["adapter_api_version"] not in {"1.0", "2.0"}:
+                    if "adapter_api_version" in provider and (
+                        not isinstance(provider["adapter_api_version"], str)
+                        or provider["adapter_api_version"] not in {"1.0", "2.0"}
+                    ):
                         errors.append(f"providers[{index}].adapter_api_version must be a supported version: 1.0 or 2.0")
                     if "zero_cost_allowed" in provider and not isinstance(provider["zero_cost_allowed"], bool):
                         errors.append(f"providers[{index}].zero_cost_allowed must be boolean")
@@ -527,7 +530,12 @@ class ConnectionManager:
         except Exception:
             adapter_version = None
         supported_versions = {"1.0": (1, 0), "2.0": (2, 0)}
-        if required_version not in supported_versions or adapter_version not in supported_versions:
+        if (
+            not isinstance(required_version, str)
+            or not isinstance(adapter_version, str)
+            or required_version not in supported_versions
+            or adapter_version not in supported_versions
+        ):
             return {
                 "status": "UNSUPPORTED_ADAPTER_API_VERSION",
                 "provider": provider_id,
@@ -850,7 +858,7 @@ class ConnectionManager:
             if not isinstance(allowed_hosts, list) or not allowed_hosts:
                 return {"status": "HOST_ALLOWLIST_REQUIRED", "saved": False}
         adapter_version = candidate.get("adapter_api_version", "1.0")
-        if adapter_version not in {"1.0", "2.0"}:
+        if not isinstance(adapter_version, str) or adapter_version not in {"1.0", "2.0"}:
             return {"status": "UNSUPPORTED_ADAPTER_API_VERSION", "saved": False}
         candidate["adapter_api_version"] = adapter_version
         # Registration is not approval to execute: all new providers begin disabled.
