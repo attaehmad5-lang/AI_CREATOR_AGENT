@@ -861,10 +861,15 @@ class ConnectionManager:
         if not isinstance(adapter_version, str) or adapter_version not in {"1.0", "2.0"}:
             return {"status": "UNSUPPORTED_ADAPTER_API_VERSION", "saved": False}
         candidate["adapter_api_version"] = adapter_version
+        # Catalog labels are not runtime evidence; discard caller-supplied connection/health claims.
+        for runtime_field in (
+            "verified", "connection_state", "connected_at", "last_verified_at",
+            "health", "health_state", "runtime_status",
+        ):
+            candidate.pop(runtime_field, None)
+        candidate["status"] = "READY"
         # Registration is not approval to execute: all new providers begin disabled.
         candidate["enabled"] = False
-        if "status" not in candidate:
-            candidate["status"] = "READY"
         with self._catalog_transaction():
             providers = self._list_providers_unlocked()
             if any(item.get("id") == candidate.get("id") for item in providers):
