@@ -54,25 +54,75 @@ class ProviderABExperimentManager:
         if len(raw["experiments"]) > self.max_experiments:
             raise ValueError("experiment state exceeds configured limit")
         for exp_id, exp in raw["experiments"].items():
-            if not self._valid_id(exp_id) or not isinstance(exp, dict):
+            if not self._valid_id(exp_id, 128) or not isinstance(exp, dict):
                 raise ValueError("experiment state contains invalid experiment")
-            if exp.get("status") not in {"ACTIVE", "PAUSED", "STOPPED"}:
-                raise ValueError("experiment state contains invalid status")
-            if not isinstance(exp.get("requests"), dict) or not isinstance(exp.get("outcomes"), dict):
+            if (
+                exp.get("experiment_id") != exp_id
+                or not self._valid_id(exp.get("project_id"), 128)
+                or not self._valid_id(exp.get("modality"), 64)
+                or exp.get("status") not in {"ACTIVE", "PAUSED", "STOPPED"}
+                or not isinstance(exp.get("paid_usage_approved"), bool)
+            ):
+                raise ValueError("experiment metadata is invalid")
+            arms = exp.get("arms")
+            if not isinstance(arms, list) or not 2 <= len(arms) <= 8:
+                raise ValueError("experiment arms are invalid")
+            arm_ids: set[str] = set()
+            for arm in arms:
+                if not isinstance(arm, dict):
+                    raise ValueError("experiment arm is invalid")
+                arm_id = arm.get("arm_id")
+                if (
+                    not self._valid_arm_id(arm_id) or arm_id in arm_ids
+                    or not self._valid_id(arm.get("provider_id"), 128)
+                    or not self._valid_id(arm.get("model_id"), 256)
+                    or finite_number(arm.get("estimated_cost"), minimum=0) is None
+                    or finite_number(arm.get("weight"), minimum=0) is None
+                    or arm.get("weight", 0) <= 0
+                ):
+                    raise ValueError("experiment arm metadata is invalid")
+                arm_ids.add(arm_id)
+            has_paid_arm = any(arm["estimated_cost"] > 0 for arm in arms)
+            requests, outcomes = exp.get("requests"), exp.get("outcomes")
+            if not isinstance(requests, dict) or not isinstance(outcomes, dict):
                 raise ValueError("experiment request/outcome state is invalid")
-            if len(exp["requests"]) > self.max_assignments:
+            max_assignments = exp.get("max_assignments")
+            if (
+                isinstance(max_assignments, bool) or not isinstance(max_assignments, int)
+                or not 1 <= max_assignments <= self.max_assignments
+                or len(requests) > max_assignments
+            ):
                 raise ValueError("experiment assignment state exceeds configured limit")
-            for request_id, assignment in exp["requests"].items():
-                if not self._valid_id(request_id) or not isinstance(assignment, dict):
+            reserved_cost = finite_number(exp.get("reserved_cost"), minimum=0)
+            if reserved_cost is None:
+                raise ValueError("experiment reserved cost is invalid")
+            if has_paid_arm:
+                experiment_cap = finite_number(exp.get("experiment_budget_cap"), minimum=0)
+                project_cap = finite_number(exp.get("project_budget_cap"), minimum=0)
+                if (
+                    exp.get("paid_usage_approved") is not True
+                    or not self._valid_id(exp.get("approval_reference"), 200)
+                    or experiment_cap is None or experiment_cap <= 0
+                    or project_cap is None or project_cap <= 0
+                    or experiment_cap > project_cap or reserved_cost > experiment_cap
+                ):
+                    raise ValueError("paid experiment approval/budget state is invalid")
+            elif reserved_cost != 0:
+                raise ValueError("free-only experiment cannot contain paid reservations")
+            for request_id, assignment in requests.items():
+                if not self._valid_id(request_id, 200) or not isinstance(assignment, dict):
                     raise ValueError("experiment assignment is invalid")
-                if not isinstance(assignment.get("arm_id"), str) or assignment["arm_id"] not in {
-                    arm.get("arm_id") for arm in exp.get("arms", []) if isinstance(arm, dict)
-                }:
+                if assignment.get("arm_id") not in arm_ids:
                     raise ValueError("experiment assignment references an unknown arm")
-                if finite_number(assignment.get("estimated_cost"), minimum=0) is None:
-                    raise ValueError("experiment assignment cost is invalid")
-            for request_id, outcome in exp["outcomes"].items():
-                if request_id not in exp["requests"] or not isinstance(outcome, dict):
+                arm = next(arm for arm in arms if arm["arm_id"] == assignment["arm_id"])
+                if (
+                    assignment.get("provider_id") != arm["provider_id"]
+                    or assignment.get("model_id") != arm["model_id"]
+                    or finite_number(assignment.get("estimated_cost"), minimum=0) != arm["estimated_cost"]
+                ):
+                    raise ValueError("experiment assignment does not match its arm")
+            for request_id, outcome in outcomes.items():
+                if request_id not in requests or not isinstance(outcome, dict):
                     raise ValueError("experiment outcome has no assignment")
                 if not isinstance(outcome.get("success"), bool):
                     raise ValueError("experiment outcome success flag is invalid")
@@ -80,7 +130,8 @@ class ProviderABExperimentManager:
                     raise ValueError("experiment outcome latency is invalid")
                 cost = finite_number(outcome.get("actual_cost"), minimum=0)
                 quality = outcome.get("quality_score")
-                if cost is None or (quality is not None and (finite_number(quality, minimum=0) is None or quality > 1)):
+                quality_value = None if quality is None else finite_number(quality, minimum=0)
+                if cost is None or (quality is not None and (quality_value is None or quality_value > 1)):
                     raise ValueError("experiment outcome metrics are invalid")
         return raw
 
