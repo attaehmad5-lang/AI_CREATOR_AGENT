@@ -27,6 +27,9 @@ class _RejectGenerationRedirects(HTTPRedirectHandler):
 
 class PollinationsProvider:
     name = "Pollinations"
+    # Authenticated API usage may incur charges. Legacy callers must route through
+    # the explicit approval/budget/quota handler rather than invoking it by fallback.
+    requires_paid_approval = True
     BASE_URL = "https://gen.pollinations.ai/image/"
 
     def __init__(
