@@ -12,6 +12,7 @@ GitHub Actions run [#38435397071](https://github.com/attaehmad5-lang/AI_CREATOR_
 - Windows: 312 tests passed, 0 failures.
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
+- **Important:** this run predates the latest commits on this branch, including paid-use fallback gating, webhook verification and bounded execution admission. The latest commits require a fresh full CI run; they are not claimed as verified by run #38435397071.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
@@ -27,9 +28,9 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | F — Provider Health | 41–48 | Persisted health history, latency/staleness checks, eligibility and active probe recording | Foundation implemented; live provider health evidence pending |
 | G — Output Validation | 49–56 | Size/signature/basic-content checks, bounded reads, mutation detection, JSON nesting limits and SHA-256 | Basic validation implemented; full media decoding, malware scanning and semantic QA pending |
 | H — Cost, Credits & Budgets | 57–64 | Paid-approval guard, configured budgets, serialized reservations, usage reconciliation, verified credit snapshots and unit compatibility; Pollinations generation now requires its bearer API key and bounds output, but does not invent a billing result | Local policy/ledger tested; provider account balance and actual cost reconciliation adapters pending |
-| I — Security & Privacy | 65–72 | Secret-safe catalog/state, endpoint allowlists, HTTPS-only probe, redirect rejection, bounded response reads, atomic replacement and interprocess locks | Implemented safeguards; threat-model and deployment review pending |
-| J — Jobs & Execution | 73–80 | Request reservation/finalization integration and idempotency tests in the provider service | Provider-request lifecycle foundation; full end-to-end generation jobs pending |
-| K — Performance & Observability | 81–88 | Health/latency history, bounded histories, concurrency tests and structured safe statuses | Partial evidence; production metrics/telemetry and load benchmarks pending |
+| I — Security & Privacy | 65–72 | Secret-safe catalog/state, endpoint allowlists, HTTPS-only probe, redirect rejection, bounded response reads, atomic replacement, interprocess locks, and webhook signature/replay primitives | Implemented safeguards; threat-model, durable/distributed replay protection and deployment review pending |
+| J — Jobs & Execution | 73–80 | Request reservation/finalization, bounded provider execution admission, and webhook verification integration | Provider-request lifecycle foundation; durable queues, callback adapters and full end-to-end generation jobs pending |
+| K — Performance & Observability | 81–88 | Health/latency history, bounded histories, concurrent execution-admission tests and structured safe statuses | Partial evidence; production metrics/telemetry and load benchmarks pending |
 | L — Configuration & Recovery | 89–96 | Validated endpoint/model configuration, atomic writes, catalog backup validation and explicit restore path | Foundation implemented; mobile/Pydroid and crash-recovery verification pending |
 | M — Integration & Reliability | 97–110 | Legacy facade compatibility, shared catalog behavior, cross-process state protection and cross-platform CI | Partial evidence; full integration matrix and cross-manager transaction guarantees pending |
 | N — Advanced Routing | 111–118 | Multiple selection policies, verified credit data, cost guards and quota-aware fallback | Foundation implemented; full canonical behavior matrix pending |
@@ -38,7 +39,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 ## Known open verification requirements
 
-1. Compare the exact canonical A–P feature list item-by-item. This file is deliberately a range-level evidence summary, **not a replacement for the user's exact 138 feature names**.
+1. The detailed item-by-item evidence matrix now covers all 138 canonical IDs in TASK_25_AUDIT_MATRIX.md. It preserves exact feature names and separates VERIFIED, PARTIAL and OPEN status; audit coverage is not the same as completion.
 2. Run provider-specific probes only against endpoints and accounts explicitly configured and authorized by the user. A generic HTTP 2xx proves only endpoint reachability unless the configured endpoint is documented to require and validate the supplied credential; it never proves model support, free credits, or successful generation.
 3. The Pollinations image adapter now uses the current authenticated generation endpoint, and the legacy generation registry loader is allowlisted. Provider-specific account-balance and actual cost reconciliation adapters are still required where the canonical scope demands them.
 4. Add provider-specific network failure injection and end-to-end generation execution tests.
@@ -47,7 +48,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 7. Verify Android/Pydroid compatibility separately; GitHub Ubuntu/Windows CI does not establish mobile-runtime compatibility.
 8. Every catalog record now has conservative baseline capability metadata, but this does not mean disabled entries have fully audited fine-grained capabilities, official endpoint configurations, adapters, or live accounts. Those must be checked against authoritative documentation before enabling. Catalog labels alone never count as live verification.
 10. The built-in HTTP probe requires a dedicated non-billable probe_endpoint and never falls back to a generation endpoint. Capability-aware adapter contract v2 requires each declared capability's callable surface, including audio editing, while avoiding the old over-broad rule that every advanced upscaling/audio provider must implement unrelated modalities.
-11. The individual audit table for canonical items 1–16 is recorded in TASK_25_AUDIT_MATRIX.md; remaining items continue to require item-by-item evidence.
+11. The audit matrix now contains individual evidence and remaining gaps for items 1–138. Any PARTIAL or OPEN item remains incomplete until its implementation, tests and required live/operational evidence are present.
 9. Pollinations' catalog entry follows its current [official API documentation](https://gen.pollinations.ai/docs): bearer API key reference, `gen.pollinations.ai` allowlist, and no assumed zero-cost access. Free-credit use still requires a trusted account-balance probe; paid usage still requires a positive estimate, project budget, and explicit approval.
 
 ## Completion gate
