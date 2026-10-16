@@ -1,3 +1,5 @@
+import re
+
 class FallbackManager:
     @staticmethod
     def _safe_status(value):
@@ -39,7 +41,10 @@ class FallbackManager:
 
         provider_id = self.provider_ids.get(provider_name)
         if not isinstance(provider_id, str) or not provider_id.strip():
-            provider_id = getattr(provider, "provider_id", None) or getattr(provider, "id", None)
+            try:
+                provider_id = getattr(provider, "provider_id", None) or getattr(provider, "id", None)
+            except Exception:
+                provider_id = None
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"kind": "rejected", "status": "EXECUTION_LIMITER_PROVIDER_ID_REQUIRED"}
         if not isinstance(request_id, str) or not request_id.strip():
@@ -56,7 +61,7 @@ class FallbackManager:
             }
         if not isinstance(admission, dict) or admission.get("acquired") is not True:
             status = admission.get("status") if isinstance(admission, dict) else None
-            if not isinstance(status, str) or not __import__("re").fullmatch(r"[A-Z0-9_]{1,80}", status):
+            if not isinstance(status, str) or not re.fullmatch(r"[A-Z0-9_]{1,80}", status):
                 status = "EXECUTION_ADMISSION_REJECTED"
             return {"kind": "rejected", "status": status}
 
@@ -183,7 +188,7 @@ class FallbackManager:
                 continue
 
             result = invocation["result"]
-            if result and result.get("status") == "COMPLETED":
+            if isinstance(result, dict) and result.get("status") == "COMPLETED":
                 if self.provider_health:
                     self.provider_health.record_success(provider_name)
                 result["attempted_providers"] = errors + [{"provider": provider_name, "status": "COMPLETED"}]
