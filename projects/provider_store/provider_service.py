@@ -29,6 +29,7 @@ class ProviderService:
         data_handling_policy: Any | None = None,
         webhook_verifier: Any | None = None,
         job_manager: Any | None = None,
+        metrics_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -46,6 +47,7 @@ class ProviderService:
             (data_handling_policy, "evaluate", "data_handling_policy"),
             (webhook_verifier, "verify", "webhook_verifier"),
             (job_manager, "submit", "job_manager"),
+            (metrics_manager, "record", "metrics_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -64,6 +66,7 @@ class ProviderService:
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
         self.job_manager = job_manager
+        self.metrics_manager = metrics_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -649,6 +652,23 @@ class ProviderService:
             credit_outcome=credit_outcome,
             actual_credit_amount=actual_credit_amount,
         )
+        metrics_result = None
+        if self.metrics_manager is not None:
+            try:
+                metrics_result = self.metrics_manager.record(
+                    provider_id=provider_id,
+                    category=category,
+                    success=final_success,
+                    latency_ms=latency_ms,
+                    queue_wait_ms=adapter_result.get("queue_wait_ms", 0.0),
+                    timed_out=adapter_result.get("status_code") in {408, 504},
+                )
+            except Exception as exc:
+                metrics_result = {
+                    "status": "METRICS_RECORD_FAILED",
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
         budget_alerts = None
         if self.budget_alert_manager is not None and self.cost_policy is not None:
             try:
@@ -716,6 +736,7 @@ class ProviderService:
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "finalization": finalization,
+            "metrics": metrics_result,
             "provider_error": provider_error,
             "budget_alerts": budget_alerts,
             "authorization": authorization,
