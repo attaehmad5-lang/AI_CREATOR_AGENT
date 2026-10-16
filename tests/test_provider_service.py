@@ -1106,7 +1106,7 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["quality"]["status"], "QUALITY_BELOW_THRESHOLD")
         self.assertFalse(result["quality"]["allowed"])
         self.assertTrue(result["output"]["valid"])
-        self.assertFalse(result["finalization"].get("success", True))
+        self.assertNotEqual(result["status"], "EXECUTION_SUCCEEDED")
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
