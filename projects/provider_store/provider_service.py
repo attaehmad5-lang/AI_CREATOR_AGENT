@@ -27,6 +27,7 @@ class ProviderService:
         authorization_manager: Any | None = None,
         sensitive_data_policy: Any | None = None,
         data_handling_policy: Any | None = None,
+        webhook_verifier: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -42,6 +43,7 @@ class ProviderService:
             (authorization_manager, "authorize", "authorization_manager"),
             (sensitive_data_policy, "inspect", "sensitive_data_policy"),
             (data_handling_policy, "evaluate", "data_handling_policy"),
+            (webhook_verifier, "verify", "webhook_verifier"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -58,6 +60,7 @@ class ProviderService:
         self.authorization_manager = authorization_manager
         self.sensitive_data_policy = sensitive_data_policy
         self.data_handling_policy = data_handling_policy
+        self.webhook_verifier = webhook_verifier
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -275,6 +278,38 @@ class ProviderService:
             "verified": connection.get("verified") is True,
             "connection": connection,
             "health": health,
+        }
+
+    def verify_webhook(
+        self,
+        *,
+        provider_id: str,
+        payload: bytes,
+        signature: str,
+        timestamp: int | str,
+        event_id: str,
+        secret: str,
+    ) -> dict[str, Any]:
+        """Verify a provider callback without persisting its secret or body."""
+        if self.webhook_verifier is None:
+            return {"verified": False, "status": "WEBHOOK_VERIFIER_UNAVAILABLE"}
+        try:
+            result = self.webhook_verifier.verify(
+                provider_id=provider_id,
+                payload=payload,
+                signature=signature,
+                timestamp=timestamp,
+                event_id=event_id,
+                secret=secret,
+            )
+        except Exception as exc:
+            return {
+                "verified": False,
+                "status": "WEBHOOK_VERIFICATION_FAILED",
+                "error_type": type(exc).__name__,
+            }
+        return result if isinstance(result, dict) else {
+            "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
