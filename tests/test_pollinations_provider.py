@@ -221,10 +221,17 @@ class PollinationsProviderTests(unittest.TestCase):
             environ={"POLLINATIONS_API_KEY": secret},
             opener=_Opener(_Response()),
         )
+        self.assertTrue(provider.requires_paid_approval)
         manager = ProviderManager()
         manager.providers["Pollinations"] = provider
         health = ProviderHealth()
-        fallback = FallbackManager(manager, health)
+        fallback = FallbackManager(
+            manager,
+            health,
+            paid_execution_handler=lambda **kwargs: kwargs["provider"].generate_image(
+                kwargs["prompt"], kwargs["output_path"]
+            ),
+        )
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "nested" / "cinematic.png"
             result = fallback.generate_image(
@@ -264,11 +271,10 @@ class PollinationsProviderTests(unittest.TestCase):
         result = FallbackManager(manager, health).generate_image(
             ["Pollinations", "SafeFallback"], "cinematic scene", "unused.png"
         )
-        self.assertEqual(result["status"], "COMPLETED")
-        self.assertEqual(result["provider"], "SafeFallback")
-        self.assertEqual(len(calls), 1)
-        self.assertFalse(health.get_status("Pollinations")["healthy"])
-        self.assertEqual(health.get_status("Pollinations")["last_error"], "ProviderHTTPStatusError")
+        self.assertEqual(result["status"], "PAID_EXECUTION_HANDLER_REQUIRED")
+        self.assertEqual(result["provider"], "Pollinations")
+        self.assertEqual(calls, [])
+        self.assertEqual(opener.calls, [])
         self.assertNotIn(secret, repr(result))
         self.assertNotIn(secret, repr(health.get_status("Pollinations")))
 
