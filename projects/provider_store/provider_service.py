@@ -306,11 +306,20 @@ class ProviderService:
                 "provider": provider_id,
                 "request_id": request_id,
             }
+        try:
+            safe_result = self._sanitize_operation_result(operation_result)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_OPERATION_RESULT_INVALID",
+                "provider": provider_id,
+                "request_id": request_id,
+                "error_type": type(exc).__name__,
+            }
         return {
             "status": "EXECUTED",
             "provider": provider_id,
             "request_id": request_id,
-            "result": self._sanitize_operation_result(operation_result),
+            "result": safe_result,
         }
 
     def verify_webhook_callback(
