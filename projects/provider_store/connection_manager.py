@@ -382,6 +382,8 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].auth_scheme is not permitted")
                     if "subscription_required" in provider and not isinstance(provider["subscription_required"], bool):
                         errors.append(f"providers[{index}].subscription_required must be boolean")
+                    if "adapter_api_version" in provider and provider["adapter_api_version"] not in {"1.0", "2.0"}:
+                        errors.append(f"providers[{index}].adapter_api_version must be a supported version: 1.0 or 2.0")
                     if "zero_cost_allowed" in provider and not isinstance(provider["zero_cost_allowed"], bool):
                         errors.append(f"providers[{index}].zero_cost_allowed must be boolean")
                     if provider.get("subscription_required") is True and provider.get("zero_cost_allowed") is True:
@@ -515,10 +517,32 @@ class ConnectionManager:
         return provider is not None and provider.get("enabled") is True
 
     def validate_provider_contract(self, provider_id: str, instance: Any) -> dict[str, Any]:
-        """Validate only the adapter methods required by this provider's declared capabilities."""
+        """Validate adapter API-version compatibility and required declared capability methods."""
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+        required_version = provider.get("adapter_api_version", "1.0")
+        try:
+            adapter_version = getattr(instance, "adapter_api_version", "1.0")
+        except Exception:
+            adapter_version = None
+        supported_versions = {"1.0": (1, 0), "2.0": (2, 0)}
+        if required_version not in supported_versions or adapter_version not in supported_versions:
+            return {
+                "status": "UNSUPPORTED_ADAPTER_API_VERSION",
+                "provider": provider_id,
+                "valid": False,
+                "contract_version": "2.0",
+            }
+        if supported_versions[adapter_version] < supported_versions[required_version]:
+            return {
+                "status": "ADAPTER_API_VERSION_TOO_OLD",
+                "provider": provider_id,
+                "valid": False,
+                "required_adapter_api_version": required_version,
+                "adapter_api_version": adapter_version,
+                "contract_version": "2.0",
+            }
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
         category_contracts: dict[str, tuple[str, ...]] = {
             "image": ("generate_image",),
@@ -642,6 +666,8 @@ class ConnectionManager:
             "valid": not missing,
             "missing_methods": missing,
             "contract_version": "2.0",
+            "required_adapter_api_version": required_version,
+            "adapter_api_version": adapter_version,
         }
 
     def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
@@ -823,6 +849,10 @@ class ConnectionManager:
             allowed_hosts = candidate.get("allowed_hosts")
             if not isinstance(allowed_hosts, list) or not allowed_hosts:
                 return {"status": "HOST_ALLOWLIST_REQUIRED", "saved": False}
+        adapter_version = candidate.get("adapter_api_version", "1.0")
+        if adapter_version not in {"1.0", "2.0"}:
+            return {"status": "UNSUPPORTED_ADAPTER_API_VERSION", "saved": False}
+        candidate["adapter_api_version"] = adapter_version
         # Registration is not approval to execute: all new providers begin disabled.
         candidate["enabled"] = False
         if "status" not in candidate:
