@@ -149,12 +149,18 @@ class ProviderRoutingManager:
         min_benchmark_success_rate: float = 0.8,
         max_benchmark_p95_latency_ms: float | None = None,
         allow_low_confidence_fallback: bool = True,
+        required_region: str | None = None,
     ) -> dict[str, Any]:
         """Return the first policy-compliant provider and the decisions that led to it."""
         if not isinstance(category, str) or not category.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_REQUIRED"}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
+        if required_region is not None and (
+            not isinstance(required_region, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", required_region)
+        ):
+            return {"allowed": False, "status": "INVALID_REQUIRED_REGION"}
 
         project_policy: dict[str, Any] = {}
         if self.project_policy_manager is not None:
@@ -172,6 +178,13 @@ class ProviderRoutingManager:
             ):
                 return {"allowed": False, "status": "PROJECT_POLICY_REQUIRED"}
             project_policy = policy_result["policy"]
+            policy_region = project_policy.get("required_region")
+            if policy_region is not None:
+                if not isinstance(policy_region, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", policy_region):
+                    return {"allowed": False, "status": "INVALID_PROJECT_REGION_POLICY"}
+                if required_region is not None and required_region.casefold() != policy_region.casefold():
+                    return {"allowed": False, "status": "PROJECT_REGION_POLICY_CONFLICT"}
+                required_region = policy_region
             allowed_models = project_policy.get("allowed_models")
             if allowed_models is not None and (
                 model is None or model not in allowed_models
@@ -297,6 +310,14 @@ class ProviderRoutingManager:
             if allowed_providers is not None and item_id not in allowed_providers:
                 decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_NOT_ALLOWED"})
                 continue
+            if required_region is not None:
+                regions = item.get("data_residency_regions", item.get("supported_regions"))
+                if not isinstance(regions, list) or any(not isinstance(region, str) for region in regions):
+                    decisions.append({"provider": item_id, "status": "REGION_METADATA_UNVERIFIED"})
+                    continue
+                if required_region.casefold() not in {region.casefold() for region in regions}:
+                    decisions.append({"provider": item_id, "status": "DATA_RESIDENCY_REGION_NOT_SUPPORTED"})
+                    continue
             if item_id in denied_providers:
                 decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_DENIED"})
                 continue
@@ -693,6 +714,7 @@ class ProviderRoutingManager:
                 "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
                 "model": model,
                 "model_version": model_version,
+                "required_region": required_region,
                 "estimated_cost": cost,
                 "estimated_cost_unit": estimated_cost_unit.strip(),
                 "health_verified": self.health_manager is not None,
@@ -728,6 +750,7 @@ class ProviderRoutingManager:
             "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
             "model": model,
             "model_version": model_version,
+            "required_region": required_region,
             "decisions": decisions,
         }
 
