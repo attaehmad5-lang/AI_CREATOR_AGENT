@@ -6,7 +6,7 @@ This matrix preserves the canonical feature-ID ranges and group names. It is an 
 
 ## Item-level progress snapshot
 
-The current item-level audit covers all 138 canonical IDs. Provisional status counts: **18 VERIFIED**, **7 IMPLEMENTED / TESTED**, **76 PARTIAL**, and **37 OPEN**. Thus **101/138 (73.2%)** have at least some implementation/test evidence, while only **25/138 (18.1%)** are currently classified as verified or implemented/tested. This is not a completion claim: the latest code/test commits still need a fresh full CI run, and all PARTIAL/OPEN items remain incomplete.
+The current item-level audit covers all 138 canonical IDs. Provisional status counts: **18 VERIFIED**, **7 IMPLEMENTED / TESTED**, **77 PARTIAL**, and **36 OPEN**. Thus **102/138 (73.9%)** have at least some implementation/test evidence, while only **25/138 (18.1%)** are currently classified as verified or implemented/tested. This is not a completion claim: the latest code/test commits still need a fresh full CI run, and all PARTIAL/OPEN items remain incomplete.
 
 ## Latest confirmed verification
 
