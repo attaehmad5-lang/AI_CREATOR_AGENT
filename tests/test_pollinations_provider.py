@@ -250,19 +250,16 @@ class PollinationsProviderTests(unittest.TestCase):
             self.assertNotIn(secret, repr(health.get_status("Pollinations")))
             self.assertEqual(limiter.summary()["active"], 0)
 
-    def test_http_failure_from_real_adapter_uses_fallback_without_secret_leak(self):
+    def test_paid_pollinations_does_not_touch_network_or_fallback_without_policy_handler(self):
         from projects.generation.providers.fallback_manager import FallbackManager
         from projects.generation.providers.provider_health import ProviderHealth
         from projects.generation.providers.provider_manager import ProviderManager
 
         secret = "never-expose-this-key"
-        error = HTTPError(
-            "https://gen.pollinations.ai/image/test", 503, "Unavailable",
-            {"Retry-After": "5"}, None,
-        )
+        opener = _Opener()
         pollinations = PollinationsProvider(
             environ={"POLLINATIONS_API_KEY": secret},
-            opener=_Opener(error=error),
+            opener=opener,
         )
         calls = []
         class SafeFallback:
