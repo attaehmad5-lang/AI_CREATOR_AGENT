@@ -27,6 +27,7 @@ class _RejectGenerationRedirects(HTTPRedirectHandler):
 
 class PollinationsProvider:
     name = "Pollinations"
+    provider_id = "pollinations"
     # Authenticated API usage may incur charges. Legacy callers must route through
     # the explicit approval/budget/quota handler rather than invoking it by fallback.
     requires_paid_approval = True
