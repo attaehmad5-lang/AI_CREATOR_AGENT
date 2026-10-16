@@ -44,6 +44,154 @@ class ProviderRoutingManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def _confidence_router(self, benchmark_results, quota_manager=None):
+        catalog = self.root / "confidence-providers.json"
+        state = self.root / "confidence-connections.json"
+        models = [{"id": "stable-diffusion-xl", "versions": ["1"]}]
+        catalog.write_text(json.dumps({
+            "providers": [
+                {"id": "primary", "name": "Primary", "category": "image", "auth_type": "NONE",
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                 "priority": 1, "capabilities": ["image"], "supported_models": models},
+                {"id": "fallback", "name": "Fallback", "category": "image", "auth_type": "NONE",
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                 "priority": 2, "capabilities": ["image"], "supported_models": models},
+            ]
+        }), encoding="utf-8")
+        state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        connections = ConnectionManager(catalog, state)
+        for provider_id in ("primary", "fallback"):
+            self.assertTrue(connections.verify_connectivity(
+                provider_id, lambda provider, **kwargs: {"ok": True}
+            )["verified"])
+
+        class BenchmarkStub:
+            def compare(self, *, modality=None):
+                return {"status": "BENCHMARKS_AVAILABLE", "results": benchmark_results}
+
+        return ProviderRoutingManager(connections, benchmark_manager=BenchmarkStub(), quota_manager=quota_manager)
+
+    def test_confidence_aware_routing_adapts_to_verified_benchmark_history(self):
+        router = self._confidence_router([
+            {"provider_id": "fallback", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 50, "success_rate": 0.96, "p95_latency_ms": 180,
+             "avg_cost_per_success": 0.0, "avg_quality_score": 0.91},
+            {"provider_id": "primary", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 50, "success_rate": 0.55, "p95_latency_ms": 100,
+             "avg_cost_per_success": 0.0, "avg_quality_score": 0.6},
+        ])
+        result = router.route(
+            category="image", project_id="film", model="stable-diffusion-xl",
+            confidence_aware=True, min_benchmark_samples=20,
+            min_benchmark_success_rate=0.8,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["confidence_routing_status"], "CONFIDENCE_AWARE_ROUTING")
+        self.assertEqual(result["benchmark_evidence"]["sample_count"], 50)
+
+    def test_benchmark_evidence_matches_provider_selected_after_quota_rejection(self):
+        results = [
+            {"provider_id": "primary", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 100, "success_rate": 0.99, "p95_latency_ms": 100,
+             "avg_cost_per_success": 0.0, "avg_quality_score": 0.95},
+            {"provider_id": "fallback", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 20, "success_rate": 0.9, "p95_latency_ms": 200,
+             "avg_cost_per_success": 0.0, "avg_quality_score": 0.85},
+        ]
+
+        class QuotaStub:
+            def reserve(self, *, provider_id, request_id):
+                if provider_id == "primary":
+                    return {"status": "QUOTA_EXCEEDED"}
+                return {"status": "RESERVED"}
+
+        router = self._confidence_router(results, quota_manager=QuotaStub())
+        result = router.route(
+            category="image", project_id="film", model="stable-diffusion-xl",
+            request_id="quota-job", confidence_aware=True,
+            min_benchmark_samples=10, min_benchmark_success_rate=0.8,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["benchmark_evidence"]["sample_count"], 20)
+        self.assertEqual(result["benchmark_evidence"]["success_rate"], 0.9)
+
+    def test_low_confidence_can_fallback_or_fail_closed(self):
+        results = [
+            {"provider_id": provider, "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 2, "success_rate": 0.9, "p95_latency_ms": 100,
+             "avg_cost_per_success": 0.0, "avg_quality_score": 0.8}
+            for provider in ("primary", "fallback")
+        ]
+        router = self._confidence_router(results)
+        blocked = router.route(
+            category="image", project_id="film", model="stable-diffusion-xl",
+            confidence_aware=True, min_benchmark_samples=10,
+            allow_low_confidence_fallback=False,
+        )
+        self.assertFalse(blocked["allowed"])
+        self.assertEqual(blocked["status"], "CONFIDENCE_INSUFFICIENT")
+        fallback = router.route(
+            category="image", project_id="film", model="stable-diffusion-xl",
+            confidence_aware=True, min_benchmark_samples=10,
+            allow_low_confidence_fallback=True,
+        )
+        self.assertTrue(fallback["allowed"])
+        self.assertEqual(fallback["provider"], "primary")
+        self.assertEqual(fallback["confidence_routing_status"], "CONFIDENCE_FALLBACK")
+
+    def test_required_data_residency_region_filters_provider_candidates(self):
+        catalog = self.root / "region-providers.json"
+        state = self.root / "region-connections.json"
+        catalog.write_text(json.dumps({
+            "providers": [
+                {"id": "primary", "name": "Primary", "category": "image", "auth_type": "NONE",
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                 "priority": 1, "capabilities": ["image"], "supported_regions": ["eu-west"]},
+                {"id": "fallback", "name": "Fallback", "category": "image", "auth_type": "NONE",
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                 "priority": 2, "capabilities": ["image"], "data_residency_regions": ["saudi-arabia"]},
+            ]
+        }), encoding="utf-8")
+        state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        connections = ConnectionManager(catalog, state)
+        for provider_id in ("primary", "fallback"):
+            self.assertTrue(connections.verify_connectivity(
+                provider_id, lambda provider, **kwargs: {"ok": True}
+            )["verified"])
+        router = ProviderRoutingManager(connections)
+        result = router.route(
+            category="image", project_id="film", required_region="SAUDI-ARABIA"
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["required_region"], "SAUDI-ARABIA")
+        self.assertIn(
+            {"provider": "primary", "status": "DATA_RESIDENCY_REGION_NOT_SUPPORTED"},
+            result["prior_decisions"],
+        )
+
+        no_region_catalog = self.root / "no-region-provider.json"
+        no_region_state = self.root / "no-region-connections.json"
+        no_region_catalog.write_text(json.dumps({
+            "providers": [{
+                "id": "unverified-region", "name": "Unverified", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "zero_cost_allowed": True, "priority": 1, "capabilities": ["image"],
+            }]
+        }), encoding="utf-8")
+        no_region_state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        no_region_connections = ConnectionManager(no_region_catalog, no_region_state)
+        no_region_connections.verify_connectivity(
+            "unverified-region", lambda provider, **kwargs: {"ok": True}
+        )
+        rejected = ProviderRoutingManager(no_region_connections).route(
+            category="image", project_id="film", required_region="saudi-arabia"
+        )
+        self.assertFalse(rejected["allowed"])
+        self.assertEqual(rejected["decisions"][0]["status"], "REGION_METADATA_UNVERIFIED")
+
     def test_routing_rejects_unverified_provider_even_if_catalog_label_says_connected(self):
         self.connections.set_state("primary", "READY")
         router = ProviderRoutingManager(self.connections)

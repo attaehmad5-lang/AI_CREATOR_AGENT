@@ -32,6 +32,7 @@ class ProviderRoutingManager:
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
         project_policy_manager: Any | None = None,
+        benchmark_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
         require_verified_connection: bool = True,
     ) -> None:
@@ -47,6 +48,8 @@ class ProviderRoutingManager:
             raise ValueError("credit_manager must provide fresh verified balances")
         if project_policy_manager is not None and not callable(getattr(project_policy_manager, "get_policy", None)):
             raise ValueError("project_policy_manager must support policy lookup")
+        if benchmark_manager is not None and not callable(getattr(benchmark_manager, "compare", None)):
+            raise ValueError("benchmark_manager must support comparison")
         if not isinstance(require_verified_connection, bool):
             raise ValueError("require_verified_connection must be boolean")
         if require_verified_connection and not callable(getattr(connection_manager, "get_state", None)):
@@ -60,6 +63,7 @@ class ProviderRoutingManager:
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager
         self.project_policy_manager = project_policy_manager
+        self.benchmark_manager = benchmark_manager
         self.default_strategy = normalized_strategy
         self.require_verified_connection = require_verified_connection
         self._round_robin_counters: dict[str, int] = {}
@@ -140,12 +144,23 @@ class ProviderRoutingManager:
         excluded_providers: set[str] | frozenset[str] | None = None,
         require_health_evidence: bool = False,
         automatic_fallback: bool = True,
+        confidence_aware: bool = False,
+        min_benchmark_samples: int = 10,
+        min_benchmark_success_rate: float = 0.8,
+        max_benchmark_p95_latency_ms: float | None = None,
+        allow_low_confidence_fallback: bool = True,
+        required_region: str | None = None,
     ) -> dict[str, Any]:
         """Return the first policy-compliant provider and the decisions that led to it."""
         if not isinstance(category, str) or not category.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_REQUIRED"}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
+        if required_region is not None and (
+            not isinstance(required_region, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", required_region)
+        ):
+            return {"allowed": False, "status": "INVALID_REQUIRED_REGION"}
 
         project_policy: dict[str, Any] = {}
         if self.project_policy_manager is not None:
@@ -163,6 +178,13 @@ class ProviderRoutingManager:
             ):
                 return {"allowed": False, "status": "PROJECT_POLICY_REQUIRED"}
             project_policy = policy_result["policy"]
+            policy_region = project_policy.get("required_region")
+            if policy_region is not None:
+                if not isinstance(policy_region, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", policy_region):
+                    return {"allowed": False, "status": "INVALID_PROJECT_REGION_POLICY"}
+                if required_region is not None and required_region.casefold() != policy_region.casefold():
+                    return {"allowed": False, "status": "PROJECT_REGION_POLICY_CONFLICT"}
+                required_region = policy_region
             allowed_models = project_policy.get("allowed_models")
             if allowed_models is not None and (
                 model is None or model not in allowed_models
@@ -214,6 +236,22 @@ class ProviderRoutingManager:
 
         if not isinstance(automatic_fallback, bool):
             return {"allowed": False, "status": "INVALID_FALLBACK_POLICY"}
+        if not isinstance(confidence_aware, bool) or not isinstance(allow_low_confidence_fallback, bool):
+            return {"allowed": False, "status": "INVALID_CONFIDENCE_POLICY"}
+        if isinstance(min_benchmark_samples, bool) or not isinstance(min_benchmark_samples, int) or not 1 <= min_benchmark_samples <= 100000:
+            return {"allowed": False, "status": "INVALID_BENCHMARK_SAMPLE_THRESHOLD"}
+        min_success = finite_number(min_benchmark_success_rate, minimum=0)
+        if min_success is None or min_success > 1:
+            return {"allowed": False, "status": "INVALID_BENCHMARK_SUCCESS_THRESHOLD"}
+        max_p95 = None
+        if max_benchmark_p95_latency_ms is not None:
+            max_p95 = finite_number(max_benchmark_p95_latency_ms, minimum=0)
+            if max_p95 is None:
+                return {"allowed": False, "status": "INVALID_BENCHMARK_LATENCY_THRESHOLD"}
+        if confidence_aware and self.benchmark_manager is None:
+            return {"allowed": False, "status": "BENCHMARK_DATA_REQUIRED"}
+        if confidence_aware and model is None:
+            return {"allowed": False, "status": "MODEL_REQUIRED_FOR_CONFIDENCE_ROUTING"}
 
         estimates = {} if estimated_costs is None else estimated_costs
         if self.credit_manager is not None:
@@ -272,6 +310,14 @@ class ProviderRoutingManager:
             if allowed_providers is not None and item_id not in allowed_providers:
                 decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_NOT_ALLOWED"})
                 continue
+            if required_region is not None:
+                regions = item.get("data_residency_regions", item.get("supported_regions"))
+                if not isinstance(regions, list) or any(not isinstance(region, str) for region in regions):
+                    decisions.append({"provider": item_id, "status": "REGION_METADATA_UNVERIFIED"})
+                    continue
+                if required_region.casefold() not in {region.casefold() for region in regions}:
+                    decisions.append({"provider": item_id, "status": "DATA_RESIDENCY_REGION_NOT_SUPPORTED"})
+                    continue
             if item_id in denied_providers:
                 decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_DENIED"})
                 continue
@@ -406,7 +452,69 @@ class ProviderRoutingManager:
                 "_route_latency": health_record.get("last_latency_ms", float("inf")),
             })
 
-        if selected_strategy == "LOWEST_COST":
+        confidence_status = None
+        confidence_evidence = None
+        confidence_evidence_by_provider: dict[str, dict[str, Any]] = {}
+        if confidence_aware:
+            try:
+                benchmark_snapshot = self.benchmark_manager.compare(modality=category.strip())
+                benchmark_rows = benchmark_snapshot.get("results", []) if isinstance(benchmark_snapshot, dict) else []
+            except Exception:
+                benchmark_rows = []
+            ranked: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
+            for provider in candidates:
+                matching = next(
+                    (
+                        row for row in benchmark_rows
+                        if isinstance(row, dict)
+                        and row.get("provider_id") == provider.get("id")
+                        and row.get("model_id") == model
+                        and row.get("modality") == category.strip()
+                    ),
+                    None,
+                )
+                if not isinstance(matching, dict):
+                    decisions.append({"provider": provider.get("id"), "status": "BENCHMARK_CONFIDENCE_UNAVAILABLE"})
+                    continue
+                sample_count = matching.get("sample_count")
+                success_rate = finite_number(matching.get("success_rate"), minimum=0)
+                p95 = finite_number(matching.get("p95_latency_ms"), minimum=0)
+                if (
+                    isinstance(sample_count, bool) or not isinstance(sample_count, int)
+                    or sample_count < min_benchmark_samples
+                    or success_rate is None or success_rate < min_success
+                    or (max_p95 is not None and (p95 is None or p95 > max_p95))
+                ):
+                    decisions.append({"provider": provider.get("id"), "status": "BENCHMARK_CONFIDENCE_INSUFFICIENT"})
+                    continue
+                rank = next(
+                    (idx for idx, row in enumerate(benchmark_rows)
+                     if isinstance(row, dict) and row.get("provider_id") == provider.get("id")
+                     and row.get("model_id") == model and row.get("modality") == category.strip()),
+                    len(benchmark_rows),
+                )
+                ranked.append((rank, provider, matching))
+            if ranked:
+                ranked.sort(key=lambda item: item[0])
+                candidates = [item[1] for item in ranked]
+                confidence_evidence_by_provider = {
+                    item[1]["id"]: dict(item[2]) for item in ranked
+                    if isinstance(item[1].get("id"), str)
+                }
+                confidence_status = "CONFIDENCE_AWARE_ROUTING"
+            elif allow_low_confidence_fallback:
+                confidence_status = "CONFIDENCE_FALLBACK"
+            else:
+                return {
+                    "allowed": False, "status": "CONFIDENCE_INSUFFICIENT",
+                    "category": category.strip(), "strategy": selected_strategy,
+                    "model": model, "decisions": decisions,
+                }
+
+        if confidence_status == "CONFIDENCE_AWARE_ROUTING":
+            # Benchmark order already accounts for success rate, quality, latency, and cost.
+            pass
+        elif selected_strategy == "LOWEST_COST":
             candidates.sort(key=lambda p: (p["_route_cost"], -p["_route_credits"], *self._priority(p)))
         elif selected_strategy == "FREE_CREDITS_FIRST":
             candidates.sort(key=lambda p: (-p["_route_credits"], *self._priority(p)))
@@ -423,6 +531,7 @@ class ProviderRoutingManager:
 
         for provider in candidates:
             provider_id = provider["id"]
+            confidence_evidence = confidence_evidence_by_provider.get(provider_id)
             cost = provider["_route_cost"]
             credit = credits.get(provider_id, 0.0)
             billing_mode = None
@@ -605,11 +714,22 @@ class ProviderRoutingManager:
                 "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
                 "model": model,
                 "model_version": model_version,
+                "required_region": required_region,
                 "estimated_cost": cost,
                 "estimated_cost_unit": estimated_cost_unit.strip(),
                 "health_verified": self.health_manager is not None,
                 "prior_decisions": decisions,
             }
+            if confidence_status is not None:
+                result["confidence_routing_status"] = confidence_status
+            if confidence_evidence is not None:
+                result["benchmark_evidence"] = {
+                    "sample_count": confidence_evidence.get("sample_count"),
+                    "success_rate": confidence_evidence.get("success_rate"),
+                    "p95_latency_ms": confidence_evidence.get("p95_latency_ms"),
+                    "avg_cost_per_success": confidence_evidence.get("avg_cost_per_success"),
+                    "avg_quality_score": confidence_evidence.get("avg_quality_score"),
+                }
             if billing_mode is not None:
                 result["billing_mode"] = billing_mode
             if cost_reserved:
@@ -630,6 +750,7 @@ class ProviderRoutingManager:
             "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
             "model": model,
             "model_version": model_version,
+            "required_region": required_region,
             "decisions": decisions,
         }
 
