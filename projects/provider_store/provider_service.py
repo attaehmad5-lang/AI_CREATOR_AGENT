@@ -30,6 +30,7 @@ class ProviderService:
         webhook_verifier: Any | None = None,
         job_manager: Any | None = None,
         metrics_manager: Any | None = None,
+        quality_policy: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -48,6 +49,7 @@ class ProviderService:
             (webhook_verifier, "verify", "webhook_verifier"),
             (job_manager, "submit", "job_manager"),
             (metrics_manager, "record", "metrics_manager"),
+            (quality_policy, "evaluate", "quality_policy"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -67,6 +69,7 @@ class ProviderService:
         self.webhook_verifier = webhook_verifier
         self.job_manager = job_manager
         self.metrics_manager = metrics_manager
+        self.quality_policy = quality_policy
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -622,6 +625,8 @@ class ProviderService:
         if not self._valid_amount(latency_ms):
             latency_ms = (time.monotonic() - started_at) * 1000
         output_validation = None
+        quality_result = None
+        quality_error = None
         final_success = reported_success
         output_error = None
         if reported_success:
@@ -633,10 +638,27 @@ class ProviderService:
             if not isinstance(output_validation, dict) or output_validation.get("valid") is not True:
                 final_success = False
                 output_error = "OUTPUT_VALIDATION_FAILED"
+            elif self.quality_policy is not None:
+                try:
+                    quality_result = self.quality_policy.evaluate(
+                        final_path, modality=modality, category=category
+                    )
+                except Exception as exc:
+                    quality_result = {
+                        "allowed": False, "status": "QUALITY_SCORING_FAILED",
+                        "error_type": type(exc).__name__,
+                    }
+                if not isinstance(quality_result, dict) or quality_result.get("allowed") is not True:
+                    final_success = False
+                    quality_error = (
+                        quality_result.get("status")
+                        if isinstance(quality_result, dict)
+                        else "INVALID_QUALITY_POLICY_RESPONSE"
+                    )
 
         error_code = self._safe_error_code(
             adapter_result.get("error_code"),
-            output_error or ("PROVIDER_EXECUTION_FAILED" if not final_success else "PROVIDER_EXECUTION_SUCCEEDED"),
+            quality_error or output_error or ("PROVIDER_EXECUTION_FAILED" if not final_success else "PROVIDER_EXECUTION_SUCCEEDED"),
         )
         finalization = self.finalize_started_request(
             project_id=project_id,
@@ -720,6 +742,8 @@ class ProviderService:
                 )
         if accounting_required:
             status = "EXECUTION_ACCOUNTING_REQUIRED"
+        elif quality_error is not None:
+            status = "OUTPUT_QUALITY_FAILED"
         elif output_error is not None:
             status = "OUTPUT_VALIDATION_FAILED"
         elif not final_success:
@@ -735,6 +759,7 @@ class ProviderService:
             "request_id": request_id,
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
+            "quality": quality_result,
             "finalization": finalization,
             "metrics": metrics_result,
             "provider_error": provider_error,
