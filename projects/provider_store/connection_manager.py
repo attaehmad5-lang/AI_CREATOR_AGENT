@@ -806,6 +806,9 @@ class ConnectionManager:
             official_docs = candidate.get("official_api_url")
             if not isinstance(official_docs, str) or not official_docs.strip():
                 return {"status": "OFFICIAL_DOCUMENTATION_REQUIRED", "saved": False}
+            docs_validation = self.validate_endpoint(official_docs)
+            if not docs_validation.get("valid"):
+                return {"status": "INVALID_OFFICIAL_DOCUMENTATION_URL", "saved": False}
             allowed_hosts = candidate.get("allowed_hosts")
             if not isinstance(allowed_hosts, list) or not allowed_hosts:
                 return {"status": "HOST_ALLOWLIST_REQUIRED", "saved": False}
