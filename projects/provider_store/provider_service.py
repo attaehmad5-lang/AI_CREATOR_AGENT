@@ -20,6 +20,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        execution_limiter: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -31,6 +32,7 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (execution_limiter, "acquire", "execution_limiter"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -43,6 +45,7 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.execution_limiter = execution_limiter
 
     def verify_provider(
         self,
@@ -209,6 +212,80 @@ class ProviderService:
             "verified": connection.get("verified") is True,
             "connection": connection,
             "health": health,
+        }
+
+    def execute_with_provider_slot(
+        self,
+        provider_id: str,
+        request_id: str,
+        operation: Any,
+        *,
+        queue_timeout_seconds: float = 0.0,
+    ) -> dict[str, Any]:
+        """Run one provider operation under bounded admission and always release its slot."""
+        if self.execution_limiter is None:
+            return {"status": "EXECUTION_LIMITER_UNAVAILABLE", "provider": provider_id}
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER_ID"}
+        if not isinstance(request_id, str) or not request_id.strip():
+            return {"status": "REQUEST_ID_REQUIRED", "provider": provider_id}
+        if not callable(operation):
+            return {"status": "INVALID_PROVIDER_OPERATION", "provider": provider_id}
+        try:
+            admission = self.execution_limiter.acquire(
+                provider_id, request_id, timeout_seconds=queue_timeout_seconds
+            )
+        except Exception as exc:
+            return {
+                "status": "EXECUTION_ADMISSION_FAILED",
+                "provider": provider_id,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(admission, dict) or admission.get("acquired") is not True:
+            status = admission.get("status") if isinstance(admission, dict) else None
+            if not isinstance(status, str) or not re.fullmatch(r"[A-Z0-9_]{1,80}", status):
+                status = "EXECUTION_ADMISSION_REJECTED"
+            return {"status": status, "provider": provider_id, "request_id": request_id}
+
+        operation_result: Any = None
+        operation_error: Exception | None = None
+        try:
+            operation_result = operation()
+        except Exception as exc:
+            operation_error = exc
+        try:
+            released = self.execution_limiter.release(provider_id, request_id)
+        except Exception as exc:
+            return {
+                "status": "EXECUTION_SLOT_RELEASE_FAILED",
+                "provider": provider_id,
+                "request_id": request_id,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(released, dict) or released.get("released") is not True:
+            return {
+                "status": "EXECUTION_SLOT_RELEASE_FAILED",
+                "provider": provider_id,
+                "request_id": request_id,
+            }
+        if operation_error is not None:
+            return {
+                "status": "PROVIDER_OPERATION_FAILED",
+                "provider": provider_id,
+                "request_id": request_id,
+                "error_type": type(operation_error).__name__,
+            }
+        if not isinstance(operation_result, dict):
+            return {
+                "status": "PROVIDER_OPERATION_INVALID_RESULT",
+                "provider": provider_id,
+                "request_id": request_id,
+            }
+        return {
+            "status": "EXECUTED",
+            "provider": provider_id,
+            "request_id": request_id,
+            "result": operation_result,
         }
 
     def verify_webhook_callback(
