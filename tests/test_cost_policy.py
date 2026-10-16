@@ -395,9 +395,11 @@ class ProviderCostPolicyTests(unittest.TestCase):
                 self.assertFalse(result["saved"])
 
     def test_unknown_charge_outcome_does_not_free_quota_for_another_request(self):
-        self.policy.reserve_usage(
+        reserved = self.policy.reserve_usage(
             project_id="documentary", provider_id="paid", estimated_cost=4.0, request_id="timeout-job"
         )
+        self.assertEqual(reserved["status"], "RESERVED")
+        self.assertTrue(reserved["saved"])
         outcome = self.policy.release_reservation(
             project_id="documentary", request_id="timeout-job", charge_outcome="unknown"
         )
