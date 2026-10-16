@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
@@ -707,6 +708,43 @@ class ProviderServiceTests(unittest.TestCase):
             estimated_cost=2.0, actual_cost=0.0, success=False, billing_mode=[],
         )
         self.assertEqual(malformed_billing["status"], "INVALID_BILLING_MODE")
+
+    def test_unknown_provider_data_policy_blocks_adapter_execution(self):
+        calls = []
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "provider": "unlisted-provider",
+                    "billing_mode": "ZERO_COST",
+                }
+
+        policy = ProviderDataHandlingPolicy({
+            "image": {
+                "allowed_categories": ["public", "user_content"],
+                "max_retention_days": 0,
+                "training_use_allowed": False,
+                "source_url": "https://provider.example.com/privacy",
+            }
+        })
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            data_handling_policy=policy,
+        )
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="data-policy-job",
+            estimated_cost=0.0,
+            modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+        )
+        self.assertEqual(result["status"], "PROVIDER_DATA_POLICY_REJECTED")
+        self.assertEqual(result["data_policy"]["status"], "PROVIDER_DATA_POLICY_UNKNOWN")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
