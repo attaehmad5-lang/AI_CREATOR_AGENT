@@ -89,6 +89,8 @@ class ProviderSLOManagerTests(unittest.TestCase):
         history = self.manager.history()
         self.assertEqual(len(history), 2)
         self.assertEqual(history[-1]["evaluated_at"], self.now.isoformat())
+        history[-1]["breached_objectives"].append("INJECTED")
+        self.assertNotIn("INJECTED", self.manager.history()[-1]["breached_objectives"])
 
 
 if __name__ == "__main__":
