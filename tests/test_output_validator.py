@@ -63,6 +63,24 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertEqual((result["width"], result["height"]), (20, 10))
 
+    def test_gif_and_webp_dimensions_are_extracted(self):
+        gif = self.root / "cover.gif"
+        gif.write_bytes(b"GIF89a" + (11).to_bytes(2, "little") + (9).to_bytes(2, "little"))
+        gif_result = self.validator.validate_file(gif, modality="image")
+        self.assertTrue(gif_result["valid"])
+        self.assertEqual((gif_result["width"], gif_result["height"]), (11, 9))
+
+        webp = self.root / "cover.webp"
+        webp.write_bytes(
+            b"RIFF" + (22).to_bytes(4, "little") + b"WEBP"
+            + b"VP8X" + (10).to_bytes(4, "little")
+            + bytes([0, 0, 0, 0])
+            + (4).to_bytes(3, "little") + (6).to_bytes(3, "little")
+        )
+        webp_result = self.validator.validate_file(webp, modality="image")
+        self.assertTrue(webp_result["valid"])
+        self.assertEqual((webp_result["width"], webp_result["height"]), (5, 7))
+
     def test_mismatched_signature_and_extension_are_rejected(self):
         wrong_signature = self.root / "cover.png"
         wrong_signature.write_bytes(b"not an image")
