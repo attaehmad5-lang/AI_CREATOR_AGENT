@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        sensitive_data_policy: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -33,6 +34,7 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (sensitive_data_policy, "inspect", "sensitive_data_policy"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -45,6 +47,7 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.sensitive_data_policy = sensitive_data_policy
 
     def verify_provider(
         self,
@@ -284,6 +287,28 @@ class ProviderService:
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
 
+        sensitive_data_scan = None
+        if self.sensitive_data_policy is not None:
+            try:
+                sensitive_data_scan = self.sensitive_data_policy.inspect(adapter_options or {})
+            except Exception as exc:
+                return {
+                    "status": "SENSITIVE_DATA_SCAN_FAILED",
+                    "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if (
+                not isinstance(sensitive_data_scan, dict)
+                or sensitive_data_scan.get("allowed") is not True
+            ):
+                return {
+                    "status": "SENSITIVE_DATA_BLOCKED",
+                    "executed": False,
+                    "sensitive_data_scan": sensitive_data_scan if isinstance(sensitive_data_scan, dict) else {
+                        "allowed": False, "status": "INVALID_SENSITIVE_DATA_SCAN_RESPONSE"
+                    },
+                }
+
         route = self.route_request(
             category=category,
             project_id=project_id,
@@ -447,6 +472,7 @@ class ProviderService:
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "finalization": finalization,
+            "sensitive_data_scan": sensitive_data_scan,
             "retry_decision": retry,
         }
 
