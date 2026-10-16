@@ -43,6 +43,10 @@ class SensitiveDataPolicyTests(unittest.TestCase):
             SensitiveDataPolicy().inspect({"date": "2026-10-16"})["findings"],
             [],
         )
+        mixed = SensitiveDataPolicy().inspect({
+            "date_and_phone": "2026-10-16 415-555-0134"
+        })
+        self.assertEqual({x["category"] for x in mixed["findings"]}, {"phone"})
 
     def test_oversized_or_deep_payload_fails_closed(self):
         policy = SensitiveDataPolicy(max_text_chars=10, max_depth=2)
