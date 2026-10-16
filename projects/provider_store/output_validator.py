@@ -44,7 +44,8 @@ class ProviderOutputValidator:
 
     def __init__(
         self, *, min_size_bytes: int = 1, max_size_bytes: int = 1_000_000_000,
-        max_json_depth: int = 128,
+        max_json_depth: int = 128, max_image_dimension: int = 32768,
+        max_image_pixels: int = 200_000_000,
     ) -> None:
         if (
             not isinstance(min_size_bytes, int)
@@ -62,9 +63,87 @@ class ProviderOutputValidator:
             or max_json_depth > 4096
         ):
             raise ValueError("max_json_depth must be an integer between 1 and 4096")
+        if (
+            not isinstance(max_image_dimension, int)
+            or isinstance(max_image_dimension, bool)
+            or not 1 <= max_image_dimension <= 1_000_000
+            or not isinstance(max_image_pixels, int)
+            or isinstance(max_image_pixels, bool)
+            or not 1 <= max_image_pixels <= 10_000_000_000
+        ):
+            raise ValueError("image dimension/pixel limits must be positive bounded integers")
         self.min_size_bytes = min_size_bytes
         self.max_size_bytes = max_size_bytes
         self.max_json_depth = max_json_depth
+        self.max_image_dimension = max_image_dimension
+        self.max_image_pixels = max_image_pixels
+
+    @staticmethod
+    def _jpeg_dimensions(stream: Any, size: int, *, scan_limit: int = 1_000_000) -> tuple[int, int] | None:
+        stream.seek(2)
+        scanned = 2
+        sof_markers = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+        while scanned < min(size, scan_limit):
+            byte = stream.read(1)
+            if not byte:
+                return None
+            scanned += 1
+            if byte != b"\\xff":
+                continue
+            marker_byte = stream.read(1)
+            if not marker_byte:
+                return None
+            scanned += 1
+            while marker_byte == b"\\xff":
+                marker_byte = stream.read(1)
+                if not marker_byte:
+                    return None
+                scanned += 1
+            marker = marker_byte[0]
+            if marker in {0x00, 0xD8, 0xD9, 0x01} or 0xD0 <= marker <= 0xD7:
+                continue
+            length_bytes = stream.read(2)
+            if len(length_bytes) != 2:
+                return None
+            scanned += 2
+            segment_length = int.from_bytes(length_bytes, "big")
+            if segment_length < 2 or scanned + segment_length - 2 > size:
+                return None
+            if marker in sof_markers:
+                frame = stream.read(5)
+                if len(frame) != 5:
+                    return None
+                height = int.from_bytes(frame[1:3], "big")
+                width = int.from_bytes(frame[3:5], "big")
+                return width, height
+            stream.seek(segment_length - 2, os.SEEK_CUR)
+            scanned += segment_length - 2
+        return None
+
+    @classmethod
+    def _image_dimensions(cls, stream: Any, mime: str, size: int) -> tuple[int, int] | None:
+        stream.seek(0)
+        header = stream.read(min(size, 64))
+        if mime == "image/png":
+            if len(header) >= 24 and header[12:16] == b"IHDR":
+                return int.from_bytes(header[16:20], "big"), int.from_bytes(header[20:24], "big")
+            return None
+        if mime == "image/gif":
+            if len(header) >= 10:
+                return int.from_bytes(header[6:8], "little"), int.from_bytes(header[8:10], "little")
+            return None
+        if mime == "image/jpeg":
+            return cls._jpeg_dimensions(stream, size)
+        if mime == "image/webp" and len(header) >= 30:
+            chunk_type = header[12:16]
+            if chunk_type == b"VP8X":
+                return 1 + int.from_bytes(header[24:27], "little"), 1 + int.from_bytes(header[27:30], "little")
+            if chunk_type == b"VP8 " and header[23:26] == b"\\x9d\\x01\\x2a":
+                return int.from_bytes(header[26:28], "little") & 0x3FFF, int.from_bytes(header[28:30], "little") & 0x3FFF
+            if chunk_type == b"VP8L" and header[20] == 0x2F and len(header) >= 25:
+                b0, b1, b2, b3 = header[21:25]
+                return 1 + b0 + ((b1 & 0x3F) << 8), 1 + ((b1 >> 6) | (b2 << 2) | ((b3 & 0x0F) << 10))
+        return None
 
     @staticmethod
     def _json_depth_within_limit(stream: Any, max_depth: int) -> bool:
@@ -135,6 +214,18 @@ class ProviderOutputValidator:
                     mime = self._match_signature(normalized_modality, header)
                     if mime is None:
                         return {"valid": False, "status": "SIGNATURE_MISMATCH"}
+                    image_dimensions = None
+                    if normalized_modality == "image":
+                        image_dimensions = self._image_dimensions(stream, mime, size)
+                        if image_dimensions is None:
+                            return {"valid": False, "status": "IMAGE_DIMENSIONS_UNAVAILABLE"}
+                        width, height = image_dimensions
+                        if width <= 0 or height <= 0:
+                            return {"valid": False, "status": "IMAGE_DIMENSIONS_INVALID"}
+                        if width > self.max_image_dimension or height > self.max_image_dimension:
+                            return {"valid": False, "status": "IMAGE_DIMENSION_LIMIT_EXCEEDED", "width": width, "height": height}
+                        if width * height > self.max_image_pixels:
+                            return {"valid": False, "status": "IMAGE_PIXEL_LIMIT_EXCEEDED", "width": width, "height": height}
                 elif normalized_modality == "text":
                     stream.seek(0)
                     decoder = codecs.getincrementaldecoder("utf-8")()
@@ -197,6 +288,10 @@ class ProviderOutputValidator:
             "mime_type": mime,
             "size_bytes": size,
             "sha256": digest.hexdigest(),
+            **(
+                {"width": image_dimensions[0], "height": image_dimensions[1]}
+                if normalized_modality == "image" and image_dimensions is not None else {}
+            ),
         }
 
     @classmethod
