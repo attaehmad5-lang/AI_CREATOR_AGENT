@@ -159,7 +159,7 @@ class ProviderServiceTests(unittest.TestCase):
             authorization_manager=authorization, ab_experiment_manager=experiments,
         )
         artifact = self.root / "paid-ab-output.png"
-        artifact.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n")
+        artifact.write_bytes(b"\x89PNG\r\n\x1a\n")
         called = {}
         def adapter(**kwargs):
             called.update(kwargs)
