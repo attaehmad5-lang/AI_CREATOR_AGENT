@@ -22,6 +22,7 @@ class ProviderService:
         cost_policy: Any | None = None,
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
+        authorization_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -33,6 +34,7 @@ class ProviderService:
             (cost_policy, "reconcile_usage", "cost_policy"),
             (quota_manager, "commit", "quota_manager"),
             (credit_manager, "commit", "credit_manager"),
+            (authorization_manager, "authorize", "authorization_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -45,6 +47,7 @@ class ProviderService:
         self.cost_policy = cost_policy
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        self.authorization_manager = authorization_manager
 
     def verify_provider(
         self,
@@ -261,6 +264,7 @@ class ProviderService:
         estimated_cost: float,
         adapter: Any,
         modality: str,
+        principal_id: str | None = None,
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
@@ -283,6 +287,27 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+
+        authorization = None
+        if self.authorization_manager is not None:
+            try:
+                authorization = self.authorization_manager.authorize(
+                    principal_id, "provider.generate"
+                )
+            except Exception as exc:
+                return {
+                    "status": "AUTHORIZATION_CHECK_FAILED",
+                    "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+                return {
+                    "status": "AUTHORIZATION_DENIED",
+                    "executed": False,
+                    "authorization": authorization if isinstance(authorization, dict) else {
+                        "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
+                    },
+                }
 
         route = self.route_request(
             category=category,
@@ -447,6 +472,7 @@ class ProviderService:
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "finalization": finalization,
+            "authorization": authorization,
             "retry_decision": retry,
         }
 
