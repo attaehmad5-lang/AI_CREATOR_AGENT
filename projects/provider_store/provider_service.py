@@ -579,6 +579,19 @@ class ProviderService:
                     "ab_experiment_id": experiment_id,
                 }
             ab_assignment = assignment
+            def release_ab_cost_reservation() -> dict[str, Any] | None:
+                if (
+                    ab_assignment is None or ab_assignment.get("estimated_cost", 0) <= 0
+                    or self.cost_policy is None
+                ):
+                    return None
+                try:
+                    return self.cost_policy.release_reservation(
+                        project_id=project_id, provider_id=ab_assignment.get("provider_id"),
+                        request_id=request_id, charge_outcome="not_incurred",
+                    )
+                except Exception as exc:
+                    return {"status": "AB_RESERVATION_RELEASE_FAILED", "released": False, "error_type": type(exc).__name__}
             assigned_provider = assignment.get("provider_id")
             assigned_model = assignment.get("model_id")
             assigned_cost = finite_number(assignment.get("estimated_cost"), minimum=0)
@@ -587,13 +600,13 @@ class ProviderService:
                 or not isinstance(assigned_model, str) or not assigned_model.strip()
                 or assigned_cost is None or assigned_cost != float(estimated_cost)
             ):
-                return {"status": "AB_ASSIGNMENT_CONSTRAINT_MISMATCH", "executed": False}
+                return {"status": "AB_ASSIGNMENT_CONSTRAINT_MISMATCH", "executed": False, "release": release_ab_cost_reservation()}
             supplied_model = route_options.get("model")
             option_model = (adapter_options or {}).get("model_id")
             if (supplied_model is not None and supplied_model != assigned_model) or (
                 option_model is not None and option_model != assigned_model
             ):
-                return {"status": "AB_MODEL_CONFLICT", "executed": False}
+                return {"status": "AB_MODEL_CONFLICT", "executed": False, "release": release_ab_cost_reservation()}
             try:
                 discovered = self.connection_manager.discover_providers(
                     category=category, capability=route_options.get("capability"), enabled_only=True
@@ -601,21 +614,21 @@ class ProviderService:
             except Exception as exc:
                 return {
                     "status": "AB_PROVIDER_DISCOVERY_FAILED", "executed": False,
-                    "error_type": type(exc).__name__,
+                    "error_type": type(exc).__name__, "release": release_ab_cost_reservation(),
                 }
             if not isinstance(discovered, list):
-                return {"status": "AB_PROVIDER_DISCOVERY_FAILED", "executed": False}
+                return {"status": "AB_PROVIDER_DISCOVERY_FAILED", "executed": False, "release": release_ab_cost_reservation()}
             available_ids = {
                 item.get("id") for item in discovered
                 if isinstance(item, dict) and isinstance(item.get("id"), str)
             }
             if assigned_provider not in available_ids:
-                return {"status": "AB_ASSIGNED_PROVIDER_UNAVAILABLE", "executed": False}
+                return {"status": "AB_ASSIGNED_PROVIDER_UNAVAILABLE", "executed": False, "release": release_ab_cost_reservation()}
             excluded = route_options.get("excluded_providers", frozenset())
             if not isinstance(excluded, (set, frozenset)):
-                return {"status": "INVALID_EXCLUDED_PROVIDER_SET", "executed": False}
+                return {"status": "INVALID_EXCLUDED_PROVIDER_SET", "executed": False, "release": release_ab_cost_reservation()}
             if assigned_provider in excluded:
-                return {"status": "AB_ASSIGNED_PROVIDER_EXCLUDED", "executed": False}
+                return {"status": "AB_ASSIGNED_PROVIDER_EXCLUDED", "executed": False, "release": release_ab_cost_reservation()}
             route_options["excluded_providers"] = set(excluded) | (available_ids - {assigned_provider})
             route_options["model"] = assigned_model
             if assigned_cost > 0:
