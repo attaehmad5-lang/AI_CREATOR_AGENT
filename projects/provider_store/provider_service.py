@@ -59,6 +59,19 @@ class ProviderService:
         self.sensitive_data_policy = sensitive_data_policy
         self.data_handling_policy = data_handling_policy
 
+    def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
+        if self.authorization_manager is None:
+            return None
+        try:
+            result = self.authorization_manager.authorize(principal_id, operation)
+        except Exception as exc:
+            return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("allowed") is not True:
+            return result if isinstance(result, dict) else {
+                "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
+            }
+        return None
+
     def verify_provider(
         self,
         provider_id: str,
@@ -66,8 +79,15 @@ class ProviderService:
         *,
         timeout_seconds: float = 5.0,
         environ: dict[str, str] | None = None,
+        principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify connection using an injected provider-specific probe and record health."""
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "verified": False, "authorization": authorization,
+            }
         try:
             connection = self.connection_manager.verify_connectivity(
                 provider_id, probe, timeout_seconds=timeout_seconds, environ=environ
@@ -106,12 +126,19 @@ class ProviderService:
         environ: dict[str, str] | None = None,
         opener: Any = None,
         max_response_bytes: int = 4096,
+        principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify a configured allowlisted HTTPS endpoint using the built-in safe probe.
 
         This checks reachability and authentication only; it does not certify model
         support, account credits, generation quality, or provider-specific capabilities.
         """
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "verified": False, "authorization": authorization,
+            }
         try:
             from .http_probe import ProviderHTTPConnectivityProbe
 
@@ -132,6 +159,7 @@ class ProviderService:
             probe,
             timeout_seconds=timeout_seconds,
             environ=environ,
+            principal_id=principal_id,
         )
 
     def verify_oauth_provider(
@@ -143,6 +171,7 @@ class ProviderService:
         environ: dict[str, str] | None = None,
         opener: Any = None,
         max_response_bytes: int = 4096,
+        principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify a provider using an access token held only by an OAuth manager in memory.
 
@@ -151,6 +180,12 @@ class ProviderService:
         Token refresh is explicit: call the OAuth manager's refresh method only when the
         provider supports it and the user-authorized session allows it.
         """
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "verified": False, "authorization": authorization,
+            }
         if not callable(getattr(oauth_manager, "get_access_token", None)):
             return {"status": "OAUTH_MANAGER_INVALID", "provider": provider_id, "verified": False}
         try:
@@ -190,6 +225,7 @@ class ProviderService:
             environ=ephemeral_environment,
             opener=opener,
             max_response_bytes=max_response_bytes,
+            principal_id=principal_id,
         )
 
     def verify_manual_provider(
@@ -199,8 +235,15 @@ class ProviderService:
         probe: Any,
         *,
         timeout_seconds: float = 5.0,
+        principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify an externally authorized account session and record safe health metadata."""
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "verified": False, "authorization": authorization,
+            }
         try:
             connection = self.connection_manager.verify_manual_connection(
                 provider_id, manual_session, probe, timeout_seconds=timeout_seconds
