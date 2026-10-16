@@ -13,11 +13,22 @@ class ProviderServiceExecutionLimiterTests(unittest.TestCase):
     def test_operation_runs_under_slot_and_releases_it(self):
         limiter = ProviderExecutionLimiter(max_concurrent=1)
         service = ProviderService(_ConnectionManager(), execution_limiter=limiter)
+        secret = "never-return-this-access-token"
         result = service.execute_with_provider_slot(
-            "image", "req-1", lambda: {"status": "COMPLETED", "output": "image.png"}
+            "image", "req-1",
+            lambda: {
+                "status": "COMPLETED", "output": "image.png",
+                "access_token": secret,
+                "metadata": {"api_key": secret, "safe_label": "cinematic"},
+            },
         )
         self.assertEqual(result["status"], "EXECUTED")
         self.assertEqual(result["result"]["status"], "COMPLETED")
+        self.assertEqual(result["result"]["output"], "image.png")
+        self.assertEqual(result["result"]["metadata"]["safe_label"], "cinematic")
+        self.assertNotIn("access_token", result["result"])
+        self.assertNotIn("api_key", result["result"]["metadata"])
+        self.assertNotIn(secret, repr(result))
         self.assertEqual(limiter.summary()["active"], 0)
 
     def test_operation_errors_are_sanitized_and_slot_is_released(self):
