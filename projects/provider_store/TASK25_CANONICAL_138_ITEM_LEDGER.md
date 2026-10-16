@@ -134,8 +134,8 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 73 | 🔴 | Unique Request ID and Trace ID | PARTIAL | Request IDs and duplicate protection exist; distributed trace propagation is incomplete. |
 | 74 | 🔴 | Idempotency and Duplicate Prevention | PARTIAL | Manager-level idempotency is tested; full external-provider request idempotency is not verified. |
 | 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | Cross-process reservations and locking are tested; worker pools and provider-specific concurrency limits are incomplete. |
-| 76 | 🔴 | Queue, Backpressure and Overload Handling | OPEN | Queue/backpressure orchestration is not implemented end-to-end. |
-| 77 | 🔴 | Async/Long-Running Job and Polling Support | OPEN | Asynchronous job lifecycle/polling is not implemented end-to-end. |
+| 76 | 🔴 | Queue, Backpressure and Overload Handling | PARTIAL | `provider_job_manager.py` implements a persistent bounded queue, priority ordering, concurrency limits, `QUEUE_FULL` backpressure with retry hints, idempotent submission, and worker lease recovery; `ProviderService` exposes authorized queue operations. Production distributed queue scaling and load tests remain open. |
+| 77 | 🔴 | Async/Long-Running Job and Polling Support | PARTIAL | Persistent `QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED` job states, polling, worker leases, retries on expired leases, cancellation requests, and result references are implemented and tested. Provider-specific remote job polling/webhook orchestration remains open. |
 | 78 | 🔴 | Webhook/Callback Verification | PARTIAL | `provider_webhook_verifier.py` validates HMAC-SHA256 signatures with constant-time comparison, bounded timestamps/payloads, and persistent event replay rejection; `ProviderService.verify_webhook` delegates without echoing secrets. Provider-specific header/signature conventions and production callback ingress integration remain open. |
 | 79 | 🔴 | Cancellation, Deadlines and Graceful Shutdown | PARTIAL | Timeout handling exists; cancellation/deadline/shutdown propagation remains incomplete. |
 | 80 | 🔴 | Generation State Manager/Orchestration Integration Tests | OPEN | Generation State Manager integration is explicitly not complete; Task #29 remains paused. |
@@ -145,10 +145,10 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 81 | 🔴 | Latency-Aware Routing | PARTIAL | Health latency data exists; verified latency-aware routing policy coverage is incomplete. |
-| 82 | 🔴 | Provider Success/Error-Rate Metrics | PARTIAL | Health history contains success/failure events; production metric aggregation is incomplete. |
-| 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | OPEN | Throughput/queue-wait telemetry is not implemented. |
-| 84 | 🔴 | Output Quality Validation/Score Integration | OPEN | Output quality scoring is not integrated with routing/execution. |
-| 85 | 🔴 | Task-Specific Quality Thresholds | OPEN | Task-specific quality threshold policy is not implemented. |
+| 82 | 🔴 | Provider Success/Error-Rate Metrics | PARTIAL | `provider_metrics_manager.py` records success/failure/timeout counters and success rate from provider executions; metrics history is bounded and does not store payloads. Export to production telemetry remains open. |
+| 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | PARTIAL | `ProviderMetricsManager` aggregates bounded latency percentiles, queue-wait averages, timeout counts, and sample throughput; `ProviderService` records execution latency and queue wait. External telemetry export and load-tested throughput metrics remain open. |
+| 84 | 🔴 | Output Quality Validation/Score Integration | PARTIAL | `provider_quality_policy.py` adds an injected output scorer and `ProviderService` applies its result after file validation; below-threshold or invalid scores prevent an output from being reported successful. A production semantic scorer and modality-specific QA remain open. |
+| 85 | 🔴 | Task-Specific Quality Thresholds | PARTIAL | `ProviderOutputQualityPolicy` supports per-category and category/modality thresholds with bounded [0,1] scores and fail-closed invalid scorer handling; task thresholds and scorer calibration still require production evaluation. |
 | 86 | 🔴 | Provider/Model Benchmarking | OPEN | Repeatable provider/model benchmark suite is not implemented. |
 | 87 | 🔴 | Structured Logs, Metrics and Distributed Traces | PARTIAL | Some structured status metadata exists; end-to-end metrics/tracing is incomplete. |
 | 88 | 🔴 | Alerts, Dashboards and Incident Diagnostics | OPEN | Alerting/dashboard/incident tooling is not implemented end-to-end. |

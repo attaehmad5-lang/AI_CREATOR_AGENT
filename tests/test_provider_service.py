@@ -5,6 +5,9 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
+from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
+from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
@@ -984,6 +987,126 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["verified"])
         self.assertEqual(result["status"], "WEBHOOK_VERIFIED")
         self.assertNotIn(secret, repr(result))
+
+    def test_async_job_queue_facade_enforces_access_and_backpressure(self):
+        jobs = ProviderJobManager(
+            self.root / "service-jobs.json",
+            max_queue_size=1,
+            max_concurrent=1,
+        )
+        authorization = ProviderAuthorizationManager(self.root / "job-auth.json")
+        authorization.assign_role("viewer-job-user", "viewer")
+        authorization.assign_role("creator-job-user", "creator")
+        service = ProviderService(
+            self.connections,
+            job_manager=jobs,
+            authorization_manager=authorization,
+        )
+        denied = service.submit_job(
+            job_id="job-denied", project_id="film", provider_id="image",
+            payload_ref="payload:denied", principal_id="viewer-job-user",
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        accepted = service.submit_job(
+            job_id="job-1", project_id="film", provider_id="image",
+            payload_ref="payload:job-1", principal_id="creator-job-user",
+        )
+        self.assertEqual(accepted["status"], "JOB_QUEUED")
+        full = service.submit_job(
+            job_id="job-2", project_id="film", provider_id="image",
+            payload_ref="payload:job-2", principal_id="creator-job-user",
+        )
+        self.assertEqual(full["status"], "QUEUE_FULL")
+        claimed = service.claim_next_job(
+            worker_id="worker-1", principal_id="creator-job-user",
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        completed = service.complete_job(
+            job_id="job-1", worker_id="worker-1", success=True,
+            result_ref="asset:job-1", principal_id="creator-job-user",
+        )
+        self.assertEqual(completed["job"]["status"], "SUCCEEDED")
+        self.assertEqual(
+            service.poll_job(job_id="job-1", principal_id="viewer-job-user")["job"]["status"],
+            "SUCCEEDED",
+        )
+
+    def test_execution_records_latency_queue_wait_and_failure_metrics(self):
+        outer = self
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                cost = outer.cost.reserve_usage(
+                    project_id=kwargs["project_id"],
+                    provider_id="image",
+                    estimated_cost=kwargs["estimated_cost"],
+                    request_id=kwargs["request_id"],
+                )
+                quota = outer.quota.reserve(
+                    provider_id="image", request_id=kwargs["request_id"]
+                )
+                if cost.get("status") != "RESERVED" or quota.get("status") != "RESERVED":
+                    return {"allowed": False, "status": "RESERVATION_FAILED"}
+                return {"allowed": True, "provider": "image", "billing_mode": "PAID_APPROVED"}
+
+        metrics = ProviderMetricsManager()
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            metrics_manager=metrics,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="metrics-job",
+            estimated_cost=2.0, modality="image",
+            adapter=lambda **kwargs: {
+                "started": True, "success": False, "actual_cost": 1.0,
+                "charge_outcome": "incurred", "status_code": 503,
+                "latency_ms": 25.0, "queue_wait_ms": 12.0,
+            },
+        )
+        self.assertEqual(result["metrics"]["status"], "METRIC_RECORDED")
+        snapshot = metrics.snapshot(provider_id="image")["metrics"]
+        self.assertEqual(snapshot["failure_count"], 1)
+        self.assertEqual(snapshot["avg_latency_ms"], 25.0)
+        self.assertEqual(snapshot["avg_queue_wait_ms"], 12.0)
+
+    def test_low_output_quality_score_prevents_success_status(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        quality = ProviderOutputQualityPolicy(
+            lambda path, **kwargs: 0.2,
+            thresholds={"image:image": 0.8},
+        )
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            health_manager=self.health,
+            retry_policy=self.retry,
+            output_validator=self.validator,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            quality_policy=quality,
+        )
+        output_path = self.root / "low-quality.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="low-quality-job",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 5.0,
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "OUTPUT_QUALITY_FAILED")
+        self.assertEqual(result["quality"]["status"], "QUALITY_BELOW_THRESHOLD")
+        self.assertFalse(result["quality"]["allowed"])
+        self.assertTrue(result["output"]["valid"])
+        self.assertNotEqual(result["status"], "EXECUTION_SUCCEEDED")
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)

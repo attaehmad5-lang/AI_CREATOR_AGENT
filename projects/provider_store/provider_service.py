@@ -28,6 +28,9 @@ class ProviderService:
         sensitive_data_policy: Any | None = None,
         data_handling_policy: Any | None = None,
         webhook_verifier: Any | None = None,
+        job_manager: Any | None = None,
+        metrics_manager: Any | None = None,
+        quality_policy: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -44,6 +47,9 @@ class ProviderService:
             (sensitive_data_policy, "inspect", "sensitive_data_policy"),
             (data_handling_policy, "evaluate", "data_handling_policy"),
             (webhook_verifier, "verify", "webhook_verifier"),
+            (job_manager, "submit", "job_manager"),
+            (metrics_manager, "record", "metrics_manager"),
+            (quality_policy, "evaluate", "quality_policy"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -61,6 +67,9 @@ class ProviderService:
         self.sensitive_data_policy = sensitive_data_policy
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
+        self.job_manager = job_manager
+        self.metrics_manager = metrics_manager
+        self.quality_policy = quality_policy
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -279,6 +288,77 @@ class ProviderService:
             "connection": connection,
             "health": health,
         }
+
+    def submit_job(
+        self, *, job_id: str, project_id: str, provider_id: str,
+        payload_ref: str, priority: int = 50, principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
+        authorization = self._authorize_operation(principal_id, "provider.generate")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "accepted": False, "authorization": authorization}
+        try:
+            result = self.job_manager.submit(
+                job_id=job_id, project_id=project_id, provider_id=provider_id,
+                payload_ref=payload_ref, priority=priority,
+            )
+        except Exception as exc:
+            return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
+
+    def poll_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
+        authorization = self._authorize_operation(principal_id, "provider.read")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
+        try:
+            result = self.job_manager.poll(job_id=job_id)
+        except Exception as exc:
+            return {"status": "JOB_POLL_FAILED", "job": None, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+
+    def claim_next_job(self, *, worker_id: str, principal_id: str | None = None) -> dict[str, Any]:
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
+        authorization = self._authorize_operation(principal_id, "provider.generate")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
+        try:
+            result = self.job_manager.claim_next(worker_id=worker_id)
+        except Exception as exc:
+            return {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+
+    def complete_job(self, *, job_id: str, worker_id: str, success: bool,
+                     result_ref: str | None = None, error_code: str | None = None,
+                     principal_id: str | None = None) -> dict[str, Any]:
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(principal_id, "provider.generate")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        try:
+            result = self.job_manager.complete(
+                job_id=job_id, worker_id=worker_id, success=success,
+                result_ref=result_ref, error_code=error_code,
+            )
+        except Exception as exc:
+            return {"status": "JOB_COMPLETION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+
+    def cancel_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(principal_id, "provider.generate")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        try:
+            result = self.job_manager.cancel(job_id=job_id)
+        except Exception as exc:
+            return {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
 
     def verify_webhook(
         self,
@@ -545,6 +625,8 @@ class ProviderService:
         if not self._valid_amount(latency_ms):
             latency_ms = (time.monotonic() - started_at) * 1000
         output_validation = None
+        quality_result = None
+        quality_error = None
         final_success = reported_success
         output_error = None
         if reported_success:
@@ -556,10 +638,27 @@ class ProviderService:
             if not isinstance(output_validation, dict) or output_validation.get("valid") is not True:
                 final_success = False
                 output_error = "OUTPUT_VALIDATION_FAILED"
+            elif self.quality_policy is not None:
+                try:
+                    quality_result = self.quality_policy.evaluate(
+                        final_path, modality=modality, category=category
+                    )
+                except Exception as exc:
+                    quality_result = {
+                        "allowed": False, "status": "QUALITY_SCORING_FAILED",
+                        "error_type": type(exc).__name__,
+                    }
+                if not isinstance(quality_result, dict) or quality_result.get("allowed") is not True:
+                    final_success = False
+                    quality_error = (
+                        quality_result.get("status")
+                        if isinstance(quality_result, dict)
+                        else "INVALID_QUALITY_POLICY_RESPONSE"
+                    )
 
         error_code = self._safe_error_code(
             adapter_result.get("error_code"),
-            output_error or ("PROVIDER_EXECUTION_FAILED" if not final_success else "PROVIDER_EXECUTION_SUCCEEDED"),
+            quality_error or output_error or ("PROVIDER_EXECUTION_FAILED" if not final_success else "PROVIDER_EXECUTION_SUCCEEDED"),
         )
         finalization = self.finalize_started_request(
             project_id=project_id,
@@ -575,6 +674,23 @@ class ProviderService:
             credit_outcome=credit_outcome,
             actual_credit_amount=actual_credit_amount,
         )
+        metrics_result = None
+        if self.metrics_manager is not None:
+            try:
+                metrics_result = self.metrics_manager.record(
+                    provider_id=provider_id,
+                    category=category,
+                    success=final_success,
+                    latency_ms=latency_ms,
+                    queue_wait_ms=adapter_result.get("queue_wait_ms", 0.0),
+                    timed_out=adapter_result.get("status_code") in {408, 504},
+                )
+            except Exception as exc:
+                metrics_result = {
+                    "status": "METRICS_RECORD_FAILED",
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
         budget_alerts = None
         if self.budget_alert_manager is not None and self.cost_policy is not None:
             try:
@@ -626,6 +742,8 @@ class ProviderService:
                 )
         if accounting_required:
             status = "EXECUTION_ACCOUNTING_REQUIRED"
+        elif quality_error is not None:
+            status = "OUTPUT_QUALITY_FAILED"
         elif output_error is not None:
             status = "OUTPUT_VALIDATION_FAILED"
         elif not final_success:
@@ -641,7 +759,9 @@ class ProviderService:
             "request_id": request_id,
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
+            "quality": quality_result,
             "finalization": finalization,
+            "metrics": metrics_result,
             "provider_error": provider_error,
             "budget_alerts": budget_alerts,
             "authorization": authorization,
