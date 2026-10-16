@@ -192,6 +192,8 @@ class ProviderSLOManager:
         return {"status": "SLO_CREATED", "saved": True, "slo_id": slo_id}
 
     def set_status(self, *, slo_id: str, status: str) -> dict[str, Any]:
+        if not self._valid_id(slo_id, 128):
+            return {"status": "INVALID_SLO_ID", "saved": False}
         if status not in {"ACTIVE", "PAUSED"}:
             return {"status": "INVALID_SLO_STATUS", "saved": False}
         with self._transaction():
@@ -247,6 +249,8 @@ class ProviderSLOManager:
         return ordered[index]
 
     def evaluate(self, *, slo_id: str, service_id: str) -> dict[str, Any]:
+        if not self._valid_id(slo_id, 128) or not self._valid_id(service_id, 128):
+            return {"status": "INVALID_SLO_SCOPE", "slo_status": "UNKNOWN"}
         try:
             now = self._now()
         except Exception:
