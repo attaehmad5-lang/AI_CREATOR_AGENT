@@ -850,6 +850,7 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(self.manager.provider_exists("secret_onboard"))
 
     def test_onboard_provider_rejects_duplicate_provider_ids(self):
+        original_name = self.manager.get_provider("token_image")["name"]
         provider = {
             "id": "token_image", "name": "Duplicate", "category": "image",
             "auth_type": "API_TOKEN", "connection_type": "API",
@@ -860,7 +861,7 @@ class ConnectionManagerTests(unittest.TestCase):
         result = self.manager.onboard_provider(provider)
         self.assertEqual(result["status"], "ALREADY_EXISTS")
         self.assertFalse(result["saved"])
-        self.assertEqual(self.manager.get_provider("token_image")["name"], "Token Image")
+        self.assertEqual(self.manager.get_provider("token_image")["name"], original_name)
 
     def test_register_provider_rejects_duplicate_without_overwrite(self):
         provider = {
