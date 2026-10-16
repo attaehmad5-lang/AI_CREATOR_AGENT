@@ -88,13 +88,13 @@ class ProviderOutputValidator:
             if not byte:
                 return None
             scanned += 1
-            if byte != b"\\xff":
+            if byte != b"\xff":
                 continue
             marker_byte = stream.read(1)
             if not marker_byte:
                 return None
             scanned += 1
-            while marker_byte == b"\\xff":
+            while marker_byte == b"\xff":
                 marker_byte = stream.read(1)
                 if not marker_byte:
                     return None
@@ -138,7 +138,7 @@ class ProviderOutputValidator:
             chunk_type = header[12:16]
             if chunk_type == b"VP8X":
                 return 1 + int.from_bytes(header[24:27], "little"), 1 + int.from_bytes(header[27:30], "little")
-            if chunk_type == b"VP8 " and header[23:26] == b"\\x9d\\x01\\x2a":
+            if chunk_type == b"VP8 " and header[23:26] == b"\x9d\x01\x2a":
                 return int.from_bytes(header[26:28], "little") & 0x3FFF, int.from_bytes(header[28:30], "little") & 0x3FFF
             if chunk_type == b"VP8L" and header[20] == 0x2F and len(header) >= 25:
                 b0, b1, b2, b3 = header[21:25]
