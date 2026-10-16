@@ -211,6 +211,67 @@ class PollinationsProviderTests(unittest.TestCase):
                         provider.generate_image(prompt, output, **options)
         self.assertEqual(provider.opener.calls, [])
 
+    def test_authenticated_image_adapter_runs_through_fallback_health_pipeline(self):
+        from projects.generation.providers.fallback_manager import FallbackManager
+        from projects.generation.providers.provider_health import ProviderHealth
+        from projects.generation.providers.provider_manager import ProviderManager
+
+        secret = "never-expose-this-key"
+        provider = PollinationsProvider(
+            environ={"POLLINATIONS_API_KEY": secret},
+            opener=_Opener(_Response()),
+        )
+        manager = ProviderManager()
+        manager.providers["Pollinations"] = provider
+        health = ProviderHealth()
+        fallback = FallbackManager(manager, health)
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "nested" / "cinematic.png"
+            result = fallback.generate_image(
+                ["Pollinations"], "cinematic documentary landscape", str(output)
+            )
+            self.assertEqual(result["status"], "COMPLETED")
+            self.assertEqual(result["provider"], "Pollinations")
+            self.assertTrue(output.is_file())
+            self.assertEqual(output.read_bytes(), PNG)
+            self.assertEqual(health.get_status("Pollinations")["healthy"], True)
+            self.assertNotIn(secret, repr(result))
+            self.assertNotIn(secret, repr(health.get_status("Pollinations")))
+
+    def test_http_failure_from_real_adapter_uses_fallback_without_secret_leak(self):
+        from projects.generation.providers.fallback_manager import FallbackManager
+        from projects.generation.providers.provider_health import ProviderHealth
+        from projects.generation.providers.provider_manager import ProviderManager
+
+        secret = "never-expose-this-key"
+        error = HTTPError(
+            "https://gen.pollinations.ai/image/test", 503, "Unavailable",
+            {"Retry-After": "5"}, None,
+        )
+        pollinations = PollinationsProvider(
+            environ={"POLLINATIONS_API_KEY": secret},
+            opener=_Opener(error=error),
+        )
+        calls = []
+        class SafeFallback:
+            def generate_image(self, prompt, output_path):
+                calls.append((prompt, output_path))
+                return {"status": "COMPLETED", "provider": "SafeFallback", "output": output_path}
+
+        manager = ProviderManager()
+        manager.providers.update({"Pollinations": pollinations, "SafeFallback": SafeFallback()})
+        health = ProviderHealth()
+        result = FallbackManager(manager, health).generate_image(
+            ["Pollinations", "SafeFallback"], "cinematic scene", "unused.png"
+        )
+        self.assertEqual(result["status"], "COMPLETED")
+        self.assertEqual(result["provider"], "SafeFallback")
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(health.get_status("Pollinations")["healthy"])
+        self.assertEqual(health.get_status("Pollinations")["last_error"], "ProviderHTTPStatusError")
+        self.assertNotIn(secret, repr(result))
+        self.assertNotIn(secret, repr(health.get_status("Pollinations")))
+
     def test_pollinations_adapter_loads_through_central_provider_contract(self):
         repository_root = Path(__file__).resolve().parents[1]
         catalog_path = repository_root / "projects" / "provider_store" / "provider_catalog.json"
