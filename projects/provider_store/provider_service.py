@@ -6,6 +6,7 @@ import re
 import time
 
 from .safe_numbers import finite_number
+from .provider_error_policy import classify_provider_error
 
 
 class ProviderService:
@@ -422,13 +423,28 @@ class ProviderService:
             actual_credit_amount=actual_credit_amount,
         )
         retry = None
-        if not final_success and self.retry_policy is not None:
-            retry = self.retry_decision(
-                attempt=adapter_result.get("attempt", 1),
-                status_code=adapter_result.get("status_code"),
-                retry_after=adapter_result.get("retry_after"),
-                idempotent=adapter_result.get("idempotent", False),
+        provider_error = None
+        status_code = adapter_result.get("status_code")
+        provider_code = adapter_result.get("provider_error_code", adapter_result.get("error_code"))
+        if not final_success and status_code is not None:
+            provider_error = classify_provider_error(
+                status_code,
+                provider_code=provider_code,
+                retry_after_seconds=adapter_result.get("retry_after_seconds"),
             )
+        if not final_success and self.retry_policy is not None:
+            if provider_error is not None and provider_error.get("retryable") is False:
+                # Billing, exhausted-credit, authentication, permission and invalid
+                # request errors must not be retried just because the retry policy
+                # sees a status such as 429.
+                retry = {"retry": False, "reason": provider_error["status"]}
+            else:
+                retry = self.retry_decision(
+                    attempt=adapter_result.get("attempt", 1),
+                    status_code=adapter_result.get("status_code"),
+                    retry_after=adapter_result.get("retry_after"),
+                    idempotent=adapter_result.get("idempotent", False),
+                )
         if accounting_required:
             status = "EXECUTION_ACCOUNTING_REQUIRED"
         elif output_error is not None:
@@ -447,6 +463,7 @@ class ProviderService:
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "finalization": finalization,
+            "provider_error": provider_error,
             "retry_decision": retry,
         }
 
