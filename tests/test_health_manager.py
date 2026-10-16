@@ -111,6 +111,26 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertTrue(self.manager.is_eligible("image")["eligible"])
         self.assertEqual(self.manager.data["providers"]["image"]["status"], "HEALTHY")
 
+    def test_unhealthy_provider_requires_configured_successes_before_readmission(self):
+        manager = ProviderHealthManager(
+            self.path,
+            history_limit=5,
+            failure_threshold=2,
+            recovery_success_threshold=2,
+            clock=lambda: self.now[0],
+        )
+        manager.record_result("image", success=False, error_code="TIMEOUT")
+        manager.record_result("image", success=False, error_code="TIMEOUT")
+        self.assertEqual(manager.data["providers"]["image"]["status"], "UNHEALTHY")
+        first_success = manager.record_result("image", success=True, latency_ms=10)
+        self.assertEqual(first_success["status"], "DEGRADED")
+        pending = manager.is_eligible("image")
+        self.assertFalse(pending["eligible"])
+        self.assertEqual(pending["status"], "RECOVERING")
+        second_success = manager.record_result("image", success=True, latency_ms=11)
+        self.assertEqual(second_success["status"], "HEALTHY")
+        self.assertTrue(manager.is_eligible("image")["eligible"])
+
     def test_stale_health_is_excluded(self):
         self.manager.record_result("image", success=True, latency_ms=10)
         self.now[0] += timedelta(seconds=301)
