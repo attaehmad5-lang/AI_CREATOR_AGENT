@@ -1,6 +1,7 @@
 """Bounded service-level objective definitions and evaluation for provider metrics."""
 from __future__ import annotations
 
+import copy
 import math
 import re
 import threading
@@ -159,7 +160,7 @@ class ProviderSLOManager:
         }
         # Persist only bounded aggregate metadata, never request payloads or credentials.
         history_record = {
-            key: result[key]
+            key: copy.deepcopy(result[key])
             for key in (
                 "provider_id", "category", "sample_count", "success_rate",
                 "timeout_rate", "p95_latency_ms", "breached_objectives",
@@ -173,7 +174,7 @@ class ProviderSLOManager:
     def history(self, *, provider_id: str | None = None, category: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             return [
-                dict(item)
+                copy.deepcopy(item)
                 for item in self._history
                 if (provider_id is None or item["provider_id"] == provider_id)
                 and (category is None or item["category"] == category)
