@@ -63,6 +63,43 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         bad.write_bytes(b"\x1a\x45\xdf\xa3")
         self.assertEqual(self.validator.validate(bad, modality="video")["status"], "WEBM_SEGMENT_MISSING")
 
+    def test_video_and_ogg_validation_streams_without_reading_whole_file(self):
+        mp4 = self.root / "streamed.mp4"
+        boxes = (
+            (b"ftyp", b"isom0000"),
+            (b"moov", b"metadata"),
+            (b"mdat", b"frame"),
+        )
+        mp4.write_bytes(b"".join((8 + len(body)).to_bytes(4, "big") + kind + body for kind, body in boxes))
+        webm = self.root / "streamed.webm"
+        webm.write_bytes(b"\\x1a\\x45\\xdf\\xa3" + b"\\x42\\x86\\x81\\x01" + b"\\x18\\x53\\x80\\x67" + b"\\x00")
+        ogg = self.root / "sample.ogg"
+        ogg.write_bytes(b"OggS" + bytes([0]) + b"\\x00" * 22 + bytes([0]))
+        with unittest.mock.patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read forbidden")):
+            self.assertTrue(self.validator.validate(mp4, modality="video")["valid"])
+            self.assertTrue(self.validator.validate(webm, modality="video")["valid"])
+            self.assertTrue(self.validator.validate(ogg, modality="audio")["valid"])
+
+    def test_wav_payload_is_read_in_bounded_chunks(self):
+        path = self.root / "chunked.wav"
+        with wave.open(str(path), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(8000)
+            audio.writeframes(b"\\x00\\x00" * 800)
+        original = wave.Wave_read.readframes
+        requested = []
+
+        def track_reads(reader, nframes):
+            requested.append(nframes)
+            return original(reader, nframes)
+
+        with unittest.mock.patch.object(wave.Wave_read, "readframes", track_reads):
+            result = self.validator.validate(path, modality="audio")
+        self.assertTrue(result["valid"])
+        self.assertTrue(requested)
+        self.assertLessEqual(max(requested), 32768)
+
     def test_unsupported_modality_and_size_limit_fail_closed(self):
         path = self.root / "unknown.bin"
         path.write_bytes(b"x" * 3000)
