@@ -73,9 +73,9 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         )
         mp4.write_bytes(b"".join((8 + len(body)).to_bytes(4, "big") + kind + body for kind, body in boxes))
         webm = self.root / "streamed.webm"
-        webm.write_bytes(b"\\x1a\\x45\\xdf\\xa3" + b"\\x42\\x86\\x81\\x01" + b"\\x18\\x53\\x80\\x67" + b"\\x00")
+        webm.write_bytes(b"\x1a\x45\xdf\xa3" + b"\x42\x86\x81\x01" + b"\x18\x53\x80\x67" + b"\x00")
         ogg = self.root / "sample.ogg"
-        ogg.write_bytes(b"OggS" + bytes([0]) + b"\\x00" * 21 + bytes([0]))
+        ogg.write_bytes(b"OggS" + bytes([0]) + b"\x00" * 21 + bytes([0]))
         with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read forbidden")):
             self.assertTrue(self.validator.validate(mp4, modality="video")["valid"])
             self.assertTrue(self.validator.validate(webm, modality="video")["valid"])
@@ -87,7 +87,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
             audio.setnchannels(1)
             audio.setsampwidth(2)
             audio.setframerate(8000)
-            audio.writeframes(b"\\x00\\x00" * 800)
+            audio.writeframes(b"\x00\x00" * 800)
         original = wave.Wave_read.readframes
         requested = []
 
@@ -95,7 +95,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
             requested.append(nframes)
             return original(reader, nframes)
 
-        with unittest.mock.patch.object(wave.Wave_read, "readframes", track_reads):
+        with patch.object(wave.Wave_read, "readframes", track_reads):
             result = self.validator.validate(path, modality="audio")
         self.assertTrue(result["valid"])
         self.assertTrue(requested)
