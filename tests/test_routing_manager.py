@@ -44,6 +44,76 @@ class ProviderRoutingManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def _confidence_router(self, benchmark_results):
+        catalog = self.root / "confidence-providers.json"
+        state = self.root / "confidence-connections.json"
+        models = [{"id": "stable-diffusion-xl", "versions": ["1"]}]
+        catalog.write_text(json.dumps({
+            "providers": [
+                {"id": "primary", "name": "Primary", "category": "image", "auth_type": "NONE",
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                 "priority": 1, "capabilities": ["image"], "supported_models": models},
+                {"id": "fallback", "name": "Fallback", "category": "image", "auth_type": "NONE",
+                 "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                 "priority": 2, "capabilities": ["image"], "supported_models": models},
+            ]
+        }), encoding="utf-8")
+        state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        connections = ConnectionManager(catalog, state)
+        for provider_id in ("primary", "fallback"):
+            self.assertTrue(connections.verify_connectivity(
+                provider_id, lambda provider, **kwargs: {"ok": True}
+            )["verified"])
+
+        class BenchmarkStub:
+            def compare(self, *, modality=None):
+                return {"status": "BENCHMARKS_AVAILABLE", "results": benchmark_results}
+
+        return ProviderRoutingManager(connections, benchmark_manager=BenchmarkStub())
+
+    def test_confidence_aware_routing_adapts_to_verified_benchmark_history(self):
+        router = self._confidence_router([
+            {"provider_id": "fallback", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 50, "success_rate": 0.96, "p95_latency_ms": 180,
+             "avg_cost_per_success": 0.0, "avg_quality_score": 0.91},
+            {"provider_id": "primary", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 50, "success_rate": 0.55, "p95_latency_ms": 100,
+             "avg_cost_per_success": 0.0, "avg_quality_score": 0.6},
+        ])
+        result = router.route(
+            category="image", project_id="film", model="stable-diffusion-xl",
+            confidence_aware=True, min_benchmark_samples=20,
+            min_benchmark_success_rate=0.8,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["confidence_routing_status"], "CONFIDENCE_AWARE_ROUTING")
+        self.assertEqual(result["benchmark_evidence"]["sample_count"], 50)
+
+    def test_low_confidence_can_fallback_or_fail_closed(self):
+        results = [
+            {"provider_id": provider, "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 2, "success_rate": 0.9, "p95_latency_ms": 100,
+             "avg_cost_per_success": 0.0, "avg_quality_score": 0.8}
+            for provider in ("primary", "fallback")
+        ]
+        router = self._confidence_router(results)
+        blocked = router.route(
+            category="image", project_id="film", model="stable-diffusion-xl",
+            confidence_aware=True, min_benchmark_samples=10,
+            allow_low_confidence_fallback=False,
+        )
+        self.assertFalse(blocked["allowed"])
+        self.assertEqual(blocked["status"], "CONFIDENCE_INSUFFICIENT")
+        fallback = router.route(
+            category="image", project_id="film", model="stable-diffusion-xl",
+            confidence_aware=True, min_benchmark_samples=10,
+            allow_low_confidence_fallback=True,
+        )
+        self.assertTrue(fallback["allowed"])
+        self.assertEqual(fallback["provider"], "primary")
+        self.assertEqual(fallback["confidence_routing_status"], "CONFIDENCE_FALLBACK")
+
     def test_routing_rejects_unverified_provider_even_if_catalog_label_says_connected(self):
         self.connections.set_state("primary", "READY")
         router = ProviderRoutingManager(self.connections)
