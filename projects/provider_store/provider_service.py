@@ -344,6 +344,7 @@ class ProviderService:
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
 
     def complete_job(self, *, job_id: str, worker_id: str, success: bool,
+                     lease_token: str | None = None,
                      result_ref: str | None = None, error_code: str | None = None,
                      principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
@@ -354,7 +355,7 @@ class ProviderService:
         try:
             result = self.job_manager.complete(
                 job_id=job_id, worker_id=worker_id, success=success,
-                result_ref=result_ref, error_code=error_code,
+                lease_token=lease_token, result_ref=result_ref, error_code=error_code,
             )
         except Exception as exc:
             return {"status": "JOB_COMPLETION_FAILED", "saved": False, "error_type": type(exc).__name__}
