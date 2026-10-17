@@ -26,17 +26,21 @@ class ProviderWebhookVerifier:
         *,
         max_skew_seconds: int = 300,
         max_payload_bytes: int = 1_000_000,
+        max_events: int = 100_000,
         clock: Any = None,
     ) -> None:
         if isinstance(max_skew_seconds, bool) or not isinstance(max_skew_seconds, int) or not 1 <= max_skew_seconds <= 3600:
             raise ValueError("max_skew_seconds must be within 1..3600")
         if isinstance(max_payload_bytes, bool) or not isinstance(max_payload_bytes, int) or not 1 <= max_payload_bytes <= 10_000_000:
             raise ValueError("max_payload_bytes must be within 1..10000000")
+        if isinstance(max_events, bool) or not isinstance(max_events, int) or not 1 <= max_events <= 1_000_000:
+            raise ValueError("max_events must be within 1..1000000")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.max_skew_seconds = max_skew_seconds
         self.max_payload_bytes = max_payload_bytes
+        self.max_events = max_events
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "events": {}}
@@ -53,6 +57,8 @@ class ProviderWebhookVerifier:
             raise ValueError("invalid webhook replay state JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("events"), dict):
             raise ValueError("invalid webhook replay state schema")
+        if len(loaded["events"]) > self.max_events:
+            raise ValueError("webhook replay state exceeds configured event limit")
         for event_key, event in loaded["events"].items():
             if (
                 not isinstance(event_key, str) or not re.fullmatch(r"[0-9a-f]{64}", event_key)
@@ -132,6 +138,7 @@ class ProviderWebhookVerifier:
         payload_hash = hashlib.sha256(payload).hexdigest()
         with self._transaction():
             cutoff = now - (self.max_skew_seconds * 2)
+            pruned = False
             for key, record in list(self.data["events"].items()):
                 try:
                     received = datetime.fromisoformat(record["received_at"]).astimezone(timezone.utc)
@@ -139,9 +146,15 @@ class ProviderWebhookVerifier:
                     raise ValueError("invalid webhook replay timestamp")
                 if received.timestamp() < cutoff:
                     del self.data["events"][key]
+                    pruned = True
             if event_key in self.data["events"]:
-                self._save()
+                if pruned:
+                    self._save()
                 return {"verified": False, "status": "WEBHOOK_REPLAY_REJECTED", "provider": provider_id}
+            if len(self.data["events"]) >= self.max_events:
+                if pruned:
+                    self._save()
+                return {"verified": False, "status": "WEBHOOK_REPLAY_STORE_FULL", "provider": provider_id}
             self.data["events"][event_key] = {
                 "provider_id": provider_id,
                 "received_at": now_iso,

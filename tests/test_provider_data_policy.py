@@ -64,6 +64,25 @@ class ProviderDataHandlingPolicyTests(unittest.TestCase):
         )
         self.assertTrue(consented["allowed"])
 
+    def test_policy_source_url_rejects_controls_queries_and_fragments(self):
+        base = {
+            "allowed_categories": ["public"],
+            "max_retention_days": 7,
+            "training_use_allowed": False,
+        }
+        for url in (
+            "https://provider.example.com/privacy?token=secret",
+            "https://provider.example.com/privacy#fragment",
+            "https://user:password@provider.example.com/privacy",
+            "https://provider.example.com/privacy\n.evil",
+            "https://provider.example.com:99999/privacy",
+        ):
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError):
+                    ProviderDataHandlingPolicy({
+                        "provider": {**base, "source_url": url},
+                    })
+
     def test_invalid_policy_and_request_inputs_are_rejected(self):
         with self.assertRaises(ValueError):
             ProviderDataHandlingPolicy({"image": {

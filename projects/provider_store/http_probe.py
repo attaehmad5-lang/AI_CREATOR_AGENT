@@ -14,6 +14,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .connection_manager import ConnectionManager, ProviderAuthenticationVerificationRequired
 from .safe_numbers import finite_number
+from .provider_secret_resolver import ProviderSecretResolver
 
 
 class ProviderHTTPAuthError(PermissionError):
@@ -101,6 +102,7 @@ class ProviderHTTPConnectivityProbe:
         environ: dict[str, str] | None = None,
         opener: Any = None,
         max_response_bytes: int = 4096,
+        secret_resolver: Any = None,
     ) -> None:
         if environ is not None and not isinstance(environ, dict):
             raise ValueError("environ must be a mapping of environment names to values")
@@ -113,9 +115,12 @@ class ProviderHTTPConnectivityProbe:
             raise ValueError("max_response_bytes must be an integer between 0 and 1000000")
         if opener is not None and not callable(getattr(opener, "open", None)):
             raise ValueError("opener must provide an open method")
+        if secret_resolver is not None and not callable(getattr(secret_resolver, "resolve", None)):
+            raise ValueError("secret_resolver must provide resolve")
         self.environ = os.environ if environ is None else environ
         self.opener = opener or build_opener(_RejectRedirects())
         self.max_response_bytes = max_response_bytes
+        self.secret_resolver = secret_resolver or ProviderSecretResolver(environ=self.environ)
 
     def __call__(self, provider: dict[str, Any], *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         if not isinstance(provider, dict):
@@ -161,12 +166,19 @@ class ProviderHTTPConnectivityProbe:
                 "configure a documented endpoint that validates provider authentication"
             )
         if credentialed_auth:
-            token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env") or self._DEFAULT_TOKEN_ENV.get(
-                str(provider.get("id", "")).casefold()
-            )
-            if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
-                raise PermissionError("credential environment reference is not configured")
-            token = self.environ.get(token_env)
+            credential_ref = provider.get("credential_ref")
+            if credential_ref is not None:
+                try:
+                    token = self.secret_resolver.resolve(credential_ref)
+                except Exception:
+                    raise PermissionError("provider credential is missing") from None
+            else:
+                token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env") or self._DEFAULT_TOKEN_ENV.get(
+                    str(provider.get("id", "")).casefold()
+                )
+                if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
+                    raise PermissionError("credential environment reference is not configured")
+                token = self.environ.get(token_env)
             if not isinstance(token, str) or not token.strip():
                 raise PermissionError("provider credential is missing")
             if len(token) > 16384 or any(ord(char) < 32 or ord(char) == 127 for char in token):

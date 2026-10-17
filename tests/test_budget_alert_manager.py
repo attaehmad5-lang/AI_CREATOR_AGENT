@@ -1,7 +1,9 @@
 """Tests for persistent budget alert threshold events."""
 import json
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +33,40 @@ class BudgetAlertManagerTests(unittest.TestCase):
         reloaded = BudgetAlertManager(self.path, clock=lambda: self.now)
         self.assertEqual(len(reloaded.pending_alerts()["alerts"]), 2)
         self.assertEqual(len(reloaded.data["events"]), 2)
+
+    def test_budget_alerts_are_idempotent_per_period_but_repeat_next_period(self):
+        first = self.manager.record(
+            project_id="film", spend=9.0, budget=10.0,
+            request_id="job-oct-1", budget_period_id="2026-10",
+        )
+        duplicate = self.manager.record(
+            project_id="film", spend=9.5, budget=10.0,
+            request_id="job-oct-2", budget_period_id="2026-10",
+        )
+        next_period = self.manager.record(
+            project_id="film", spend=8.0, budget=10.0,
+            request_id="job-nov-1", budget_period_id="2026-11",
+        )
+        self.assertEqual(len(first["alerts"]), 2)
+        self.assertEqual(len(duplicate["alerts"]), 2)
+        self.assertEqual(
+            {event["event_id"] for event in first["alerts"]},
+            {event["event_id"] for event in duplicate["alerts"]},
+        )
+        self.assertEqual(len(next_period["alerts"]), 2)
+        self.assertTrue(all(
+            event["budget_period_id"] == "2026-11"
+            for event in next_period["alerts"]
+        ))
+        self.assertEqual(len(self.manager.data["events"]), 4)
+
+    def test_invalid_budget_period_id_fails_closed(self):
+        result = self.manager.record(
+            project_id="film", spend=9.0, budget=10.0,
+            request_id="job-1", budget_period_id="bad\nperiod",
+        )
+        self.assertEqual(result["status"], "INVALID_BUDGET_PERIOD_ID")
+        self.assertEqual(result["alerts"], [])
 
     def test_exactly_at_hard_stop_threshold_emits_100_percent_alert(self):
         result = self.manager.record(
@@ -87,6 +123,49 @@ class BudgetAlertManagerTests(unittest.TestCase):
         self.assertEqual(retried["delivered"], 2)
         self.assertEqual(len(self.manager.pending_alerts()["alerts"]), 0)
 
+    def test_concurrent_dispatchers_do_not_claim_the_same_alert(self):
+        manager = BudgetAlertManager(
+            self.path, thresholds=(1.0,), clock=lambda: self.now,
+        )
+        manager.record(
+            project_id="film", spend=10.0, budget=10.0, request_id="job-once"
+        )
+        entered = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def sender(alert):
+            calls.append(alert["event_id"])
+            entered.set()
+            release.wait(timeout=3)
+            return True
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(manager.dispatch_pending, sender, limit=1)
+            self.assertTrue(entered.wait(timeout=2))
+            second = manager.dispatch_pending(lambda alert: calls.append(alert["event_id"]) or True, limit=1)
+            self.assertEqual(second["attempted"], 0)
+            release.set()
+            result = first.result(timeout=3)
+
+        self.assertEqual(result["delivered"], 1)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(manager.pending_alerts()["alerts"], [])
+
+    def test_expired_delivery_lease_can_be_reclaimed(self):
+        manager = BudgetAlertManager(
+            self.path, thresholds=(1.0,), delivery_lease_seconds=5,
+            clock=lambda: self.now,
+        )
+        manager.record(
+            project_id="film", spend=10.0, budget=10.0, request_id="job-lease"
+        )
+        claimed = manager._claim_pending_alerts(limit=1)
+        self.assertEqual(claimed[0]["status"], "DELIVERING")
+        self.now = self.now.replace(minute=13)
+        result = manager.dispatch_pending(lambda alert: True, limit=1)
+        self.assertEqual(result["delivered"], 1)
+
     def test_dispatch_rejects_invalid_callback_and_limit(self):
         self.assertEqual(self.manager.dispatch_pending(None)["status"], "INVALID_DELIVERY_CALLBACK")
         self.assertEqual(self.manager.dispatch_pending(lambda _: True, limit=0)["status"], "INVALID_LIMIT")
@@ -106,6 +185,34 @@ class BudgetAlertManagerTests(unittest.TestCase):
     def test_pending_limit_is_bounded(self):
         self.assertEqual(self.manager.pending_alerts(limit=0)["status"], "INVALID_LIMIT")
         self.assertEqual(self.manager.pending_alerts(limit=1001)["status"], "INVALID_LIMIT")
+
+    def test_corrupt_delivery_metadata_and_nonfinite_amounts_are_rejected(self):
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "events": {
+                "event": {
+                    "event_id": "event", "project_id": "film", "threshold": 0.8,
+                    "budget": 10.0, "spend": 9.0, "ratio": 0.9,
+                    "request_id": "job-1", "status": "PENDING",
+                    "created_at": self.now.isoformat(), "delivery_attempts": "many",
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            BudgetAlertManager(self.path, clock=lambda: self.now)
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "events": {
+                "event": {
+                    "event_id": "event", "project_id": "film", "threshold": 0.8,
+                    "budget": 10.0, "spend": 9.0, "ratio": float("inf"),
+                    "request_id": "job-1", "status": "PENDING",
+                    "created_at": self.now.isoformat(),
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            BudgetAlertManager(self.path, clock=lambda: self.now)
 
     def test_corrupt_state_is_rejected(self):
         self.path.write_text(json.dumps({"events": []}), encoding="utf-8")

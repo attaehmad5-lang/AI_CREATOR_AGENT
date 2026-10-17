@@ -56,6 +56,40 @@ class ProviderWebhookVerifierTests(unittest.TestCase):
         self.assertFalse(duplicate["verified"])
         self.assertEqual(duplicate["status"], "WEBHOOK_REPLAY_REJECTED")
 
+    def test_replay_store_capacity_fails_closed_and_reclaims_expired_events(self):
+        verifier = ProviderWebhookVerifier(
+            self.path, clock=lambda: self.now, max_payload_bytes=128, max_events=1
+        )
+        first = verifier.verify(
+            provider_id="video", payload=self.payload, signature=self.signature(),
+            timestamp=self.timestamp, event_id="event-1", secret=self.secret,
+        )
+        self.assertTrue(first["verified"])
+        full = verifier.verify(
+            provider_id="video", payload=self.payload, signature=self.signature(),
+            timestamp=self.timestamp, event_id="event-2", secret=self.secret,
+        )
+        self.assertEqual(full["status"], "WEBHOOK_REPLAY_STORE_FULL")
+        self.assertEqual(len(verifier.data["events"]), 1)
+        self.now = self.now.replace(minute=20)
+        new_timestamp = int(self.now.timestamp())
+        signed = str(new_timestamp).encode("ascii") + b"." + self.payload
+        signature = "sha256=" + hmac.new(
+            self.secret.encode(), signed, hashlib.sha256
+        ).hexdigest()
+        accepted = verifier.verify(
+            provider_id="video", payload=self.payload, signature=signature,
+            timestamp=new_timestamp, event_id="event-3", secret=self.secret,
+        )
+        self.assertTrue(accepted["verified"])
+        self.assertEqual(len(verifier.data["events"]), 1)
+
+    def test_replay_store_limit_must_be_bounded_positive_integer(self):
+        with self.assertRaises(ValueError):
+            ProviderWebhookVerifier(self.path, max_events=0)
+        with self.assertRaises(ValueError):
+            ProviderWebhookVerifier(self.path, max_events=True)
+
     def test_invalid_signature_and_stale_timestamp_are_rejected(self):
         bad = self.verifier.verify(
             provider_id="video", payload=self.payload,

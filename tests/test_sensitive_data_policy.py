@@ -17,6 +17,20 @@ class SensitiveDataPolicyTests(unittest.TestCase):
         self.assertNotIn(secret, repr(result))
         self.assertNotIn("Bearer", repr(result))
 
+    def test_sensitive_field_names_are_blocked_even_when_values_are_short(self):
+        payload = {
+            "headers": {"Authorization": "x"},
+            "options": {"api_key": "short", "refresh_token": "abc"},
+            "nested": [{"client_secret": ""}],
+        }
+        result = SensitiveDataPolicy().inspect(payload)
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertIn("credential", result["blocked_categories"])
+        self.assertNotIn("short", repr(result))
+        self.assertNotIn("abc", repr(result))
+        self.assertNotIn('"x"', repr(result))
+
     def test_email_and_phone_are_reported_but_policy_is_configurable(self):
         payload = {"prompt": "Contact jane@example.com or call +1 (415) 555-0134"}
         default = SensitiveDataPolicy().inspect(payload)

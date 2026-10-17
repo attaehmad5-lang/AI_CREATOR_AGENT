@@ -35,6 +35,7 @@ class ProviderService:
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
+        audit_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -58,6 +59,7 @@ class ProviderService:
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
+            (audit_manager, "append", "audit_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -82,6 +84,7 @@ class ProviderService:
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
+        self.audit_manager = audit_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -95,6 +98,29 @@ class ProviderService:
                 "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
             }
         return None
+
+    def _audit_event(
+        self, *, principal_id: str | None, operation: str, resource_type: str,
+        resource_id: str, outcome: str, request_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if self.audit_manager is None:
+            return None
+        try:
+            result = self.audit_manager.append(
+                actor_id=principal_id or "system",
+                operation=operation,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                outcome=outcome,
+                request_id=request_id,
+            )
+        except Exception as exc:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("saved") is not True:
+            return result if isinstance(result, dict) else {
+                "status": "AUDIT_LOG_FAILED", "saved": False,
+            }
+        return result
 
     def verify_provider(
         self,
@@ -112,6 +138,12 @@ class ProviderService:
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
                 "verified": False, "authorization": authorization,
             }
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.verify",
+            resource_type="provider", resource_id=provider_id, outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "provider": provider_id, "verified": False}
         try:
             connection = self.connection_manager.verify_connectivity(
                 provider_id, probe, timeout_seconds=timeout_seconds, environ=environ
@@ -134,13 +166,21 @@ class ProviderService:
                 )
             except Exception as exc:
                 health = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return {
+        result = {
             "status": connection.get("status", "UNKNOWN"),
             "provider": provider_id,
             "verified": connection.get("verified") is True,
             "connection": connection,
             "health": health,
         }
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.verify",
+            resource_type="provider", resource_id=provider_id,
+            outcome=re.sub(r"[^A-Za-z0-9_.:-]", "_", str(result["status"]))[:80] or "UNKNOWN",
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            result["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return result
 
     def verify_http_provider(
         self,
@@ -301,23 +341,161 @@ class ProviderService:
             "health": health,
         }
 
+    def assign_provider_role(
+        self, *, actor_id: str, target_principal_id: str, role: str,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        """Expose role changes only through an explicitly authorized admin operation."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(actor_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=actor_id, operation="provider.access.assign_role",
+            resource_type="principal", resource_id=target_principal_id,
+            outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
+        try:
+            result = self.authorization_manager.assign_role(
+                target_principal_id, role, enabled=enabled,
+            )
+        except Exception as exc:
+            return {"status": "ROLE_ASSIGNMENT_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_AUTHORIZATION_RESPONSE", "saved": False}
+        audit_result = self._audit_event(
+            principal_id=actor_id, operation="provider.access.assign_role",
+            resource_type="principal", resource_id=target_principal_id,
+            outcome=str(result.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            result["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return result
+
+    def disable_provider_principal(
+        self, *, actor_id: str, target_principal_id: str,
+    ) -> dict[str, Any]:
+        """Disable a principal only after admin authorization and an audit intent."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(actor_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=actor_id, operation="provider.access.disable_principal",
+            resource_type="principal", resource_id=target_principal_id,
+            outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
+        try:
+            result = self.authorization_manager.disable_principal(target_principal_id)
+        except Exception as exc:
+            return {"status": "PRINCIPAL_DISABLE_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_AUTHORIZATION_RESPONSE", "saved": False}
+        audit_result = self._audit_event(
+            principal_id=actor_id, operation="provider.access.disable_principal",
+            resource_type="principal", resource_id=target_principal_id,
+            outcome=str(result.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            result["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return result
+
+    def request_job_shutdown(
+        self, *, drain: bool = True, deadline_at: str | None = None,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self.job_manager is None or not callable(getattr(self.job_manager, "request_shutdown", None)):
+            return {"status": "JOB_SHUTDOWN_CONTROL_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit = self._audit_event(
+            principal_id=principal_id, operation="provider.job.shutdown",
+            resource_type="job_queue", resource_id="provider-job-queue", outcome="REQUESTED",
+        )
+        if audit is not None and audit.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
+        try:
+            result = self.job_manager.request_shutdown(drain=drain, deadline_at=deadline_at)
+        except Exception as exc:
+            return {"status": "JOB_SHUTDOWN_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        outcome = self._audit_event(
+            principal_id=principal_id, operation="provider.job.shutdown",
+            resource_type="job_queue", resource_id="provider-job-queue",
+            outcome=str(result.get("status", "UNKNOWN")),
+        )
+        if outcome is not None and outcome.get("saved") is not True:
+            result["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return result
+
+    def resume_job_work(self, *, principal_id: str | None = None) -> dict[str, Any]:
+        if self.job_manager is None or not callable(getattr(self.job_manager, "resume_work", None)):
+            return {"status": "JOB_SHUTDOWN_CONTROL_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit = self._audit_event(
+            principal_id=principal_id, operation="provider.job.resume",
+            resource_type="job_queue", resource_id="provider-job-queue", outcome="REQUESTED",
+        )
+        if audit is not None and audit.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
+        try:
+            result = self.job_manager.resume_work()
+        except Exception as exc:
+            return {"status": "JOB_RESUME_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        outcome = self._audit_event(
+            principal_id=principal_id, operation="provider.job.resume",
+            resource_type="job_queue", resource_id="provider-job-queue",
+            outcome=str(result.get("status", "UNKNOWN")),
+        )
+        if outcome is not None and outcome.get("saved") is not True:
+            result["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return result
+
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
-        payload_ref: str, priority: int = 50, principal_id: str | None = None,
+        payload_ref: str, priority: int = 50, trace_id: str | None = None,
+        deadline_at: str | None = None, principal_id: str | None = None,
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "accepted": False, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.job.submit",
+            resource_type="job", resource_id=job_id, request_id=job_id, outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "accepted": False}
         try:
             result = self.job_manager.submit(
                 job_id=job_id, project_id=project_id, provider_id=provider_id,
-                payload_ref=payload_ref, priority=priority,
+                payload_ref=payload_ref, priority=priority, trace_id=trace_id,
+                deadline_at=deadline_at,
             )
         except Exception as exc:
             return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
+        normalized = result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.job.submit",
+            resource_type="job", resource_id=job_id, request_id=job_id,
+            outcome=str(normalized.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            normalized["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return normalized
 
     def poll_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
@@ -337,13 +515,28 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.job.claim",
+            resource_type="worker", resource_id=worker_id, outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "job": None}
         try:
             result = self.job_manager.claim_next(worker_id=worker_id)
         except Exception as exc:
             return {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+        normalized = result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.job.claim",
+            resource_type="worker", resource_id=worker_id,
+            outcome=str(normalized.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            normalized["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return normalized
 
     def complete_job(self, *, job_id: str, worker_id: str, success: bool,
+                     lease_token: str | None = None,
                      result_ref: str | None = None, error_code: str | None = None,
                      principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
@@ -351,14 +544,28 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.job.complete",
+            resource_type="job", resource_id=job_id, request_id=job_id, outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
         try:
             result = self.job_manager.complete(
                 job_id=job_id, worker_id=worker_id, success=success,
-                result_ref=result_ref, error_code=error_code,
+                lease_token=lease_token, result_ref=result_ref, error_code=error_code,
             )
         except Exception as exc:
             return {"status": "JOB_COMPLETION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        normalized = result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.job.complete",
+            resource_type="job", resource_id=job_id, request_id=job_id,
+            outcome=str(normalized.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            normalized["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return normalized
 
     def cancel_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
@@ -366,11 +573,25 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.job.cancel",
+            resource_type="job", resource_id=job_id, request_id=job_id, outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
         try:
             result = self.job_manager.cancel(job_id=job_id)
         except Exception as exc:
             return {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        normalized = result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.job.cancel",
+            resource_type="job", resource_id=job_id, request_id=job_id,
+            outcome=str(normalized.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            normalized["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return normalized
 
     def verify_webhook(
         self,
@@ -381,8 +602,19 @@ class ProviderService:
         timestamp: int | str,
         event_id: str,
         secret: str,
+        principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify a provider callback without persisting its secret or body."""
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {"verified": False, "status": "AUTHORIZATION_DENIED", "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.webhook.verify",
+            resource_type="webhook", resource_id=event_id, request_id=event_id,
+            outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"verified": False, "status": "AUDIT_LOG_FAILED"}
         if self.webhook_verifier is None:
             return {"verified": False, "status": "WEBHOOK_VERIFIER_UNAVAILABLE"}
         try:
@@ -400,9 +632,17 @@ class ProviderService:
                 "status": "WEBHOOK_VERIFICATION_FAILED",
                 "error_type": type(exc).__name__,
             }
-        return result if isinstance(result, dict) else {
+        normalized = result if isinstance(result, dict) else {
             "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.webhook.verify",
+            resource_type="webhook", resource_id=event_id, request_id=event_id,
+            outcome=re.sub(r"[^A-Za-z0-9_.:-]", "_", str(normalized.get("status", "UNKNOWN")))[:80] or "UNKNOWN",
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            normalized["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return normalized
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:

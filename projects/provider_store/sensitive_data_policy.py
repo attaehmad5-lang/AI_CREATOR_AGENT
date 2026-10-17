@@ -17,6 +17,17 @@ _PATTERNS = (
 _SAFE_KEY = re.compile(r"[A-Za-z0-9_.-]{1,64}\Z")
 
 
+def _sensitive_key(key: Any) -> bool:
+    if not isinstance(key, str):
+        return False
+    normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
+    return (
+        normalized in {"apikey", "auth", "authheader", "privatekey"}
+        or normalized.endswith(("token", "secret", "password", "passwd", "credential", "credentials"))
+        or "authorization" in normalized
+    )
+
+
 class SensitiveDataPolicy:
     def __init__(
         self,
@@ -81,7 +92,16 @@ class SensitiveDataPolicy:
                             return
             elif isinstance(value, dict):
                 for key, child in value.items():
-                    walk(child, self._child_path(path, key), depth + 1)
+                    child_path = self._child_path(path, key)
+                    if _sensitive_key(key):
+                        item = {"category": "credential", "path": child_path}
+                        if item not in findings:
+                            findings.append(item)
+                        if "credential" in self.blocked_categories:
+                            # Continue bounded traversal for a complete category report,
+                            # but never expose the field's value.
+                            pass
+                    walk(child, child_path, depth + 1)
                     if exceeded:
                         return
             elif isinstance(value, (list, tuple)):

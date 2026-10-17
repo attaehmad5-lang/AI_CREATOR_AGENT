@@ -11,6 +11,7 @@ from projects.provider_store.provider_benchmark_manager import ProviderBenchmark
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
+from projects.provider_store.provider_audit_log import ProviderAuditLog
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
@@ -974,9 +975,11 @@ class ProviderServiceTests(unittest.TestCase):
                     "event_id": kwargs["event_id"],
                 }
 
+        audit = ProviderAuditLog(self.root / "webhook-service-audit.json")
         service = ProviderService(
             self.connections,
             webhook_verifier=WebhookStub(),
+            audit_manager=audit,
         )
         secret = "do-not-echo-webhook-secret"
         result = service.verify_webhook(
@@ -990,6 +993,9 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["verified"])
         self.assertEqual(result["status"], "WEBHOOK_VERIFIED")
         self.assertNotIn(secret, repr(result))
+        self.assertTrue(audit.verify_chain()["valid"])
+        self.assertEqual(audit.verify_chain()["entry_count"], 2)
+        self.assertEqual(audit.data["entries"][0]["operation"], "provider.webhook.verify")
 
     def test_async_job_queue_facade_enforces_access_and_backpressure(self):
         jobs = ProviderJobManager(
@@ -1000,10 +1006,12 @@ class ProviderServiceTests(unittest.TestCase):
         authorization = ProviderAuthorizationManager(self.root / "job-auth.json")
         authorization.assign_role("viewer-job-user", "viewer")
         authorization.assign_role("creator-job-user", "creator")
+        audit = ProviderAuditLog(self.root / "job-audit.json")
         service = ProviderService(
             self.connections,
             job_manager=jobs,
             authorization_manager=authorization,
+            audit_manager=audit,
         )
         denied = service.submit_job(
             job_id="job-denied", project_id="film", provider_id="image",
@@ -1012,7 +1020,8 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
         accepted = service.submit_job(
             job_id="job-1", project_id="film", provider_id="image",
-            payload_ref="payload:job-1", principal_id="creator-job-user",
+            payload_ref="payload:job-1", trace_id="trace-job-1",
+            principal_id="creator-job-user",
         )
         self.assertEqual(accepted["status"], "JOB_QUEUED")
         full = service.submit_job(
@@ -1024,8 +1033,10 @@ class ProviderServiceTests(unittest.TestCase):
             worker_id="worker-1", principal_id="creator-job-user",
         )
         self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.assertEqual(claimed["job"]["trace_id"], "trace-job-1")
         completed = service.complete_job(
             job_id="job-1", worker_id="worker-1", success=True,
+            lease_token=claimed["job"]["lease_token"],
             result_ref="asset:job-1", principal_id="creator-job-user",
         )
         self.assertEqual(completed["job"]["status"], "SUCCEEDED")
@@ -1033,6 +1044,68 @@ class ProviderServiceTests(unittest.TestCase):
             service.poll_job(job_id="job-1", principal_id="viewer-job-user")["job"]["status"],
             "SUCCEEDED",
         )
+        chain = audit.verify_chain()
+        self.assertTrue(chain["valid"])
+        self.assertEqual(chain["entry_count"], 8)
+        events = audit.data["entries"]
+        self.assertEqual(events[0]["operation"], "provider.job.submit")
+        self.assertEqual(events[1]["outcome"], "JOB_QUEUED")
+        self.assertEqual(events[-1]["outcome"], "JOB_COMPLETED")
+
+    def test_role_administration_requires_admin_and_is_audited(self):
+        authorization = ProviderAuthorizationManager(self.root / "role-auth.json")
+        authorization.assign_role("admin-actor", "admin")
+        authorization.assign_role("creator-actor", "creator")
+        audit = ProviderAuditLog(self.root / "role-audit.json")
+        jobs = ProviderJobManager(self.root / "role-jobs.json")
+        service = ProviderService(
+            self.connections, authorization_manager=authorization,
+            audit_manager=audit, job_manager=jobs,
+        )
+        denied = service.assign_provider_role(
+            actor_id="creator-actor", target_principal_id="new-admin",
+            role="admin",
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(
+            authorization.authorize("new-admin", "provider.configure")["status"],
+            "PRINCIPAL_NOT_FOUND",
+        )
+        allowed = service.assign_provider_role(
+            actor_id="admin-actor", target_principal_id="new-creator",
+            role="creator",
+        )
+        self.assertEqual(allowed["status"], "ROLE_ASSIGNED")
+        disabled = service.disable_provider_principal(
+            actor_id="admin-actor", target_principal_id="new-creator",
+        )
+        self.assertEqual(disabled["status"], "PRINCIPAL_DISABLED")
+        self.assertEqual(
+            authorization.authorize("new-creator", "provider.generate")["status"],
+            "PRINCIPAL_DISABLED",
+        )
+        denied_shutdown = service.request_job_shutdown(principal_id="creator-actor")
+        self.assertEqual(denied_shutdown["status"], "AUTHORIZATION_DENIED")
+        shutdown = service.request_job_shutdown(principal_id="admin-actor")
+        self.assertEqual(shutdown["status"], "SHUTDOWN_DRAINING")
+        resumed = service.resume_job_work(principal_id="admin-actor")
+        self.assertEqual(resumed["status"], "WORK_RESUMED")
+        self.assertTrue(audit.verify_chain()["valid"])
+
+    def test_job_mutation_fails_closed_when_audit_intent_cannot_be_saved(self):
+        jobs = ProviderJobManager(self.root / "audit-fail-jobs.json")
+        audit_path = self.root / "audit-fail.json"
+        audit = ProviderAuditLog(audit_path)
+        audit_path.write_text("{corrupt", encoding="utf-8")
+        service = ProviderService(
+            self.connections, job_manager=jobs, audit_manager=audit,
+        )
+        result = service.submit_job(
+            job_id="audit-fail-job", project_id="film", provider_id="image",
+            payload_ref="payload:audit-fail-job",
+        )
+        self.assertEqual(result["status"], "AUDIT_LOG_FAILED")
+        self.assertEqual(jobs.poll(job_id="audit-fail-job")["status"], "JOB_NOT_FOUND")
 
     def test_execution_records_latency_queue_wait_and_failure_metrics(self):
         outer = self
