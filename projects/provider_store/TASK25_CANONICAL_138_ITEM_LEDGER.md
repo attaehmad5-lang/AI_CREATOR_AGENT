@@ -202,7 +202,7 @@ GitHub Actions run [#38959082545](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 119 | 🔴 | Multi-Project/Multi-Tenant Provider Policies | OPEN | Complete multi-tenant provider policy isolation is not implemented. |
+| 119 | 🔴 | Multi-Project/Multi-Tenant Provider Policies | PARTIAL | `ProviderTenantPolicyManager` binds each project to one enabled tenant and applies provider/modality allowlists; `ProviderService.execute_routed_request` checks tenant scope before routing and rechecks the selected provider before adapter invocation. Tests cover cross-tenant and provider-scope denial. Storage-level partitioning of credentials, quotas, jobs, usage ledgers and assets remains open under item #120. |
 | 120 | 🔴 | Tenant Isolation for Credentials, Quotas and Job Data | OPEN | Credential, quota and job data tenant isolation is not implemented. |
 | 121 | 🔴 | Separate User/Project/Tenant Usage Limits | PARTIAL | Project quotas exist; distinct user/project/tenant limits are not fully implemented. |
 | 122 | 🔴 | Fair Scheduling and Workload Prioritization | PARTIAL | `ProviderJobManager` now supports configurable `max_consecutive_project_jobs`, preserving priority while preventing one project from monopolizing claims when other projects have queued work; scheduler state persists and older queue files receive safe defaults. Regression tests cover fairness, persistence and legacy compatibility. Distributed weighted fairness, tenant-specific weights, starvation SLOs and sustained load testing remain open. |
