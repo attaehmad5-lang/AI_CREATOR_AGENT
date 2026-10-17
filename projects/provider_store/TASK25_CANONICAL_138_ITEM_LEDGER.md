@@ -205,7 +205,7 @@ GitHub Actions run [#38959082545](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 119 | 🔴 | Multi-Project/Multi-Tenant Provider Policies | OPEN | Complete multi-tenant provider policy isolation is not implemented. |
 | 120 | 🔴 | Tenant Isolation for Credentials, Quotas and Job Data | OPEN | Credential, quota and job data tenant isolation is not implemented. |
 | 121 | 🔴 | Separate User/Project/Tenant Usage Limits | PARTIAL | Project quotas exist; distinct user/project/tenant limits are not fully implemented. |
-| 122 | 🔴 | Fair Scheduling and Workload Prioritization | OPEN | Fair scheduling and priority queues are not implemented. |
+| 122 | 🔴 | Fair Scheduling and Workload Prioritization | PARTIAL | `ProviderJobManager` now supports configurable `max_consecutive_project_jobs`, preserving priority while preventing one project from monopolizing claims when other projects have queued work; scheduler state persists and older queue files receive safe defaults. Regression tests cover fairness, persistence and legacy compatibility. Distributed weighted fairness, tenant-specific weights, starvation SLOs and sustained load testing remain open. |
 | 123 | 🔴 | Provider/Regional Outage Handling | PARTIAL | Health and fallback primitives exist; region-wide outage handling is not integrated. |
 | 124 | 🔴 | Disaster Recovery and Restore Procedures | PARTIAL | Catalog restore and atomic persistence exist; full disaster recovery/restore drills are not verified. |
 | 125 | 🔴 | Degraded Mode During Partial Service Outages | OPEN | Explicit degraded-mode orchestration is not implemented. |
