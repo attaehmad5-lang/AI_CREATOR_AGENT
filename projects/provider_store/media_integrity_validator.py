@@ -210,7 +210,7 @@ class MediaIntegrityValidator:
     def _validate_webm(self, path: Path, size: int) -> dict[str, Any]:
         with path.open("rb") as stream:
             # EBML header ID and bounded declared payload.
-            if stream.read(4) != b"\\x1a\\x45\\xdf\\xa3":
+            if stream.read(4) != b"\x1a\x45\xdf\xa3":
                 return {"valid": False, "status": "WEBM_EBML_HEADER_INVALID", "size_bytes": size}
             header_size_info = self._read_ebml_size(stream, 4, size)
             if header_size_info is None:
@@ -222,7 +222,7 @@ class MediaIntegrityValidator:
             if segment_id_offset > size or segment_id_offset + 4 > size:
                 return {"valid": False, "status": "WEBM_EBML_HEADER_TRUNCATED", "size_bytes": size}
             stream.seek(segment_id_offset)
-            if stream.read(4) != b"\\x18\\x53\\x80\\x67":
+            if stream.read(4) != b"\x18\x53\x80\x67":
                 return {"valid": False, "status": "WEBM_SEGMENT_MISSING", "size_bytes": size}
             segment_size_info = self._read_ebml_size(stream, segment_id_offset + 4, size)
             if segment_size_info is None:
