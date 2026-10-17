@@ -81,6 +81,36 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
             self.assertEqual(result["status"], "CREDIT_BALANCE_UPDATED")
             self.assertEqual(manager.usable_free_credits(unit="POLLEN"), {"pollinations": 3.5})
 
+    def test_nested_available_credit_field_path_is_supported(self):
+        opener = _Opener(_Response({"usage": {"available": {"credits": 12.5}}}))
+        probe = self.make_probe(opener, balance_field="usage.available.credits", unit="credits")
+        result = probe("provider")
+        self.assertEqual(result["status"], "BALANCE_VERIFIED")
+        self.assertEqual(result["free_credits_remaining"], 12.5)
+        self.assertEqual(result["unit"], "credits")
+
+    def test_fifty_invalid_balance_field_paths_are_rejected_at_configuration(self):
+        invalid_paths = [
+            "", ".balance", "balance.", "a..b", "balance[0]", "a/b", "a b",
+            "0balance", ("a." * 8) + "b", "x" * 257,
+        ]
+        invalid_paths.extend(f"bad-field-{index}" for index in range(40))
+        self.assertEqual(len(invalid_paths), 50)
+        for index, field in enumerate(invalid_paths):
+            with self.subTest(case=index, field=field):
+                with self.assertRaisesRegex(ValueError, "INVALID_BALANCE_FIELD"):
+                    self.make_probe(balance_field=field)
+
+    def test_fifty_invalid_balance_amounts_fail_closed(self):
+        invalid_values = [None, True, -1, float("nan"), float("inf"), "-1", "0", [], {}, 10**1000]
+        for index in range(50):
+            value = invalid_values[index % len(invalid_values)]
+            with self.subTest(case=index, value_type=type(value).__name__):
+                result = self.make_probe(_Opener(_Response({"totalBalance": value})))(f"provider-{index}")
+                self.assertEqual(result["status"], "BALANCE_AMOUNT_INVALID")
+                self.assertFalse(result["verified"])
+                self.assertNotIn("totalBalance", repr(result))
+
     def test_missing_credentials_fail_before_network(self):
         opener = _Opener()
         probe = self.make_probe(opener, environ={})

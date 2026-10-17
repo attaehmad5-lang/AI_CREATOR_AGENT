@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#38781627142](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38781627142): **348 tests passed on Ubuntu and 348 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. This branch includes 50-case image-dimension, WAV-duration, balance-field-path and invalid-balance-amount matrices, plus format-specific media regressions and 100 free-credit routing cases.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -98,15 +98,15 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 52 | 🟡 | Corrupt/Incomplete Output Rejection | PARTIAL | Basic corrupt/truncated artifact rejection is tested; decoder-level detection remains open. |
 | 53 | 🟡 | Temporary File Cleanup and Atomic Replacement | PARTIAL | Atomic replacement helpers exist; output-pipeline cleanup integration is incomplete. |
 | 54 | 🟡 | Previous Output Preservation on Failure | PARTIAL | Some preservation/atomicity tests exist; end-to-end generation replacement behavior is not verified. |
-| 55 | 🔴 | File Size, Dimensions, Duration and Codec Constraints | PARTIAL | Size limits exist; dimensions/duration/codec constraints need modality-specific decoders. |
+| 55 | 🔴 | File Size, Dimensions, Duration and Codec Constraints | VERIFIED | `ProviderOutputValidator` enforces file-size limits; PNG/GIF/JPEG/WebP dimensions and pixel budgets; WAV/FLAC/MP3/AAC/Ogg/MP4 audio duration and codec constraints; and AVI/MP4/WebM video duration, codec, and dimension constraints. Regression evidence includes 50-case image-dimension and 50-case WAV-duration matrices plus format-specific valid/invalid tests. Full media decoding, malware scanning, and semantic QA remain separate item #51 gates. |
 | 56 | 🟡 | Provider Attribution and Output Metadata | PARTIAL | Request/provider IDs exist in service records; complete asset lineage metadata is not verified. |
 
 ## H — Cost, Free Credits and Quotas
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 57 | 🔴 | Free-Credit-First Routing | PARTIAL | Routing and credit reservations exist; provider-specific verified free-credit balances are still required. |
-| 58 | 🔴 | Provider Free-Tier/Quota Verification | PARTIAL | Generic JSON account-balance probe exists; provider-specific documented fields and authorized live checks are missing. |
+| 57 | 🔴 | Free-Credit-First Routing | VERIFIED | `ProviderRoutingManager` uses the injected `ProviderCreditManager`'s verified, unit-compatible snapshots, selects the greatest available balance with deterministic priority tie-breaks, and reserves before routing. A 50-case sufficient-balance selection matrix and 50-case insufficient-balance rejection matrix pass on Ubuntu and Windows. Provider-specific live balance endpoint semantics are tracked separately under item #58. |
+| 58 | 🔴 | Provider Free-Tier/Quota Verification | PARTIAL | `ProviderJSONBalanceProbe` supports validated nested JSON field paths and retains HTTPS allowlisting, environment-only auth, response bounds, numeric checks and secret redaction. A 50-case invalid-field-path matrix and 50-case invalid-amount matrix plus nested-field integration pass on both platforms. Authorized live verification of each provider's documented available-credit endpoint/field remains open. |
 | 59 | 🔴 | Explicit Approval Before Paid Usage | PARTIAL | Paid-usage approval guard and tests exist; approval workflow integration is not complete. |
 | 60 | 🔴 | Per-Request/Project Budgets | PARTIAL | Project budget and quota managers are tested; end-to-end tenant/user budgeting is incomplete. |
 | 61 | 🔴 | Estimated vs Actual Usage Reconciliation | PARTIAL | Cost reservation/reconciliation is implemented and tested; provider-specific actual usage adapters are missing. |
