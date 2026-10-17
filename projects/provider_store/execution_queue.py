@@ -60,7 +60,7 @@ class BoundedExecutionQueue:
 
     @contextmanager
     def _transaction(self) -> Iterator[None]:
-        with self._transaction():
+        with self._lock:
             if self.state_path is None:
                 yield
                 return
