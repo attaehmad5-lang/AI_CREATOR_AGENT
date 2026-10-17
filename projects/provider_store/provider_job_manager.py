@@ -459,6 +459,9 @@ class ProviderJobManager:
         now_dt = self.clock().astimezone(timezone.utc)
         now = now_dt.isoformat()
         with self._transaction():
+            shutdown_changed = self._apply_shutdown_deadline_locked(now_dt)
+            if shutdown_changed:
+                self._save()
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
                 return {"status": "JOB_NOT_FOUND", "saved": False}
