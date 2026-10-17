@@ -185,6 +185,49 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(exhausted["status"], "QUEUE_EMPTY")
         self.assertEqual(self.manager.poll(job_id="job-1")["job"]["status"], "FAILED")
 
+    def test_queued_job_past_deadline_fails_without_being_claimed(self):
+        deadline = (self.now[0] + timedelta(seconds=5)).isoformat()
+        result = self.manager.submit(
+            job_id="job-deadline-queued", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-queued", deadline_at=deadline,
+        )
+        self.assertTrue(result["accepted"])
+        self.now[0] += timedelta(seconds=6)
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(claimed["status"], "QUEUE_EMPTY")
+        job = self.manager.poll(job_id="job-deadline-queued")["job"]
+        self.assertEqual(job["status"], "FAILED")
+        self.assertEqual(job["error_code"], "DEADLINE_EXCEEDED")
+
+    def test_running_job_cannot_report_success_after_deadline(self):
+        deadline = (self.now[0] + timedelta(seconds=5)).isoformat()
+        self.manager.submit(
+            job_id="job-deadline-running", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-running", deadline_at=deadline,
+        )
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.now[0] += timedelta(seconds=6)
+        completed = self.manager.complete(
+            job_id="job-deadline-running", worker_id="worker-1", success=True,
+            lease_token=claimed["job"]["lease_token"], result_ref="asset:too-late",
+        )
+        self.assertEqual(completed["job"]["status"], "FAILED")
+        self.assertEqual(completed["job"]["error_code"], "DEADLINE_EXCEEDED")
+        self.assertNotIn("result_ref", completed["job"])
+
+    def test_job_deadline_requires_aware_future_timestamp(self):
+        invalid = self.manager.submit(
+            job_id="job-deadline-invalid", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-invalid", deadline_at="2026-10-16T12:05:00",
+        )
+        self.assertEqual(invalid["status"], "INVALID_DEADLINE")
+        expired = self.manager.submit(
+            job_id="job-deadline-past", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-past",
+            deadline_at=(self.now[0] - timedelta(seconds=1)).isoformat(),
+        )
+        self.assertEqual(expired["status"], "DEADLINE_ALREADY_EXPIRED")
+
     def test_state_persists_without_raw_payload_storage(self):
         self.submit("job-1")
         reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
