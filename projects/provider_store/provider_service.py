@@ -26,6 +26,7 @@ class ProviderService:
         credit_manager: Any | None = None,
         metrics_manager: Any | None = None,
         execution_limiter: Any | None = None,
+        execution_queue: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -39,6 +40,11 @@ class ProviderService:
             (credit_manager, "commit", "credit_manager"),
             (metrics_manager, "record_request", "metrics_manager"),
             (execution_limiter, "run", "execution_limiter"),
+            (execution_queue, "enqueue", "execution_queue"),
+            (execution_queue, "claim_next", "execution_queue"),
+            (execution_queue, "complete", "execution_queue"),
+            (execution_queue, "cancel", "execution_queue"),
+            (execution_queue, "stats", "execution_queue"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -53,6 +59,63 @@ class ProviderService:
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
         self.metrics_manager = metrics_manager
         self.execution_limiter = execution_limiter
+        self.execution_queue = execution_queue
+
+    def enqueue_execution(
+        self, *, request_id: str, tenant_id: str, project_id: str, category: str,
+        priority: int = 0, deadline_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Queue metadata only; prompts, credentials, and payloads stay outside the queue."""
+        if self.execution_queue is None:
+            return {"status": "EXECUTION_QUEUE_UNAVAILABLE", "accepted": False}
+        try:
+            result = self.execution_queue.enqueue(
+                request_id=request_id, tenant_id=tenant_id, project_id=project_id,
+                category=category, priority=priority, deadline_at=deadline_at,
+            )
+        except Exception as exc:
+            return {"status": "EXECUTION_QUEUE_FAILED", "accepted": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE", "accepted": False}
+
+    def claim_next_execution(self, *, worker_id: str) -> dict[str, Any]:
+        if self.execution_queue is None:
+            return {"status": "EXECUTION_QUEUE_UNAVAILABLE", "job": None}
+        try:
+            result = self.execution_queue.claim_next(worker_id=worker_id)
+        except Exception as exc:
+            return {"status": "EXECUTION_QUEUE_FAILED", "job": None, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE", "job": None}
+
+    def complete_queued_execution(
+        self, *, request_id: str, worker_id: str, status: str,
+    ) -> dict[str, Any]:
+        if self.execution_queue is None:
+            return {"status": "EXECUTION_QUEUE_UNAVAILABLE", "completed": False}
+        try:
+            result = self.execution_queue.complete(
+                request_id=request_id, worker_id=worker_id, status=status,
+            )
+        except Exception as exc:
+            return {"status": "EXECUTION_QUEUE_FAILED", "completed": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE", "completed": False}
+
+    def cancel_queued_execution(self, *, request_id: str, tenant_id: str) -> dict[str, Any]:
+        if self.execution_queue is None:
+            return {"status": "EXECUTION_QUEUE_UNAVAILABLE", "cancelled": False}
+        try:
+            result = self.execution_queue.cancel(request_id=request_id, tenant_id=tenant_id)
+        except Exception as exc:
+            return {"status": "EXECUTION_QUEUE_FAILED", "cancelled": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE", "cancelled": False}
+
+    def execution_queue_stats(self) -> dict[str, Any]:
+        if self.execution_queue is None:
+            return {"status": "EXECUTION_QUEUE_UNAVAILABLE"}
+        try:
+            result = self.execution_queue.stats()
+        except Exception as exc:
+            return {"status": "EXECUTION_QUEUE_FAILED", "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE"}
 
     def verify_provider(
         self,
