@@ -11,6 +11,7 @@ from projects.provider_store.provider_benchmark_manager import ProviderBenchmark
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
+from projects.provider_store.provider_audit_log import ProviderAuditLog
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
@@ -1000,10 +1001,12 @@ class ProviderServiceTests(unittest.TestCase):
         authorization = ProviderAuthorizationManager(self.root / "job-auth.json")
         authorization.assign_role("viewer-job-user", "viewer")
         authorization.assign_role("creator-job-user", "creator")
+        audit = ProviderAuditLog(self.root / "job-audit.json")
         service = ProviderService(
             self.connections,
             job_manager=jobs,
             authorization_manager=authorization,
+            audit_manager=audit,
         )
         denied = service.submit_job(
             job_id="job-denied", project_id="film", provider_id="image",
@@ -1036,6 +1039,13 @@ class ProviderServiceTests(unittest.TestCase):
             service.poll_job(job_id="job-1", principal_id="viewer-job-user")["job"]["status"],
             "SUCCEEDED",
         )
+        chain = audit.verify_chain()
+        self.assertTrue(chain["valid"])
+        self.assertEqual(chain["entry_count"], 6)
+        events = audit.data["entries"]
+        self.assertEqual(events[0]["operation"], "provider.job.submit")
+        self.assertEqual(events[1]["outcome"], "JOB_QUEUED")
+        self.assertEqual(events[-1]["outcome"], "JOB_COMPLETED")
 
     def test_execution_records_latency_queue_wait_and_failure_metrics(self):
         outer = self
