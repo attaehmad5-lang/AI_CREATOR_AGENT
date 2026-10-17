@@ -9,7 +9,7 @@ import re
 from typing import Any, Mapping
 
 _ENV_REF = re.compile(r"env:([A-Z_][A-Z0-9_]{0,127})\Z")
-_VAULT_REF = re.compile(r"vault:([A-Za-z0-9._-]{1,64}/[A-Za-z0-9._-]{1,128})\Z")
+_VAULT_REF = re.compile(r"vault:([A-Za-z0-9][A-Za-z0-9._-]{0,62}/[A-Za-z0-9][A-Za-z0-9._-]{0,126})\Z")
 
 
 class ProviderSecretResolver:
