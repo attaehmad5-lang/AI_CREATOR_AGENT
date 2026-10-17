@@ -81,6 +81,27 @@ class BoundedExecutionQueueTests(unittest.TestCase):
         self.assertTrue(completed["completed"])
         self.assertEqual(queue.stats()["running"], 0)
 
+    def test_running_cancellation_is_visible_only_to_owning_worker(self):
+        queue = BoundedExecutionQueue(max_running=1)
+        self.enqueue(queue, "job")
+        queue.claim_next(worker_id="worker-a", now=self.now)
+        self.assertEqual(
+            queue.cancel(request_id="job", tenant_id="tenant-a", now=self.now)["status"],
+            "CANCEL_REQUESTED",
+        )
+        wrong_worker = queue.get_job(request_id="job", tenant_id="tenant-a", worker_id="worker-b")
+        self.assertEqual(wrong_worker["status"], "WORKER_OWNERSHIP_MISMATCH")
+        wrong_tenant = queue.get_job(request_id="job", tenant_id="tenant-b", worker_id="worker-a")
+        self.assertEqual(wrong_tenant["status"], "NOT_FOUND")
+        owner = queue.get_job(request_id="job", tenant_id="tenant-a", worker_id="worker-a")
+        self.assertEqual(owner["status"], "FOUND")
+        self.assertTrue(owner["job"]["cancel_requested"])
+        self.assertNotIn("fingerprint", repr(owner["job"]))
+        queue.complete(request_id="job", worker_id="worker-a", status="CANCELLED", now=self.now)
+        terminal = queue.get_job(request_id="job", tenant_id="tenant-a")
+        self.assertEqual(terminal["status"], "TERMINAL")
+        self.assertEqual(terminal["job"]["status"], "CANCELLED")
+
     def test_expired_queued_jobs_are_removed_but_running_deadlines_hold_capacity(self):
         queue = BoundedExecutionQueue(max_running=1)
         self.enqueue(queue, "queued-expired", priority=1, deadline_at=(self.now + timedelta(seconds=5)).isoformat())
