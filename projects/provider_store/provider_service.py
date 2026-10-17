@@ -484,6 +484,13 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        if slo_id is not None or slo_service_id is not None:
+            if (
+                self.slo_manager is None
+                or not isinstance(slo_id, str) or not slo_id.strip()
+                or not isinstance(slo_service_id, str) or not slo_service_id.strip()
+            ):
+                return {"status": "SLO_MANAGER_OR_SCOPE_REQUIRED", "executed": False}
 
         tenant_scope_result = None
         if self.tenant_policy_manager is not None:
@@ -857,27 +864,19 @@ class ProviderService:
                         "error_type": type(exc).__name__,
                     }
         slo_result = None
-        if self.slo_manager is not None:
-            if slo_id is None and slo_service_id is None:
-                slo_result = {"status": "SLO_CONTEXT_NOT_PROVIDED", "saved": False}
-            elif (
-                not isinstance(slo_id, str) or not slo_id.strip()
-                or not isinstance(slo_service_id, str) or not slo_service_id.strip()
-            ):
-                slo_result = {"status": "SLO_CONTEXT_INVALID", "saved": False}
-            else:
-                try:
-                    slo_result = self.slo_manager.record_observation(
-                        slo_id=slo_id, service_id=slo_service_id,
-                        request_id=request_id, success=final_success,
-                        latency_ms=latency_ms,
-                    )
-                except Exception as exc:
-                    slo_result = {
-                        "status": "SLO_OBSERVATION_FAILED",
-                        "saved": False,
-                        "error_type": type(exc).__name__,
-                    }
+        if self.slo_manager is not None and slo_id is not None and slo_service_id is not None:
+            try:
+                slo_result = self.slo_manager.record_observation(
+                    slo_id=slo_id, service_id=slo_service_id,
+                    request_id=request_id, success=final_success,
+                    latency_ms=latency_ms,
+                )
+            except Exception as exc:
+                slo_result = {
+                    "status": "SLO_OBSERVATION_FAILED",
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
 
         metrics_result = None
         if self.metrics_manager is not None:
