@@ -1047,6 +1047,39 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(events[1]["outcome"], "JOB_QUEUED")
         self.assertEqual(events[-1]["outcome"], "JOB_COMPLETED")
 
+    def test_role_administration_requires_admin_and_is_audited(self):
+        authorization = ProviderAuthorizationManager(self.root / "role-auth.json")
+        authorization.assign_role("admin-actor", "admin")
+        authorization.assign_role("creator-actor", "creator")
+        audit = ProviderAuditLog(self.root / "role-audit.json")
+        service = ProviderService(
+            self.connections, authorization_manager=authorization,
+            audit_manager=audit,
+        )
+        denied = service.assign_provider_role(
+            actor_id="creator-actor", target_principal_id="new-admin",
+            role="admin",
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(
+            authorization.authorize("new-admin", "provider.configure")["status"],
+            "PRINCIPAL_NOT_FOUND",
+        )
+        allowed = service.assign_provider_role(
+            actor_id="admin-actor", target_principal_id="new-creator",
+            role="creator",
+        )
+        self.assertEqual(allowed["status"], "ROLE_ASSIGNED")
+        disabled = service.disable_provider_principal(
+            actor_id="admin-actor", target_principal_id="new-creator",
+        )
+        self.assertEqual(disabled["status"], "PRINCIPAL_DISABLED")
+        self.assertEqual(
+            authorization.authorize("new-creator", "provider.generate")["status"],
+            "PRINCIPAL_DISABLED",
+        )
+        self.assertTrue(audit.verify_chain()["valid"])
+
     def test_job_mutation_fails_closed_when_audit_intent_cannot_be_saved(self):
         jobs = ProviderJobManager(self.root / "audit-fail-jobs.json")
         audit_path = self.root / "audit-fail.json"
