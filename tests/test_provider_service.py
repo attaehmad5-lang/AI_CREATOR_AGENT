@@ -14,6 +14,7 @@ from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
+from projects.provider_store.provider_tenant_policy import ProviderTenantPolicyManager
 from projects.provider_store.budget_alert_manager import BudgetAlertManager
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.credit_manager import ProviderCreditManager
@@ -61,6 +62,58 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_tenant_scope_blocks_cross_tenant_project_before_adapter(self):
+        tenant_policy = ProviderTenantPolicyManager(self.root / "tenant-policy.json")
+        tenant_policy.register_tenant("tenant-a")
+        tenant_policy.register_tenant("tenant-b")
+        tenant_policy.bind_project(
+            tenant_id="tenant-a", project_id="film",
+            allowed_providers=["image"], allowed_modalities=["image"],
+        )
+        service = ProviderService(
+            self.connections,
+            routing_manager=ProviderRoutingManager(
+                self.connections, cost_policy=self.cost, quota_manager=self.quota
+            ),
+            cost_policy=self.cost, quota_manager=self.quota,
+            tenant_policy_manager=tenant_policy,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="tenant-cross",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(kwargs),
+            modality="image", tenant_id="tenant-b",
+        )
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["status"], "TENANT_SCOPE_REJECTED")
+        self.assertEqual(called, [])
+
+    def test_tenant_provider_allowlist_blocks_routed_provider_before_adapter(self):
+        tenant_policy = ProviderTenantPolicyManager(self.root / "tenant-provider-policy.json")
+        tenant_policy.register_tenant("tenant-a")
+        tenant_policy.bind_project(
+            tenant_id="tenant-a", project_id="film",
+            allowed_providers=[], allowed_modalities=["image"],
+        )
+        service = ProviderService(
+            self.connections,
+            routing_manager=ProviderRoutingManager(
+                self.connections, cost_policy=self.cost, quota_manager=self.quota
+            ),
+            cost_policy=self.cost, quota_manager=self.quota,
+            tenant_policy_manager=tenant_policy,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="tenant-provider-denied",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(kwargs),
+            modality="image", tenant_id="tenant-a",
+        )
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["status"], "ROUTING_REJECTED")
+        self.assertEqual(result["route"]["status"], "TENANT_SCOPE_REJECTED")
+        self.assertEqual(called, [])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)

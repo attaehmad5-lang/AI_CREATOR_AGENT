@@ -25,6 +25,7 @@ class ProviderService:
         credit_manager: Any | None = None,
         budget_alert_manager: Any | None = None,
         authorization_manager: Any | None = None,
+        tenant_policy_manager: Any | None = None,
         sensitive_data_policy: Any | None = None,
         data_handling_policy: Any | None = None,
         webhook_verifier: Any | None = None,
@@ -48,6 +49,7 @@ class ProviderService:
             (credit_manager, "commit", "credit_manager"),
             (budget_alert_manager, "record", "budget_alert_manager"),
             (authorization_manager, "authorize", "authorization_manager"),
+            (tenant_policy_manager, "authorize_scope", "tenant_policy_manager"),
             (sensitive_data_policy, "inspect", "sensitive_data_policy"),
             (data_handling_policy, "evaluate", "data_handling_policy"),
             (webhook_verifier, "verify", "webhook_verifier"),
@@ -72,6 +74,7 @@ class ProviderService:
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
         self.budget_alert_manager = budget_alert_manager
         self.authorization_manager = authorization_manager
+        self.tenant_policy_manager = tenant_policy_manager
         self.sensitive_data_policy = sensitive_data_policy
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
@@ -405,15 +408,51 @@ class ProviderService:
         }
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
+        tenant_id = route_options.pop("tenant_id", None)
+        tenant_modality = route_options.pop("tenant_modality", route_options.get("category"))
+        if tenant_id is not None and self.tenant_policy_manager is None:
+            return {"allowed": False, "status": "TENANT_POLICY_MANAGER_UNAVAILABLE"}
+        if self.tenant_policy_manager is not None:
+            project_id = route_options.get("project_id")
+            if not isinstance(tenant_id, str) or not isinstance(project_id, str) or not isinstance(tenant_modality, str):
+                return {"allowed": False, "status": "TENANT_SCOPE_REQUIRED"}
+            try:
+                scope = self.tenant_policy_manager.authorize_scope(
+                    tenant_id=tenant_id, project_id=project_id, modality=tenant_modality
+                )
+            except Exception as exc:
+                return {"allowed": False, "status": "TENANT_SCOPE_CHECK_FAILED", "error_type": type(exc).__name__}
+            if not isinstance(scope, dict) or scope.get("allowed") is not True:
+                return {"allowed": False, "status": "TENANT_SCOPE_REJECTED", "scope": scope}
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
             return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
-        }
+        if not isinstance(result, dict):
+            return {"allowed": False, "status": "INVALID_ROUTING_RESPONSE"}
+        if result.get("allowed") is True and self.tenant_policy_manager is not None:
+            provider_id = result.get("provider")
+            try:
+                provider_scope = self.tenant_policy_manager.authorize_scope(
+                    tenant_id=tenant_id, project_id=route_options["project_id"],
+                    modality=tenant_modality, provider_id=provider_id,
+                )
+            except Exception as exc:
+                provider_scope = {"allowed": False, "status": "TENANT_PROVIDER_SCOPE_CHECK_FAILED", "error_type": type(exc).__name__}
+            if not isinstance(provider_scope, dict) or provider_scope.get("allowed") is not True:
+                release = None
+                if isinstance(provider_id, str) and isinstance(route_options.get("request_id"), str):
+                    release = self.release_unstarted_request(
+                        project_id=route_options["project_id"], provider_id=provider_id,
+                        request_id=route_options["request_id"],
+                    )
+                return {
+                    "allowed": False, "status": "TENANT_SCOPE_REJECTED",
+                    "scope": provider_scope, "reservation_release": release,
+                }
+        return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
         if self.output_validator is None:
@@ -445,6 +484,7 @@ class ProviderService:
         adapter: Any,
         modality: str,
         principal_id: str | None = None,
+        tenant_id: str | None = None,
         data_categories: tuple[str, ...] | list[str] = ("user_content",),
         retention_days: int = 0,
         provider_training_use: bool = False,
@@ -471,6 +511,19 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        if self.tenant_policy_manager is not None:
+            if not isinstance(tenant_id, str) or not tenant_id.strip():
+                return {"status": "TENANT_SCOPE_REQUIRED", "executed": False}
+            try:
+                tenant_scope = self.tenant_policy_manager.authorize_scope(
+                    tenant_id=tenant_id, project_id=project_id, modality=modality
+                )
+            except Exception as exc:
+                return {"status": "TENANT_SCOPE_CHECK_FAILED", "executed": False, "error_type": type(exc).__name__}
+            if not isinstance(tenant_scope, dict) or tenant_scope.get("allowed") is not True:
+                return {"status": "TENANT_SCOPE_REJECTED", "executed": False, "scope": tenant_scope}
+        elif tenant_id is not None:
+            return {"status": "TENANT_POLICY_MANAGER_UNAVAILABLE", "executed": False}
 
         feature_flag_result = None
         if self.feature_flag_manager is not None:
@@ -521,6 +574,9 @@ class ProviderService:
                     },
                 }
 
+        if tenant_id is not None:
+            route_options["tenant_id"] = tenant_id
+            route_options["tenant_modality"] = modality
         route = self.route_request(
             category=category,
             project_id=project_id,
