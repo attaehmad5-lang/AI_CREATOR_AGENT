@@ -138,6 +138,12 @@ class ProviderService:
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
                 "verified": False, "authorization": authorization,
             }
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.verify",
+            resource_type="provider", resource_id=provider_id, outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "provider": provider_id, "verified": False}
         try:
             connection = self.connection_manager.verify_connectivity(
                 provider_id, probe, timeout_seconds=timeout_seconds, environ=environ
@@ -160,13 +166,21 @@ class ProviderService:
                 )
             except Exception as exc:
                 health = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return {
+        result = {
             "status": connection.get("status", "UNKNOWN"),
             "provider": provider_id,
             "verified": connection.get("verified") is True,
             "connection": connection,
             "health": health,
         }
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.verify",
+            resource_type="provider", resource_id=provider_id,
+            outcome=re.sub(r"[^A-Za-z0-9_.:-]", "_", str(result["status"]))[:80] or "UNKNOWN",
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            result["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return result
 
     def verify_http_provider(
         self,
