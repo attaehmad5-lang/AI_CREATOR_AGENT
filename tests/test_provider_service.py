@@ -14,6 +14,7 @@ from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.metrics_manager import ProviderMetricsManager
 from projects.provider_store.execution_limiter import ProviderExecutionLimiter
+from projects.provider_store.execution_queue import BoundedExecutionQueue
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 
@@ -56,6 +57,46 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_service_exposes_bounded_queue_lifecycle_without_payload_storage(self):
+        queue = BoundedExecutionQueue(max_pending=2, max_running=1, max_pending_per_tenant=2)
+        service = ProviderService(self.connections, execution_queue=queue)
+        low = service.enqueue_execution(
+            request_id="queue-low", tenant_id="tenant-a", project_id="film",
+            category="image", priority=1,
+        )
+        high = service.enqueue_execution(
+            request_id="queue-high", tenant_id="tenant-a", project_id="film",
+            category="image", priority=10,
+        )
+        self.assertEqual(low["status"], "QUEUED")
+        self.assertEqual(high["status"], "QUEUED")
+        self.assertEqual(service.execution_queue_stats()["pending"], 2)
+        claimed = service.claim_next_execution(worker_id="worker-a")
+        self.assertEqual(claimed["job"]["request_id"], "queue-high")
+        wrong_tenant = service.cancel_queued_execution(
+            request_id="queue-low", tenant_id="tenant-b",
+        )
+        self.assertEqual(wrong_tenant["status"], "TENANT_SCOPE_MISMATCH")
+        cancelled = service.cancel_queued_execution(
+            request_id="queue-low", tenant_id="tenant-a",
+        )
+        self.assertTrue(cancelled["cancelled"])
+        completed = service.complete_queued_execution(
+            request_id="queue-high", worker_id="worker-a", status="SUCCEEDED",
+        )
+        self.assertTrue(completed["completed"])
+        self.assertEqual(service.execution_queue_stats()["running"], 0)
+        self.assertNotIn("queue-high", repr(service.execution_queue_stats()))
+
+    def test_service_reports_queue_unavailable_without_crashing(self):
+        self.assertEqual(
+            self.service.enqueue_execution(
+                request_id="job", tenant_id="tenant", project_id="film", category="image",
+            )["status"],
+            "EXECUTION_QUEUE_UNAVAILABLE",
+        )
+        self.assertEqual(self.service.claim_next_execution(worker_id="worker")["status"], "EXECUTION_QUEUE_UNAVAILABLE")
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
