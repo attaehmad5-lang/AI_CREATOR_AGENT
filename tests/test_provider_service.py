@@ -1047,6 +1047,21 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(events[1]["outcome"], "JOB_QUEUED")
         self.assertEqual(events[-1]["outcome"], "JOB_COMPLETED")
 
+    def test_job_mutation_fails_closed_when_audit_intent_cannot_be_saved(self):
+        jobs = ProviderJobManager(self.root / "audit-fail-jobs.json")
+        audit_path = self.root / "audit-fail.json"
+        audit = ProviderAuditLog(audit_path)
+        audit_path.write_text("{corrupt", encoding="utf-8")
+        service = ProviderService(
+            self.connections, job_manager=jobs, audit_manager=audit,
+        )
+        result = service.submit_job(
+            job_id="audit-fail-job", project_id="film", provider_id="image",
+            payload_ref="payload:audit-fail-job",
+        )
+        self.assertEqual(result["status"], "AUDIT_LOG_FAILED")
+        self.assertEqual(jobs.poll(job_id="audit-fail-job")["status"], "JOB_NOT_FOUND")
+
     def test_execution_records_latency_queue_wait_and_failure_metrics(self):
         outer = self
 
