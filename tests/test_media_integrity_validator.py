@@ -91,12 +91,12 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         self.assertTrue(self.validator.validate(path, modality="video")["valid"])
         bad = self.root / "bad.webm"
         bad.write_bytes(b"\x1a\x45\xdf\xa3")
-        self.assertEqual(self.validator.validate(bad, modality="video")["status"], "WEBM_SEGMENT_MISSING")
+        self.assertEqual(self.validator.validate(bad, modality="video")["status"], "WEBM_EBML_HEADER_SIZE_INVALID")
 
     def test_webm_rejects_truncated_headers_and_segment_sizes(self):
         valid_header = b"\x1a\x45\xdf\xa3\x84\x42\x86\x81\x01"
         cases = [
-            (valid_header, "WEBM_SEGMENT_MISSING"),
+            (valid_header, "WEBM_EBML_HEADER_TRUNCATED"),
             (valid_header + b"\x18\x53\x80\x67", "WEBM_SEGMENT_SIZE_INVALID"),
             (valid_header + b"\x18\x53\x80\x67\x85\xec\x80", "WEBM_SEGMENT_SIZE_EXCEEDS_FILE"),
             (valid_header + b"\x18\x53\x80\x67\x81\xec", "WEBM_SEGMENT_ELEMENT_SIZE_INVALID"),
