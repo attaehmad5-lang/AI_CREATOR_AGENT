@@ -351,7 +351,15 @@ class ProviderService:
             )
         except Exception as exc:
             return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
+        normalized = result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.job.submit",
+            resource_type="job", resource_id=job_id, request_id=job_id,
+            outcome=str(normalized.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            normalized["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return normalized
 
     def poll_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
@@ -381,7 +389,15 @@ class ProviderService:
             result = self.job_manager.claim_next(worker_id=worker_id)
         except Exception as exc:
             return {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+        normalized = result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.job.claim",
+            resource_type="worker", resource_id=worker_id,
+            outcome=str(normalized.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            normalized["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return normalized
 
     def complete_job(self, *, job_id: str, worker_id: str, success: bool,
                      lease_token: str | None = None,
@@ -405,7 +421,15 @@ class ProviderService:
             )
         except Exception as exc:
             return {"status": "JOB_COMPLETION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        normalized = result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.job.complete",
+            resource_type="job", resource_id=job_id, request_id=job_id,
+            outcome=str(normalized.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            normalized["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return normalized
 
     def cancel_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
@@ -423,7 +447,15 @@ class ProviderService:
             result = self.job_manager.cancel(job_id=job_id)
         except Exception as exc:
             return {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        normalized = result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.job.cancel",
+            resource_type="job", resource_id=job_id, request_id=job_id,
+            outcome=str(normalized.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            normalized["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return normalized
 
     def verify_webhook(
         self,
