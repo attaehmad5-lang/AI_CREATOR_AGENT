@@ -130,6 +130,7 @@ class ProviderJobManager:
         provider_id: str,
         payload_ref: str,
         priority: int = 50,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         for value, name in ((job_id, "job_id"), (project_id, "project_id"), (provider_id, "provider_id")):
             if not isinstance(value, str) or not _ID_RE.fullmatch(value):
@@ -138,6 +139,11 @@ class ProviderJobManager:
             return {"status": "INVALID_PAYLOAD_REFERENCE", "accepted": False}
         if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
             return {"status": "INVALID_PRIORITY", "accepted": False}
+        if trace_id is not None and (
+            not isinstance(trace_id, str) or not _ID_RE.fullmatch(trace_id)
+        ):
+            return {"status": "INVALID_TRACE_ID", "accepted": False}
+        resolved_trace_id = trace_id or secrets.token_hex(16)
         now = self.clock().astimezone(timezone.utc).isoformat()
         with self._transaction():
             existing = self.data["jobs"].get(job_id)
@@ -146,6 +152,7 @@ class ProviderJobManager:
                     "project_id": project_id, "provider_id": provider_id,
                     "payload_ref": payload_ref, "priority": priority,
                 }.items())
+                and (trace_id is None or existing.get("trace_id") == trace_id)
                 return {
                     "status": "ALREADY_SUBMITTED" if same else "REQUEST_ID_CONFLICT",
                     "accepted": same,
@@ -163,7 +170,8 @@ class ProviderJobManager:
                 }
             job = {
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
-                "payload_ref": payload_ref, "priority": priority, "status": "QUEUED",
+                "payload_ref": payload_ref, "priority": priority, "trace_id": resolved_trace_id,
+                "status": "QUEUED",
                 "attempts": 0, "created_at": now, "updated_at": now,
                 "cancel_requested": False,
             }
