@@ -52,6 +52,21 @@ class BoundedExecutionQueueTests(unittest.TestCase):
         )["status"], "COMPLETED")
         self.assertEqual(queue.claim_next(worker_id="worker-2", now=self.now)["job"]["request_id"], "high-second")
 
+    def test_tenant_round_robin_prevents_busy_tenant_monopolizing_workers(self):
+        queue = BoundedExecutionQueue(max_pending=10, max_running=1, max_pending_per_tenant=10)
+        self.enqueue(queue, "a-high-1", tenant_id="tenant-a", priority=100)
+        self.enqueue(queue, "a-high-2", tenant_id="tenant-a", priority=100)
+        self.enqueue(queue, "a-high-3", tenant_id="tenant-a", priority=100)
+        self.enqueue(queue, "b-low", tenant_id="tenant-b", priority=0)
+        first = queue.claim_next(worker_id="worker-1", now=self.now)
+        self.assertEqual(first["job"]["request_id"], "a-high-1")
+        queue.complete(request_id="a-high-1", worker_id="worker-1", status="SUCCEEDED", now=self.now)
+        second = queue.claim_next(worker_id="worker-1", now=self.now)
+        self.assertEqual(second["job"]["request_id"], "b-low")
+        queue.complete(request_id="b-low", worker_id="worker-1", status="SUCCEEDED", now=self.now)
+        third = queue.claim_next(worker_id="worker-1", now=self.now)
+        self.assertEqual(third["job"]["request_id"], "a-high-2")
+
     def test_wrong_worker_cannot_complete_running_job(self):
         queue = BoundedExecutionQueue()
         self.enqueue(queue, "job")
