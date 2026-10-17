@@ -1026,6 +1026,7 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(claimed["status"], "JOB_CLAIMED")
         completed = service.complete_job(
             job_id="job-1", worker_id="worker-1", success=True,
+            lease_token=claimed["job"]["lease_token"],
             result_ref="asset:job-1", principal_id="creator-job-user",
         )
         self.assertEqual(completed["job"]["status"], "SUCCEEDED")
