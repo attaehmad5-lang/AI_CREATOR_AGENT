@@ -43,6 +43,10 @@ This guide describes the current implementation in this branch. It is not a clai
 7. **Persistence limits.** Shared JSON state for provider connection/catalog, health, credits, cost budgets, and quotas uses atomic replacement plus OS-level interprocess lock files and reload-before-mutate. This prevents lost read-modify-write updates across local processes when every writer uses these manager APIs. It is not a single transaction across multiple manager files, and it does not coordinate separate devices, containers with non-shared lock semantics, or external writers bypassing these APIs. Routing compensates reservations created by the current attempt when a later quota step rejects the route, and fails closed if that compensation fails; this reduces orphaned reservations but does not make the separate JSON files one atomic transaction. SQLite or a transactional database is preferred for production multi-worker coordination.
 8. **Secrets stay outside the catalog.** Store environment-variable names or references, not credential values. Returned provider metadata and state views redact credential-like fields.
 
+## State backup and restore
+
+`provider_backup_manager.py` supports bounded, checksum-verified JSON snapshots and explicit restore with overwrite disabled by default. It rejects secret-like JSON keys and unsafe paths. These file snapshots are not a substitute for encrypted off-device backups, a coordinated transaction across every manager ledger, or timed restore drills.
+
 ## Operations runbook
 
 See `PROVIDER_OPERATIONS_RUNBOOK.md` for the draft incident procedures covering provider outages, ambiguous charges, credit exhaustion, unsafe outputs, queue recovery, tenant-scope incidents, restore/rollback and SLO follow-up. It is a draft; production contacts, alert channels and timed drills must be supplied and verified by the deployment owner.
