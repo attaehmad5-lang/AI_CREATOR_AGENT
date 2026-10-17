@@ -56,6 +56,16 @@ class BudgetAlertManager:
         self.data: dict[str, Any] = {"version": "1.0", "events": {}}
         self._reload()
 
+    @staticmethod
+    def _valid_event_timestamp(value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        try:
+            parsed = datetime.fromisoformat(value)
+        except (ValueError, TypeError, OverflowError):
+            return False
+        return parsed.tzinfo is not None and parsed.utcoffset() is not None
+
     def _reload(self) -> None:
         if not self.state_path.exists():
             self.data = {"version": "1.0", "events": {}}
@@ -72,7 +82,33 @@ class BudgetAlertManager:
                 not isinstance(event_id, str) or not event_id
                 or not isinstance(event, dict)
                 or not isinstance(event.get("project_id"), str)
-                or not isinstance(event.get("threshold"), (int, float))
+                or not event.get("project_id", "").strip()
+                or isinstance(event.get("threshold"), bool)
+                or finite_number(event.get("threshold"), minimum=0) is None
+                or not 0 < float(event.get("threshold", 0)) <= 1
+                or isinstance(event.get("budget"), bool)
+                or finite_number(event.get("budget"), minimum=0) is None
+                or float(event.get("budget", 0)) <= 0
+                or isinstance(event.get("spend"), bool)
+                or finite_number(event.get("spend"), minimum=0) is None
+                or isinstance(event.get("ratio"), bool)
+                or finite_number(event.get("ratio"), minimum=0) is None
+                or not self._valid_event_timestamp(event.get("created_at"))
+                or (
+                    "delivery_attempts" in event
+                    and (
+                        isinstance(event.get("delivery_attempts"), bool)
+                        or not isinstance(event.get("delivery_attempts"), int)
+                        or event["delivery_attempts"] < 0
+                    )
+                )
+                or (
+                    event.get("budget_period_id") is not None
+                    and (
+                        not isinstance(event.get("budget_period_id"), str)
+                        or not event["budget_period_id"].strip()
+                    )
+                )
                 or not isinstance(event.get("status"), str)
                 or event.get("status") not in {"PENDING", "DELIVERING", "DELIVERED"}
             ):
