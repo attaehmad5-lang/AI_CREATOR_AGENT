@@ -29,6 +29,7 @@ class ProviderJobManager:
         *,
         max_queue_size: int = 100,
         max_concurrent: int = 4,
+        max_concurrent_by_provider: dict[str, int] | None = None,
         lease_seconds: int = 120,
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
@@ -43,11 +44,20 @@ class ProviderJobManager:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise ValueError(f"{name} is outside safe limits")
+        if max_concurrent_by_provider is not None:
+            if not isinstance(max_concurrent_by_provider, dict):
+                raise ValueError("max_concurrent_by_provider must be a mapping")
+            for provider_id, limit in max_concurrent_by_provider.items():
+                if not isinstance(provider_id, str) or not _ID_RE.fullmatch(provider_id):
+                    raise ValueError("invalid provider ID in concurrency limits")
+                if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
+                    raise ValueError("provider concurrency limit is outside safe limits")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.max_queue_size = max_queue_size
         self.max_concurrent = max_concurrent
+        self.max_concurrent_by_provider = dict(max_concurrent_by_provider or {})
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.backpressure_retry_seconds = backpressure_retry_seconds
@@ -220,7 +230,20 @@ class ProviderJobManager:
                 if changed:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
-            job = queued[0]
+            running_by_provider: dict[str, int] = {}
+            for running_job in self.data["jobs"].values():
+                if isinstance(running_job, dict) and running_job.get("status") == "RUNNING":
+                    provider = running_job.get("provider_id")
+                    running_by_provider[provider] = running_by_provider.get(provider, 0) + 1
+            job = next((
+                candidate for candidate in queued
+                if running_by_provider.get(candidate["provider_id"], 0)
+                < self.max_concurrent_by_provider.get(candidate["provider_id"], self.max_concurrent)
+            ), None)
+            if job is None:
+                if changed:
+                    self._save()
+                return {"status": "PROVIDER_CONCURRENCY_LIMIT", "job": None}
             job["status"] = "RUNNING"
             job["worker_id"] = worker_id
             job["lease_token"] = secrets.token_urlsafe(32)
