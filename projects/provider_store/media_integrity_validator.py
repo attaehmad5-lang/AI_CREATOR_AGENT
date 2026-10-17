@@ -162,19 +162,95 @@ class MediaIntegrityValidator:
             result["duration_seconds"] = duration_seconds
         return result
 
+    @staticmethod
+    def _read_ebml_size(stream: Any, position: int, file_size: int) -> tuple[int, int, bool] | None:
+        """Read an EBML size VINT as (value, width, unknown_size)."""
+        if position < 0 or position >= file_size:
+            return None
+        stream.seek(position)
+        first = stream.read(1)
+        if len(first) != 1 or first[0] == 0:
+            return None
+        marker = 0x80
+        width = 1
+        while not (first[0] & marker) and width <= 8:
+            marker >>= 1
+            width += 1
+        if width > 8 or position + width > file_size:
+            return None
+        tail = stream.read(width - 1)
+        if len(tail) != width - 1:
+            return None
+        value = first[0] & (marker - 1)
+        for byte in tail:
+            value = (value << 8) | byte
+        unknown_value = (1 << (7 * width)) - 1
+        return value, width, value == unknown_value
+
+    @staticmethod
+    def _read_ebml_id(stream: Any, position: int, file_size: int) -> tuple[bytes, int] | None:
+        if position < 0 or position >= file_size:
+            return None
+        stream.seek(position)
+        first = stream.read(1)
+        if len(first) != 1 or first[0] == 0:
+            return None
+        marker = 0x80
+        width = 1
+        while not (first[0] & marker) and width <= 4:
+            marker >>= 1
+            width += 1
+        if width > 4 or position + width > file_size:
+            return None
+        tail = stream.read(width - 1)
+        if len(tail) != width - 1:
+            return None
+        return first + tail, width
+
     def _validate_webm(self, path: Path, size: int) -> dict[str, Any]:
-        needle = b"\x18\x53\x80\x67"
-        overlap = b""
         with path.open("rb") as stream:
-            while True:
-                chunk = stream.read(64 * 1024)
-                if not chunk:
-                    break
-                block = overlap + chunk
-                if needle in block:
-                    return {"valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "WEBM", "size_bytes": size}
-                overlap = block[-(len(needle) - 1):]
-        return {"valid": False, "status": "WEBM_SEGMENT_MISSING", "size_bytes": size}
+            # EBML header ID and bounded declared payload.
+            if stream.read(4) != b"\\x1a\\x45\\xdf\\xa3":
+                return {"valid": False, "status": "WEBM_EBML_HEADER_INVALID", "size_bytes": size}
+            header_size_info = self._read_ebml_size(stream, 4, size)
+            if header_size_info is None:
+                return {"valid": False, "status": "WEBM_EBML_HEADER_SIZE_INVALID", "size_bytes": size}
+            header_size, header_width, header_unknown = header_size_info
+            if header_unknown:
+                return {"valid": False, "status": "WEBM_EBML_HEADER_SIZE_UNKNOWN", "size_bytes": size}
+            segment_id_offset = 4 + header_width + header_size
+            if segment_id_offset > size or segment_id_offset + 4 > size:
+                return {"valid": False, "status": "WEBM_EBML_HEADER_TRUNCATED", "size_bytes": size}
+            stream.seek(segment_id_offset)
+            if stream.read(4) != b"\\x18\\x53\\x80\\x67":
+                return {"valid": False, "status": "WEBM_SEGMENT_MISSING", "size_bytes": size}
+            segment_size_info = self._read_ebml_size(stream, segment_id_offset + 4, size)
+            if segment_size_info is None:
+                return {"valid": False, "status": "WEBM_SEGMENT_SIZE_INVALID", "size_bytes": size}
+            segment_size, segment_width, segment_unknown = segment_size_info
+            payload_offset = segment_id_offset + 4 + segment_width
+            available = size - payload_offset
+            if not segment_unknown and segment_size > available:
+                return {"valid": False, "status": "WEBM_SEGMENT_SIZE_EXCEEDS_FILE", "size_bytes": size}
+            segment_end = size if segment_unknown else payload_offset + segment_size
+            if payload_offset >= segment_end:
+                return {"valid": False, "status": "WEBM_SEGMENT_EMPTY", "size_bytes": size}
+            element_id = self._read_ebml_id(stream, payload_offset, segment_end)
+            if element_id is None:
+                return {"valid": False, "status": "WEBM_SEGMENT_ELEMENT_INVALID", "size_bytes": size}
+            _, element_id_width = element_id
+            element_size_info = self._read_ebml_size(stream, payload_offset + element_id_width, segment_end)
+            if element_size_info is None:
+                return {"valid": False, "status": "WEBM_SEGMENT_ELEMENT_SIZE_INVALID", "size_bytes": size}
+            element_size, element_size_width, element_unknown = element_size_info
+            element_payload_offset = payload_offset + element_id_width + element_size_width
+            element_available = segment_end - element_payload_offset
+            if not element_unknown and element_size > element_available:
+                return {"valid": False, "status": "WEBM_SEGMENT_ELEMENT_TRUNCATED", "size_bytes": size}
+        return {
+            "valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "WEBM",
+            "size_bytes": size, "segment_size": None if segment_unknown else segment_size,
+        }
 
     def _validate_ogg(self, path: Path, size: int) -> dict[str, Any]:
         offset = 0
