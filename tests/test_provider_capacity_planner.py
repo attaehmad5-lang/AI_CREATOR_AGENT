@@ -64,7 +64,9 @@ class ProviderCapacityPlannerTests(unittest.TestCase):
             ([{"success": True}], 10),
             ([{"success": 1, "latency_ms": 10}], 10),
             ([{"success": True, "latency_ms": float("nan")}], 10),
+            ([{"success": True, "latency_ms": 0}], 10),
             ([{"success": True, "latency_ms": 10, "timed_out": "no"}], 10),
+            ([{"success": True, "timed_out": True, "latency_ms": 10}], 10),
             ("not-samples", 10),
         ]
         for index, (samples, window) in enumerate(cases):
