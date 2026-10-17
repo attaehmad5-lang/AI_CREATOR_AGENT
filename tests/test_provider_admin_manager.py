@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from projects.provider_store.provider_admin_manager import ProviderAdminManager
@@ -139,6 +140,51 @@ class ProviderAdminManagerTests(unittest.TestCase):
         self.path.write_text("{bad json", encoding="utf-8")
         with self.assertRaises(ValueError):
             ProviderAdminManager(self.path, authorizer=lambda **kwargs: True)
+
+    def test_concurrent_admin_actions_preserve_all_audit_events(self):
+        def perform(index):
+            return self.manager.execute(
+                subject_id="admin-1", operation="provider.enable",
+                resource=f"provider-{index}", request_id=f"concurrent-{index}",
+                parameters={"change": f"ticket-{index}"},
+            )
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(perform, range(24)))
+        self.assertTrue(all(result["status"] == "SUCCEEDED" for result in results))
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(len(stored["events"]), 24)
+        self.assertEqual(len(stored["requests"]), 24)
+        self.assertTrue(all(event["status"] == "SUCCEEDED" for event in stored["events"]))
+        self.assertNotIn("ticket-", self.path.read_text(encoding="utf-8"))
+
+    def test_concurrent_duplicate_admin_request_invokes_handler_once(self):
+        from threading import Lock
+        count = {"value": 0}
+        count_lock = Lock()
+        manager = ProviderAdminManager(
+            self.path.with_name("duplicate-admin.json"),
+            authorizer=lambda **kwargs: True,
+            handlers={
+                "provider.enable": lambda **kwargs: (
+                    count_lock.acquire(),
+                    count.update(value=count["value"] + 1),
+                    count_lock.release(),
+                    {"success": True},
+                )[-1],
+            },
+        )
+        def perform(_):
+            return manager.execute(
+                subject_id="admin-1", operation="provider.enable",
+                resource="provider-a", request_id="same-concurrent-request",
+            )
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(perform, range(12)))
+        self.assertEqual(count["value"], 1)
+        self.assertTrue(all(result["status"] in {"SUCCEEDED", "ADMIN_REQUEST_REPLAY"} for result in results))
+        stored = json.loads(manager.path.read_text(encoding="utf-8"))
+        self.assertEqual(len(stored["events"]), 1)
+        self.assertEqual(stored["requests"]["same-concurrent-request"]["status"], "SUCCEEDED")
 
     def test_operation_list_is_explicit_and_stable(self):
         operations = self.manager.list_operations()
