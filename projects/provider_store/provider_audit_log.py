@@ -6,6 +6,7 @@ prompts, tokens, request bodies, and provider response bodies are never accepted
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -89,7 +90,7 @@ class ProviderAuditLog:
                 or entry.get("previous_hash") != previous
                 or not isinstance(entry.get("entry_hash"), str)
                 or not re.fullmatch(r"[0-9a-f]{64}", entry["entry_hash"])
-                or not hashlib.compare_digest(entry["entry_hash"], self._hash_entry(entry))
+                or not hmac.compare_digest(entry["entry_hash"], self._hash_entry(entry))
             ):
                 raise ValueError("provider audit log integrity validation failed")
             previous = entry["entry_hash"]
