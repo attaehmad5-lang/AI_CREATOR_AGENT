@@ -22,8 +22,8 @@ from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
 _CODE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,79}\Z")
 _SECRET_RE = re.compile(
-    r"(?i)(?:bearer\\s+[A-Za-z0-9._~+/-]{12,}|(?:api[_-]?key|access[_-]?token|secret|password)\\s*[:=]\\s*[^\\s,;]{6,}|"
-    r"\\b(?:sk-[A-Za-z0-9_-]{16,}|hf_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\\b)"
+    r"(?i)(?:bearer\s+[A-Za-z0-9._~+/-]{12,}|(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=]\s*[^\s,;]{6,}|"
+    r"\b(?:sk-[A-Za-z0-9_-]{16,}|hf_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\b)"
 )
 _ZERO_HASH = "0" * 64
 
