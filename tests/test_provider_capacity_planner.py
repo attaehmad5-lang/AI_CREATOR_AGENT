@@ -36,11 +36,12 @@ class ProviderCapacityPlannerTests(unittest.TestCase):
             for latency in range(1, 21)
         ]
         samples[0]["success"] = False
+        samples[1]["success"] = False
         samples[1]["timed_out"] = True
         result = self.planner.summarize_samples(samples, window_seconds=10)
         self.assertEqual(result["sample_count"], 20)
         self.assertEqual(result["observed_requests_per_second"], 2.0)
-        self.assertEqual(result["success_rate"], 0.95)
+        self.assertEqual(result["success_rate"], 0.9)
         self.assertEqual(result["timeout_rate"], 0.05)
         self.assertEqual(result["p95_latency_ms"], 19.0)
         self.assertTrue(result["production_load_test_required"])
