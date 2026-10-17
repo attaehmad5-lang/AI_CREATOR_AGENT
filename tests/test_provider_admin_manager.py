@@ -161,17 +161,14 @@ class ProviderAdminManagerTests(unittest.TestCase):
         from threading import Lock
         count = {"value": 0}
         count_lock = Lock()
+        def handle(**kwargs):
+            with count_lock:
+                count["value"] += 1
+            return {"success": True}
         manager = ProviderAdminManager(
             self.path.with_name("duplicate-admin.json"),
             authorizer=lambda **kwargs: True,
-            handlers={
-                "provider.enable": lambda **kwargs: (
-                    count_lock.acquire(),
-                    count.update(value=count["value"] + 1),
-                    count_lock.release(),
-                    {"success": True},
-                )[-1],
-            },
+            handlers={"provider.enable": handle},
         )
         def perform(_):
             return manager.execute(
