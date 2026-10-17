@@ -35,6 +35,7 @@ class ProviderService:
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
+        audit_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -58,6 +59,7 @@ class ProviderService:
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
+            (audit_manager, "append", "audit_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -82,6 +84,7 @@ class ProviderService:
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
+        self.audit_manager = audit_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -95,6 +98,29 @@ class ProviderService:
                 "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
             }
         return None
+
+    def _audit_event(
+        self, *, principal_id: str | None, operation: str, resource_type: str,
+        resource_id: str, outcome: str, request_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if self.audit_manager is None:
+            return None
+        try:
+            result = self.audit_manager.append(
+                actor_id=principal_id or "system",
+                operation=operation,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                outcome=outcome,
+                request_id=request_id,
+            )
+        except Exception as exc:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("saved") is not True:
+            return result if isinstance(result, dict) else {
+                "status": "AUDIT_LOG_FAILED", "saved": False,
+            }
+        return result
 
     def verify_provider(
         self,
