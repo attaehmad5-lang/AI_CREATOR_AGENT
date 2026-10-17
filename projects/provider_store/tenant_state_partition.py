@@ -18,6 +18,7 @@ class TenantStatePartition:
     })
     _TENANT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z")
     _FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.json\Z")
+    _SECRET_MARKERS = ("token", "secret", "password", "api_key", "authorization", "credential", "private_key")
 
     def __init__(self, root: str | Path, tenant_id: str) -> None:
         if not isinstance(tenant_id, str) or not self._TENANT_ID.fullmatch(tenant_id) or tenant_id in {".", ".."}:
@@ -29,8 +30,11 @@ class TenantStatePartition:
     def path_for(self, resource: str, filename: str) -> Path:
         if not isinstance(resource, str) or resource not in self.RESOURCES:
             raise ValueError("resource is not an approved tenant store")
-        if not isinstance(filename, str) or not self._FILE_NAME.fullmatch(filename):
-            raise ValueError("filename must be a safe JSON basename")
+        if (
+            not isinstance(filename, str) or not self._FILE_NAME.fullmatch(filename)
+            or any(marker in filename.casefold() for marker in self._SECRET_MARKERS)
+        ):
+            raise ValueError("filename must be a safe, non-secret JSON basename")
         if self.tenant_root.is_symlink():
             raise ValueError("tenant storage root must not be a symlink")
         resource_dir = self.tenant_root / resource
