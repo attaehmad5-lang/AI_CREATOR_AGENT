@@ -1,12 +1,12 @@
 # Task #25 — A–P Verification Matrix
 
-**Overall status: IN PROGRESS.** PR #1 was merged before Task #25 was complete. Follow-up hardening is isolated in draft PR #7; do not merge it without explicit user approval.
+**Overall status: IN PROGRESS.** PR #1 and the earlier security/reliability follow-up PR #7 are merged, but Task #25 remains incomplete. The current 17-feature hardening batch is isolated in draft PR #70; do not merge it without explicit user approval.
 
 The exact canonical feature names, original baseline markers and item-by-item evidence are maintained in the [canonical 138-item verification ledger](TASK25_CANONICAL_138_ITEM_LEDGER.md). This summary preserves the original A–P headings and ranges; it does not replace the detailed ledger.
 
 ## Latest code verification
 
-GitHub Actions code-verification run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299) completed successfully on Python 3.13: **328 tests passed on Ubuntu and 328 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This run includes bounded Retry-After metadata handling, overflow-safe retry backoff, fail-closed OAuth provider lookup, validated deprecation metadata including malformed-input rejection, and candidate-catalog validation before enablement.
+GitHub Actions run [#39049156369](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39049156369) passed on Python 3.13: **452 tests passed on Ubuntu and 452 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This verified code head includes budget-period alerting and delivery leases, hash-chained audit events, environment/vault secret resolution, job trace IDs and deadlines, per-provider concurrency and worker-lease fencing, bounded webhook replay storage, sensitive-field scanning, and data-policy URL validation. A later documentation-only ledger commit is receiving its own CI run.
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
@@ -18,11 +18,11 @@ GitHub Actions code-verification run [#38434905299](https://github.com/attaehmad
 | F / 41–48 | Health and Reliability | PARTIAL | Persistent health history, active-probe hooks and stale-health checks exist; live probes and automatic recovery/re-admission remain open. |
 | G / 49–56 | Output and Asset Safety | PARTIAL | Basic output/file validation and atomic helpers exist; full media decoding, codec constraints, malware scanning and asset lineage remain open. |
 | H / 57–64 | Cost, Free Credits and Quotas | PARTIAL | Budgets, approval gates, quotas, credit snapshots, reconciliation and a generic balance probe are tested; provider-specific balance semantics and live credit-first routing remain open. |
-| I / 65–72 | Security, Privacy and Governance | PARTIAL | Redaction, environment-only credentials, HTTPS allowlists and safe probes exist; least-privilege roles, sensitive-data enforcement, retention rules and complete audit logs remain open. |
-| J / 73–80 | Production Orchestration | PARTIAL | Request IDs/idempotency and cross-process manager safety exist; queue/backpressure, async jobs, webhook verification, cancellation and Generation State Manager integration remain open. |
+| I / 65–72 | Security, Privacy and Governance | PARTIAL | Environment/vault credential references, credential-field scanning, provider data-policy URL validation, admin-gated role changes, and hash-chained audit events exist; vendor vault integration, full policy coverage, and audit coverage for every operation remain open. |
+| J / 73–80 | Production Orchestration | PARTIAL | Stable job trace IDs, global/per-provider concurrency, queue backpressure, lease-token fencing, deadlines, bounded webhook replay, and cancellation requests are tested; remote-provider orchestration, force cancellation, and Generation State Manager integration remain open. |
 | K / 81–88 | Quality, Performance and Observability | PARTIAL | Health latency/history and safe status metadata exist; production metrics, quality scoring, benchmarks, tracing, alerts and dashboards remain open. |
 | L / 89–96 | Configuration, Compatibility and Change Control | PARTIAL | Schema validation, safe config checks and catalog restore exist; version migration, hot reload, feature flags and complete backup/rollback verification remain open. |
-| M / 97–110 | Testing, Audit and Release Readiness | PARTIAL | 303 tests pass on Windows and Ubuntu; full 138-item coverage, all-modality end-to-end tests, complete failure injection, secret scanning and release PASS remain open. |
+| M / 97–110 | Testing, Audit and Release Readiness | PARTIAL | 452 tests pass on Windows and Ubuntu at the last verified code head; full 138-item coverage, all-modality end-to-end tests, complete failure injection, repository-wide secret scanning and release PASS remain open. |
 | N / 111–118 | High-Advanced Routing Intelligence | PARTIAL | Cost/health/capability routing foundations exist; confidence-aware, adaptive, region-aware and A/B routing with approval gates remain open. |
 | O / 119–128 | Enterprise and Large-Production Resiliency | OPEN/PARTIAL | Some quotas, health and restore primitives exist; tenant isolation, fair scheduling, regional outage/degraded mode, capacity tests, SLOs and incident runbooks are not complete. |
 | P / 129–138 | Future-Ready Extensibility | PARTIAL | Capability contracts and compatibility facades exist; plugin lifecycle, self-hosted providers, deprecation handling, policy simulation and admin controls remain open. |
