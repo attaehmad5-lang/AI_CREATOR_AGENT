@@ -21,6 +21,10 @@ from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
 _CODE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,79}\Z")
+_SECRET_RE = re.compile(
+    r"(?i)(?:bearer\\s+[A-Za-z0-9._~+/-]{12,}|(?:api[_-]?key|access[_-]?token|secret|password)\\s*[:=]\\s*[^\\s,;]{6,}|"
+    r"\\b(?:sk-[A-Za-z0-9_-]{16,}|hf_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\\b)"
+)
 _ZERO_HASH = "0" * 64
 
 
@@ -44,6 +48,10 @@ class ProviderAuditLog:
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "entries": []}
         self._reload()
+
+    @staticmethod
+    def _safe_audit_value(value: str) -> bool:
+        return _SECRET_RE.search(value) is None
 
     @staticmethod
     def _hash_entry(entry: dict[str, Any]) -> str:
@@ -134,18 +142,18 @@ class ProviderAuditLog:
         outcome: str,
         request_id: str | None = None,
     ) -> dict[str, Any]:
-        if not isinstance(actor_id, str) or not _ID_RE.fullmatch(actor_id):
+        if not isinstance(actor_id, str) or not _ID_RE.fullmatch(actor_id) or not self._safe_audit_value(actor_id):
             return {"status": "INVALID_AUDIT_ACTOR", "saved": False}
-        if not isinstance(operation, str) or not _CODE_RE.fullmatch(operation):
+        if not isinstance(operation, str) or not _CODE_RE.fullmatch(operation) or not self._safe_audit_value(operation):
             return {"status": "INVALID_AUDIT_OPERATION", "saved": False}
-        if not isinstance(resource_type, str) or not _CODE_RE.fullmatch(resource_type):
+        if not isinstance(resource_type, str) or not _CODE_RE.fullmatch(resource_type) or not self._safe_audit_value(resource_type):
             return {"status": "INVALID_AUDIT_RESOURCE_TYPE", "saved": False}
-        if not isinstance(resource_id, str) or not _ID_RE.fullmatch(resource_id):
+        if not isinstance(resource_id, str) or not _ID_RE.fullmatch(resource_id) or not self._safe_audit_value(resource_id):
             return {"status": "INVALID_AUDIT_RESOURCE_ID", "saved": False}
-        if not isinstance(outcome, str) or not _CODE_RE.fullmatch(outcome):
+        if not isinstance(outcome, str) or not _CODE_RE.fullmatch(outcome) or not self._safe_audit_value(outcome):
             return {"status": "INVALID_AUDIT_OUTCOME", "saved": False}
         if request_id is not None and (
-            not isinstance(request_id, str) or not _ID_RE.fullmatch(request_id)
+            not isinstance(request_id, str) or not _ID_RE.fullmatch(request_id) or not self._safe_audit_value(request_id)
         ):
             return {"status": "INVALID_AUDIT_REQUEST_ID", "saved": False}
         now = self.clock()
