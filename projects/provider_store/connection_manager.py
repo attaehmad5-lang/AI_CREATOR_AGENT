@@ -594,10 +594,33 @@ class ConnectionManager:
         return provider is not None and provider.get("enabled") is True
 
     def validate_provider_contract(self, provider_id: str, instance: Any) -> dict[str, Any]:
-        """Validate the callable surface required by the provider's declared modality."""
+        """Validate adapter API version and callable surface for the declared modality."""
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+        provider_version = provider.get("adapter_api_version", "1.0")
+        if not isinstance(provider_version, str) or not re.fullmatch(r"\d+\.\d+", provider_version):
+            return {
+                "status": "INVALID_ADAPTER_API_VERSION", "provider": provider_id,
+                "valid": False, "contract_version": "1.0",
+            }
+        if provider_version != "1.0":
+            return {
+                "status": "UNSUPPORTED_ADAPTER_API_VERSION", "provider": provider_id,
+                "valid": False, "contract_version": provider_version,
+            }
+        try:
+            instance_version = getattr(instance, "adapter_api_version", "1.0")
+        except Exception:
+            return {
+                "status": "ADAPTER_API_VERSION_UNREADABLE", "provider": provider_id,
+                "valid": False, "contract_version": provider_version,
+            }
+        if instance_version != provider_version:
+            return {
+                "status": "ADAPTER_API_VERSION_MISMATCH", "provider": provider_id,
+                "valid": False, "contract_version": provider_version,
+            }
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
         contracts: dict[str, tuple[tuple[str, ...], ...]] = {
             "image": (("generate_image",),),
