@@ -103,6 +103,26 @@ class ProviderJobManager:
                         or not self._is_aware_timestamp(job.get("deadline_at"))
                     )
                 )
+                or (
+                    job.get("trace_id") is not None
+                    and (not isinstance(job.get("trace_id"), str) or not _ID_RE.fullmatch(job["trace_id"]))
+                )
+                or (
+                    "cancel_requested" in job
+                    and not isinstance(job.get("cancel_requested"), bool)
+                )
+                or (
+                    job.get("worker_id") is not None
+                    and (not isinstance(job.get("worker_id"), str) or not _ID_RE.fullmatch(job["worker_id"]))
+                )
+                or (
+                    job.get("lease_token") is not None
+                    and (not isinstance(job.get("lease_token"), str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", job["lease_token"]))
+                )
+                or (
+                    job.get("lease_until") is not None
+                    and not self._is_aware_timestamp(job.get("lease_until"))
+                )
                 or isinstance(job.get("attempts"), bool)
                 or not isinstance(job.get("attempts"), int) or job["attempts"] < 0
                 or isinstance(job.get("priority"), bool)
