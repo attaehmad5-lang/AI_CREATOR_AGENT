@@ -1,9 +1,11 @@
-"""Bounded in-process execution queue with explicit backpressure semantics.
+"""Bounded execution queue with optional atomic JSON persistence and backpressure.
 
 Only request metadata is stored; prompts, credentials, payloads, and provider responses
 must remain outside the queue. Running work retains its capacity slot after cancel or
-deadline requests until its worker confirms a terminal outcome.
+deadline requests until its worker confirms a terminal outcome. With state_path set,
+shared processes coordinate through an OS-level lock on a shared local filesystem.
 """
+
 from __future__ import annotations
 
 import json
@@ -107,6 +109,12 @@ class BoundedExecutionQueue:
         terminal = loaded["terminal"]
         if len(pending) > self.max_pending or len(running) > self.max_running or len(terminal) > self.max_terminal_records:
             raise ValueError("execution queue state exceeds configured limits")
+        tenant_pending: dict[str, int] = {}
+        for item in pending.values():
+            if isinstance(item, dict) and isinstance(item.get("tenant_id"), str):
+                tenant_pending[item["tenant_id"]] = tenant_pending.get(item["tenant_id"], 0) + 1
+        if any(count > self.max_pending_per_tenant for count in tenant_pending.values()):
+            raise ValueError("execution queue state exceeds per-tenant limits")
         for collection, statuses in (
             (pending, {"QUEUED"}), (running, {"RUNNING"}),
             (terminal, self.TERMINAL_STATES),
