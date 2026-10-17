@@ -406,6 +406,63 @@ class ProviderService:
             result["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
         return result
 
+    def request_job_shutdown(
+        self, *, drain: bool = True, deadline_at: str | None = None,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self.job_manager is None or not callable(getattr(self.job_manager, "request_shutdown", None)):
+            return {"status": "JOB_SHUTDOWN_CONTROL_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit = self._audit_event(
+            principal_id=principal_id, operation="provider.job.shutdown",
+            resource_type="job_queue", resource_id="provider-job-queue", outcome="REQUESTED",
+        )
+        if audit is not None and audit.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
+        try:
+            result = self.job_manager.request_shutdown(drain=drain, deadline_at=deadline_at)
+        except Exception as exc:
+            return {"status": "JOB_SHUTDOWN_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        outcome = self._audit_event(
+            principal_id=principal_id, operation="provider.job.shutdown",
+            resource_type="job_queue", resource_id="provider-job-queue",
+            outcome=str(result.get("status", "UNKNOWN")),
+        )
+        if outcome is not None and outcome.get("saved") is not True:
+            result["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return result
+
+    def resume_job_work(self, *, principal_id: str | None = None) -> dict[str, Any]:
+        if self.job_manager is None or not callable(getattr(self.job_manager, "resume_work", None)):
+            return {"status": "JOB_SHUTDOWN_CONTROL_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit = self._audit_event(
+            principal_id=principal_id, operation="provider.job.resume",
+            resource_type="job_queue", resource_id="provider-job-queue", outcome="REQUESTED",
+        )
+        if audit is not None and audit.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
+        try:
+            result = self.job_manager.resume_work()
+        except Exception as exc:
+            return {"status": "JOB_RESUME_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        outcome = self._audit_event(
+            principal_id=principal_id, operation="provider.job.resume",
+            resource_type="job_queue", resource_id="provider-job-queue",
+            outcome=str(result.get("status", "UNKNOWN")),
+        )
+        if outcome is not None and outcome.get("saved") is not True:
+            result["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return result
+
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, trace_id: str | None = None,
