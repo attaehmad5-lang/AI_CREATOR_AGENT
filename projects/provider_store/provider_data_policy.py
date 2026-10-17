@@ -38,9 +38,23 @@ class ProviderDataHandlingPolicy:
                 or not isinstance(source, str)
             ):
                 raise ValueError("invalid provider data policy fields")
+            if (
+                len(source) > 2048
+                or any(ord(char) < 32 or ord(char) == 127 for char in source)
+            ):
+                raise ValueError("provider data policy source URL contains unsafe characters")
             parsed = urlsplit(source)
-            if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
-                raise ValueError("provider data policy source must be an HTTPS URL")
+            try:
+                port = parsed.port
+            except ValueError as exc:
+                raise ValueError("provider data policy source URL has an invalid port") from exc
+            if (
+                parsed.scheme != "https" or not parsed.hostname
+                or parsed.username or parsed.password
+                or parsed.query or parsed.fragment
+                or (port is not None and not 1 <= port <= 65535)
+            ):
+                raise ValueError("provider data policy source must be a clean HTTPS terms URL")
             self.policies[provider_id] = {
                 "allowed_categories": frozenset(categories),
                 "max_retention_days": retention,
