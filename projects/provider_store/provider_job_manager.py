@@ -307,6 +307,10 @@ class ProviderJobManager:
                     queued_job["completed_at"] = now.isoformat()
                     queued_job["updated_at"] = now.isoformat()
                     changed = True
+            if self.data["control"].get("accepting_work") is not True:
+                if changed:
+                    self._save()
+                return {"status": "SHUTDOWN_DRAINING", "job": None}
             running = sum(
                 1 for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "RUNNING"
@@ -324,10 +328,6 @@ class ProviderJobManager:
                 if changed:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
-            if self.data["control"].get("accepting_work") is not True:
-                if changed:
-                    self._save()
-                return {"status": "SHUTDOWN_DRAINING", "job": None}
             running_by_provider: dict[str, int] = {}
             for running_job in self.data["jobs"].values():
                 if isinstance(running_job, dict) and running_job.get("status") == "RUNNING":
