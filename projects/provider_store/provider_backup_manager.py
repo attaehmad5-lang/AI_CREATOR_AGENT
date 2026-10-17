@@ -40,7 +40,7 @@ class ProviderBackupManager:
 
     @staticmethod
     def _safe_relative(value: Any) -> str | None:
-        if not isinstance(value, str) or not value or "\\" in value:
+        if not isinstance(value, str) or not value or "\\" in value or ":" in value:
             return None
         path = PurePosixPath(value)
         if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts) or path.suffix.casefold() != ".json":
@@ -184,7 +184,7 @@ class ProviderBackupManager:
                         return {"status": "BACKUP_CHECKSUM_OR_CONTENT_INVALID", "verified": False}
                 if total > self.max_total_bytes:
                     return {"status": "BACKUP_TOTAL_SIZE_EXCEEDED", "verified": False}
-        except (OSError, zipfile.BadZipFile, KeyError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError):
+        except (OSError, zipfile.BadZipFile, KeyError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError, RecursionError):
             return {"status": "BACKUP_ARCHIVE_INVALID", "verified": False}
         return {"status": "BACKUP_VERIFIED", "verified": True, "file_count": len(expected_names), "total_bytes": total}
 
