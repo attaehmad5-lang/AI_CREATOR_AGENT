@@ -327,6 +327,71 @@ class ProviderService:
             "health": health,
         }
 
+    def assign_provider_role(
+        self, *, actor_id: str, target_principal_id: str, role: str,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        """Expose role changes only through an explicitly authorized admin operation."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(actor_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=actor_id, operation="provider.access.assign_role",
+            resource_type="principal", resource_id=target_principal_id,
+            outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
+        try:
+            result = self.authorization_manager.assign_role(
+                target_principal_id, role, enabled=enabled,
+            )
+        except Exception as exc:
+            return {"status": "ROLE_ASSIGNMENT_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_AUTHORIZATION_RESPONSE", "saved": False}
+        audit_result = self._audit_event(
+            principal_id=actor_id, operation="provider.access.assign_role",
+            resource_type="principal", resource_id=target_principal_id,
+            outcome=str(result.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            result["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return result
+
+    def disable_provider_principal(
+        self, *, actor_id: str, target_principal_id: str,
+    ) -> dict[str, Any]:
+        """Disable a principal only after admin authorization and an audit intent."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(actor_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=actor_id, operation="provider.access.disable_principal",
+            resource_type="principal", resource_id=target_principal_id,
+            outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
+        try:
+            result = self.authorization_manager.disable_principal(target_principal_id)
+        except Exception as exc:
+            return {"status": "PRINCIPAL_DISABLE_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_AUTHORIZATION_RESPONSE", "saved": False}
+        audit_result = self._audit_event(
+            principal_id=actor_id, operation="provider.access.disable_principal",
+            resource_type="principal", resource_id=target_principal_id,
+            outcome=str(result.get("status", "UNKNOWN")),
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            result["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return result
+
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, trace_id: str | None = None,
