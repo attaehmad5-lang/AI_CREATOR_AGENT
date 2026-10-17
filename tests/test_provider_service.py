@@ -1057,9 +1057,10 @@ class ProviderServiceTests(unittest.TestCase):
         authorization.assign_role("admin-actor", "admin")
         authorization.assign_role("creator-actor", "creator")
         audit = ProviderAuditLog(self.root / "role-audit.json")
+        jobs = ProviderJobManager(self.root / "role-jobs.json")
         service = ProviderService(
             self.connections, authorization_manager=authorization,
-            audit_manager=audit,
+            audit_manager=audit, job_manager=jobs,
         )
         denied = service.assign_provider_role(
             actor_id="creator-actor", target_principal_id="new-admin",
@@ -1083,6 +1084,12 @@ class ProviderServiceTests(unittest.TestCase):
             authorization.authorize("new-creator", "provider.generate")["status"],
             "PRINCIPAL_DISABLED",
         )
+        denied_shutdown = service.request_job_shutdown(principal_id="creator-actor")
+        self.assertEqual(denied_shutdown["status"], "AUTHORIZATION_DENIED")
+        shutdown = service.request_job_shutdown(principal_id="admin-actor")
+        self.assertEqual(shutdown["status"], "SHUTDOWN_DRAINING")
+        resumed = service.resume_job_work(principal_id="admin-actor")
+        self.assertEqual(resumed["status"], "WORK_RESUMED")
         self.assertTrue(audit.verify_chain()["valid"])
 
     def test_job_mutation_fails_closed_when_audit_intent_cannot_be_saved(self):
