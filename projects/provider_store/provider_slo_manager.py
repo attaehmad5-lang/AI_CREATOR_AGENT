@@ -1,181 +1,295 @@
-"""Bounded service-level objective definitions and evaluation for provider metrics."""
+"""Persistent, bounded service-level objective definitions and evaluation."""
 from __future__ import annotations
 
-import copy
+import json
 import math
-import re
+import os
+import tempfile
 import threading
-from collections import deque
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
+from .safe_numbers import finite_number
 
 
 class ProviderSLOManager:
-    """Evaluate configured targets against the bounded metrics snapshot.
+    """Track request-level success/latency evidence without storing payloads."""
 
-    This is local, sample-window SLO tracking; it is not an external telemetry/SLO platform.
-    """
+    MAX_WINDOW_SECONDS = 30 * 24 * 60 * 60
 
     def __init__(
         self,
-        metrics_manager: Any,
+        state_path: str | os.PathLike[str],
         *,
-        max_history: int = 500,
-        clock: Any = None,
+        max_slos: int = 500,
+        max_observations_per_slo: int = 100_000,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
-        if not callable(getattr(metrics_manager, "snapshot", None)):
-            raise ValueError("metrics_manager must provide snapshot()")
-        if isinstance(max_history, bool) or not isinstance(max_history, int) or not 1 <= max_history <= 10000:
-            raise ValueError("max_history is outside safe limits")
+        if isinstance(max_slos, bool) or not isinstance(max_slos, int) or not 1 <= max_slos <= 10_000:
+            raise ValueError("max_slos must be between 1 and 10000")
+        if isinstance(max_observations_per_slo, bool) or not isinstance(max_observations_per_slo, int) or not 1 <= max_observations_per_slo <= 1_000_000:
+            raise ValueError("max_observations_per_slo must be between 1 and 1000000")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
-        self.metrics_manager = metrics_manager
-        self.max_history = max_history
+        self.path = Path(state_path)
+        self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        self.max_slos = max_slos
+        self.max_observations = max_observations_per_slo
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
-        self._targets: dict[tuple[str, str], dict[str, Any]] = {}
-        self._history: deque[dict[str, Any]] = deque(maxlen=max_history)
+        self.data: dict[str, Any] = {"version": "1.0", "slos": {}}
+        with self._transaction():
+            pass
 
     @staticmethod
-    def _valid_id(value: Any, *, maximum: int) -> bool:
-        return isinstance(value, str) and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0," + str(maximum - 1) + r"}", value))
+    def _valid_id(value: Any, limit: int = 160) -> bool:
+        return (
+            isinstance(value, str) and 1 <= len(value.strip()) <= limit
+            and value == value.strip() and not any(ord(ch) < 32 for ch in value)
+        )
 
-    def set_target(
+    @staticmethod
+    def _timestamp(value: Any) -> datetime:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("invalid SLO timestamp")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError("invalid SLO timestamp") from None
+        if parsed.tzinfo is None:
+            raise ValueError("SLO timestamp must include timezone")
+        return parsed.astimezone(timezone.utc)
+
+    def _now(self) -> datetime:
+        value = self.clock()
+        if not isinstance(value, datetime) or value.tzinfo is None:
+            raise ValueError("SLO clock must return a timezone-aware datetime")
+        return value.astimezone(timezone.utc)
+
+    def _load(self) -> dict[str, Any]:
+        if not self.path.exists():
+            return {"version": "1.0", "slos": {}}
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError, RecursionError):
+            raise ValueError("SLO state is unreadable") from None
+        if not isinstance(raw, dict) or raw.get("version") != "1.0" or not isinstance(raw.get("slos"), dict):
+            raise ValueError("SLO state schema is invalid")
+        if len(raw["slos"]) > self.max_slos:
+            raise ValueError("SLO state exceeds configured limit")
+        for slo_id, slo in raw["slos"].items():
+            if not self._valid_id(slo_id, 128) or not isinstance(slo, dict) or slo.get("slo_id") != slo_id:
+                raise ValueError("SLO definition is invalid")
+            if not self._valid_id(slo.get("service_id"), 128):
+                raise ValueError("SLO service is invalid")
+            target = finite_number(slo.get("target_success_rate"), minimum=0, maximum=1)
+            window = slo.get("window_seconds")
+            minimum = slo.get("min_samples")
+            if (
+                target is None or target <= 0
+                or isinstance(window, bool) or not isinstance(window, int)
+                or not 60 <= window <= self.MAX_WINDOW_SECONDS
+                or isinstance(minimum, bool) or not isinstance(minimum, int)
+                or not 1 <= minimum <= self.max_observations
+                or slo.get("status") not in {"ACTIVE", "PAUSED"}
+            ):
+                raise ValueError("SLO policy is invalid")
+            latency = slo.get("max_p95_latency_ms")
+            if latency is not None and finite_number(latency, minimum=0) is None:
+                raise ValueError("SLO latency threshold is invalid")
+            observations = slo.get("observations")
+            if not isinstance(observations, list) or len(observations) > self.max_observations:
+                raise ValueError("SLO observations are invalid")
+            seen: set[str] = set()
+            for observation in observations:
+                if not isinstance(observation, dict):
+                    raise ValueError("SLO observation is invalid")
+                request_id = observation.get("request_id")
+                if not self._valid_id(request_id, 200) or request_id in seen:
+                    raise ValueError("SLO observation id is invalid or duplicated")
+                seen.add(request_id)
+                self._timestamp(observation.get("observed_at"))
+                if not isinstance(observation.get("success"), bool):
+                    raise ValueError("SLO observation success flag is invalid")
+                if finite_number(observation.get("latency_ms"), minimum=0) is None:
+                    raise ValueError("SLO observation latency is invalid")
+        return raw
+
+    def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=f".{self.path.name}.", suffix=".tmp", dir=str(self.path.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(self.data, stream, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            atomic_replace_with_retry(temporary, self.path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    class _Transaction:
+        def __init__(self, manager: "ProviderSLOManager") -> None:
+            self.manager = manager
+        def __enter__(self):
+            self.manager._lock.acquire()
+            self.lock = interprocess_file_lock(self.manager.lock_path)
+            self.lock.__enter__()
+            try:
+                self.manager.data = self.manager._load()
+            except Exception:
+                self.lock.__exit__(None, None, None)
+                self.manager._lock.release()
+                raise
+            return self.manager
+        def __exit__(self, exc_type, exc, tb):
+            try:
+                if exc_type is None:
+                    self.manager._save()
+            finally:
+                self.lock.__exit__(exc_type, exc, tb)
+                self.manager._lock.release()
+            return False
+
+    def _transaction(self):
+        return self._Transaction(self)
+
+    def define_slo(
         self,
         *,
-        provider_id: str,
-        category: str,
+        slo_id: str,
+        service_id: str,
+        target_success_rate: float,
+        window_seconds: int = 86_400,
         min_samples: int = 20,
-        min_success_rate: float = 0.99,
         max_p95_latency_ms: float | None = None,
-        max_timeout_rate: float = 0.05,
     ) -> dict[str, Any]:
-        if not self._valid_id(provider_id, maximum=128):
-            return {"status": "INVALID_PROVIDER_ID", "saved": False}
-        if not self._valid_id(category, maximum=64):
-            return {"status": "INVALID_CATEGORY", "saved": False}
-        if isinstance(min_samples, bool) or not isinstance(min_samples, int) or not 1 <= min_samples <= 100000:
-            return {"status": "INVALID_MIN_SAMPLES", "saved": False}
+        target = finite_number(target_success_rate, minimum=0, maximum=1)
+        latency = None if max_p95_latency_ms is None else finite_number(max_p95_latency_ms, minimum=0)
         if (
-            not isinstance(min_success_rate, (int, float))
-            or isinstance(min_success_rate, bool)
-            or not math.isfinite(min_success_rate)
-            or not 0 <= min_success_rate <= 1
+            not self._valid_id(slo_id, 128) or not self._valid_id(service_id, 128)
+            or target is None or target <= 0
+            or isinstance(window_seconds, bool) or not isinstance(window_seconds, int)
+            or not 60 <= window_seconds <= self.MAX_WINDOW_SECONDS
+            or isinstance(min_samples, bool) or not isinstance(min_samples, int)
+            or not 1 <= min_samples <= self.max_observations
+            or (max_p95_latency_ms is not None and latency is None)
         ):
-            return {"status": "INVALID_SUCCESS_RATE", "saved": False}
-        if (
-            not isinstance(max_timeout_rate, (int, float))
-            or isinstance(max_timeout_rate, bool)
-            or not math.isfinite(max_timeout_rate)
-            or not 0 <= max_timeout_rate <= 1
-        ):
-            return {"status": "INVALID_TIMEOUT_RATE", "saved": False}
-        if max_p95_latency_ms is not None and (
-            not isinstance(max_p95_latency_ms, (int, float))
-            or isinstance(max_p95_latency_ms, bool)
-            or not math.isfinite(max_p95_latency_ms)
-            or max_p95_latency_ms <= 0
-        ):
-            return {"status": "INVALID_P95_LATENCY", "saved": False}
-        target = {
-            "provider_id": provider_id,
-            "category": category,
-            "min_samples": min_samples,
-            "min_success_rate": float(min_success_rate),
-            "max_p95_latency_ms": float(max_p95_latency_ms) if max_p95_latency_ms is not None else None,
-            "max_timeout_rate": float(max_timeout_rate),
-        }
-        with self._lock:
-            self._targets[(provider_id, category)] = target
-        return {"status": "SLO_TARGET_SAVED", "saved": True, "target": dict(target)}
-
-    def get_target(self, *, provider_id: str, category: str) -> dict[str, Any]:
-        with self._lock:
-            target = self._targets.get((provider_id, category))
-            return {
-                "status": "SLO_TARGET_FOUND" if target else "SLO_TARGET_NOT_FOUND",
-                "target": dict(target) if target else None,
+            return {"status": "INVALID_SLO_DEFINITION", "saved": False}
+        with self._transaction():
+            if slo_id in self.data["slos"]:
+                return {"status": "SLO_ALREADY_EXISTS", "saved": False}
+            if len(self.data["slos"]) >= self.max_slos:
+                return {"status": "SLO_LIMIT_REACHED", "saved": False}
+            self.data["slos"][slo_id] = {
+                "slo_id": slo_id, "service_id": service_id,
+                "target_success_rate": target, "window_seconds": window_seconds,
+                "min_samples": min_samples, "max_p95_latency_ms": latency,
+                "status": "ACTIVE", "observations": [],
             }
+        return {"status": "SLO_CREATED", "saved": True, "slo_id": slo_id}
 
-    def evaluate(self, *, provider_id: str, category: str) -> dict[str, Any]:
-        with self._lock:
-            target = self._targets.get((provider_id, category))
-            target = dict(target) if target else None
-        if target is None:
-            return {"status": "SLO_TARGET_NOT_FOUND", "evaluated": False}
+    def set_status(self, *, slo_id: str, status: str) -> dict[str, Any]:
+        if not self._valid_id(slo_id, 128):
+            return {"status": "INVALID_SLO_ID", "saved": False}
+        if status not in {"ACTIVE", "PAUSED"}:
+            return {"status": "INVALID_SLO_STATUS", "saved": False}
+        with self._transaction():
+            slo = self.data["slos"].get(slo_id)
+            if not isinstance(slo, dict):
+                return {"status": "SLO_NOT_FOUND", "saved": False}
+            slo["status"] = status
+        return {"status": "SLO_STATUS_UPDATED", "saved": True}
+
+    def record_observation(
+        self,
+        *,
+        slo_id: str,
+        service_id: str,
+        request_id: str,
+        success: bool,
+        latency_ms: float,
+    ) -> dict[str, Any]:
+        latency = finite_number(latency_ms, minimum=0)
+        if not self._valid_id(slo_id, 128) or not self._valid_id(service_id, 128) or not self._valid_id(request_id, 200):
+            return {"status": "INVALID_SLO_OBSERVATION_ID", "saved": False}
+        if not isinstance(success, bool) or latency is None:
+            return {"status": "INVALID_SLO_OBSERVATION", "saved": False}
         try:
-            snapshot = self.metrics_manager.snapshot(provider_id=provider_id, category=category)
-        except Exception as exc:
-            return {"status": "SLO_METRICS_LOOKUP_FAILED", "evaluated": False, "error_type": type(exc).__name__}
-        if not isinstance(snapshot, dict) or snapshot.get("status") not in {"METRICS_AVAILABLE", "NO_METRICS"}:
-            return {"status": "SLO_METRICS_INVALID", "evaluated": False}
-        metrics = snapshot.get("metrics")
-        if not isinstance(metrics, dict):
-            return {"status": "SLO_METRICS_INVALID", "evaluated": False}
-        count = metrics.get("sample_count")
-        if isinstance(count, bool) or not isinstance(count, int) or count < target["min_samples"]:
-            return {
-                "status": "SLO_INSUFFICIENT_DATA",
-                "evaluated": False,
-                "sample_count": count if isinstance(count, int) and not isinstance(count, bool) else 0,
-                "required_samples": target["min_samples"],
-            }
-        success_rate = metrics.get("success_rate")
-        p95 = metrics.get("p95_latency_ms")
-        timeout_count = metrics.get("timeout_count")
-        if (
-            not isinstance(success_rate, (int, float)) or isinstance(success_rate, bool)
-            or not math.isfinite(success_rate) or not 0 <= success_rate <= 1
-            or isinstance(timeout_count, bool) or not isinstance(timeout_count, int)
-            or not 0 <= timeout_count <= count
-            or (p95 is not None and (
-                not isinstance(p95, (int, float)) or isinstance(p95, bool)
-                or not math.isfinite(p95) or p95 < 0
-            ))
-        ):
-            return {"status": "SLO_METRICS_INVALID", "evaluated": False}
-        timeout_rate = timeout_count / count
-        breached = []
-        if success_rate < target["min_success_rate"]:
-            breached.append("SUCCESS_RATE")
-        if timeout_rate > target["max_timeout_rate"]:
-            breached.append("TIMEOUT_RATE")
-        if target["max_p95_latency_ms"] is not None:
-            if p95 is None:
-                return {"status": "SLO_METRICS_INCOMPLETE", "evaluated": False}
-            if p95 > target["max_p95_latency_ms"]:
-                breached.append("P95_LATENCY")
-        result = {
-            "status": "SLO_BREACHED" if breached else "SLO_MET",
-            "evaluated": True,
-            "provider_id": provider_id,
-            "category": category,
-            "sample_count": count,
-            "success_rate": float(success_rate),
-            "timeout_rate": timeout_rate,
-            "p95_latency_ms": float(p95) if p95 is not None else None,
-            "breached_objectives": breached,
-            "target": target,
-            "evaluated_at": self.clock().astimezone(timezone.utc).isoformat(),
-        }
-        # Persist only bounded aggregate metadata, never request payloads or credentials.
-        history_record = {
-            key: copy.deepcopy(result[key])
-            for key in (
-                "provider_id", "category", "sample_count", "success_rate",
-                "timeout_rate", "p95_latency_ms", "breached_objectives",
-                "status", "evaluated_at",
-            )
-        }
-        with self._lock:
-            self._history.append(history_record)
-        return result
+            now = self._now().isoformat()
+        except Exception:
+            return {"status": "SLO_CLOCK_FAILED", "saved": False}
+        with self._transaction():
+            slo = self.data["slos"].get(slo_id)
+            if not isinstance(slo, dict):
+                return {"status": "SLO_NOT_FOUND", "saved": False}
+            if slo["service_id"] != service_id:
+                return {"status": "SERVICE_SCOPE_MISMATCH", "saved": False}
+            if slo["status"] != "ACTIVE":
+                return {"status": "SLO_NOT_ACTIVE", "saved": False}
+            existing = next((item for item in slo["observations"] if item["request_id"] == request_id), None)
+            candidate = {"request_id": request_id, "observed_at": now, "success": success, "latency_ms": latency}
+            if existing is not None:
+                if existing["success"] == success and existing["latency_ms"] == latency:
+                    return {"status": "ALREADY_RECORDED", "saved": True}
+                return {"status": "OBSERVATION_CONFLICT", "saved": False}
+            if len(slo["observations"]) >= self.max_observations:
+                return {"status": "OBSERVATION_LIMIT_REACHED", "saved": False}
+            slo["observations"].append(candidate)
+        return {"status": "SLO_OBSERVATION_RECORDED", "saved": True}
 
-    def history(self, *, provider_id: str | None = None, category: str | None = None) -> list[dict[str, Any]]:
-        with self._lock:
-            return [
-                copy.deepcopy(item)
-                for item in self._history
-                if (provider_id is None or item["provider_id"] == provider_id)
-                and (category is None or item["category"] == category)
+    @staticmethod
+    def _percentile(values: list[float], percentile: float) -> float | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        index = max(0, math.ceil(percentile * len(ordered)) - 1)
+        return ordered[index]
+
+    def evaluate(self, *, slo_id: str, service_id: str) -> dict[str, Any]:
+        if not self._valid_id(slo_id, 128) or not self._valid_id(service_id, 128):
+            return {"status": "INVALID_SLO_SCOPE", "slo_status": "UNKNOWN"}
+        try:
+            now = self._now()
+        except Exception:
+            return {"status": "SLO_CLOCK_FAILED", "slo_status": "UNKNOWN"}
+        with self._transaction():
+            slo = self.data["slos"].get(slo_id)
+            if not isinstance(slo, dict):
+                return {"status": "SLO_NOT_FOUND", "slo_status": "UNKNOWN"}
+            if slo["service_id"] != service_id:
+                return {"status": "SERVICE_SCOPE_MISMATCH", "slo_status": "UNKNOWN"}
+            cutoff = now - timedelta(seconds=slo["window_seconds"])
+            observations = [
+                item for item in slo["observations"]
+                if cutoff <= self._timestamp(item["observed_at"]) <= now
             ]
+            count = len(observations)
+            if slo["status"] != "ACTIVE":
+                state = "PAUSED"
+            elif count < slo["min_samples"]:
+                state = "INSUFFICIENT_DATA"
+            else:
+                success_rate = sum(1 for item in observations if item["success"]) / count
+                p95 = self._percentile([item["latency_ms"] for item in observations], 0.95)
+                breached = success_rate < slo["target_success_rate"] or (
+                    slo["max_p95_latency_ms"] is not None and p95 is not None
+                    and p95 > slo["max_p95_latency_ms"]
+                )
+                state = "SLO_BREACHED" if breached else "SLO_MET"
+            successes = sum(1 for item in observations if item["success"])
+            failures = count - successes
+            success_rate = successes / count if count else None
+            p95 = self._percentile([item["latency_ms"] for item in observations], 0.95)
+            allowed_failures = max(0.0, (1.0 - slo["target_success_rate"]) * count)
+            return {
+                "status": "SLO_EVALUATED", "slo_status": state, "slo_id": slo_id,
+                "service_id": service_id, "window_seconds": slo["window_seconds"],
+                "sample_count": count, "success_count": successes, "failure_count": failures,
+                "success_rate": success_rate, "target_success_rate": slo["target_success_rate"],
+                "p95_latency_ms": p95, "max_p95_latency_ms": slo["max_p95_latency_ms"],
+                "error_budget_allowed_failures": allowed_failures,
+                "error_budget_remaining": max(0.0, allowed_failures - failures),
+            }
