@@ -26,6 +26,7 @@ class ProviderService:
         budget_alert_manager: Any | None = None,
         authorization_manager: Any | None = None,
         degraded_mode_manager: Any | None = None,
+        tenant_policy_manager: Any | None = None,
         sensitive_data_policy: Any | None = None,
         data_handling_policy: Any | None = None,
         webhook_verifier: Any | None = None,
@@ -50,6 +51,7 @@ class ProviderService:
             (budget_alert_manager, "record", "budget_alert_manager"),
             (authorization_manager, "authorize", "authorization_manager"),
             (degraded_mode_manager, "evaluate", "degraded_mode_manager"),
+            (tenant_policy_manager, "authorize_scope", "tenant_policy_manager"),
             (sensitive_data_policy, "inspect", "sensitive_data_policy"),
             (data_handling_policy, "evaluate", "data_handling_policy"),
             (webhook_verifier, "verify", "webhook_verifier"),
@@ -75,6 +77,7 @@ class ProviderService:
         self.budget_alert_manager = budget_alert_manager
         self.authorization_manager = authorization_manager
         self.degraded_mode_manager = degraded_mode_manager
+        self.tenant_policy_manager = tenant_policy_manager
         self.sensitive_data_policy = sensitive_data_policy
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
@@ -448,6 +451,7 @@ class ProviderService:
         adapter: Any,
         modality: str,
         principal_id: str | None = None,
+        tenant_id: str | None = None,
         degraded_service_id: str | None = None,
         data_categories: tuple[str, ...] | list[str] = ("user_content",),
         retention_days: int = 0,
@@ -475,6 +479,27 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+
+        tenant_scope_result = None
+        if self.tenant_policy_manager is not None:
+            if not isinstance(tenant_id, str) or not tenant_id.strip():
+                return {"status": "TENANT_ID_REQUIRED", "executed": False}
+            try:
+                tenant_scope_result = self.tenant_policy_manager.authorize_scope(
+                    tenant_id=tenant_id, project_id=project_id, modality=modality,
+                )
+            except Exception as exc:
+                return {
+                    "status": "TENANT_SCOPE_CHECK_FAILED",
+                    "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(tenant_scope_result, dict) or tenant_scope_result.get("allowed") is not True:
+                return {
+                    "status": "TENANT_SCOPE_DENIED",
+                    "executed": False,
+                    "tenant_scope": tenant_scope_result,
+                }
 
         degraded_mode_result = None
         if self.degraded_mode_manager is not None:
@@ -561,6 +586,30 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+
+        if self.tenant_policy_manager is not None:
+            try:
+                provider_scope = self.tenant_policy_manager.authorize_scope(
+                    tenant_id=tenant_id, project_id=project_id,
+                    modality=modality, provider_id=provider_id,
+                )
+            except Exception as exc:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "TENANT_SCOPE_CHECK_FAILED", "executed": False,
+                    "release": release, "error_type": type(exc).__name__,
+                }
+            if not isinstance(provider_scope, dict) or provider_scope.get("allowed") is not True:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "TENANT_SCOPE_DENIED", "executed": False,
+                    "tenant_scope": provider_scope, "release": release,
+                }
+            tenant_scope_result = provider_scope
 
         if self.degraded_mode_manager is not None:
             try:
@@ -923,6 +972,7 @@ class ProviderService:
             "authorization": authorization,
             "feature_flag": feature_flag_result,
             "degraded_mode": degraded_mode_result,
+            "tenant_scope": tenant_scope_result,
             "sensitive_data_scan": sensitive_data_scan,
             "data_policy": data_policy_result,
             "retry_decision": retry,
