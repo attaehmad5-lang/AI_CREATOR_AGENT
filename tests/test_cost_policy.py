@@ -407,6 +407,23 @@ class ProviderCostPolicyTests(unittest.TestCase):
         )
         self.assertEqual(blocked["status"], "PROJECT_BUDGET_EXCEEDED")
 
+        # Unknown charge outcomes must survive process restart; otherwise a fresh
+        # policy instance could incorrectly free the same budget for another job.
+        reloaded = ProviderCostPolicy(
+            self.ledger, project_budgets={"documentary": 5.0}
+        )
+        self.assertIn(
+            "timeout-job",
+            reloaded.ledger["projects"]["documentary"]["reservations"],
+        )
+        blocked_after_reload = reloaded.reserve_usage(
+            project_id="documentary", provider_id="paid",
+            estimated_cost=2.0, request_id="after-restart-job",
+        )
+        self.assertEqual(
+            blocked_after_reload["status"], "PROJECT_BUDGET_EXCEEDED"
+        )
+
     def test_concurrent_budget_reservations_across_processes_never_overspend(self):
         ledger_path = self.ledger.with_name("process-ledger.json")
         args = [
