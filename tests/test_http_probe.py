@@ -6,6 +6,7 @@ from urllib.error import HTTPError
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.http_probe import ProviderHTTPConnectivityProbe
+from projects.provider_store.provider_secret_resolver import ProviderSecretResolver
 
 
 class _Response:
@@ -84,6 +85,28 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         self.assertEqual(result["http_status"], 200)
         self.assertTrue(result["authentication_verified"])
         self.assertEqual(opener.calls[0][0].get_header("Authorization"), f"Bearer {secret}")
+        self.assertNotIn(secret, repr(result))
+
+    def test_http_probe_can_resolve_credential_from_injected_vault(self):
+        secret = "vault-managed-private-key"
+        opener = _Opener()
+        resolver = ProviderSecretResolver(
+            vault_resolver=lambda reference: secret if reference == "provider/api-key" else None,
+        )
+        probe = ProviderHTTPConnectivityProbe(opener=opener, secret_resolver=resolver)
+        result = probe({
+            "id": "custom-provider", "auth_type": "API_KEY",
+            "credential_ref": "vault:provider/api-key",
+            "allowed_hosts": ["api.example.com"],
+            "configuration": {
+                "endpoint": "https://api.example.com/health",
+                "authentication_required": True,
+            },
+        })
+        self.assertTrue(result["authentication_verified"])
+        self.assertEqual(
+            opener.calls[0][0].get_header("Authorization"), f"Bearer {secret}"
+        )
         self.assertNotIn(secret, repr(result))
 
     def test_provider_specific_auth_header_defaults_are_supported(self):
