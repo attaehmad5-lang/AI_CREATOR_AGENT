@@ -99,6 +99,31 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertNotIn("result_ref", job)
         self.assertNotIn("lease_token", job)
 
+    def test_stale_lease_token_cannot_complete_reclaimed_job(self):
+        self.submit("job-fenced")
+        first = self.manager.claim_next(worker_id="worker-1")
+        self.now[0] += timedelta(seconds=11)
+        second = self.manager.claim_next(worker_id="worker-1")
+        stale = self.manager.complete(
+            job_id="job-fenced", worker_id="worker-1", success=True,
+            lease_token=first["job"]["lease_token"], result_ref="asset:stale",
+        )
+        self.assertEqual(stale["status"], "JOB_LEASE_TOKEN_MISMATCH")
+        current = self.manager.complete(
+            job_id="job-fenced", worker_id="worker-1", success=True,
+            lease_token=second["job"]["lease_token"], result_ref="asset:current",
+        )
+        self.assertEqual(current["job"]["result_ref"], "asset:current")
+
+    def test_job_completion_requires_lease_token(self):
+        self.submit("job-no-token")
+        self.manager.claim_next(worker_id="worker-1")
+        result = self.manager.complete(
+            job_id="job-no-token", worker_id="worker-1", success=True,
+            result_ref="asset:result",
+        )
+        self.assertEqual(result["status"], "LEASE_TOKEN_REQUIRED")
+
     def test_expired_worker_lease_requeues_then_fails_at_attempt_limit(self):
         self.submit("job-1")
         self.manager.claim_next(worker_id="worker-1")
