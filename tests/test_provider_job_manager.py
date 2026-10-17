@@ -52,6 +52,30 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(claimed["job"]["job_id"], "high")
         self.assertEqual(self.manager.claim_next(worker_id="worker-2")["status"], "CONCURRENCY_LIMIT")
 
+    def test_trace_id_is_persisted_and_conflicts_are_rejected(self):
+        first = self.manager.submit(
+            job_id="trace-job", project_id="film", provider_id="image",
+            payload_ref="payload:trace-job", trace_id="trace-123",
+        )
+        duplicate = self.manager.submit(
+            job_id="trace-job", project_id="film", provider_id="image",
+            payload_ref="payload:trace-job", trace_id="trace-123",
+        )
+        conflict = self.manager.submit(
+            job_id="trace-job", project_id="film", provider_id="image",
+            payload_ref="payload:trace-job", trace_id="trace-456",
+        )
+        self.assertEqual(first["job"]["trace_id"], "trace-123")
+        self.assertEqual(duplicate["status"], "ALREADY_SUBMITTED")
+        self.assertEqual(conflict["status"], "REQUEST_ID_CONFLICT")
+        self.assertEqual(
+            self.manager.submit(
+                job_id="bad-trace", project_id="film", provider_id="image",
+                payload_ref="payload:bad-trace", trace_id="bad trace",
+            )["status"],
+            "INVALID_TRACE_ID",
+        )
+
     def test_provider_specific_concurrency_skips_blocked_provider_queue(self):
         manager = ProviderJobManager(
             self.path, max_queue_size=10, max_concurrent=3,
