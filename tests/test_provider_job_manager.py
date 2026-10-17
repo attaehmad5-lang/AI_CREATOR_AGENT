@@ -229,6 +229,64 @@ class ProviderJobManagerTests(unittest.TestCase):
         )
         self.assertEqual(expired["status"], "DEADLINE_ALREADY_EXPIRED")
 
+    def test_graceful_shutdown_drains_without_claiming_or_accepting_new_jobs(self):
+        self.submit("job-before-shutdown")
+        result = self.manager.request_shutdown(drain=True)
+        self.assertEqual(result["status"], "SHUTDOWN_DRAINING")
+        rejected = self.submit("job-during-shutdown")
+        self.assertEqual(rejected["status"], "SHUTDOWN_IN_PROGRESS")
+        blocked = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(blocked["status"], "SHUTDOWN_DRAINING")
+        self.assertEqual(
+            self.manager.poll(job_id="job-before-shutdown")["job"]["status"],
+            "QUEUED",
+        )
+        self.assertEqual(self.manager.resume_work()["status"], "WORK_RESUMED")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(claimed["job"]["job_id"], "job-before-shutdown")
+
+    def test_immediate_shutdown_cancels_queue_and_requests_running_cancel(self):
+        self.submit("job-running")
+        self.submit("job-queued")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        result = self.manager.request_shutdown(drain=False)
+        self.assertEqual(result["status"], "SHUTDOWN_CANCELLING")
+        self.assertTrue(self.manager.poll(job_id="job-queued")["job"]["status"] == "CANCELLED")
+        running = self.manager.poll(job_id="job-running")["job"]
+        self.assertTrue(running["cancel_requested"])
+        finished = self.manager.complete(
+            job_id="job-running", worker_id="worker-1", success=True,
+            lease_token=claimed["job"]["lease_token"], result_ref="asset:cancelled",
+        )
+        self.assertEqual(finished["job"]["status"], "CANCELLED")
+
+    def test_shutdown_deadline_requests_cancellation_when_drain_expires(self):
+        self.submit("job-running-deadline")
+        self.submit("job-queued-deadline")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        deadline = (self.now[0] + timedelta(seconds=5)).isoformat()
+        self.assertEqual(
+            self.manager.request_shutdown(drain=True, deadline_at=deadline)["status"],
+            "SHUTDOWN_DRAINING",
+        )
+        self.now[0] += timedelta(seconds=6)
+        self.assertEqual(
+            self.manager.claim_next(worker_id="worker-2")["status"],
+            "SHUTDOWN_DRAINING",
+        )
+        self.assertEqual(
+            self.manager.poll(job_id="job-queued-deadline")["job"]["status"],
+            "CANCELLED",
+        )
+        self.assertTrue(
+            self.manager.poll(job_id="job-running-deadline")["job"]["cancel_requested"]
+        )
+        finished = self.manager.complete(
+            job_id="job-running-deadline", worker_id="worker-1", success=True,
+            lease_token=claimed["job"]["lease_token"], result_ref="asset:late",
+        )
+        self.assertEqual(finished["job"]["status"], "CANCELLED")
+
     def test_state_persists_without_raw_payload_storage(self):
         self.submit("job-1")
         reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
