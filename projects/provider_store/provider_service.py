@@ -337,6 +337,12 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "accepted": False, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.job.submit",
+            resource_type="job", resource_id=job_id, request_id=job_id, outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "accepted": False}
         try:
             result = self.job_manager.submit(
                 job_id=job_id, project_id=project_id, provider_id=provider_id,
@@ -365,6 +371,12 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.job.claim",
+            resource_type="worker", resource_id=worker_id, outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "job": None}
         try:
             result = self.job_manager.claim_next(worker_id=worker_id)
         except Exception as exc:
@@ -380,6 +392,12 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.job.complete",
+            resource_type="job", resource_id=job_id, request_id=job_id, outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
         try:
             result = self.job_manager.complete(
                 job_id=job_id, worker_id=worker_id, success=success,
@@ -395,6 +413,12 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.job.cancel",
+            resource_type="job", resource_id=job_id, request_id=job_id, outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"status": "AUDIT_LOG_FAILED", "saved": False}
         try:
             result = self.job_manager.cancel(job_id=job_id)
         except Exception as exc:
