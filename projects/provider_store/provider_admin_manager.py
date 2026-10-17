@@ -150,8 +150,6 @@ class ProviderAdminManager:
         if not callable(self.authorizer):
             return {"allowed": False, "status": "ADMIN_AUTHORIZER_REQUIRED"}
         handler = self.handlers.get(operation)
-        if not callable(handler):
-            return {"allowed": False, "status": "ADMIN_HANDLER_UNAVAILABLE"}
 
         try:
             authorized = self.authorizer(
@@ -170,6 +168,8 @@ class ProviderAdminManager:
                 if existing.get("fingerprint") != fingerprint:
                     return {"allowed": False, "status": "ADMIN_REQUEST_ID_CONFLICT"}
                 return {"allowed": existing.get("status") == "SUCCEEDED", "status": "ADMIN_REQUEST_REPLAY"}
+            if not callable(handler):
+                return {"allowed": False, "status": "ADMIN_HANDLER_UNAVAILABLE"}
             event = {
                 "request_id": request_id,
                 "subject_id": subject_id,
