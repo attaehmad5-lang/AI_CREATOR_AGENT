@@ -68,6 +68,10 @@ class ProviderAuditLogTests(unittest.TestCase):
         self.assertEqual(invalid["status"], "INVALID_AUDIT_ACTOR")
         invalid_request = self.append(request_id="bad request id")
         self.assertEqual(invalid_request["status"], "INVALID_AUDIT_REQUEST_ID")
+        token_outcome = self.append(outcome="sk-abcdefghijklmnopqrstuvwxyz123456")
+        self.assertEqual(token_outcome["status"], "INVALID_AUDIT_OUTCOME")
+        token_resource = self.append(resource_id="hf_abcdefghijklmnop1234567890")
+        self.assertEqual(token_resource["status"], "INVALID_AUDIT_RESOURCE_ID")
         self.assertFalse(self.path.exists())
 
     def test_invalid_capacity_and_naive_clock_fail_closed(self):
