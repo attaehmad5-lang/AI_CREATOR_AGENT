@@ -304,7 +304,7 @@ class ProviderService:
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, trace_id: str | None = None,
-        principal_id: str | None = None,
+        deadline_at: str | None = None, principal_id: str | None = None,
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
@@ -315,6 +315,7 @@ class ProviderService:
             result = self.job_manager.submit(
                 job_id=job_id, project_id=project_id, provider_id=provider_id,
                 payload_ref=payload_ref, priority=priority, trace_id=trace_id,
+                deadline_at=deadline_at,
             )
         except Exception as exc:
             return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
