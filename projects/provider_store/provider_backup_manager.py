@@ -108,6 +108,8 @@ class ProviderBackupManager:
             try:
                 if not path.is_file():
                     return {"status": "BACKUP_SOURCE_NOT_FILE", "created": False}
+                if path.stat().st_size > self.max_file_bytes:
+                    return {"status": "BACKUP_FILE_SIZE_EXCEEDED", "created": False}
                 raw = path.read_bytes()
             except OSError:
                 return {"status": "BACKUP_SOURCE_UNREADABLE", "created": False}
@@ -205,6 +207,8 @@ class ProviderBackupManager:
                     if target.exists() and not overwrite:
                         return {"status": "RESTORE_TARGET_EXISTS", "restored": False, "path": relative}
                     raw = archive.read(f"files/{relative}")
+                    if target.exists() and target.stat().st_size > self.max_file_bytes:
+                        return {"status": "RESTORE_TARGET_SIZE_EXCEEDED", "restored": False, "path": relative}
                     original = target.read_bytes() if target.exists() else None
                     total += len(raw) + (len(original) if original else 0)
                     if total > self.max_total_bytes * 2:
