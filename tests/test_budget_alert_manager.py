@@ -32,6 +32,40 @@ class BudgetAlertManagerTests(unittest.TestCase):
         self.assertEqual(len(reloaded.pending_alerts()["alerts"]), 2)
         self.assertEqual(len(reloaded.data["events"]), 2)
 
+    def test_budget_alerts_are_idempotent_per_period_but_repeat_next_period(self):
+        first = self.manager.record(
+            project_id="film", spend=9.0, budget=10.0,
+            request_id="job-oct-1", budget_period_id="2026-10",
+        )
+        duplicate = self.manager.record(
+            project_id="film", spend=9.5, budget=10.0,
+            request_id="job-oct-2", budget_period_id="2026-10",
+        )
+        next_period = self.manager.record(
+            project_id="film", spend=8.0, budget=10.0,
+            request_id="job-nov-1", budget_period_id="2026-11",
+        )
+        self.assertEqual(len(first["alerts"]), 2)
+        self.assertEqual(len(duplicate["alerts"]), 2)
+        self.assertEqual(
+            {event["event_id"] for event in first["alerts"]},
+            {event["event_id"] for event in duplicate["alerts"]},
+        )
+        self.assertEqual(len(next_period["alerts"]), 2)
+        self.assertTrue(all(
+            event["budget_period_id"] == "2026-11"
+            for event in next_period["alerts"]
+        ))
+        self.assertEqual(len(self.manager.data["events"]), 4)
+
+    def test_invalid_budget_period_id_fails_closed(self):
+        result = self.manager.record(
+            project_id="film", spend=9.0, budget=10.0,
+            request_id="job-1", budget_period_id="bad\nperiod",
+        )
+        self.assertEqual(result["status"], "INVALID_BUDGET_PERIOD_ID")
+        self.assertEqual(result["alerts"], [])
+
     def test_exactly_at_hard_stop_threshold_emits_100_percent_alert(self):
         result = self.manager.record(
             project_id="film", spend=10.0, budget=10.0, request_id="job-1"
