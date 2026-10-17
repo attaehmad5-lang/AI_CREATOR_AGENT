@@ -99,12 +99,19 @@ class BudgetAlertManager:
             raise
 
     def record(
-        self, *, project_id: str, spend: float, budget: float, request_id: str
+        self, *, project_id: str, spend: float, budget: float, request_id: str,
+        budget_period_id: str = "default",
     ) -> dict[str, Any]:
         if not isinstance(project_id, str) or not project_id.strip() or len(project_id) > 200:
             return {"status": "INVALID_PROJECT_ID", "alerts": []}
         if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 200:
             return {"status": "INVALID_REQUEST_ID", "alerts": []}
+        if (
+            not isinstance(budget_period_id, str) or not budget_period_id.strip()
+            or len(budget_period_id) > 200
+            or any(ord(char) < 32 or ord(char) == 127 for char in budget_period_id)
+        ):
+            return {"status": "INVALID_BUDGET_PERIOD_ID", "alerts": []}
         spend_value = finite_number(spend, minimum=0)
         budget_value = finite_number(budget, minimum=0)
         if spend_value is None or budget_value is None or budget_value <= 0:
@@ -118,13 +125,14 @@ class BudgetAlertManager:
             for threshold in self.thresholds:
                 if ratio < threshold:
                     continue
-                identity = f"{project_id}\0{budget_value:.12g}\0{threshold:.12g}"
+                identity = f"{project_id}\0{budget_period_id}\0{budget_value:.12g}\0{threshold:.12g}"
                 event_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
                 event = self.data["events"].get(event_id)
                 if event is None:
                     event = {
                         "event_id": event_id,
                         "project_id": project_id,
+                        "budget_period_id": budget_period_id,
                         "threshold": threshold,
                         "budget": budget_value,
                         "spend": spend_value,
