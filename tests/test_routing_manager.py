@@ -567,6 +567,34 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(second["status"], "REQUEST_ALREADY_RESERVED")
         self.assertEqual(quota.data["requests"]["duplicate-route"]["status"], "RESERVED")
 
+    def test_explicit_matching_paid_reservation_can_be_reused_by_ab_assignment(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        policy.reserve_usage(
+            project_id="film", provider_id="primary",
+            estimated_cost=1.0, request_id="ab-existing-reservation",
+        )
+        router = ProviderRoutingManager(self.connections, cost_policy=policy)
+        result = router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary"}, request_id="ab-existing-reservation",
+            allow_existing_cost_reservation=True,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "primary")
+        self.assertTrue(result["cost_reserved"])
+        self.assertEqual(
+            policy.ledger["projects"]["film"]["reservations"]["ab-existing-reservation"]["provider_id"],
+            "primary",
+        )
+
+    def test_existing_reservation_flag_must_be_boolean(self):
+        router = ProviderRoutingManager(self.connections)
+        result = router.route(
+            category="image", project_id="film",
+            allow_existing_cost_reservation="yes",
+        )
+        self.assertEqual(result["status"], "INVALID_EXISTING_RESERVATION_FLAG")
+
     def test_duplicate_paid_reservation_cannot_start_second_provider_call(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
