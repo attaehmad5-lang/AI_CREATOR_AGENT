@@ -136,6 +136,9 @@ class BoundedExecutionQueue:
     def _terminalize(self, request_id: str, record: dict[str, Any], status: str, now: datetime) -> None:
         self._terminal[request_id] = {
             "fingerprint": record["fingerprint"],
+            "tenant_id": record["tenant_id"],
+            "project_id": record["project_id"],
+            "category": record["category"],
             "status": status,
             "completed_at": now.isoformat(),
         }
@@ -236,6 +239,48 @@ class BoundedExecutionQueue:
             if request_id in self._terminal:
                 return {"status": "ALREADY_TERMINAL", "cancelled": False}
             return {"status": "NOT_FOUND", "cancelled": False}
+
+    def get_job(
+        self, *, request_id: str, tenant_id: str, worker_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Read safe job state; running jobs are visible only to their owning worker."""
+        if not self._valid_id(request_id) or not self._valid_id(tenant_id):
+            return {"status": "INVALID_REQUEST_METADATA", "job": None}
+        if worker_id is not None and not self._valid_id(worker_id):
+            return {"status": "INVALID_WORKER_ID", "job": None}
+        with self._lock:
+            record = self._pending.get(request_id)
+            if record is not None:
+                if record["tenant_id"] != tenant_id:
+                    return {"status": "NOT_FOUND", "job": None}
+            else:
+                record = self._running.get(request_id)
+                if record is not None:
+                    if record["tenant_id"] != tenant_id:
+                        return {"status": "NOT_FOUND", "job": None}
+                    if worker_id != record.get("worker_id"):
+                        return {"status": "WORKER_OWNERSHIP_MISMATCH", "job": None}
+                else:
+                    terminal = self._terminal.get(request_id)
+                    if terminal is None:
+                        return {"status": "NOT_FOUND", "job": None}
+                    if terminal.get("tenant_id") != tenant_id:
+                        return {"status": "NOT_FOUND", "job": None}
+                    return {
+                        "status": "TERMINAL",
+                        "job": {
+                            "request_id": request_id,
+                            "tenant_id": tenant_id,
+                            "status": terminal["status"],
+                            "completed_at": terminal["completed_at"],
+                        },
+                    }
+            keys = (
+                "request_id", "tenant_id", "project_id", "category", "priority",
+                "deadline_at", "queued_at", "started_at", "status",
+                "cancel_requested", "deadline_exceeded",
+            )
+            return {"status": "FOUND", "job": {key: record[key] for key in keys if key in record}}
 
     def reap_expired(self, *, now: datetime | None = None) -> dict[str, Any]:
         try:
