@@ -975,9 +975,11 @@ class ProviderServiceTests(unittest.TestCase):
                     "event_id": kwargs["event_id"],
                 }
 
+        audit = ProviderAuditLog(self.root / "webhook-service-audit.json")
         service = ProviderService(
             self.connections,
             webhook_verifier=WebhookStub(),
+            audit_manager=audit,
         )
         secret = "do-not-echo-webhook-secret"
         result = service.verify_webhook(
@@ -991,6 +993,9 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["verified"])
         self.assertEqual(result["status"], "WEBHOOK_VERIFIED")
         self.assertNotIn(secret, repr(result))
+        self.assertTrue(audit.verify_chain()["valid"])
+        self.assertEqual(audit.verify_chain()["entry_count"], 2)
+        self.assertEqual(audit.data["entries"][0]["operation"], "provider.webhook.verify")
 
     def test_async_job_queue_facade_enforces_access_and_backpressure(self):
         jobs = ProviderJobManager(
