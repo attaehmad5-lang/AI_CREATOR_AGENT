@@ -1,4 +1,5 @@
 """Queue capacity, idempotency, async lifecycle, and backpressure tests."""
+import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -235,6 +236,21 @@ class ProviderJobManagerTests(unittest.TestCase):
         state = self.path.read_text(encoding="utf-8")
         self.assertNotIn("actual prompt text", state)
         self.assertIn("payload:job-1", state)
+
+    def test_malformed_persisted_trace_and_lease_fields_are_rejected(self):
+        bad_path = self.path.with_name("bad-jobs.json")
+        bad_path.write_text(json.dumps({
+            "version": "1.0",
+            "jobs": {
+                "job-1": {
+                    "job_id": "job-1", "project_id": "film", "provider_id": "image",
+                    "payload_ref": "payload:job-1", "priority": 50, "status": "QUEUED",
+                    "attempts": 0, "trace_id": "invalid trace", "cancel_requested": False,
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ProviderJobManager(bad_path)
 
     def test_invalid_inputs_fail_closed(self):
         self.assertEqual(self.manager.submit(
