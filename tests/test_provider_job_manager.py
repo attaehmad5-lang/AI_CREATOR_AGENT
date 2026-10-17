@@ -287,6 +287,23 @@ class ProviderJobManagerTests(unittest.TestCase):
         )
         self.assertEqual(finished["job"]["status"], "CANCELLED")
 
+    def test_completion_applies_expired_shutdown_deadline_without_new_claim(self):
+        self.submit("job-running-no-claim", priority=90)
+        self.submit("job-queued-no-claim", priority=10)
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        deadline = (self.now[0] + timedelta(seconds=5)).isoformat()
+        self.manager.request_shutdown(drain=True, deadline_at=deadline)
+        self.now[0] += timedelta(seconds=6)
+        completed = self.manager.complete(
+            job_id="job-running-no-claim", worker_id="worker-1", success=True,
+            lease_token=claimed["job"]["lease_token"], result_ref="asset:too-late",
+        )
+        self.assertEqual(completed["job"]["status"], "CANCELLED")
+        self.assertEqual(
+            self.manager.poll(job_id="job-queued-no-claim")["job"]["status"],
+            "CANCELLED",
+        )
+
     def test_state_persists_without_raw_payload_storage(self):
         self.submit("job-1")
         reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
