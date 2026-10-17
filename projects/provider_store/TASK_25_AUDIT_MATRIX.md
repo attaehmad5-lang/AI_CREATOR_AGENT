@@ -6,7 +6,7 @@ The exact canonical feature names, original baseline markers and item-by-item ev
 
 ## Latest code verification
 
-GitHub Actions run [#39049624745](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39049624745) passed on Python 3.13: **456 tests passed on Ubuntu and 456 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This verified code head includes budget-period alerting and delivery leases, hash-chained audit events, environment/vault secret resolution, job trace IDs and deadlines, per-provider concurrency and worker-lease fencing, graceful shutdown controls, bounded webhook replay storage, sensitive-field scanning, and data-policy URL validation. A later documentation-only ledger update is receiving its own CI run.
+GitHub Actions run [#39049732249](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39049732249) passed on Python 3.13: **456 tests passed on Ubuntu and 456 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. The verified code includes budget-period alerting and delivery leases, hash-chained audit events, environment/vault secret resolution, job trace IDs and deadlines, per-provider concurrency and worker-lease fencing, graceful shutdown controls, bounded webhook replay storage, sensitive-field scanning, and data-policy URL validation.
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
