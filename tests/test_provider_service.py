@@ -1041,7 +1041,7 @@ class ProviderServiceTests(unittest.TestCase):
         )
         chain = audit.verify_chain()
         self.assertTrue(chain["valid"])
-        self.assertEqual(chain["entry_count"], 6)
+        self.assertEqual(chain["entry_count"], 8)
         events = audit.data["entries"]
         self.assertEqual(events[0]["operation"], "provider.job.submit")
         self.assertEqual(events[1]["outcome"], "JOB_QUEUED")
