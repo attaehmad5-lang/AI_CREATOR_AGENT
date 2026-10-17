@@ -1012,7 +1012,8 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
         accepted = service.submit_job(
             job_id="job-1", project_id="film", provider_id="image",
-            payload_ref="payload:job-1", principal_id="creator-job-user",
+            payload_ref="payload:job-1", trace_id="trace-job-1",
+            principal_id="creator-job-user",
         )
         self.assertEqual(accepted["status"], "JOB_QUEUED")
         full = service.submit_job(
@@ -1024,6 +1025,7 @@ class ProviderServiceTests(unittest.TestCase):
             worker_id="worker-1", principal_id="creator-job-user",
         )
         self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.assertEqual(claimed["job"]["trace_id"], "trace-job-1")
         completed = service.complete_job(
             job_id="job-1", worker_id="worker-1", success=True,
             lease_token=claimed["job"]["lease_token"],
