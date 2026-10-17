@@ -74,6 +74,16 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(service.execution_queue_stats()["pending"], 2)
         claimed = service.claim_next_execution(worker_id="worker-a")
         self.assertEqual(claimed["job"]["request_id"], "queue-high")
+        self.assertEqual(
+            service.get_queued_execution(
+                request_id="queue-high", tenant_id="tenant-a", worker_id="worker-a",
+            )["job"]["status"],
+            "RUNNING",
+        )
+        wrong_worker = service.get_queued_execution(
+            request_id="queue-high", tenant_id="tenant-a", worker_id="worker-b",
+        )
+        self.assertEqual(wrong_worker["status"], "WORKER_OWNERSHIP_MISMATCH")
         wrong_tenant = service.cancel_queued_execution(
             request_id="queue-low", tenant_id="tenant-b",
         )
