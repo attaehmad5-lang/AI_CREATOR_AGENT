@@ -131,8 +131,41 @@ class BoundedExecutionQueue:
                     or record["status"] not in statuses
                 ):
                     raise ValueError("invalid execution queue record")
-                if not isinstance(record.get("fingerprint"), list):
+                fingerprint = record.get("fingerprint")
+                priority = record.get("priority")
+                if (
+                    not isinstance(fingerprint, list) or len(fingerprint) != 5
+                    or not isinstance(priority, int) or isinstance(priority, bool)
+                    or not 0 <= priority <= 100
+                    or fingerprint != self._fingerprint(
+                        record["tenant_id"], record["project_id"], record["category"],
+                        priority, self._parse_deadline(record.get("deadline_at")),
+                    )
+                ):
                     raise ValueError("invalid execution queue idempotency fingerprint")
+                if (
+                    not isinstance(record.get("sequence"), int)
+                    or isinstance(record.get("sequence"), bool)
+                    or record["sequence"] < 1
+                    or not isinstance(record.get("queued_at"), str)
+                ):
+                    raise ValueError("invalid execution queue timing metadata")
+                try:
+                    self._parse_deadline(record["queued_at"])
+                    if record.get("deadline_at") is not None:
+                        self._parse_deadline(record["deadline_at"])
+                    if collection is running:
+                        self._parse_deadline(record.get("started_at"))
+                        if (
+                            not self._valid_id(record.get("worker_id"))
+                            or not isinstance(record.get("cancel_requested"), bool)
+                            or not isinstance(record.get("deadline_exceeded"), bool)
+                        ):
+                            raise ValueError("invalid running queue lease metadata")
+                    if collection is terminal:
+                        self._parse_deadline(record.get("completed_at"))
+                except ValueError as exc:
+                    raise ValueError("invalid execution queue timing metadata") from exc
         self._sequence = loaded["sequence"]
         self._last_claimed_tenant = loaded.get("last_claimed_tenant")
         if self._last_claimed_tenant is not None and not self._valid_id(self._last_claimed_tenant):
@@ -267,6 +300,10 @@ class BoundedExecutionQueue:
             "tenant_id": record["tenant_id"],
             "project_id": record["project_id"],
             "category": record["category"],
+            "priority": record["priority"],
+            "deadline_at": record["deadline_at"],
+            "queued_at": record["queued_at"],
+            "sequence": record["sequence"],
             "status": status,
             "completed_at": now.isoformat(),
         }
