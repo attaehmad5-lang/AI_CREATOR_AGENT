@@ -42,7 +42,10 @@ class ProviderHealthManager:
         self._lock = threading.RLock()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}}
-        self._reload_state()
+        # Constructor reads must participate in the same process lock as writers;
+        # otherwise Windows may reject a read while another process replaces JSON.
+        with interprocess_file_lock(self.state_path.with_name(self.state_path.name + ".lock")):
+            self._reload_state()
 
     @staticmethod
     def _parse_timestamp(value: Any) -> datetime:

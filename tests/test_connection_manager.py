@@ -1197,5 +1197,24 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("configuration", self.manager.get_state("public_image"))
 
 
+    def test_provider_contract_rejects_adapter_api_version_mismatch(self):
+        class IncompatibleImageProvider:
+            adapter_api_version = "2.0"
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.validate_provider_contract(
+            "public_image", IncompatibleImageProvider()
+        )
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "ADAPTER_API_VERSION_MISMATCH")
+        loaded = self.manager.load_provider(
+            "public_image", lambda metadata: IncompatibleImageProvider()
+        )
+        self.assertFalse(loaded["loaded"])
+        self.assertEqual(loaded["status"], "CONTRACT_VIOLATION")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@
 import tempfile
 import unittest
 import wave
+from unittest.mock import patch
 from pathlib import Path
 
 from projects.provider_store.media_integrity_validator import MediaIntegrityValidator
@@ -43,7 +44,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         path = self.root / "sample.mp4"
         boxes = (
             (b"ftyp", b"isom0000"),
-            (b"moov", b"metadata"),
+            (b"moov", (8).to_bytes(4, "big") + b"free"),
             (b"mdat", b"frame"),
         )
         data = b"".join((8 + len(body)).to_bytes(4, "big") + kind + body for kind, body in boxes)
@@ -55,13 +56,110 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         malformed.write_bytes((1000).to_bytes(4, "big") + b"ftyp" + b"tiny")
         self.assertEqual(self.validator.validate(malformed, modality="video")["status"], "MP4_BOX_SIZE_INVALID")
 
+    def test_mp4_movie_header_enforces_duration_limit(self):
+        def box(kind, body):
+            return (8 + len(body)).to_bytes(4, "big") + kind + body
+
+        ftyp = box(b"ftyp", b"isom0000")
+        mdat = box(b"mdat", b"frame")
+        def mp4_with_duration(duration_ticks):
+            mvhd = (
+                b"\x00\x00\x00\x00"
+                + b"\x00" * 8
+                + (1000).to_bytes(4, "big")
+                + duration_ticks.to_bytes(4, "big")
+            )
+            moov = box(b"moov", box(b"mvhd", mvhd))
+            return ftyp + moov + mdat
+
+        too_long = self.root / "too-long.mp4"
+        too_long.write_bytes(mp4_with_duration(31_000))
+        result = self.validator.validate(too_long, modality="video")
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "MEDIA_DURATION_EXCEEDED")
+        self.assertEqual(result["duration_seconds"], 31.0)
+
+        within_limit = self.root / "within-limit.mp4"
+        within_limit.write_bytes(mp4_with_duration(10_000))
+        result = self.validator.validate(within_limit, modality="video")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["duration_seconds"], 10.0)
+
     def test_webm_requires_ebml_header_and_segment(self):
         path = self.root / "sample.webm"
-        path.write_bytes(b"\x1a\x45\xdf\xa3" + b"\x42\x86\x81\x01" + b"\x18\x53\x80\x67" + b"\x00")
+        path.write_bytes(b"\x1a\x45\xdf\xa3" + b"\x84\x42\x86\x81\x01" + b"\x18\x53\x80\x67" + b"\x82\xec\x80")
         self.assertTrue(self.validator.validate(path, modality="video")["valid"])
         bad = self.root / "bad.webm"
         bad.write_bytes(b"\x1a\x45\xdf\xa3")
-        self.assertEqual(self.validator.validate(bad, modality="video")["status"], "WEBM_SEGMENT_MISSING")
+        self.assertEqual(self.validator.validate(bad, modality="video")["status"], "WEBM_EBML_HEADER_SIZE_INVALID")
+
+    def test_webm_rejects_truncated_headers_and_segment_sizes(self):
+        valid_header = b"\x1a\x45\xdf\xa3\x84\x42\x86\x81\x01"
+        cases = [
+            (valid_header, "WEBM_EBML_HEADER_TRUNCATED"),
+            (valid_header + b"\x18\x53\x80\x67", "WEBM_SEGMENT_SIZE_INVALID"),
+            (valid_header + b"\x18\x53\x80\x67\x85\xec\x80", "WEBM_SEGMENT_SIZE_EXCEEDS_FILE"),
+            (valid_header + b"\x18\x53\x80\x67\x81\xec", "WEBM_SEGMENT_ELEMENT_SIZE_INVALID"),
+        ]
+        for index, (payload, expected) in enumerate(cases):
+            with self.subTest(index=index):
+                path = self.root / f"bad-webm-{index}.webm"
+                path.write_bytes(payload)
+                result = self.validator.validate(path, modality="video")
+                self.assertFalse(result["valid"])
+                self.assertEqual(result["status"], expected)
+
+    def test_webm_rejects_empty_segment_and_truncated_segment_element(self):
+        header = b"\x1a\x45\xdf\xa3\x84\x42\x86\x81\x01"
+        empty = self.root / "empty-segment.webm"
+        empty.write_bytes(header + b"\x18\x53\x80\x67\x80")
+        self.assertEqual(
+            self.validator.validate(empty, modality="video")["status"],
+            "WEBM_SEGMENT_EMPTY",
+        )
+        truncated = self.root / "truncated-element.webm"
+        truncated.write_bytes(header + b"\x18\x53\x80\x67\x82\xec\x82x")
+        self.assertEqual(
+            self.validator.validate(truncated, modality="video")["status"],
+            "WEBM_SEGMENT_ELEMENT_TRUNCATED",
+        )
+
+    def test_video_and_ogg_validation_streams_without_reading_whole_file(self):
+        mp4 = self.root / "streamed.mp4"
+        boxes = (
+            (b"ftyp", b"isom0000"),
+            (b"moov", (8).to_bytes(4, "big") + b"free"),
+            (b"mdat", b"frame"),
+        )
+        mp4.write_bytes(b"".join((8 + len(body)).to_bytes(4, "big") + kind + body for kind, body in boxes))
+        webm = self.root / "streamed.webm"
+        webm.write_bytes(b"\x1a\x45\xdf\xa3" + b"\x84\x42\x86\x81\x01" + b"\x18\x53\x80\x67" + b"\x82\xec\x80")
+        ogg = self.root / "sample.ogg"
+        ogg.write_bytes(b"OggS" + bytes([0]) + b"\x00" * 21 + bytes([0]))
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read forbidden")):
+            self.assertTrue(self.validator.validate(mp4, modality="video")["valid"])
+            self.assertTrue(self.validator.validate(webm, modality="video")["valid"])
+            self.assertTrue(self.validator.validate(ogg, modality="audio")["valid"])
+
+    def test_wav_payload_is_read_in_bounded_chunks(self):
+        path = self.root / "chunked.wav"
+        with wave.open(str(path), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(8000)
+            audio.writeframes(b"\x00\x00" * 800)
+        original = wave.Wave_read.readframes
+        requested = []
+
+        def track_reads(reader, nframes):
+            requested.append(nframes)
+            return original(reader, nframes)
+
+        with patch.object(wave.Wave_read, "readframes", track_reads):
+            result = self.validator.validate(path, modality="audio")
+        self.assertTrue(result["valid"])
+        self.assertTrue(requested)
+        self.assertLessEqual(max(requested), 32768)
 
     def test_unsupported_modality_and_size_limit_fail_closed(self):
         path = self.root / "unknown.bin"

@@ -20,11 +20,66 @@ class ProviderOutputValidatorTests(unittest.TestCase):
 
     def test_valid_image_signature_returns_hash_and_metadata(self):
         path = self.root / "cover.png"
-        path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
+        path.write_bytes(
+            b"\x89PNG\r\n\x1a\n"
+            + (13).to_bytes(4, "big") + b"IHDR"
+            + (32).to_bytes(4, "big") + (24).to_bytes(4, "big")
+            + bytes([8, 2, 0, 0, 0])
+        )
         result = self.validator.validate_file(path, modality="image")
         self.assertTrue(result["valid"])
         self.assertEqual(result["mime_type"], "image/png")
+        self.assertEqual((result["width"], result["height"]), (32, 24))
         self.assertEqual(len(result["sha256"]), 64)
+
+    def test_image_dimension_and_pixel_limits_fail_closed(self):
+        path = self.root / "large-dimensions.png"
+        path.write_bytes(
+            b"\x89PNG\r\n\x1a\n"
+            + (13).to_bytes(4, "big") + b"IHDR"
+            + (20).to_bytes(4, "big") + (20).to_bytes(4, "big")
+            + bytes([8, 2, 0, 0, 0])
+        )
+        pixel_limited = ProviderOutputValidator(max_size_bytes=64, max_image_pixels=100)
+        self.assertEqual(
+            pixel_limited.validate_file(path, modality="image")["status"],
+            "IMAGE_PIXEL_LIMIT_EXCEEDED",
+        )
+        dimension_limited = ProviderOutputValidator(max_size_bytes=64, max_image_dimension=10)
+        self.assertEqual(
+            dimension_limited.validate_file(path, modality="image")["status"],
+            "IMAGE_DIMENSION_LIMIT_EXCEEDED",
+        )
+
+    def test_jpeg_dimensions_are_read_from_bounded_header_scan(self):
+        path = self.root / "cover.jpg"
+        path.write_bytes(
+            b"\xff\xd8"
+            + b"\xff\xc0" + (11).to_bytes(2, "big")
+            + bytes([8]) + (10).to_bytes(2, "big") + (20).to_bytes(2, "big")
+            + bytes([1, 1, 0x11, 0]) + b"\xff\xd9"
+        )
+        result = self.validator.validate_file(path, modality="image")
+        self.assertTrue(result["valid"])
+        self.assertEqual((result["width"], result["height"]), (20, 10))
+
+    def test_gif_and_webp_dimensions_are_extracted(self):
+        gif = self.root / "cover.gif"
+        gif.write_bytes(b"GIF89a" + (11).to_bytes(2, "little") + (9).to_bytes(2, "little"))
+        gif_result = self.validator.validate_file(gif, modality="image")
+        self.assertTrue(gif_result["valid"])
+        self.assertEqual((gif_result["width"], gif_result["height"]), (11, 9))
+
+        webp = self.root / "cover.webp"
+        webp.write_bytes(
+            b"RIFF" + (22).to_bytes(4, "little") + b"WEBP"
+            + b"VP8X" + (10).to_bytes(4, "little")
+            + bytes([0, 0, 0, 0])
+            + (4).to_bytes(3, "little") + (6).to_bytes(3, "little")
+        )
+        webp_result = self.validator.validate_file(webp, modality="image")
+        self.assertTrue(webp_result["valid"])
+        self.assertEqual((webp_result["width"], webp_result["height"]), (5, 7))
 
     def test_mismatched_signature_and_extension_are_rejected(self):
         wrong_signature = self.root / "cover.png"
@@ -92,7 +147,12 @@ class ProviderOutputValidatorTests(unittest.TestCase):
 
     def test_file_growth_during_validation_is_detected(self):
         path = self.root / "changing.png"
-        signature = b"\x89PNG\r\n\x1a\n"
+        signature = (
+            b"\x89PNG\r\n\x1a\n"
+            + (13).to_bytes(4, "big") + b"IHDR"
+            + (32).to_bytes(4, "big") + (24).to_bytes(4, "big")
+            + bytes([8, 2, 0, 0, 0])
+        )
         path.write_bytes(signature + b"extra bytes")
         actual = path.stat()
         fake_stat = SimpleNamespace(
@@ -162,6 +222,10 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             ProviderOutputValidator(min_size_bytes=10, max_size_bytes=1)
         with self.assertRaises(ValueError):
             ProviderOutputValidator(max_json_depth=0)
+        with self.assertRaises(ValueError):
+            ProviderOutputValidator(max_image_dimension=0)
+        with self.assertRaises(ValueError):
+            ProviderOutputValidator(max_image_pixels=0)
         self.assertEqual(
             ProviderOutputValidator().validate_file("bad\x00path.txt", modality="text")["status"],
             "INVALID_PATH",

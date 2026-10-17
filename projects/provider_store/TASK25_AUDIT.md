@@ -1,17 +1,18 @@
 # Task #25 — Provider Connection Manager Verification Audit
 
-**Follow-up branch:** `task-25-followup-audit`  
-**Pull request:** #1 (merged; follow-up work requires a new branch/PR)  
-**Audit status:** In progress — do not mark Task #25 complete yet.
+**Current follow-up branch:** `task-25-production-hardening`  
+**Merged foundation PRs:** #1 and #7. **Current draft PR:** #69 (not merged)  
+**Audit status:** In progress — **24 VERIFIED, 78 PARTIAL, 36 OPEN** across the canonical 138 items. Do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#38305883948](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680) completed successfully on Python 3.13:
+GitHub Actions code-verification run [#38959082545](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38959082545) completed successfully on Python 3.13:
 
-- Ubuntu: 312 tests passed, 0 failures.
-- Windows: 304 tests passed, 0 failures.
+- Ubuntu: 435 tests passed, 0 failures.
+- Windows: 435 tests passed, 0 failures.
 - Provider module/test compilation and provider JSON catalog validation passed on both platforms.
-- The only changes after that code-verification run are audit/documentation updates. Follow-up work is isolated in draft PR #7; PR #1 is already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
+- The latest canonical ledger/guide documentation update was also verified by run [#38957954038](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38957954038): 428 tests passed on both Ubuntu and Windows.
+- Draft PR #69 contains additional media-validation hardening and remains unmerged. Task #25 remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
@@ -25,12 +26,12 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 | D — Routing and Selection | 25–32 | Priority, free-credit-first, lowest-cost, healthiest-first, round-robin, PRIMARY_ONLY and explicit automatic-fallback control; declared model/version filtering; verified-connection gating and fallback reservations | Foundation implemented; real generation-path integration pending |
 | E — Retry, Failure and Recovery | 33–40 | Bounded backoff, status/Retry-After handling, idempotency checks, circuit breaker and probe-slot recovery | Unit-tested foundation; provider-specific failure injection pending |
 | F — Health and Reliability | 41–48 | Persisted health history, latency/staleness checks, eligibility and active probe recording | Foundation implemented; live provider health evidence pending |
-| G — Output and Asset Safety | 49–56 | Size/signature/basic-content checks, bounded reads, mutation detection, JSON nesting limits and SHA-256 | Basic validation implemented; full media decoding, malware scanning and semantic QA pending |
+| G — Output and Asset Safety | 49–56 | Size/signature/basic-content checks, bounded reads, mutation detection, JSON nesting limits and SHA-256; bounded PNG/JPEG/GIF/WebP dimension/pixel caps; streaming WAV/MP4/WebM/OGG structure checks and MP4 mvhd duration limits | Header/container validation improved and regression-tested; full image/media decoding, malware scanning and semantic QA pending |
 | H — Cost, Free Credits and Quotas | 57–64 | Paid-approval guard, configured budgets, serialized reservations, usage reconciliation, verified credit snapshots and unit compatibility; new `account_balance_probe.py` provides bounded, allowlisted JSON balance reads with explicit available-credit field semantics | Local policy/ledger and generic balance-probe integration tested; provider-specific live balance adapters and balance-field semantics still need authorized verification |
 | I — Security, Privacy and Governance | 65–72 | Secret-safe catalog/state, endpoint allowlists, HTTPS-only probes, redirect rejection, bounded response reads, rejection of unsupported raw-token Basic auth, and overflow-safe numeric validation across cost, credit, routing, connection, health, retry, and OAuth | Implemented safeguards; threat-model and deployment review pending |
 | J — Production Orchestration | 73–80 | Request reservation/finalization integration and idempotency tests in the provider service | Provider-request lifecycle foundation; full end-to-end generation jobs pending |
-| K — Quality, Performance and Observability | 81–88 | Health/latency history, bounded histories, concurrency tests and structured safe statuses | Partial evidence; production metrics/telemetry and load benchmarks pending |
-| L — Configuration, Compatibility and Change Control | 89–96 | Validated endpoint/model configuration, atomic writes, catalog backup validation and explicit restore path | Foundation implemented; mobile/Pydroid and crash-recovery verification pending |
+| K — Quality, Performance and Observability | 81–88 | Health/latency history, bounded histories, concurrency tests, structured safe statuses, and a `ProviderSLOManager` evaluating success-rate, p95-latency and timeout-rate targets from bounded metrics snapshots | Partial evidence; durable/time-windowed SLO history, production telemetry export, alerting and load benchmarks pending |
+| L — Configuration, Compatibility and Change Control | 89–96 | Validated endpoint/model configuration, atomic writes, catalog backup validation, explicit restore path, and non-mutating candidate configuration simulation | Foundation implemented; full runtime integration, mobile/Pydroid and crash-recovery verification pending |
 | M — Testing, Audit and Release Readiness | 97–110 | Legacy facade compatibility, shared catalog behavior, cross-process state protection and cross-platform CI | Partial evidence; full integration matrix and cross-manager transaction guarantees pending |
 | N — High-Advanced Routing Intelligence | 111–118 | Multiple selection policies, verified credit data, cost guards and quota-aware fallback | Foundation implemented; full canonical behavior matrix pending |
 | O — Enterprise and Large-Production Resiliency | 119–128 | Request IDs, reservations, committed usage, budget/quota records and duplicate/conflict protection | Local usage controls tested; real provider billing reconciliation pending |
@@ -42,7 +43,7 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 2. Run provider-specific probes only against endpoints and accounts explicitly configured and authorized by the user. A generic HTTP 2xx proves only endpoint reachability unless the configured endpoint is documented to require and validate the supplied credential; it never proves model support, free credits, or successful generation.
 3. Implement and test provider-specific credential/authentication, account-balance, and generation adapters where required by the canonical scope. `ProviderJSONBalanceProbe` is a generic adapter only; it must be configured with a provider-documented field representing available credits, never a budget cap or estimated balance.
 4. Add provider-specific network failure injection and end-to-end generation execution tests.
-5. Add full image/audio/video decoding, malware scanning, and semantic output checks where required.
+5. Add full image/audio/video decoding, malware scanning, and semantic output checks where required. The current media hardening only checks bounded headers/container structure and must not be treated as full decoding.
 6. Review deployment persistence: the JSON/OS-lock design protects cooperating local processes but is not one atomic transaction across manager files, devices, or containers with incompatible lock semantics. Evaluate SQLite/transactional storage for production multi-worker use.
 7. Verify Android/Pydroid compatibility separately; GitHub Ubuntu/Windows CI does not establish mobile-runtime compatibility.
 8. Enabled providers now have explicit basic capability metadata and official documentation URLs. Disabled catalog entries still need their fine-grained capabilities and official links checked against authoritative documentation before enabling. Catalog labels alone never count as live verification.
@@ -50,4 +51,4 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 ## Completion gate
 
-Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and platform/runtime constraints are tested. PR #1 is already merged; that merge is not a completion signal.
+Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and platform/runtime constraints are tested. PRs #1 and #7 are already merged; neither merge is a completion signal. PR #69 remains a draft pending review and must not be merged without explicit user approval.

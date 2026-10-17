@@ -49,6 +49,42 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.active_config, good)
         self.assertEqual(self.manager.generation, 1)
 
+    def test_policy_simulation_reports_safe_diff_without_applying_changes(self):
+        current = {
+            "schema_version": "1",
+            "providers": {"image": {"endpoint": "https://old.example.com"}},
+        }
+        self.manager.reload(current)
+        generation_before = self.manager.generation
+        candidate = {
+            "schema_version": "1",
+            "providers": {
+                "image": {
+                    "endpoint": "https://new.example.com",
+                    "api_key": "super-secret-test-value",
+                }
+            },
+        }
+        result = self.manager.simulate_reload(candidate)
+        self.assertEqual(result["status"], "POLICY_SIMULATION_VALID")
+        self.assertTrue(result["would_reload"])
+        self.assertFalse(result["applies_changes"])
+        self.assertIn("providers.image.endpoint", result["changed_paths"])
+        self.assertIn("providers.image.api_key", result["changed_paths"])
+        self.assertNotIn("super-secret-test-value", repr(result))
+        self.assertEqual(self.manager.active_config, current)
+        self.assertEqual(self.manager.generation, generation_before)
+
+    def test_policy_simulation_rejects_invalid_candidate_without_mutation(self):
+        current = {"schema_version": "1", "providers": {"image": {}}}
+        self.manager.reload(current)
+        result = self.manager.simulate_reload({"schema_version": 2, "providers": []})
+        self.assertEqual(result["status"], "POLICY_SIMULATION_REJECTED")
+        self.assertFalse(result["would_reload"])
+        self.assertEqual(result["changed_paths"], [])
+        self.assertEqual(self.manager.active_config, current)
+        self.assertEqual(self.manager.generation, 1)
+
     def test_rollback_restores_previous_known_good_generation(self):
         first = {"schema_version": "1", "providers": {"image": {}}}
         second = {"schema_version": "2", "providers": {"video": {}}}

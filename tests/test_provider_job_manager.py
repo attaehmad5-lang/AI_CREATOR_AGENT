@@ -52,6 +52,48 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(claimed["job"]["job_id"], "high")
         self.assertEqual(self.manager.claim_next(worker_id="worker-2")["status"], "CONCURRENCY_LIMIT")
 
+    def test_fair_scheduling_prevents_one_project_monopolizing_claims(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=10,
+            max_consecutive_project_jobs=2, clock=lambda: self.now[0],
+        )
+        for index in range(4):
+            manager.submit(
+                job_id=f"film-{index}", project_id="film", provider_id="image",
+                payload_ref=f"payload:film-{index}", priority=100,
+            )
+        for index in range(2):
+            manager.submit(
+                job_id=f"education-{index}", project_id="education", provider_id="image",
+                payload_ref=f"payload:education-{index}", priority=1,
+            )
+        first = manager.claim_next(worker_id="worker-1")
+        second = manager.claim_next(worker_id="worker-2")
+        third = manager.claim_next(worker_id="worker-3")
+        self.assertEqual(first["job"]["project_id"], "film")
+        self.assertEqual(second["job"]["project_id"], "film")
+        self.assertEqual(third["job"]["project_id"], "education")
+
+    def test_fair_scheduler_state_persists_across_manager_reload(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=10,
+            max_consecutive_project_jobs=1, clock=lambda: self.now[0],
+        )
+        manager.submit(job_id="film-1", project_id="film", provider_id="image", payload_ref="payload:film-1", priority=100)
+        manager.submit(job_id="education-1", project_id="education", provider_id="image", payload_ref="payload:education-1", priority=10)
+        self.assertEqual(manager.claim_next(worker_id="worker-1")["job"]["project_id"], "film")
+        reloaded = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=10,
+            max_consecutive_project_jobs=1, clock=lambda: self.now[0],
+        )
+        self.assertEqual(reloaded.claim_next(worker_id="worker-2")["job"]["project_id"], "education")
+
+    def test_legacy_queue_state_without_scheduler_metadata_loads(self):
+        self.path.write_text('{"version":"1.0","jobs":{}}', encoding="utf-8")
+        manager = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertEqual(manager.claim_next(worker_id="worker-1")["status"], "QUEUE_EMPTY")
+        self.assertIn("scheduler", manager.data)
+
     def test_job_lifecycle_poll_and_result_reference(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
