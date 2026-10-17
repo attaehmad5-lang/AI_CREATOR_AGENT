@@ -68,7 +68,7 @@ class ProviderAuditLogTests(unittest.TestCase):
         self.assertEqual(invalid["status"], "INVALID_AUDIT_ACTOR")
         invalid_request = self.append(request_id="bad request id")
         self.assertEqual(invalid_request["status"], "INVALID_AUDIT_REQUEST_ID")
-        self.assertNotIn("prompt", self.path.read_text(encoding="utf-8"))
+        self.assertFalse(self.path.exists())
 
     def test_invalid_capacity_and_naive_clock_fail_closed(self):
         with self.assertRaises(ValueError):
