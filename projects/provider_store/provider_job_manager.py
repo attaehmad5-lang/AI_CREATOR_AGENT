@@ -148,11 +148,13 @@ class ProviderJobManager:
         with self._transaction():
             existing = self.data["jobs"].get(job_id)
             if isinstance(existing, dict):
-                same = all(existing.get(key) == value for key, value in {
-                    "project_id": project_id, "provider_id": provider_id,
-                    "payload_ref": payload_ref, "priority": priority,
-                }.items())
-                and (trace_id is None or existing.get("trace_id") == trace_id)
+                same = (
+                    all(existing.get(key) == value for key, value in {
+                        "project_id": project_id, "provider_id": provider_id,
+                        "payload_ref": payload_ref, "priority": priority,
+                    }.items())
+                    and (trace_id is None or existing.get("trace_id") == trace_id)
+                )
                 return {
                     "status": "ALREADY_SUBMITTED" if same else "REQUEST_ID_CONFLICT",
                     "accepted": same,
