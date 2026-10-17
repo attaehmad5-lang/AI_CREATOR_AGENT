@@ -77,13 +77,15 @@ class ProviderCapacityPlanner:
         for record in records:
             if not isinstance(record, dict) or not isinstance(record.get("success"), bool) or not isinstance(record.get("timed_out", False), bool):
                 raise ValueError("each sample requires boolean success and optional timed_out")
+            if record.get("timed_out", False) and record["success"]:
+                raise ValueError("a timed-out sample cannot also be successful")
             if record["success"]:
                 successes += 1
             if record.get("timed_out", False):
                 timeouts += 1
             latency = record.get("latency_ms")
             if latency is not None:
-                latencies.append(self._number(latency, name="latency_ms", minimum=0, maximum=3_600_000))
+                latencies.append(self._number(latency, name="latency_ms", minimum=0.1, maximum=3_600_000))
         if not latencies:
             raise ValueError("at least one valid latency sample is required")
         ordered = sorted(latencies)
