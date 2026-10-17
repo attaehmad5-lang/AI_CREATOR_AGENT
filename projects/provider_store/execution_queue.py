@@ -36,6 +36,7 @@ class BoundedExecutionQueue:
         self.max_terminal_records = max_terminal_records
         self._lock = RLock()
         self._sequence = 0
+        self._last_claimed_tenant: str | None = None
         self._pending: dict[str, dict[str, Any]] = {}
         self._running: dict[str, dict[str, Any]] = {}
         self._terminal: dict[str, dict[str, Any]] = {}
@@ -169,10 +170,26 @@ class BoundedExecutionQueue:
                 return {"status": "QUEUE_EMPTY", "job": None}
             if len(self._running) >= self.max_running:
                 return {"status": "WORKER_CAPACITY_FULL", "job": None}
-            record = min(
-                self._pending.values(),
-                key=lambda item: (-item["priority"], item["sequence"]),
-            )
+            # Fairness is across tenants first; priority/FIFO is honored within
+            # each tenant so one busy tenant cannot monopolize every worker slot.
+            tenant_first_sequence: dict[str, int] = {}
+            for item in self._pending.values():
+                tenant = item["tenant_id"]
+                tenant_first_sequence[tenant] = min(
+                    tenant_first_sequence.get(tenant, item["sequence"]),
+                    item["sequence"],
+                )
+            tenant_order = sorted(tenant_first_sequence, key=tenant_first_sequence.get)
+            if self._last_claimed_tenant in tenant_order:
+                start = tenant_order.index(self._last_claimed_tenant) + 1
+                tenant_order = tenant_order[start:] + tenant_order[:start]
+            chosen_tenant = tenant_order[0]
+            tenant_jobs = [
+                item for item in self._pending.values()
+                if item["tenant_id"] == chosen_tenant
+            ]
+            record = min(tenant_jobs, key=lambda item: (-item["priority"], item["sequence"]))
+            self._last_claimed_tenant = chosen_tenant
             request_id = record["request_id"]
             del self._pending[request_id]
             record = dict(record)
