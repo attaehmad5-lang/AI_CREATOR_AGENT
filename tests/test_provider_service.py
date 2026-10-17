@@ -22,6 +22,7 @@ from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.provider_slo_manager import ProviderSLOManager
+from projects.provider_store.provider_ab_manager import ProviderABExperimentManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 
@@ -104,6 +105,72 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "SLO_MANAGER_OR_SCOPE_REQUIRED")
         self.assertEqual(called, [])
+
+    def test_controlled_ab_assignment_pins_provider_and_records_outcome(self):
+        catalog = self.root / "ab-providers.json"
+        state = self.root / "ab-connections.json"
+        provider_records = []
+        for provider_id in ("image-a", "image-b"):
+            provider_records.append({
+                "id": provider_id, "name": provider_id, "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "zero_cost_allowed": True,
+                "supported_models": [{"id": "image-v1", "versions": ["v1"]}],
+            })
+        catalog.write_text(json.dumps({"providers": provider_records}), encoding="utf-8")
+        state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        connections = ConnectionManager(catalog, state)
+        for provider_id in ("image-a", "image-b"):
+            self.assertTrue(connections.verify_connectivity(
+                provider_id, lambda provider, **kwargs: {"ok": True}
+            )["verified"])
+        cost = ProviderCostPolicy(self.root / "ab-cost.json", project_budgets={"film": 5.0})
+        quota = ProviderQuotaManager(
+            self.root / "ab-quota.json",
+            limits={"image-a": {"daily": 5}, "image-b": {"daily": 5}},
+        )
+        router = ProviderRoutingManager(connections, cost_policy=cost, quota_manager=quota)
+        experiments = ProviderABExperimentManager(self.root / "ab-experiments.json")
+        created = experiments.create_experiment(
+            experiment_id="image-experiment", project_id="film", modality="image",
+            arms=[
+                {"arm_id": "arm-a", "provider_id": "image-a", "model_id": "image-v1", "estimated_cost": 0.0, "weight": 1},
+                {"arm_id": "arm-b", "provider_id": "image-b", "model_id": "image-v1", "estimated_cost": 0.0, "weight": 1},
+            ],
+        )
+        self.assertTrue(created["saved"])
+        service = ProviderService(
+            connections, routing_manager=router,
+            output_validator=self.validator, cost_policy=cost, quota_manager=quota,
+            ab_experiment_manager=experiments,
+        )
+        artifact = self.root / "ab-output.png"
+        artifact.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n")
+        seen = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="ab-request-1",
+            estimated_cost=0.0, modality="image", output_path=artifact,
+            experiment_id="image-experiment",
+            adapter=lambda **kwargs: seen.append(kwargs) or {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred",
+            },
+        )
+        self.assertTrue(result["executed"])
+        self.assertIn(result["provider"], {"image-a", "image-b"})
+        self.assertEqual(seen[0]["provider_id"], result["provider"])
+        self.assertEqual(seen[0]["model_id"], "image-v1")
+        self.assertEqual(result["ab_experiment"]["outcome"]["status"], "OUTCOME_RECORDED")
+
+    def test_ab_execution_fails_closed_without_experiment_manager(self):
+        calls = []
+        result = self.service.execute_routed_request(
+            category="image", project_id="film", request_id="ab-no-manager",
+            estimated_cost=0.0, modality="image", experiment_id="missing",
+            adapter=lambda **kwargs: calls.append(kwargs),
+        )
+        self.assertEqual(result["status"], "AB_EXPERIMENT_MANAGER_UNAVAILABLE")
+        self.assertEqual(calls, [])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
