@@ -6,9 +6,16 @@ deadline requests until its worker confirms a terminal outcome.
 """
 from __future__ import annotations
 
+import json
+import os
+import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, Iterator
+
+from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 
 class BoundedExecutionQueue:
@@ -21,6 +28,7 @@ class BoundedExecutionQueue:
         max_running: int = 8,
         max_pending_per_tenant: int = 25,
         max_terminal_records: int = 10000,
+        state_path: str | os.PathLike[str] | None = None,
     ) -> None:
         for name, value, minimum, maximum in (
             ("max_pending", max_pending, 1, 1_000_000),
@@ -33,7 +41,10 @@ class BoundedExecutionQueue:
         self.max_pending = max_pending
         self.max_running = max_running
         self.max_pending_per_tenant = max_pending_per_tenant
+        if state_path is not None and not isinstance(state_path, (str, os.PathLike)):
+            raise ValueError("state_path must be a path or None")
         self.max_terminal_records = max_terminal_records
+        self.state_path = Path(state_path) if state_path is not None else None
         self._lock = RLock()
         self._sequence = 0
         self._last_claimed_tenant: str | None = None
@@ -42,6 +53,114 @@ class BoundedExecutionQueue:
         self._terminal: dict[str, dict[str, Any]] = {}
         self._accepted = 0
         self._rejected = 0
+        if self.state_path is not None:
+            lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                self._reload_state()
+
+    @contextmanager
+    def _transaction(self) -> Iterator[None]:
+        with self._transaction():
+            if self.state_path is None:
+                yield
+                return
+            lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                self._reload_state()
+                yield
+                self._save_state()
+
+    def _reload_state(self) -> None:
+        if self.state_path is None or not self.state_path.exists():
+            self._sequence = 0
+            self._last_claimed_tenant = None
+            self._pending = {}
+            self._running = {}
+            self._terminal = {}
+            self._accepted = 0
+            self._rejected = 0
+            return
+        try:
+            with self.state_path.open("r", encoding="utf-8") as stream:
+                loaded = json.load(stream)
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError("invalid execution queue state") from exc
+        if (
+            not isinstance(loaded, dict)
+            or loaded.get("version") != 1
+            or not isinstance(loaded.get("pending"), dict)
+            or not isinstance(loaded.get("running"), dict)
+            or not isinstance(loaded.get("terminal"), dict)
+            or not isinstance(loaded.get("sequence"), int)
+            or isinstance(loaded.get("sequence"), bool)
+            or loaded["sequence"] < 0
+            or not isinstance(loaded.get("accepted"), int)
+            or isinstance(loaded.get("accepted"), bool)
+            or loaded["accepted"] < 0
+            or not isinstance(loaded.get("rejected"), int)
+            or isinstance(loaded.get("rejected"), bool)
+            or loaded["rejected"] < 0
+        ):
+            raise ValueError("invalid execution queue state schema")
+        pending = loaded["pending"]
+        running = loaded["running"]
+        terminal = loaded["terminal"]
+        if len(pending) > self.max_pending or len(running) > self.max_running or len(terminal) > self.max_terminal_records:
+            raise ValueError("execution queue state exceeds configured limits")
+        for collection, statuses in (
+            (pending, {"QUEUED"}), (running, {"RUNNING"}),
+            (terminal, self.TERMINAL_STATES),
+        ):
+            for request_id, record in collection.items():
+                if (
+                    not self._valid_id(request_id)
+                    or not isinstance(record, dict)
+                    or record.get("request_id", request_id) != request_id
+                    or not self._valid_id(record.get("tenant_id"))
+                    or not self._valid_id(record.get("project_id"))
+                    or not self._valid_id(record.get("category"), max_length=80)
+                    or not isinstance(record.get("status"), str)
+                    or record["status"] not in statuses
+                ):
+                    raise ValueError("invalid execution queue record")
+                if not isinstance(record.get("fingerprint"), list):
+                    raise ValueError("invalid execution queue idempotency fingerprint")
+        self._sequence = loaded["sequence"]
+        self._last_claimed_tenant = loaded.get("last_claimed_tenant")
+        if self._last_claimed_tenant is not None and not self._valid_id(self._last_claimed_tenant):
+            raise ValueError("invalid execution queue scheduler state")
+        self._pending = pending
+        self._running = running
+        self._terminal = terminal
+        self._accepted = loaded["accepted"]
+        self._rejected = loaded["rejected"]
+
+    def _save_state(self) -> None:
+        if self.state_path is None:
+            return
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "sequence": self._sequence,
+            "last_claimed_tenant": self._last_claimed_tenant,
+            "pending": self._pending,
+            "running": self._running,
+            "terminal": self._terminal,
+            "accepted": self._accepted,
+            "rejected": self._rejected,
+        }
+        fd, temporary = tempfile.mkstemp(
+            prefix=self.state_path.name + ".", suffix=".tmp", dir=str(self.state_path.parent)
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"))
+                stream.flush()
+                os.fsync(stream.fileno())
+            atomic_replace_with_retry(temporary, self.state_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     @staticmethod
     def _valid_id(value: Any, *, max_length: int = 128) -> bool:
@@ -72,8 +191,8 @@ class BoundedExecutionQueue:
         return parsed.astimezone(timezone.utc)
 
     @staticmethod
-    def _fingerprint(tenant_id: str, project_id: str, category: str, priority: int, deadline: datetime | None) -> tuple[Any, ...]:
-        return (tenant_id, project_id, category, priority, deadline.isoformat() if deadline else None)
+    def _fingerprint(tenant_id: str, project_id: str, category: str, priority: int, deadline: datetime | None) -> list[Any]:
+        return [tenant_id, project_id, category, priority, deadline.isoformat() if deadline else None]
 
     def enqueue(
         self,
@@ -100,7 +219,7 @@ class BoundedExecutionQueue:
         if deadline is not None and deadline <= current:
             return {"status": "DEADLINE_ALREADY_EXPIRED", "accepted": False}
         fingerprint = self._fingerprint(tenant_id, project_id, category, priority, deadline)
-        with self._lock:
+        with self._transaction():
             existing = self._pending.get(request_id) or self._running.get(request_id) or self._terminal.get(request_id)
             if existing is not None:
                 if existing["fingerprint"] != fingerprint:
@@ -164,7 +283,7 @@ class BoundedExecutionQueue:
             current = self._utc_now(now)
         except ValueError:
             return {"status": "INVALID_CURRENT_TIME", "job": None}
-        with self._lock:
+        with self._transaction():
             self._expire_pending(current)
             if not self._pending:
                 return {"status": "QUEUE_EMPTY", "job": None}
@@ -220,7 +339,7 @@ class BoundedExecutionQueue:
             current = self._utc_now(now)
         except ValueError:
             return {"status": "INVALID_CURRENT_TIME", "completed": False}
-        with self._lock:
+        with self._transaction():
             record = self._running.get(request_id)
             if record is None:
                 if request_id in self._terminal:
@@ -239,7 +358,7 @@ class BoundedExecutionQueue:
             current = self._utc_now(now)
         except ValueError:
             return {"status": "INVALID_CURRENT_TIME", "cancelled": False}
-        with self._lock:
+        with self._transaction():
             record = self._pending.get(request_id)
             if record is not None:
                 if record["tenant_id"] != tenant_id:
@@ -265,7 +384,7 @@ class BoundedExecutionQueue:
             return {"status": "INVALID_REQUEST_METADATA", "job": None}
         if worker_id is not None and not self._valid_id(worker_id):
             return {"status": "INVALID_WORKER_ID", "job": None}
-        with self._lock:
+        with self._transaction():
             record = self._pending.get(request_id)
             if record is not None:
                 if record["tenant_id"] != tenant_id:
@@ -304,7 +423,7 @@ class BoundedExecutionQueue:
             current = self._utc_now(now)
         except ValueError:
             return {"status": "INVALID_CURRENT_TIME", "pending_expired": 0, "running_deadlines_flagged": 0}
-        with self._lock:
+        with self._transaction():
             pending_expired = self._expire_pending(current)
             running_flagged = 0
             for record in self._running.values():
@@ -319,7 +438,7 @@ class BoundedExecutionQueue:
             }
 
     def stats(self) -> dict[str, Any]:
-        with self._lock:
+        with self._transaction():
             return {
                 "status": "READY",
                 "pending": len(self._pending),
