@@ -52,6 +52,31 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(claimed["job"]["job_id"], "high")
         self.assertEqual(self.manager.claim_next(worker_id="worker-2")["status"], "CONCURRENCY_LIMIT")
 
+    def test_provider_specific_concurrency_skips_blocked_provider_queue(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=3,
+            max_concurrent_by_provider={"image": 1, "video": 2},
+            clock=lambda: self.now[0],
+        )
+        manager.submit(job_id="image-high", project_id="film", provider_id="image",
+                       payload_ref="payload:image-high", priority=90)
+        manager.submit(job_id="image-low", project_id="film", provider_id="image",
+                       payload_ref="payload:image-low", priority=80)
+        manager.submit(job_id="video-mid", project_id="film", provider_id="video",
+                       payload_ref="payload:video-mid", priority=70)
+        first = manager.claim_next(worker_id="worker-1")
+        second = manager.claim_next(worker_id="worker-2")
+        third = manager.claim_next(worker_id="worker-3")
+        self.assertEqual(first["job"]["job_id"], "image-high")
+        self.assertEqual(second["job"]["job_id"], "video-mid")
+        self.assertEqual(third["status"], "PROVIDER_CONCURRENCY_LIMIT")
+
+    def test_invalid_provider_concurrency_limits_are_rejected(self):
+        with self.assertRaises(ValueError):
+            ProviderJobManager(self.path, max_concurrent_by_provider={"bad provider": 1})
+        with self.assertRaises(ValueError):
+            ProviderJobManager(self.path, max_concurrent_by_provider={"image": True})
+
     def test_job_lifecycle_poll_and_result_reference(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
