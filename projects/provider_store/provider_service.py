@@ -25,6 +25,7 @@ class ProviderService:
         credit_manager: Any | None = None,
         budget_alert_manager: Any | None = None,
         authorization_manager: Any | None = None,
+        degraded_mode_manager: Any | None = None,
         sensitive_data_policy: Any | None = None,
         data_handling_policy: Any | None = None,
         webhook_verifier: Any | None = None,
@@ -48,6 +49,7 @@ class ProviderService:
             (credit_manager, "commit", "credit_manager"),
             (budget_alert_manager, "record", "budget_alert_manager"),
             (authorization_manager, "authorize", "authorization_manager"),
+            (degraded_mode_manager, "evaluate", "degraded_mode_manager"),
             (sensitive_data_policy, "inspect", "sensitive_data_policy"),
             (data_handling_policy, "evaluate", "data_handling_policy"),
             (webhook_verifier, "verify", "webhook_verifier"),
@@ -72,6 +74,7 @@ class ProviderService:
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
         self.budget_alert_manager = budget_alert_manager
         self.authorization_manager = authorization_manager
+        self.degraded_mode_manager = degraded_mode_manager
         self.sensitive_data_policy = sensitive_data_policy
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
@@ -445,6 +448,7 @@ class ProviderService:
         adapter: Any,
         modality: str,
         principal_id: str | None = None,
+        degraded_service_id: str | None = None,
         data_categories: tuple[str, ...] | list[str] = ("user_content",),
         retention_days: int = 0,
         provider_training_use: bool = False,
@@ -471,6 +475,20 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        degraded_mode_result = None
+        if self.degraded_mode_manager is not None:
+            service_scope = degraded_service_id or category
+            if not isinstance(service_scope, str) or not service_scope.strip():
+                return {"status": "DEGRADED_SERVICE_SCOPE_REQUIRED", "executed": False}
+            try:
+                degraded_mode_result = self.degraded_mode_manager.evaluate(
+                    project_id=project_id, service_id=service_scope,
+                    operation="provider.generate",
+                )
+            except Exception as exc:
+                return {"status": "DEGRADED_MODE_CHECK_FAILED", "executed": False, "error_type": type(exc).__name__}
+            if not isinstance(degraded_mode_result, dict) or degraded_mode_result.get("allowed") is not True:
+                return {"status": "DEGRADED_MODE_BLOCKED", "executed": False, "degraded_mode": degraded_mode_result}
 
         feature_flag_result = None
         if self.feature_flag_manager is not None:
@@ -534,6 +552,29 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+        if self.degraded_mode_manager is not None:
+            try:
+                provider_mode = self.degraded_mode_manager.evaluate(
+                    project_id=project_id, service_id=degraded_service_id or category,
+                    operation="provider.generate", provider_id=provider_id,
+                )
+            except Exception as exc:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "DEGRADED_MODE_CHECK_FAILED", "executed": False,
+                    "release": release, "error_type": type(exc).__name__,
+                }
+            if not isinstance(provider_mode, dict) or provider_mode.get("allowed") is not True:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "DEGRADED_MODE_BLOCKED", "executed": False,
+                    "degraded_mode": provider_mode, "release": release,
+                }
+            degraded_mode_result = provider_mode
 
         data_policy_result = None
         if self.data_handling_policy is not None:
@@ -871,6 +912,7 @@ class ProviderService:
             "budget_alerts": budget_alerts,
             "authorization": authorization,
             "feature_flag": feature_flag_result,
+            "degraded_mode": degraded_mode_result,
             "sensitive_data_scan": sensitive_data_scan,
             "data_policy": data_policy_result,
             "retry_decision": retry,

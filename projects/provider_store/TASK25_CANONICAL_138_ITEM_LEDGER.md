@@ -208,7 +208,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 122 | 🔴 | Fair Scheduling and Workload Prioritization | OPEN | Fair scheduling and priority queues are not implemented. |
 | 123 | 🔴 | Provider/Regional Outage Handling | PARTIAL | Health and fallback primitives exist; region-wide outage handling is not integrated. |
 | 124 | 🔴 | Disaster Recovery and Restore Procedures | PARTIAL | Catalog restore and atomic persistence exist; full disaster recovery/restore drills are not verified. |
-| 125 | 🔴 | Degraded Mode During Partial Service Outages | OPEN | Explicit degraded-mode orchestration is not implemented. |
+| 125 | 🔴 | Degraded Mode During Partial Service Outages | PARTIAL | `provider_degraded_mode.py` persists NORMAL/DEGRADED/READ_ONLY/FAIL_CLOSED policies with safe reason codes and explicit provider allowlists. `ProviderService` blocks generation when policy is missing or mode denies it, and rechecks the selected provider before adapter invocation. Automated health-to-mode transitions, recovery orchestration, cross-service policy distribution and outage drills remain open. |
 | 126 | 🔴 | Capacity Planning and Load Testing | OPEN | Capacity planning and sustained load tests are not complete. |
 | 127 | 🔴 | Service-Level Objectives (SLOs) | OPEN | SLO definitions and tracking are not implemented. |
 | 128 | 🔴 | Operational Runbooks and Incident Recovery | PARTIAL | A provider guide exists; full operational runbooks and incident drills are incomplete. |

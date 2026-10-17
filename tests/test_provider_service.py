@@ -8,6 +8,7 @@ from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.provider_feature_flags import ProviderFeatureFlagManager
 from projects.provider_store.provider_incident_manager import ProviderIncidentManager
 from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
+from projects.provider_store.provider_degraded_mode import ProviderDegradedModeManager
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
@@ -61,6 +62,58 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_degraded_mode_blocks_generation_before_adapter_invocation(self):
+        modes = ProviderDegradedModeManager(self.root / "degraded-read-only.json")
+        self.assertTrue(modes.set_mode(
+            project_id="film", service_id="image", mode="READ_ONLY",
+            reason_code="PROVIDER_OUTAGE",
+        )["saved"])
+        service = ProviderService(
+            self.connections,
+            routing_manager=ProviderRoutingManager(
+                self.connections, cost_policy=self.cost, quota_manager=self.quota
+            ),
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=modes,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="degraded-read-only",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(kwargs),
+            modality="image",
+        )
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["status"], "DEGRADED_MODE_BLOCKED")
+        self.assertEqual(called, [])
+
+    def test_degraded_mode_allows_only_selected_provider(self):
+        modes = ProviderDegradedModeManager(self.root / "degraded-allowlist.json")
+        self.assertTrue(modes.set_mode(
+            project_id="film", service_id="image", mode="DEGRADED",
+            reason_code="PARTIAL_OUTAGE", allowed_providers=["image"],
+        )["saved"])
+        service = ProviderService(
+            self.connections,
+            routing_manager=ProviderRoutingManager(
+                self.connections, cost_policy=self.cost, quota_manager=self.quota
+            ),
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=modes,
+        )
+        artifact = self.root / "degraded-output.png"
+        artifact.write_bytes(b"\x89PNG\r\n\x1a\n")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="degraded-allowed",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred",
+            },
+            modality="image", output_path=artifact,
+        )
+        self.assertTrue(result["executed"])
+        self.assertEqual(result["degraded_mode"]["mode"], "DEGRADED")
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
