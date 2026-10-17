@@ -545,8 +545,19 @@ class ProviderService:
         timestamp: int | str,
         event_id: str,
         secret: str,
+        principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify a provider callback without persisting its secret or body."""
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {"verified": False, "status": "AUTHORIZATION_DENIED", "authorization": authorization}
+        audit_intent = self._audit_event(
+            principal_id=principal_id, operation="provider.webhook.verify",
+            resource_type="webhook", resource_id=event_id, request_id=event_id,
+            outcome="REQUESTED",
+        )
+        if audit_intent is not None and audit_intent.get("saved") is not True:
+            return {"verified": False, "status": "AUDIT_LOG_FAILED"}
         if self.webhook_verifier is None:
             return {"verified": False, "status": "WEBHOOK_VERIFIER_UNAVAILABLE"}
         try:
@@ -564,9 +575,17 @@ class ProviderService:
                 "status": "WEBHOOK_VERIFICATION_FAILED",
                 "error_type": type(exc).__name__,
             }
-        return result if isinstance(result, dict) else {
+        normalized = result if isinstance(result, dict) else {
             "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
+        audit_result = self._audit_event(
+            principal_id=principal_id, operation="provider.webhook.verify",
+            resource_type="webhook", resource_id=event_id, request_id=event_id,
+            outcome=re.sub(r"[^A-Za-z0-9_.:-]", "_", str(normalized.get("status", "UNKNOWN")))[:80] or "UNKNOWN",
+        )
+        if audit_result is not None and audit_result.get("saved") is not True:
+            normalized["audit_status"] = "AUDIT_RESULT_WRITE_FAILED"
+        return normalized
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
