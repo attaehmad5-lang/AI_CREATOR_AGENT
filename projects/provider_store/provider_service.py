@@ -32,6 +32,7 @@ class ProviderService:
         metrics_manager: Any | None = None,
         quality_policy: Any | None = None,
         benchmark_manager: Any | None = None,
+        slo_manager: Any | None = None,
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
@@ -55,6 +56,7 @@ class ProviderService:
             (metrics_manager, "record", "metrics_manager"),
             (quality_policy, "evaluate", "quality_policy"),
             (benchmark_manager, "record", "benchmark_manager"),
+            (slo_manager, "record_observation", "slo_manager"),
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
@@ -79,6 +81,7 @@ class ProviderService:
         self.metrics_manager = metrics_manager
         self.quality_policy = quality_policy
         self.benchmark_manager = benchmark_manager
+        self.slo_manager = slo_manager
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
@@ -445,6 +448,8 @@ class ProviderService:
         adapter: Any,
         modality: str,
         principal_id: str | None = None,
+        slo_id: str | None = None,
+        slo_service_id: str | None = None,
         data_categories: tuple[str, ...] | list[str] = ("user_content",),
         retention_days: int = 0,
         provider_training_use: bool = False,
@@ -471,6 +476,13 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        if slo_id is not None or slo_service_id is not None:
+            if (
+                self.slo_manager is None
+                or not isinstance(slo_id, str) or not slo_id.strip()
+                or not isinstance(slo_service_id, str) or not slo_service_id.strip()
+            ):
+                return {"status": "SLO_MANAGER_OR_SCOPE_REQUIRED", "executed": False}
 
         feature_flag_result = None
         if self.feature_flag_manager is not None:
@@ -842,6 +854,19 @@ class ProviderService:
                     "saved": False,
                     "error_type": type(exc).__name__,
                 }
+        slo_observation = None
+        if slo_id is not None and self.slo_manager is not None:
+            try:
+                slo_observation = self.slo_manager.record_observation(
+                    slo_id=slo_id, service_id=slo_service_id, request_id=request_id,
+                    success=bool(final_success),
+                    latency_ms=max(0.0, (time.monotonic() - started_at) * 1000),
+                )
+            except Exception as exc:
+                slo_observation = {
+                    "status": "SLO_OBSERVATION_RECORD_FAILED",
+                    "saved": False, "error_type": type(exc).__name__,
+                }
         if accounting_required:
             status = "EXECUTION_ACCOUNTING_REQUIRED"
         elif quality_error is not None:
@@ -866,6 +891,7 @@ class ProviderService:
             "finalization": finalization,
             "metrics": metrics_result,
             "benchmark": benchmark_result,
+            "slo": slo_observation,
             "incident": incident_result,
             "provider_error": provider_error,
             "budget_alerts": budget_alerts,

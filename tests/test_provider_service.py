@@ -8,6 +8,7 @@ from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.provider_feature_flags import ProviderFeatureFlagManager
 from projects.provider_store.provider_incident_manager import ProviderIncidentManager
 from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
+from projects.provider_store.provider_slo_manager import ProviderSLOManager
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
@@ -61,6 +62,48 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_slo_manager_records_completed_execution_without_payloads(self):
+        slo = ProviderSLOManager(self.root / "service-slo.json")
+        self.assertTrue(slo.define_slo(
+            slo_id="image-slo", service_id="image", target_success_rate=0.95,
+            window_seconds=3600, min_samples=1,
+        )["saved"])
+        service = ProviderService(
+            self.connections,
+            routing_manager=ProviderRoutingManager(
+                self.connections, cost_policy=self.cost, quota_manager=self.quota
+            ),
+            health_manager=self.health, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota, slo_manager=slo,
+        )
+        artifact = self.root / "slo-output.png"
+        artifact.write_bytes(b"\x89PNG\r\n\x1a\n")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="slo-request-1",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred",
+            },
+            modality="image", output_path=artifact,
+            slo_id="image-slo", slo_service_id="image",
+        )
+        self.assertTrue(result["executed"])
+        self.assertEqual(result["slo"]["status"], "SLO_OBSERVATION_RECORDED")
+        evaluation = slo.evaluate(slo_id="image-slo", service_id="image")
+        self.assertEqual(evaluation["slo_status"], "SLO_MET")
+        self.assertEqual(evaluation["sample_count"], 1)
+
+    def test_slo_request_is_rejected_when_manager_or_scope_is_missing(self):
+        called = []
+        result = self.service.execute_routed_request(
+            category="image", project_id="film", request_id="missing-slo",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(kwargs),
+            modality="image", slo_id="missing-slo", slo_service_id="image",
+        )
+        self.assertEqual(result["status"], "SLO_MANAGER_OR_SCOPE_REQUIRED")
+        self.assertEqual(called, [])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
