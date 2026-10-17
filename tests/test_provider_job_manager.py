@@ -246,8 +246,8 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(claimed["job"]["job_id"], "job-before-shutdown")
 
     def test_immediate_shutdown_cancels_queue_and_requests_running_cancel(self):
-        self.submit("job-running")
-        self.submit("job-queued")
+        self.submit("job-running", priority=90)
+        self.submit("job-queued", priority=10)
         claimed = self.manager.claim_next(worker_id="worker-1")
         result = self.manager.request_shutdown(drain=False)
         self.assertEqual(result["status"], "SHUTDOWN_CANCELLING")
@@ -261,8 +261,8 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(finished["job"]["status"], "CANCELLED")
 
     def test_shutdown_deadline_requests_cancellation_when_drain_expires(self):
-        self.submit("job-running-deadline")
-        self.submit("job-queued-deadline")
+        self.submit("job-running-deadline", priority=90)
+        self.submit("job-queued-deadline", priority=10)
         claimed = self.manager.claim_next(worker_id="worker-1")
         deadline = (self.now[0] + timedelta(seconds=5)).isoformat()
         self.assertEqual(
