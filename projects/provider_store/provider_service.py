@@ -37,6 +37,7 @@ class ProviderService:
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
+        slo_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -62,6 +63,7 @@ class ProviderService:
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
+            (slo_manager, "record_observation", "slo_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -88,6 +90,7 @@ class ProviderService:
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
+        self.slo_manager = slo_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -453,6 +456,8 @@ class ProviderService:
         principal_id: str | None = None,
         tenant_id: str | None = None,
         degraded_service_id: str | None = None,
+        slo_id: str | None = None,
+        slo_service_id: str | None = None,
         data_categories: tuple[str, ...] | list[str] = ("user_content",),
         retention_days: int = 0,
         provider_training_use: bool = False,
@@ -851,6 +856,29 @@ class ProviderService:
                         "saved": False,
                         "error_type": type(exc).__name__,
                     }
+        slo_result = None
+        if self.slo_manager is not None:
+            if slo_id is None and slo_service_id is None:
+                slo_result = {"status": "SLO_CONTEXT_NOT_PROVIDED", "saved": False}
+            elif (
+                not isinstance(slo_id, str) or not slo_id.strip()
+                or not isinstance(slo_service_id, str) or not slo_service_id.strip()
+            ):
+                slo_result = {"status": "SLO_CONTEXT_INVALID", "saved": False}
+            else:
+                try:
+                    slo_result = self.slo_manager.record_observation(
+                        slo_id=slo_id, service_id=slo_service_id,
+                        request_id=request_id, success=final_success,
+                        latency_ms=latency_ms,
+                    )
+                except Exception as exc:
+                    slo_result = {
+                        "status": "SLO_OBSERVATION_FAILED",
+                        "saved": False,
+                        "error_type": type(exc).__name__,
+                    }
+
         metrics_result = None
         if self.metrics_manager is not None:
             try:
@@ -965,6 +993,7 @@ class ProviderService:
             "quality": quality_result,
             "finalization": finalization,
             "metrics": metrics_result,
+            "slo": slo_result,
             "benchmark": benchmark_result,
             "incident": incident_result,
             "provider_error": provider_error,
