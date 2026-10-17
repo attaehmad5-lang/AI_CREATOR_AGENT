@@ -103,8 +103,21 @@ class LocalProviderManager:
             validation = self.validate_endpoint(record["endpoint"], allowed_hosts=record.get("allowed_hosts"))
             if not validation["valid"] or not record["model"].strip() or len(record["model"]) > 200:
                 raise ValueError("local provider configuration is invalid")
-            if not record["capabilities"] or any(cap not in self.CAPABILITIES for cap in record["capabilities"]):
+            if (
+                not record["capabilities"]
+                or any(not isinstance(cap, str) or cap not in self.CAPABILITIES for cap in record["capabilities"])
+                or len(record["capabilities"]) != len(set(record["capabilities"]))
+            ):
                 raise ValueError("local provider capabilities are invalid")
+            if not isinstance(record.get("allowed_hosts"), list) or any(
+                not isinstance(host, str) or not host.strip() for host in record["allowed_hosts"]
+            ):
+                raise ValueError("local provider host allowlist is invalid")
+            if any(
+                marker in record["model"].casefold()
+                for marker in ("token=", "api_key=", "password=", "secret=", "bearer ")
+            ):
+                raise ValueError("local provider model metadata contains a secret-like value")
             if record["enabled"] and not record["verified"]:
                 raise ValueError("unverified local provider cannot be enabled")
         return state
@@ -157,8 +170,8 @@ class LocalProviderManager:
             return {"status": "INVALID_MODEL_ID", "registered": False}
         if (
             not isinstance(capabilities, list) or not capabilities
-            or len(capabilities) != len(set(capabilities))
             or any(not isinstance(cap, str) or cap not in self.CAPABILITIES for cap in capabilities)
+            or len(capabilities) != len(set(capabilities))
         ):
             return {"status": "INVALID_CAPABILITIES", "registered": False}
         if allowed_hosts is not None and (
