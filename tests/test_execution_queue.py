@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
@@ -161,6 +163,60 @@ class BoundedExecutionQueueTests(unittest.TestCase):
         self.assertEqual(queue.stats()["pending"], 40)
         self.assertEqual(queue.stats()["accepted_total"], 40)
         self.assertEqual(queue.stats()["rejected_total"], 60)
+
+    def test_persistent_queue_survives_restart_and_preserves_idempotency(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "queue.json"
+            first = BoundedExecutionQueue(state_path=path, max_pending=4, max_running=1)
+            self.assertEqual(self.enqueue(first, "persisted-job")["status"], "QUEUED")
+            restarted = BoundedExecutionQueue(state_path=path, max_pending=4, max_running=1)
+            self.assertEqual(restarted.stats()["pending"], 1)
+            claimed = restarted.claim_next(worker_id="worker", now=self.now)
+            self.assertEqual(claimed["job"]["request_id"], "persisted-job")
+            after_claim = BoundedExecutionQueue(state_path=path, max_pending=4, max_running=1)
+            self.assertEqual(after_claim.stats()["running"], 1)
+            self.assertTrue(after_claim.complete(
+                request_id="persisted-job", worker_id="worker", status="SUCCEEDED", now=self.now
+            )["completed"])
+            after_complete = BoundedExecutionQueue(state_path=path, max_pending=4, max_running=1)
+            self.assertEqual(after_complete.enqueue(
+                request_id="persisted-job", tenant_id="tenant-a", project_id="project-a",
+                category="image", now=self.now,
+            )["status"], "ALREADY_TERMINAL")
+
+    def test_persistent_queue_rejects_corrupt_state_without_overwriting_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "queue.json"
+            path.write_text("{invalid-json", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                BoundedExecutionQueue(state_path=path)
+            self.assertEqual(path.read_text(encoding="utf-8"), "{invalid-json")
+
+    def test_separate_queue_instances_share_persistent_capacity_safely(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "shared-queue.json"
+            queues = [
+                BoundedExecutionQueue(
+                    state_path=path, max_pending=20, max_running=2,
+                    max_pending_per_tenant=100,
+                )
+                for _ in range(10)
+            ]
+            def put(index):
+                return queues[index % len(queues)].enqueue(
+                    request_id=f"shared-{index}", tenant_id=f"tenant-{index % 4}",
+                    project_id="project", category="image", now=self.now,
+                )["accepted"]
+            with ThreadPoolExecutor(max_workers=20) as pool:
+                results = list(pool.map(put, range(60)))
+            final = BoundedExecutionQueue(
+                state_path=path, max_pending=20, max_running=2,
+                max_pending_per_tenant=100,
+            )
+            self.assertEqual(sum(results), 20)
+            self.assertEqual(final.stats()["pending"], 20)
+            self.assertEqual(final.stats()["accepted_total"], 20)
+            self.assertEqual(final.stats()["rejected_total"], 40)
 
     def test_stats_never_include_request_payloads_or_identifiers(self):
         queue = BoundedExecutionQueue()
