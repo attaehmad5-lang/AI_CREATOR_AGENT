@@ -6,7 +6,7 @@ The exact canonical feature names, original baseline markers and item-by-item ev
 
 ## Latest code verification
 
-GitHub Actions run [#38796551453](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38796551453) completed successfully on Python 3.13: **358 tests passed on Ubuntu and 358 on Windows, 0 failures on either platform**. A bounded metadata-only queue and ProviderService queue facade were added afterward; those newest changes are awaiting their own CI verification. Compilation and provider JSON catalog validation passed on both platforms. This run includes persistent execution metrics, unique trace IDs, mandatory health gating before generation, capability-based routing, active health probes and recovery, bounded per-provider concurrency/backpressure, latency-aware routing, and an explicit error-specific retry classification matrix.
+GitHub Actions run [#38796551453](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38796551453) completed successfully on Python 3.13: **358 tests passed on Ubuntu and 358 on Windows, 0 failures on either platform**. After that run, a bounded metadata-only queue, tenant-round-robin scheduling, cancellation polling, and ProviderService queue wrappers were added with regression tests. These newest changes are awaiting their own CI verification. Compilation and provider JSON catalog validation passed on both platforms. This run includes persistent execution metrics, unique trace IDs, mandatory health gating before generation, capability-based routing, active health probes and recovery, bounded per-provider concurrency/backpressure, latency-aware routing, and an explicit error-specific retry classification matrix.
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
@@ -24,7 +24,7 @@ GitHub Actions run [#38796551453](https://github.com/attaehmad5-lang/AI_CREATOR_
 | L / 89–96 | Configuration, Compatibility and Change Control | PARTIAL | Schema validation, safe config checks and catalog restore exist; version migration, hot reload, feature flags and complete backup/rollback verification remain open. |
 | M / 97–110 | Testing, Audit and Release Readiness | PARTIAL | 351 tests pass on Windows and Ubuntu; full 138-item coverage, all-modality end-to-end tests, complete failure injection, secret scanning and release PASS remain open. |
 | N / 111–118 | High-Advanced Routing Intelligence | PARTIAL | Cost/health/capability routing foundations exist; confidence-aware, adaptive, region-aware and A/B routing with approval gates remain open. |
-| O / 119–128 | Enterprise and Large-Production Resiliency | OPEN/PARTIAL | Some quotas, health and restore primitives exist; tenant isolation, fair scheduling, regional outage/degraded mode, capacity tests, SLOs and incident runbooks are not complete. |
+| O / 119–128 | Enterprise and Large-Production Resiliency | OPEN/PARTIAL | Some quotas, health and restore primitives exist; an in-memory tenant round-robin queue is now present but still needs CI and production integration. Tenant isolation, regional outage/degraded mode, capacity tests, SLOs and incident runbooks remain incomplete. |
 | P / 129–138 | Future-Ready Extensibility | PARTIAL | Capability contracts and compatibility facades exist; plugin lifecycle, self-hosted providers, deprecation handling, policy simulation and admin controls remain open. |
 
 ## Completion gates
