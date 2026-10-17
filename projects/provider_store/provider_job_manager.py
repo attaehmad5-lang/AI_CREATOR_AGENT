@@ -31,6 +31,7 @@ class ProviderJobManager:
         lease_seconds: int = 120,
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
+        max_consecutive_project_jobs: int = 3,
         clock: Any = None,
     ) -> None:
         for value, name, minimum, maximum in (
@@ -39,6 +40,7 @@ class ProviderJobManager:
             (lease_seconds, "lease_seconds", 1, 86400),
             (max_attempts, "max_attempts", 1, 20),
             (backpressure_retry_seconds, "backpressure_retry_seconds", 1, 3600),
+            (max_consecutive_project_jobs, "max_consecutive_project_jobs", 1, 100),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise ValueError(f"{name} is outside safe limits")
@@ -50,20 +52,21 @@ class ProviderJobManager:
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.backpressure_retry_seconds = backpressure_retry_seconds
+        self.max_consecutive_project_jobs = max_consecutive_project_jobs
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {
             "version": "1.0", "jobs": {},
-            "scheduler_state": {"last_project_by_priority": {}},
+            "scheduler": {"last_project_id": None, "consecutive_claims": 0},
         }
-        # Initialization must not read the shared JSON file while another process
-        # is atomically replacing it (notably on Windows).
-        with interprocess_file_lock(self.state_path.with_name(self.state_path.name + ".lock")):
-            self._reload()
+        self._reload()
 
     def _reload(self) -> None:
         if not self.state_path.exists():
-            self.data = {"version": "1.0", "jobs": {}}
+            self.data = {
+                "version": "1.0", "jobs": {},
+                "scheduler": {"last_project_id": None, "consecutive_claims": 0},
+            }
             return
         try:
             with self.state_path.open("r", encoding="utf-8") as stream:
@@ -72,21 +75,23 @@ class ProviderJobManager:
             raise ValueError("invalid provider job state JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("jobs"), dict):
             raise ValueError("invalid provider job state schema")
-        loaded.setdefault("scheduler_state", {"last_project_by_priority": {}})
-        scheduler_state = loaded.get("scheduler_state")
-        if not isinstance(scheduler_state, dict):
+        scheduler = loaded.setdefault(
+            "scheduler", {"last_project_id": None, "consecutive_claims": 0}
+        )
+        if (
+            not isinstance(scheduler, dict)
+            or (
+                scheduler.get("last_project_id") is not None
+                and (
+                    not isinstance(scheduler.get("last_project_id"), str)
+                    or not _ID_RE.fullmatch(scheduler["last_project_id"])
+                )
+            )
+            or isinstance(scheduler.get("consecutive_claims"), bool)
+            or not isinstance(scheduler.get("consecutive_claims"), int)
+            or scheduler["consecutive_claims"] < 0
+        ):
             raise ValueError("invalid provider job scheduler state")
-        last_project_by_priority = scheduler_state.get("last_project_by_priority", {})
-        if not isinstance(last_project_by_priority, dict):
-            raise ValueError("invalid provider job scheduler cursor")
-        for priority, project_id in last_project_by_priority.items():
-            if (
-                not isinstance(priority, str) or not priority.isdigit()
-                or not 0 <= int(priority) <= 100
-                or not isinstance(project_id, str) or not _ID_RE.fullmatch(project_id)
-            ):
-                raise ValueError("invalid provider job scheduler cursor")
-        scheduler_state["last_project_by_priority"] = last_project_by_priority
         for job_id, job in loaded["jobs"].items():
             if (
                 not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
@@ -227,21 +232,29 @@ class ProviderJobManager:
                 job for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "QUEUED"
             ]
+            queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
             if not queued:
                 if changed:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
-            highest_priority = max(job["priority"] for job in queued)
-            priority_queue = [job for job in queued if job["priority"] == highest_priority]
-            projects = sorted({job["project_id"] for job in priority_queue})
-            cursors = self.data["scheduler_state"]["last_project_by_priority"]
-            last_project = cursors.get(str(highest_priority))
-            next_projects = [project for project in projects if last_project is None or project > last_project]
-            selected_project = next_projects[0] if next_projects else projects[0]
-            project_jobs = [job for job in priority_queue if job["project_id"] == selected_project]
-            project_jobs.sort(key=lambda job: (job["created_at"], job["job_id"]))
-            job = project_jobs[0]
-            cursors[str(highest_priority)] = selected_project
+            scheduler = self.data["scheduler"]
+            last_project = scheduler.get("last_project_id")
+            consecutive = scheduler.get("consecutive_claims", 0)
+            selected_pool = queued
+            if (
+                isinstance(last_project, str)
+                and consecutive >= self.max_consecutive_project_jobs
+                and any(job.get("project_id") != last_project for job in queued)
+            ):
+                # Preserve priority ordering among other projects, but prevent one
+                # busy project from monopolizing every worker claim.
+                selected_pool = [job for job in queued if job.get("project_id") != last_project]
+            job = selected_pool[0]
+            if job.get("project_id") == last_project:
+                scheduler["consecutive_claims"] = consecutive + 1
+            else:
+                scheduler["last_project_id"] = job.get("project_id")
+                scheduler["consecutive_claims"] = 1
             job["status"] = "RUNNING"
             job["worker_id"] = worker_id
             job["attempts"] += 1
