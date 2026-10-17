@@ -232,6 +232,6 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 1. Every one of the 138 items must be reviewed against its original wording; do not infer or rename features.
 2. Any `PARTIAL` or `OPEN` item must remain uncompleted until its implementation, tests and required live/operational evidence exist.
-3. The 303 passing unit/regression tests do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
+3. The 328 passing unit/regression tests on Ubuntu and Windows do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
 4. The account-balance adapter is generic. It must be configured only with a provider-documented endpoint and a field representing actual available credits; never mistake a per-key budget cap for free credits.
 5. Task #29 Generation State Manager remains paused and must not be started as a separate task during this Task #25 work.
