@@ -87,11 +87,42 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
 
     def test_webm_requires_ebml_header_and_segment(self):
         path = self.root / "sample.webm"
-        path.write_bytes(b"\x1a\x45\xdf\xa3" + b"\x42\x86\x81\x01" + b"\x18\x53\x80\x67" + b"\x00")
+        path.write_bytes(b"\x1a\x45\xdf\xa3" + b"\x84\x42\x86\x81\x01" + b"\x18\x53\x80\x67" + b"\x82\xec\x80")
         self.assertTrue(self.validator.validate(path, modality="video")["valid"])
         bad = self.root / "bad.webm"
         bad.write_bytes(b"\x1a\x45\xdf\xa3")
         self.assertEqual(self.validator.validate(bad, modality="video")["status"], "WEBM_SEGMENT_MISSING")
+
+    def test_webm_rejects_truncated_headers_and_segment_sizes(self):
+        valid_header = b"\x1a\x45\xdf\xa3\x84\x42\x86\x81\x01"
+        cases = [
+            (valid_header, "WEBM_SEGMENT_MISSING"),
+            (valid_header + b"\x18\x53\x80\x67", "WEBM_SEGMENT_SIZE_INVALID"),
+            (valid_header + b"\x18\x53\x80\x67\x85\xec\x80", "WEBM_SEGMENT_SIZE_EXCEEDS_FILE"),
+            (valid_header + b"\x18\x53\x80\x67\x81\xec", "WEBM_SEGMENT_ELEMENT_SIZE_INVALID"),
+        ]
+        for index, (payload, expected) in enumerate(cases):
+            with self.subTest(index=index):
+                path = self.root / f"bad-webm-{index}.webm"
+                path.write_bytes(payload)
+                result = self.validator.validate(path, modality="video")
+                self.assertFalse(result["valid"])
+                self.assertEqual(result["status"], expected)
+
+    def test_webm_rejects_empty_segment_and_truncated_segment_element(self):
+        header = b"\x1a\x45\xdf\xa3\x84\x42\x86\x81\x01"
+        empty = self.root / "empty-segment.webm"
+        empty.write_bytes(header + b"\x18\x53\x80\x67\x80")
+        self.assertEqual(
+            self.validator.validate(empty, modality="video")["status"],
+            "WEBM_SEGMENT_EMPTY",
+        )
+        truncated = self.root / "truncated-element.webm"
+        truncated.write_bytes(header + b"\x18\x53\x80\x67\x82\xec\x82x")
+        self.assertEqual(
+            self.validator.validate(truncated, modality="video")["status"],
+            "WEBM_SEGMENT_ELEMENT_TRUNCATED",
+        )
 
     def test_video_and_ogg_validation_streams_without_reading_whole_file(self):
         mp4 = self.root / "streamed.mp4"
@@ -102,7 +133,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         )
         mp4.write_bytes(b"".join((8 + len(body)).to_bytes(4, "big") + kind + body for kind, body in boxes))
         webm = self.root / "streamed.webm"
-        webm.write_bytes(b"\x1a\x45\xdf\xa3" + b"\x42\x86\x81\x01" + b"\x18\x53\x80\x67" + b"\x00")
+        webm.write_bytes(b"\x1a\x45\xdf\xa3" + b"\x84\x42\x86\x81\x01" + b"\x18\x53\x80\x67" + b"\x82\xec\x80")
         ogg = self.root / "sample.ogg"
         ogg.write_bytes(b"OggS" + bytes([0]) + b"\x00" * 21 + bytes([0]))
         with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read forbidden")):
