@@ -87,3 +87,8 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+
+## Controlled A/B experiments
+
+`provider_ab_manager.py` provides persistent deterministic A/B assignments, idempotent outcome capture, aggregate summaries, and fail-closed state validation. `ProviderService.execute_routed_request(experiment_id=...)` pins execution to the selected provider/model and records outcome metrics. Paid arms require a verified approval reference, experiment/project budget caps, a caller with `billing.approve`, and an idempotent `ProviderCostPolicy` reservation before routing. Routing can reuse only an exact matching reservation; normal finalization reconciles actual cost. Unexpected charges on a free arm stop the experiment, and an experiment that exceeds its budget cap is paused. Live provider campaign and crash/recovery validation remain separate release gates.
