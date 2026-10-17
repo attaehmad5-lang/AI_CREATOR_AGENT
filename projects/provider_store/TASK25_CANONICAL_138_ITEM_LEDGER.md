@@ -209,7 +209,7 @@ GitHub Actions run [#38959082545](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 123 | 🔴 | Provider/Regional Outage Handling | PARTIAL | Health and fallback primitives exist; region-wide outage handling is not integrated. |
 | 124 | 🔴 | Disaster Recovery and Restore Procedures | PARTIAL | Catalog restore and atomic persistence exist; full disaster recovery/restore drills are not verified. |
 | 125 | 🔴 | Degraded Mode During Partial Service Outages | OPEN | Explicit degraded-mode orchestration is not implemented. |
-| 126 | 🔴 | Capacity Planning and Load Testing | OPEN | Capacity planning and sustained load tests are not complete. |
+| 126 | 🔴 | Capacity Planning and Load Testing | PARTIAL | `provider_capacity_planner.py` estimates concurrency from target RPS, p95 latency, utilization, and burst factor; summarizes measured samples into throughput, success/timeout rates and nearest-rank p95. Regression tests cover invalid numeric values, limits and sample shapes. Sustained load tests, real workload traces, autoscaling validation and production capacity evidence remain open. |
 | 127 | 🔴 | Service-Level Objectives (SLOs) | PARTIAL | `ProviderSLOManager` defines provider/category targets for minimum samples, success rate, p95 latency and timeout rate; evaluates bounded `ProviderMetricsManager` snapshots, records bounded aggregate evaluation history, and fails closed on insufficient/invalid metrics. Persistent SLO definitions, time-windowed durable history, alert delivery and production telemetry integration remain open. |
 | 128 | 🔴 | Operational Runbooks and Incident Recovery | PARTIAL | A provider guide exists; full operational runbooks and incident drills are incomplete. |
 
