@@ -44,6 +44,7 @@ class ProviderService:
             (execution_queue, "claim_next", "execution_queue"),
             (execution_queue, "complete", "execution_queue"),
             (execution_queue, "cancel", "execution_queue"),
+            (execution_queue, "get_job", "execution_queue"),
             (execution_queue, "stats", "execution_queue"),
         )
         for instance, method, label in expected:
@@ -107,6 +108,19 @@ class ProviderService:
         except Exception as exc:
             return {"status": "EXECUTION_QUEUE_FAILED", "cancelled": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE", "cancelled": False}
+
+    def get_queued_execution(
+        self, *, request_id: str, tenant_id: str, worker_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self.execution_queue is None:
+            return {"status": "EXECUTION_QUEUE_UNAVAILABLE", "job": None}
+        try:
+            result = self.execution_queue.get_job(
+                request_id=request_id, tenant_id=tenant_id, worker_id=worker_id,
+            )
+        except Exception as exc:
+            return {"status": "EXECUTION_QUEUE_FAILED", "job": None, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_QUEUE_RESPONSE", "job": None}
 
     def execution_queue_stats(self) -> dict[str, Any]:
         if self.execution_queue is None:
