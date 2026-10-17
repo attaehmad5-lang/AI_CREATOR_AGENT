@@ -45,9 +45,9 @@ class ProviderBackupManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.create_backup(name="good", files=["config.json"])["status"], "BACKUP_ALREADY_EXISTS")
 
     def test_traversal_duplicate_and_secret_paths_are_rejected(self):
-        for files in (["../outside.json"], ["/etc/passwd.json"], ["config.json", "config.json"], ["api_token.json"]):
+        for index, files in enumerate((["../outside.json"], ["/etc/passwd.json"], ["config.json", "config.json"], ["api_token.json"])):
             with self.subTest(files=files):
-                result = self.manager.create_backup(name="unsafe-" + str(len(files)) + str(files[0][0]), files=files)
+                result = self.manager.create_backup(name=f"unsafe-{index}", files=files)
                 self.assertIn(result["status"], {"UNSAFE_BACKUP_PATH", "INVALID_BACKUP_FILE_LIST"})
 
     def test_secret_bearing_json_and_non_json_files_are_rejected(self):
