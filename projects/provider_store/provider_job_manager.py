@@ -66,6 +66,16 @@ class ProviderJobManager:
         self.data: dict[str, Any] = {"version": "1.0", "jobs": {}}
         self._reload()
 
+    @staticmethod
+    def _is_aware_timestamp(value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (ValueError, TypeError, OverflowError):
+            return False
+        return parsed.tzinfo is not None and parsed.utcoffset() is not None
+
     def _reload(self) -> None:
         if not self.state_path.exists():
             self.data = {"version": "1.0", "jobs": {}}
@@ -86,6 +96,13 @@ class ProviderJobManager:
                 or not isinstance(job.get("project_id"), str)
                 or not isinstance(job.get("provider_id"), str)
                 or not isinstance(job.get("payload_ref"), str)
+                or (
+                    job.get("deadline_at") is not None
+                    and (
+                        not isinstance(job.get("deadline_at"), str)
+                        or not self._is_aware_timestamp(job.get("deadline_at"))
+                    )
+                )
                 or isinstance(job.get("attempts"), bool)
                 or not isinstance(job.get("attempts"), int) or job["attempts"] < 0
                 or isinstance(job.get("priority"), bool)
@@ -131,6 +148,7 @@ class ProviderJobManager:
         payload_ref: str,
         priority: int = 50,
         trace_id: str | None = None,
+        deadline_at: str | None = None,
     ) -> dict[str, Any]:
         for value, name in ((job_id, "job_id"), (project_id, "project_id"), (provider_id, "provider_id")):
             if not isinstance(value, str) or not _ID_RE.fullmatch(value):
@@ -143,8 +161,20 @@ class ProviderJobManager:
             not isinstance(trace_id, str) or not _ID_RE.fullmatch(trace_id)
         ):
             return {"status": "INVALID_TRACE_ID", "accepted": False}
+        if deadline_at is not None and (
+            not self._is_aware_timestamp(deadline_at) or len(deadline_at) > 64
+        ):
+            return {"status": "INVALID_DEADLINE", "accepted": False}
         resolved_trace_id = trace_id or secrets.token_hex(16)
-        now = self.clock().astimezone(timezone.utc).isoformat()
+        now_dt = self.clock().astimezone(timezone.utc)
+        now = now_dt.isoformat()
+        normalized_deadline = None
+        if deadline_at is not None:
+            normalized_deadline = datetime.fromisoformat(
+                deadline_at.replace("Z", "+00:00")
+            ).astimezone(timezone.utc).isoformat()
+            if datetime.fromisoformat(normalized_deadline) <= now_dt:
+                return {"status": "DEADLINE_ALREADY_EXPIRED", "accepted": False}
         with self._transaction():
             existing = self.data["jobs"].get(job_id)
             if isinstance(existing, dict):
@@ -154,6 +184,7 @@ class ProviderJobManager:
                         "payload_ref": payload_ref, "priority": priority,
                     }.items())
                     and (trace_id is None or existing.get("trace_id") == trace_id)
+                    and (deadline_at is None or existing.get("deadline_at") == normalized_deadline)
                 )
                 return {
                     "status": "ALREADY_SUBMITTED" if same else "REQUEST_ID_CONFLICT",
@@ -173,7 +204,7 @@ class ProviderJobManager:
             job = {
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
                 "payload_ref": payload_ref, "priority": priority, "trace_id": resolved_trace_id,
-                "status": "QUEUED",
+                "deadline_at": normalized_deadline, "status": "QUEUED",
                 "attempts": 0, "created_at": now, "updated_at": now,
                 "cancel_requested": False,
             }
@@ -223,6 +254,19 @@ class ProviderJobManager:
         now = self.clock().astimezone(timezone.utc)
         with self._transaction():
             changed = self._reap_expired_locked(now)
+            for queued_job in self.data["jobs"].values():
+                if not isinstance(queued_job, dict) or queued_job.get("status") != "QUEUED":
+                    continue
+                deadline = queued_job.get("deadline_at")
+                if deadline is None:
+                    continue
+                parsed_deadline = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+                if parsed_deadline.astimezone(timezone.utc) <= now.astimezone(timezone.utc):
+                    queued_job["status"] = "FAILED"
+                    queued_job["error_code"] = "DEADLINE_EXCEEDED"
+                    queued_job["completed_at"] = now.isoformat()
+                    queued_job["updated_at"] = now.isoformat()
+                    changed = True
             running = sum(
                 1 for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "RUNNING"
@@ -311,6 +355,12 @@ class ProviderJobManager:
                 return {"status": "JOB_LEASE_TOKEN_MISMATCH", "saved": False}
             if job.get("cancel_requested") is True:
                 job["status"] = "CANCELLED"
+            elif job.get("deadline_at") is not None and (
+                datetime.fromisoformat(job["deadline_at"].replace("Z", "+00:00")).astimezone(timezone.utc)
+                <= now_dt
+            ):
+                job["status"] = "FAILED"
+                job["error_code"] = "DEADLINE_EXCEEDED"
             else:
                 job["status"] = "SUCCEEDED" if success else "FAILED"
                 if success:
