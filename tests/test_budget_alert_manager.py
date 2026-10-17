@@ -1,7 +1,9 @@
 """Tests for persistent budget alert threshold events."""
 import json
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -120,6 +122,49 @@ class BudgetAlertManagerTests(unittest.TestCase):
         retried = self.manager.dispatch_pending(lambda alert: {"delivered": True}, limit=10)
         self.assertEqual(retried["delivered"], 2)
         self.assertEqual(len(self.manager.pending_alerts()["alerts"]), 0)
+
+    def test_concurrent_dispatchers_do_not_claim_the_same_alert(self):
+        manager = BudgetAlertManager(
+            self.path, thresholds=(1.0,), clock=lambda: self.now,
+        )
+        manager.record(
+            project_id="film", spend=10.0, budget=10.0, request_id="job-once"
+        )
+        entered = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def sender(alert):
+            calls.append(alert["event_id"])
+            entered.set()
+            release.wait(timeout=3)
+            return True
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(manager.dispatch_pending, sender, limit=1)
+            self.assertTrue(entered.wait(timeout=2))
+            second = manager.dispatch_pending(lambda alert: calls.append(alert["event_id"]) or True, limit=1)
+            self.assertEqual(second["attempted"], 0)
+            release.set()
+            result = first.result(timeout=3)
+
+        self.assertEqual(result["delivered"], 1)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(manager.pending_alerts()["alerts"], [])
+
+    def test_expired_delivery_lease_can_be_reclaimed(self):
+        manager = BudgetAlertManager(
+            self.path, thresholds=(1.0,), delivery_lease_seconds=5,
+            clock=lambda: self.now,
+        )
+        manager.record(
+            project_id="film", spend=10.0, budget=10.0, request_id="job-lease"
+        )
+        claimed = manager._claim_pending_alerts(limit=1)
+        self.assertEqual(claimed[0]["status"], "DELIVERING")
+        self.now = self.now.replace(minute=13)
+        result = manager.dispatch_pending(lambda alert: True, limit=1)
+        self.assertEqual(result["delivered"], 1)
 
     def test_dispatch_rejects_invalid_callback_and_limit(self):
         self.assertEqual(self.manager.dispatch_pending(None)["status"], "INVALID_DELIVERY_CALLBACK")
