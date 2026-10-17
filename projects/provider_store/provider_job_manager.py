@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import tempfile
 import threading
 from contextlib import contextmanager
@@ -167,14 +168,22 @@ class ProviderJobManager:
                 continue
             lease_until = job.get("lease_until")
             try:
-                expired = isinstance(lease_until, str) and datetime.fromisoformat(lease_until) <= now
-            except ValueError:
+                if not isinstance(lease_until, str):
+                    expired = True
+                else:
+                    parsed_lease = datetime.fromisoformat(lease_until)
+                    if parsed_lease.tzinfo is None:
+                        expired = True
+                    else:
+                        expired = parsed_lease.astimezone(timezone.utc) <= now.astimezone(timezone.utc)
+            except (ValueError, TypeError, OverflowError):
                 expired = True
             if not expired:
                 continue
             job["updated_at"] = now.isoformat()
             job["worker_id"] = None
             job["lease_until"] = None
+            job.pop("lease_token", None)
             if job.get("cancel_requested") is True:
                 job["status"] = "CANCELLED"
                 job["completed_at"] = now.isoformat()
@@ -214,6 +223,7 @@ class ProviderJobManager:
             job = queued[0]
             job["status"] = "RUNNING"
             job["worker_id"] = worker_id
+            job["lease_token"] = secrets.token_urlsafe(32)
             job["attempts"] += 1
             job["started_at"] = job.get("started_at") or now.isoformat()
             job["updated_at"] = now.isoformat()
@@ -229,6 +239,7 @@ class ProviderJobManager:
         success: bool,
         result_ref: str | None = None,
         error_code: str | None = None,
+        lease_token: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
             return {"status": "INVALID_JOB_ID", "saved": False}
@@ -242,13 +253,29 @@ class ProviderJobManager:
             not isinstance(error_code, str) or not _ERROR_RE.fullmatch(error_code)
         ):
             return {"status": "INVALID_ERROR_CODE", "saved": False}
-        now = self.clock().astimezone(timezone.utc).isoformat()
+        if not isinstance(lease_token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", lease_token):
+            return {"status": "LEASE_TOKEN_REQUIRED", "saved": False}
+        now_dt = self.clock().astimezone(timezone.utc)
+        now = now_dt.isoformat()
         with self._transaction():
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
                 return {"status": "JOB_NOT_FOUND", "saved": False}
+            if job.get("status") == "RUNNING" and job.get("worker_id") == worker_id:
+                lease_until = job.get("lease_until")
+                try:
+                    parsed_lease = datetime.fromisoformat(lease_until) if isinstance(lease_until, str) else None
+                    lease_expired = parsed_lease is None or parsed_lease.tzinfo is None or parsed_lease.astimezone(timezone.utc) <= now_dt
+                except (ValueError, TypeError, OverflowError):
+                    lease_expired = True
+                if lease_expired:
+                    self._reap_expired_locked(now_dt)
+                    self._save()
+                    return {"status": "JOB_LEASE_EXPIRED", "saved": False}
             if job.get("status") != "RUNNING" or job.get("worker_id") != worker_id:
                 return {"status": "JOB_NOT_OWNED_BY_WORKER", "saved": False}
+            if not secrets.compare_digest(str(job.get("lease_token", "")), lease_token):
+                return {"status": "JOB_LEASE_TOKEN_MISMATCH", "saved": False}
             if job.get("cancel_requested") is True:
                 job["status"] = "CANCELLED"
             else:
@@ -260,6 +287,7 @@ class ProviderJobManager:
             job["completed_at"] = now
             job["updated_at"] = now
             job["lease_until"] = None
+            job.pop("lease_token", None)
             self._save()
             return {"status": "JOB_COMPLETED", "saved": True, "job": dict(job)}
 
@@ -289,4 +317,6 @@ class ProviderJobManager:
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
                 return {"status": "JOB_NOT_FOUND", "job": None}
-            return {"status": "JOB_STATUS", "job": dict(job)}
+            public_job = dict(job)
+            public_job.pop("lease_token", None)
+            return {"status": "JOB_STATUS", "job": public_job}
