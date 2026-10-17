@@ -186,6 +186,34 @@ class BudgetAlertManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.pending_alerts(limit=0)["status"], "INVALID_LIMIT")
         self.assertEqual(self.manager.pending_alerts(limit=1001)["status"], "INVALID_LIMIT")
 
+    def test_corrupt_delivery_metadata_and_nonfinite_amounts_are_rejected(self):
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "events": {
+                "event": {
+                    "event_id": "event", "project_id": "film", "threshold": 0.8,
+                    "budget": 10.0, "spend": 9.0, "ratio": 0.9,
+                    "request_id": "job-1", "status": "PENDING",
+                    "created_at": self.now.isoformat(), "delivery_attempts": "many",
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            BudgetAlertManager(self.path, clock=lambda: self.now)
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "events": {
+                "event": {
+                    "event_id": "event", "project_id": "film", "threshold": 0.8,
+                    "budget": 10.0, "spend": 9.0, "ratio": float("inf"),
+                    "request_id": "job-1", "status": "PENDING",
+                    "created_at": self.now.isoformat(),
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            BudgetAlertManager(self.path, clock=lambda: self.now)
+
     def test_corrupt_state_is_rejected(self):
         self.path.write_text(json.dumps({"events": []}), encoding="utf-8")
         with self.assertRaises(ValueError):
