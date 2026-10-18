@@ -30,6 +30,7 @@ class ProviderService:
         webhook_verifier: Any | None = None,
         job_manager: Any | None = None,
         metrics_manager: Any | None = None,
+        slo_manager: Any | None = None,
         quality_policy: Any | None = None,
         benchmark_manager: Any | None = None,
         incident_manager: Any | None = None,
@@ -53,6 +54,7 @@ class ProviderService:
             (webhook_verifier, "verify", "webhook_verifier"),
             (job_manager, "submit", "job_manager"),
             (metrics_manager, "record", "metrics_manager"),
+            (slo_manager, "evaluate", "slo_manager"),
             (quality_policy, "evaluate", "quality_policy"),
             (benchmark_manager, "record", "benchmark_manager"),
             (incident_manager, "record", "incident_manager"),
@@ -77,6 +79,7 @@ class ProviderService:
         self.webhook_verifier = webhook_verifier
         self.job_manager = job_manager
         self.metrics_manager = metrics_manager
+        self.slo_manager = slo_manager
         self.quality_policy = quality_policy
         self.benchmark_manager = benchmark_manager
         self.incident_manager = incident_manager
@@ -95,6 +98,36 @@ class ProviderService:
                 "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
             }
         return None
+
+    def evaluate_provider_slo(
+        self,
+        provider_id: str,
+        *,
+        principal_id: str | None,
+        category: str | None = None,
+    ) -> dict[str, Any]:
+        """Return an SLO assessment only to an explicitly authorized reader."""
+        if self.slo_manager is None:
+            return {"status": "SLO_MANAGER_UNAVAILABLE", "provider": provider_id, "slo_met": False}
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_REQUIRED", "provider": provider_id, "slo_met": False}
+        authorization = self._authorize_operation(principal_id, "provider.read")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "provider": provider_id,
+                "slo_met": False,
+                "authorization": authorization,
+            }
+        try:
+            return self.slo_manager.evaluate(provider_id, category=category)
+        except Exception as exc:
+            return {
+                "status": "SLO_EVALUATION_FAILED",
+                "provider": provider_id,
+                "slo_met": False,
+                "error_type": type(exc).__name__,
+            }
 
     def set_provider_enabled(
         self,
