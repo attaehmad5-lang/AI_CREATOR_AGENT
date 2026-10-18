@@ -931,6 +931,37 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(missing["status"], "NOT_FOUND")
         self.assertFalse(missing["activation_performed"])
 
+    def test_policy_gated_enablement_requires_approval_and_is_atomic(self):
+        before = self.catalog_path.read_text(encoding="utf-8")
+        pending = self.manager.set_provider_enabled_after_policy_simulation(
+            "public_image", False
+        )
+        self.assertEqual(pending["status"], "POLICY_APPROVAL_REQUIRED")
+        self.assertFalse(pending["saved"])
+        self.assertEqual(
+            pending["policy_simulation"]["status"],
+            "POLICY_SIMULATION_REVIEW_REQUIRED",
+        )
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), before)
+        self.assertTrue(self.manager.is_provider_enabled("public_image"))
+
+        approved = self.manager.set_provider_enabled_after_policy_simulation(
+            "public_image", False, approved=True
+        )
+        self.assertEqual(approved["status"], "DISABLED")
+        self.assertTrue(approved["saved"])
+        self.assertEqual(approved["policy_simulation_status"], "POLICY_SIMULATION_REVIEW_REQUIRED")
+        self.assertTrue(approved["policy_approved"])
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
+
+    def test_policy_gated_enablement_rejects_non_boolean_approval(self):
+        result = self.manager.set_provider_enabled_after_policy_simulation(
+            "public_image", False, approved="yes"
+        )
+        self.assertEqual(result["status"], "INVALID_POLICY_APPROVAL")
+        self.assertFalse(result["saved"])
+        self.assertTrue(self.manager.is_provider_enabled("public_image"))
+
     def test_enable_disable_persists_catalog_flag_without_claiming_connection(self):
         result = self.manager.set_provider_enabled("public_image", False)
         self.assertEqual(result["status"], "DISABLED")
