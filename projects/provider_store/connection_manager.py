@@ -604,8 +604,28 @@ class ConnectionManager:
         with self._lock:
             return self._set_provider_enabled_locked(provider_id, enabled)
 
+    def set_provider_enabled_after_policy_simulation(
+        self, provider_id: str, enabled: bool, *, approved: bool = False
+    ) -> dict[str, Any]:
+        """Atomically simulate and gate a provider lifecycle change.
+
+        Any review finding requires explicit approval. Blocking findings cannot be
+        overridden. The simulation and catalog write share the same interprocess
+        catalog transaction to prevent a stale-preview/activation race.
+        """
+        if not isinstance(approved, bool):
+            return {"status": "INVALID_POLICY_APPROVAL", "provider": provider_id, "saved": False}
+        with self._lock:
+            return self._set_provider_enabled_locked(
+                provider_id, enabled,
+                require_policy_approval=True,
+                policy_approved=approved,
+            )
+
     def _set_provider_enabled_locked(
-        self, provider_id: str, enabled: bool
+        self, provider_id: str, enabled: bool, *,
+        require_policy_approval: bool = False,
+        policy_approved: bool = False,
     ) -> dict[str, Any]:
         """Enable/disable catalog eligibility only; never purchases or proves connectivity."""
         if not isinstance(enabled, bool):
@@ -627,6 +647,27 @@ class ConnectionManager:
                     "saved": False,
                     "errors": validation.get("errors", []),
                 }
+            simulation_result = None
+            if require_policy_approval:
+                from .policy_simulator import ProviderPolicySimulator
+                simulation_result = ProviderPolicySimulator().simulate(self.catalog, new_catalog)
+                if simulation_result.get("status") == "POLICY_SIMULATION_BLOCKED":
+                    return {
+                        "status": "POLICY_SIMULATION_BLOCKED",
+                        "provider": provider_id,
+                        "saved": False,
+                        "policy_simulation": simulation_result,
+                    }
+                if (
+                    simulation_result.get("status") == "POLICY_SIMULATION_REVIEW_REQUIRED"
+                    and not policy_approved
+                ):
+                    return {
+                        "status": "POLICY_APPROVAL_REQUIRED",
+                        "provider": provider_id,
+                        "saved": False,
+                        "policy_simulation": simulation_result,
+                    }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
         if not enabled and provider_id in self._loaded_providers:
@@ -638,13 +679,18 @@ class ConnectionManager:
                     "saved": True,
                     "runtime_unloaded": False,
                 }
-        return {
+        result = {
             "status": "ENABLED" if enabled else "DISABLED",
             "provider": provider_id,
             "saved": True,
             "runtime_unloaded": not enabled,
             "note": "Eligibility only; no purchase, billing, or live connectivity check performed.",
         }
+        if require_policy_approval:
+            result["policy_simulation_status"] = simulation_result.get("status") if simulation_result else None
+            result["policy_approved"] = policy_approved
+            result["policy_findings_count"] = len(simulation_result.get("findings", [])) if simulation_result else 0
+        return result
 
     def is_provider_enabled(self, provider_id: str) -> bool:
         provider = self.get_provider(provider_id)
