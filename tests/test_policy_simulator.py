@@ -104,6 +104,16 @@ class ProviderPolicySimulatorTests(unittest.TestCase):
         self.assertEqual(result["status"], "POLICY_SIMULATION_BLOCKED")
         self.assertFalse(result["schema_valid"])
 
+    def test_mixed_metadata_key_types_do_not_crash_diff_generation(self):
+        current = catalog(base_provider())
+        proposed = catalog(base_provider())
+        proposed["providers"][0][7] = "unexpected-key"
+        result = self.simulator.simulate(current, proposed)
+        self.assertIn(result["status"], {
+            "POLICY_SIMULATION_PASSED", "POLICY_SIMULATION_REVIEW_REQUIRED"
+        })
+        self.assertIn("7", result["changes"][0]["fields"])
+
     def test_provider_removal_is_reviewed(self):
         result = self.simulator.simulate(catalog(base_provider()), {"version": "3.0", "providers": []})
         self.assertEqual(result["status"], "POLICY_SIMULATION_REVIEW_REQUIRED")
