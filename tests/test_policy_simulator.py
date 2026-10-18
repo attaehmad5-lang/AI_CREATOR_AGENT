@@ -97,6 +97,13 @@ class ProviderPolicySimulatorTests(unittest.TestCase):
         self.assertEqual(oversized["status"], "POLICY_SIMULATION_BLOCKED")
         self.assertIn("PROVIDER_LIMIT_EXCEEDED", {x["code"] for x in oversized["findings"]})
 
+    def test_unhashable_malformed_capabilities_fail_closed(self):
+        current = catalog(base_provider())
+        proposed = catalog(base_provider(capabilities=[{"unexpected": "object"}]))
+        result = self.simulator.simulate(current, proposed)
+        self.assertEqual(result["status"], "POLICY_SIMULATION_BLOCKED")
+        self.assertFalse(result["schema_valid"])
+
     def test_provider_removal_is_reviewed(self):
         result = self.simulator.simulate(catalog(base_provider()), {"version": "3.0", "providers": []})
         self.assertEqual(result["status"], "POLICY_SIMULATION_REVIEW_REQUIRED")
