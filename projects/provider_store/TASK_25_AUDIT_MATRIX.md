@@ -25,7 +25,7 @@ GitHub Actions code-verification run [#38434905299](https://github.com/attaehmad
 | M / 97–110 | Testing, Audit and Release Readiness | PARTIAL | 303 tests pass on Windows and Ubuntu; full 138-item coverage, all-modality end-to-end tests, complete failure injection, secret scanning and release PASS remain open. |
 | N / 111–118 | High-Advanced Routing Intelligence | PARTIAL | Cost/health/capability routing foundations exist; confidence-aware, adaptive, region-aware and A/B routing with approval gates remain open. |
 | O / 119–128 | Enterprise and Large-Production Resiliency | OPEN/PARTIAL | Some quotas, health and restore primitives exist; tenant isolation, fair scheduling, regional outage/degraded mode, capacity tests, SLOs and incident runbooks are not complete. |
-| P / 129–138 | Future-Ready Extensibility | PARTIAL | Capability contracts and compatibility facades exist; plugin lifecycle, self-hosted providers, deprecation handling, policy simulation and admin controls remain open. |
+| P / 129–138 | Future-Ready Extensibility | PARTIAL | Capability contracts and compatibility facades exist; a non-mutating policy dry-run now reports catalog changes and blocks unsafe enablement proposals, while mandatory simulation/approval integration, plugin lifecycle, self-hosted providers and admin controls remain open. |
 
 ## Completion gates
 
