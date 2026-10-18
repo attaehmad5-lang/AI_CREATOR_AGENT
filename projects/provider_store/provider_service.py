@@ -96,6 +96,92 @@ class ProviderService:
             }
         return None
 
+    def set_provider_enabled(
+        self,
+        provider_id: str,
+        enabled: bool,
+        *,
+        principal_id: str | None,
+        approved: bool = False,
+    ) -> dict[str, Any]:
+        """Authorize and policy-gate provider lifecycle changes through the service boundary."""
+        if not isinstance(enabled, bool):
+            return {"status": "INVALID_ENABLED_VALUE", "provider": provider_id, "saved": False}
+        if not isinstance(approved, bool):
+            return {"status": "INVALID_POLICY_APPROVAL", "provider": provider_id, "saved": False}
+        if self.authorization_manager is None:
+            return {
+                "status": "AUTHORIZATION_MANAGER_REQUIRED",
+                "provider": provider_id,
+                "saved": False,
+            }
+        operation = "provider.enable" if enabled else "provider.disable"
+        authorization = self._authorize_operation(principal_id, operation)
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "provider": provider_id,
+                "saved": False,
+                "authorization": authorization,
+            }
+        lifecycle = getattr(self.connection_manager, "set_provider_enabled_after_policy_simulation", None)
+        if not callable(lifecycle):
+            return {
+                "status": "POLICY_GATED_LIFECYCLE_UNAVAILABLE",
+                "provider": provider_id,
+                "saved": False,
+            }
+        try:
+            return lifecycle(provider_id, enabled, approved=approved)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_LIFECYCLE_FAILED",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+
+    def configure_provider(
+        self,
+        provider_id: str,
+        *,
+        principal_id: str | None,
+        model: str | None = None,
+        endpoint: str | None = None,
+        probe_endpoint: str | None = None,
+        authentication_required: bool | None = None,
+    ) -> dict[str, Any]:
+        """Require an explicit configure permission before changing provider settings."""
+        if self.authorization_manager is None:
+            return {
+                "status": "AUTHORIZATION_MANAGER_REQUIRED",
+                "provider": provider_id,
+                "saved": False,
+            }
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "provider": provider_id,
+                "saved": False,
+                "authorization": authorization,
+            }
+        try:
+            return self.connection_manager.configure_provider(
+                provider_id,
+                model=model,
+                endpoint=endpoint,
+                probe_endpoint=probe_endpoint,
+                authentication_required=authentication_required,
+            )
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_CONFIGURATION_FAILED",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+
     def verify_provider(
         self,
         provider_id: str,
