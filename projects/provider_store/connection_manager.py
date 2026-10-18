@@ -5,6 +5,8 @@ unless a separate provider-specific probe has actually succeeded.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -600,9 +602,10 @@ class ConnectionManager:
         return result
 
     def set_provider_enabled(
-        self, provider_id: str, enabled: bool, *, approved: bool = False
+        self, provider_id: str, enabled: bool, *, approved: bool = False,
+        simulation_digest: str | None = None,
     ) -> dict[str, Any]:
-        """Simulate and gate lifecycle changes; review findings require explicit approval."""
+        """Simulate and gate lifecycle changes; approval must match the preview digest."""
         if not isinstance(approved, bool):
             return {"status": "INVALID_POLICY_APPROVAL", "provider": provider_id, "saved": False}
         with self._lock:
@@ -610,10 +613,12 @@ class ConnectionManager:
                 provider_id, enabled,
                 require_policy_approval=True,
                 policy_approved=approved,
+                expected_simulation_digest=simulation_digest,
             )
 
     def set_provider_enabled_after_policy_simulation(
-        self, provider_id: str, enabled: bool, *, approved: bool = False
+        self, provider_id: str, enabled: bool, *, approved: bool = False,
+        simulation_digest: str | None = None,
     ) -> dict[str, Any]:
         """Atomically simulate and gate a provider lifecycle change.
 
@@ -628,12 +633,14 @@ class ConnectionManager:
                 provider_id, enabled,
                 require_policy_approval=True,
                 policy_approved=approved,
+                expected_simulation_digest=simulation_digest,
             )
 
     def _set_provider_enabled_locked(
         self, provider_id: str, enabled: bool, *,
         require_policy_approval: bool = False,
         policy_approved: bool = False,
+        expected_simulation_digest: str | None = None,
     ) -> dict[str, Any]:
         """Enable/disable catalog eligibility only; never purchases or proves connectivity."""
         if not isinstance(enabled, bool):
@@ -659,6 +666,12 @@ class ConnectionManager:
             if require_policy_approval:
                 from .policy_simulator import ProviderPolicySimulator
                 simulation_result = ProviderPolicySimulator().simulate(self.catalog, new_catalog)
+                digest_payload = json.dumps(
+                    {"current": self.catalog, "proposed": new_catalog},
+                    sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+                ).encode("utf-8")
+                simulation_digest = hashlib.sha256(digest_payload).hexdigest()
+                simulation_result["simulation_digest"] = simulation_digest
                 if simulation_result.get("status") == "POLICY_SIMULATION_BLOCKED":
                     return {
                         "status": "POLICY_SIMULATION_BLOCKED",
@@ -666,16 +679,31 @@ class ConnectionManager:
                         "saved": False,
                         "policy_simulation": simulation_result,
                     }
-                if (
-                    simulation_result.get("status") == "POLICY_SIMULATION_REVIEW_REQUIRED"
-                    and not policy_approved
-                ):
-                    return {
-                        "status": "POLICY_APPROVAL_REQUIRED",
-                        "provider": provider_id,
-                        "saved": False,
-                        "policy_simulation": simulation_result,
-                    }
+                if simulation_result.get("status") == "POLICY_SIMULATION_REVIEW_REQUIRED":
+                    if not policy_approved:
+                        return {
+                            "status": "POLICY_APPROVAL_REQUIRED",
+                            "provider": provider_id,
+                            "saved": False,
+                            "policy_simulation": simulation_result,
+                            "simulation_digest": simulation_digest,
+                        }
+                    if not isinstance(expected_simulation_digest, str):
+                        return {
+                            "status": "POLICY_SIMULATION_DIGEST_REQUIRED",
+                            "provider": provider_id,
+                            "saved": False,
+                            "policy_simulation": simulation_result,
+                            "simulation_digest": simulation_digest,
+                        }
+                    if not hmac.compare_digest(expected_simulation_digest, simulation_digest):
+                        return {
+                            "status": "POLICY_SIMULATION_STALE",
+                            "provider": provider_id,
+                            "saved": False,
+                            "policy_simulation": simulation_result,
+                            "simulation_digest": simulation_digest,
+                        }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
         if not enabled and provider_id in self._loaded_providers:
@@ -698,6 +726,7 @@ class ConnectionManager:
             result["policy_simulation_status"] = simulation_result.get("status") if simulation_result else None
             result["policy_approved"] = policy_approved
             result["policy_findings_count"] = len(simulation_result.get("findings", [])) if simulation_result else 0
+            result["simulation_digest"] = simulation_result.get("simulation_digest") if simulation_result else None
         return result
 
     def is_provider_enabled(self, provider_id: str) -> bool:
