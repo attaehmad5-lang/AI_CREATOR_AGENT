@@ -955,6 +955,21 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(approved["policy_approved"])
         self.assertFalse(self.manager.is_provider_enabled("public_image"))
 
+    def test_policy_approval_requires_matching_preview_digest(self):
+        preview = self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(preview["status"], "POLICY_APPROVAL_REQUIRED")
+        missing = self.manager.set_provider_enabled(
+            "public_image", False, approved=True
+        )
+        self.assertEqual(missing["status"], "POLICY_SIMULATION_DIGEST_REQUIRED")
+        stale = self.manager.set_provider_enabled(
+            "public_image", False, approved=True,
+            simulation_digest="0" * 64,
+        )
+        self.assertEqual(stale["status"], "POLICY_SIMULATION_STALE")
+        self.assertFalse(stale["saved"])
+        self.assertTrue(self.manager.is_provider_enabled("public_image"))
+
     def test_policy_gated_enablement_rejects_non_boolean_approval(self):
         result = self.manager.set_provider_enabled_after_policy_simulation(
             "public_image", False, approved="yes"
