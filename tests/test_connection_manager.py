@@ -963,13 +963,17 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(self.manager.is_provider_enabled("public_image"))
 
     def test_enable_disable_persists_catalog_flag_without_claiming_connection(self):
-        result = self.manager.set_provider_enabled("public_image", False)
+        pending = self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(pending["status"], "POLICY_APPROVAL_REQUIRED")
+        self.assertFalse(pending["saved"])
+        self.assertTrue(self.manager.is_provider_enabled("public_image"))
+        result = self.manager.set_provider_enabled("public_image", False, approved=True)
         self.assertEqual(result["status"], "DISABLED")
         self.assertFalse(self.manager.is_provider_enabled("public_image"))
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertFalse(reloaded.is_provider_enabled("public_image"))
-        enabled = reloaded.set_provider_enabled("public_image", True)
+        enabled = reloaded.set_provider_enabled("public_image", True, approved=True)
         self.assertEqual(enabled["status"], "ENABLED")
         self.assertTrue(reloaded.is_provider_enabled("public_image"))
         self.assertIn("no purchase", enabled["note"].lower())
@@ -984,7 +988,7 @@ class ConnectionManagerTests(unittest.TestCase):
                 self.closed = True
         instance = Closable()
         self.manager.load_provider("public_image", lambda metadata: instance)
-        result = self.manager.set_provider_enabled("public_image", False)
+        result = self.manager.set_provider_enabled("public_image", False, approved=True)
         self.assertEqual(result["status"], "DISABLED")
         self.assertTrue(instance.closed)
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
@@ -1014,7 +1018,7 @@ class ConnectionManagerTests(unittest.TestCase):
 
         def disable_provider():
             disable_started.set()
-            return self.manager.set_provider_enabled("public_image", False)
+            return self.manager.set_provider_enabled("public_image", False, approved=True)
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             load_future = pool.submit(self.manager.load_provider, "public_image", factory)
@@ -1136,7 +1140,7 @@ class ConnectionManagerTests(unittest.TestCase):
             )["status"],
             "INVALID_TIMEOUT",
         )
-        self.manager.set_provider_enabled("public_image", False)
+        self.manager.set_provider_enabled("public_image", False, approved=True)
         self.assertEqual(
             self.manager.verify_connectivity("public_image", lambda *a, **k: True)["status"],
             "DISABLED",
