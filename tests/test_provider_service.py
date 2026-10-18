@@ -861,7 +861,8 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(self.connections.is_provider_enabled("image"))
 
         approved = service.set_provider_enabled(
-            "image", False, principal_id="admin-user", approved=True
+            "image", False, principal_id="admin-user", approved=True,
+            simulation_digest=pending["simulation_digest"],
         )
         self.assertEqual(approved["status"], "DISABLED")
         self.assertFalse(self.connections.is_provider_enabled("image"))
