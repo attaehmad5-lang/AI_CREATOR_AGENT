@@ -102,8 +102,7 @@ class ProviderPolicySimulator:
                 })
             else:
                 changed_fields = sorted(
-                    key for key in set(old) | set(new)
-                    if old.get(key) != new.get(key)
+                    {str(key) for key in set(old) | set(new) if old.get(key) != new.get(key)}
                 )
                 if changed_fields:
                     changes.append({
