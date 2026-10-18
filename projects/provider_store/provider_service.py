@@ -103,6 +103,7 @@ class ProviderService:
         *,
         principal_id: str | None,
         approved: bool = False,
+        simulation_digest: str | None = None,
     ) -> dict[str, Any]:
         """Authorize and policy-gate provider lifecycle changes through the service boundary."""
         if not isinstance(enabled, bool):
@@ -132,7 +133,10 @@ class ProviderService:
                 "saved": False,
             }
         try:
-            return lifecycle(provider_id, enabled, approved=approved)
+            return lifecycle(
+                provider_id, enabled, approved=approved,
+                simulation_digest=simulation_digest,
+            )
         except Exception as exc:
             return {
                 "status": "PROVIDER_LIFECYCLE_FAILED",
