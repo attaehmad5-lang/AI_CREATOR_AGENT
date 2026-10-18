@@ -946,7 +946,8 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(self.manager.is_provider_enabled("public_image"))
 
         approved = self.manager.set_provider_enabled_after_policy_simulation(
-            "public_image", False, approved=True
+            "public_image", False, approved=True,
+            simulation_digest=pending["simulation_digest"],
         )
         self.assertEqual(approved["status"], "DISABLED")
         self.assertTrue(approved["saved"])
@@ -967,13 +968,21 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(pending["status"], "POLICY_APPROVAL_REQUIRED")
         self.assertFalse(pending["saved"])
         self.assertTrue(self.manager.is_provider_enabled("public_image"))
-        result = self.manager.set_provider_enabled("public_image", False, approved=True)
+        result = self.manager.set_provider_enabled(
+            "public_image", False, approved=True,
+            simulation_digest=pending["simulation_digest"],
+        )
         self.assertEqual(result["status"], "DISABLED")
         self.assertFalse(self.manager.is_provider_enabled("public_image"))
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertFalse(reloaded.is_provider_enabled("public_image"))
-        enabled = reloaded.set_provider_enabled("public_image", True, approved=True)
+        enable_preview = reloaded.set_provider_enabled("public_image", True)
+        self.assertEqual(enable_preview["status"], "POLICY_APPROVAL_REQUIRED")
+        enabled = reloaded.set_provider_enabled(
+            "public_image", True, approved=True,
+            simulation_digest=enable_preview["simulation_digest"],
+        )
         self.assertEqual(enabled["status"], "ENABLED")
         self.assertTrue(reloaded.is_provider_enabled("public_image"))
         self.assertIn("no purchase", enabled["note"].lower())
@@ -988,7 +997,11 @@ class ConnectionManagerTests(unittest.TestCase):
                 self.closed = True
         instance = Closable()
         self.manager.load_provider("public_image", lambda metadata: instance)
-        result = self.manager.set_provider_enabled("public_image", False, approved=True)
+        preview = self.manager.set_provider_enabled("public_image", False)
+        result = self.manager.set_provider_enabled(
+            "public_image", False, approved=True,
+            simulation_digest=preview["simulation_digest"],
+        )
         self.assertEqual(result["status"], "DISABLED")
         self.assertTrue(instance.closed)
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
@@ -1016,9 +1029,15 @@ class ConnectionManagerTests(unittest.TestCase):
                 raise TimeoutError("test factory release timed out")
             return instance
 
+        preview = self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(preview["status"], "POLICY_APPROVAL_REQUIRED")
+
         def disable_provider():
             disable_started.set()
-            return self.manager.set_provider_enabled("public_image", False, approved=True)
+            return self.manager.set_provider_enabled(
+                "public_image", False, approved=True,
+                simulation_digest=preview["simulation_digest"],
+            )
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             load_future = pool.submit(self.manager.load_provider, "public_image", factory)
@@ -1140,7 +1159,11 @@ class ConnectionManagerTests(unittest.TestCase):
             )["status"],
             "INVALID_TIMEOUT",
         )
-        self.manager.set_provider_enabled("public_image", False, approved=True)
+        preview = self.manager.set_provider_enabled("public_image", False)
+        self.manager.set_provider_enabled(
+            "public_image", False, approved=True,
+            simulation_digest=preview["simulation_digest"],
+        )
         self.assertEqual(
             self.manager.verify_connectivity("public_image", lambda *a, **k: True)["status"],
             "DISABLED",
