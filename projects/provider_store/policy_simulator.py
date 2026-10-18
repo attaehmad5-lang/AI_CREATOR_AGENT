@@ -147,7 +147,7 @@ class ProviderPolicySimulator:
                     })
 
             if new is not None and new.get("enabled") is True and self._is_api_provider(new):
-                docs = new.get("documentation_url")
+                docs = new.get("official_api_url", new.get("documentation_url"))
                 hosts = new.get("allowed_hosts")
                 capabilities = new.get("capabilities")
                 if not isinstance(docs, str) or not docs.startswith("https://"):
