@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#39150401862](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39150401862): **432 tests passed on Ubuntu and 432 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite includes manager-level policy simulation, fail-closed malformed catalog/capability handling, bounded Retry-After metadata, overflow-safe retry backoff, OAuth failure handling, deprecation validation, and runtime enablement safeguards.
+GitHub Actions run [#39150590569](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39150590569): **433 tests passed on Ubuntu and 433 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite includes manager-level policy simulation, malformed metadata/diff handling, fail-closed catalog/capability checks, bounded Retry-After metadata, overflow-safe retry backoff, OAuth failure handling, deprecation validation, and runtime enablement safeguards.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
