@@ -599,10 +599,18 @@ class ConnectionManager:
         result["requested_enabled"] = enabled
         return result
 
-    def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
-        """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
+    def set_provider_enabled(
+        self, provider_id: str, enabled: bool, *, approved: bool = False
+    ) -> dict[str, Any]:
+        """Simulate and gate lifecycle changes; review findings require explicit approval."""
+        if not isinstance(approved, bool):
+            return {"status": "INVALID_POLICY_APPROVAL", "provider": provider_id, "saved": False}
         with self._lock:
-            return self._set_provider_enabled_locked(provider_id, enabled)
+            return self._set_provider_enabled_locked(
+                provider_id, enabled,
+                require_policy_approval=True,
+                policy_approved=approved,
+            )
 
     def set_provider_enabled_after_policy_simulation(
         self, provider_id: str, enabled: bool, *, approved: bool = False
