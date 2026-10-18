@@ -914,6 +914,23 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.unload_provider("public_image")["status"], "NOT_LOADED")
         self.assertEqual(self.manager.unload_provider("missing")["status"], "NOT_FOUND")
 
+    def test_policy_simulation_is_available_from_manager_and_never_writes_catalog(self):
+        before = self.catalog_path.read_text(encoding="utf-8")
+        result = self.manager.simulate_provider_enablement("public_image", False)
+        self.assertEqual(result["status"], "POLICY_SIMULATION_REVIEW_REQUIRED")
+        self.assertTrue(result["simulation_only"])
+        self.assertFalse(result["activation_performed"])
+        self.assertIn("PROVIDER_DISABLEMENT_PROPOSED", {item["code"] for item in result["findings"]})
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), before)
+        self.assertTrue(self.manager.is_provider_enabled("public_image"))
+
+    def test_policy_simulation_rejects_invalid_arguments_and_unknown_provider(self):
+        invalid = self.manager.simulate_provider_enablement("public_image", "yes")
+        self.assertEqual(invalid["status"], "INVALID_ENABLED_VALUE")
+        missing = self.manager.simulate_provider_enablement("missing_provider", True)
+        self.assertEqual(missing["status"], "NOT_FOUND")
+        self.assertFalse(missing["activation_performed"])
+
     def test_enable_disable_persists_catalog_flag_without_claiming_connection(self):
         result = self.manager.set_provider_enabled("public_image", False)
         self.assertEqual(result["status"], "DISABLED")
