@@ -135,8 +135,14 @@ class ProviderPolicySimulator:
                         "code": "ENDPOINT_ALLOWLIST_CHANGED",
                         "provider_id": provider_id,
                     })
-                old_caps = set(old.get("capabilities", [])) if isinstance(old.get("capabilities"), list) else set()
-                new_caps = set(new.get("capabilities", [])) if isinstance(new.get("capabilities"), list) else set()
+                old_caps = (
+                    {item for item in old.get("capabilities", []) if isinstance(item, str)}
+                    if isinstance(old.get("capabilities"), list) else set()
+                )
+                new_caps = (
+                    {item for item in new.get("capabilities", []) if isinstance(item, str)}
+                    if isinstance(new.get("capabilities"), list) else set()
+                )
                 removed_caps = sorted(old_caps - new_caps)
                 if removed_caps:
                     findings.append({
