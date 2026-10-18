@@ -597,6 +597,11 @@ class ConnectionManager:
             target["enabled"] = enabled
         from .policy_simulator import ProviderPolicySimulator
         result = ProviderPolicySimulator().simulate(current, proposed)
+        digest_payload = json.dumps(
+            {"current": current, "proposed": proposed},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        ).encode("utf-8")
+        result["simulation_digest"] = hashlib.sha256(digest_payload).hexdigest()
         result["provider"] = provider_id
         result["requested_enabled"] = enabled
         return result
