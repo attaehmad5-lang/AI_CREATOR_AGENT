@@ -10,6 +10,7 @@ from projects.provider_store.provider_incident_manager import ProviderIncidentMa
 from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
+from projects.provider_store.provider_slo_manager import ProviderSLOManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
@@ -888,6 +889,56 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(
             self.connections.get_provider_configuration("image")["configuration"]["model"],
             "new-model",
+        )
+
+    def test_slo_assessments_are_authorized_and_use_provider_metrics(self):
+        metrics = ProviderMetricsManager(max_samples=10)
+        metrics.record(
+            provider_id="image", category="image", success=True, latency_ms=25
+        )
+        slo = ProviderSLOManager(metrics, {
+            "image": {
+                "target_success_rate": 0.9,
+                "max_p95_latency_ms": 100,
+                "min_samples": 1,
+            }
+        })
+        authorization = ProviderAuthorizationManager(self.root / "slo-auth.json")
+        authorization.assign_role("viewer-user", "viewer")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            metrics_manager=metrics,
+            slo_manager=slo,
+        )
+        allowed = service.evaluate_provider_slo(
+            "image", principal_id="viewer-user", category="image"
+        )
+        self.assertEqual(allowed["status"], "SLO_MET")
+        denied = service.evaluate_provider_slo(
+            "image", principal_id="missing-user", category="image"
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertFalse(denied["slo_met"])
+
+    def test_slo_assessment_requires_authorization_and_configured_manager(self):
+        without_auth = ProviderService(
+            self.connections,
+            slo_manager=ProviderSLOManager(ProviderMetricsManager(), {
+                "image": {
+                    "target_success_rate": 0.9,
+                    "max_p95_latency_ms": 100,
+                    "min_samples": 1,
+                }
+            }),
+        )
+        self.assertEqual(
+            without_auth.evaluate_provider_slo("image", principal_id="admin")["status"],
+            "AUTHORIZATION_MANAGER_REQUIRED",
+        )
+        self.assertEqual(
+            self.service.evaluate_provider_slo("image", principal_id="admin")["status"],
+            "SLO_MANAGER_UNAVAILABLE",
         )
 
     def test_least_privilege_authorization_blocks_generation_before_adapter(self):
