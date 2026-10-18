@@ -98,7 +98,7 @@ class ProviderPolicySimulatorTests(unittest.TestCase):
         self.assertIn("PROVIDER_LIMIT_EXCEEDED", {x["code"] for x in oversized["findings"]})
 
     def test_provider_removal_is_reviewed(self):
-        result = self.simulator.simulate(catalog(base_provider()), catalog())
+        result = self.simulator.simulate(catalog(base_provider()), {"version": "3.0", "providers": []})
         self.assertEqual(result["status"], "POLICY_SIMULATION_REVIEW_REQUIRED")
         self.assertIn("PROVIDER_REMOVED", {x["code"] for x in result["findings"]})
 
