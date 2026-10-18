@@ -836,6 +836,59 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertEqual(len(alerts.pending_alerts()["alerts"]), 1)
 
+    def test_provider_admin_lifecycle_requires_role_and_policy_approval(self):
+        unauthenticated = self.service.set_provider_enabled(
+            "image", False, principal_id="admin-user", approved=True
+        )
+        self.assertEqual(unauthenticated["status"], "AUTHORIZATION_MANAGER_REQUIRED")
+        self.assertTrue(self.connections.is_provider_enabled("image"))
+
+        authorization = ProviderAuthorizationManager(self.root / "admin-auth.json")
+        authorization.assign_role("viewer-user", "viewer")
+        authorization.assign_role("admin-user", "admin")
+        service = ProviderService(self.connections, authorization_manager=authorization)
+
+        denied = service.set_provider_enabled(
+            "image", False, principal_id="viewer-user", approved=True
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertTrue(self.connections.is_provider_enabled("image"))
+
+        pending = service.set_provider_enabled(
+            "image", False, principal_id="admin-user"
+        )
+        self.assertEqual(pending["status"], "POLICY_APPROVAL_REQUIRED")
+        self.assertTrue(self.connections.is_provider_enabled("image"))
+
+        approved = service.set_provider_enabled(
+            "image", False, principal_id="admin-user", approved=True
+        )
+        self.assertEqual(approved["status"], "DISABLED")
+        self.assertFalse(self.connections.is_provider_enabled("image"))
+
+    def test_provider_configuration_requires_admin_permission(self):
+        authorization = ProviderAuthorizationManager(self.root / "configure-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        authorization.assign_role("admin-user", "admin")
+        service = ProviderService(self.connections, authorization_manager=authorization)
+
+        denied = service.configure_provider(
+            "image", principal_id="creator-user", model="new-model"
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertNotEqual(
+            self.connections.get_provider_configuration("image").get("configuration", {}).get("model"),
+            "new-model",
+        )
+        allowed = service.configure_provider(
+            "image", principal_id="admin-user", model="new-model"
+        )
+        self.assertTrue(allowed["saved"])
+        self.assertEqual(
+            self.connections.get_provider_configuration("image")["configuration"]["model"],
+            "new-model",
+        )
+
     def test_least_privilege_authorization_blocks_generation_before_adapter(self):
         authorization = ProviderAuthorizationManager(self.root / "service-auth.json")
         authorization.assign_role("read-only-user", "viewer")
