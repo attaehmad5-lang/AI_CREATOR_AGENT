@@ -210,7 +210,7 @@ GitHub Actions run [#39151986731](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 124 | 🔴 | Disaster Recovery and Restore Procedures | PARTIAL | Catalog restore and atomic persistence exist; full disaster recovery/restore drills are not verified. |
 | 125 | 🔴 | Degraded Mode During Partial Service Outages | OPEN | Explicit degraded-mode orchestration is not implemented. |
 | 126 | 🔴 | Capacity Planning and Load Testing | OPEN | Capacity planning and sustained load tests are not complete. |
-| 127 | 🔴 | Service-Level Objectives (SLOs) | OPEN | SLO definitions and tracking are not implemented. |
+| 127 | 🔴 | Service-Level Objectives (SLOs) | PARTIAL | `provider_slo_manager.py` validates SLO policies, evaluates availability and p95 latency against minimum sample counts, reports breaches and remaining error budget, and fails closed on invalid policy/metrics errors. `ProviderService.evaluate_provider_slo()` requires `provider.read`; tests cover met/breached/insufficient-data and authorization. Production telemetry export, alert wiring, per-tenant SLO policies, and calibration against real traffic remain open. |
 | 128 | 🔴 | Operational Runbooks and Incident Recovery | PARTIAL | A provider guide exists; full operational runbooks and incident drills are incomplete. |
 
 ## P — Future-Ready Extensibility
