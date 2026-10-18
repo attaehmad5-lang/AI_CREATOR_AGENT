@@ -542,6 +542,63 @@ class ConnectionManager:
             safe[key] = value
         return safe
 
+    def simulate_provider_enablement(
+        self, provider_id: str, enabled: bool = True
+    ) -> dict[str, Any]:
+        """Dry-run a provider enable/disable change without changing persistent state."""
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {
+                "status": "INVALID_PROVIDER_ID",
+                "simulation_only": True,
+                "activation_performed": False,
+                "findings": [{"severity": "BLOCKER", "code": "INVALID_PROVIDER_ID"}],
+                "changes": [],
+            }
+        if not isinstance(enabled, bool):
+            return {
+                "status": "INVALID_ENABLED_VALUE",
+                "simulation_only": True,
+                "activation_performed": False,
+                "findings": [{"severity": "BLOCKER", "code": "INVALID_ENABLED_VALUE"}],
+                "changes": [],
+            }
+        import copy
+        with self._catalog_transaction():
+            current = copy.deepcopy(self.catalog)
+            providers = current.get("providers")
+            if not isinstance(providers, list):
+                return {
+                    "status": "POLICY_SIMULATION_BLOCKED",
+                    "simulation_only": True,
+                    "activation_performed": False,
+                    "findings": [{"severity": "BLOCKER", "code": "PROVIDERS_MUST_BE_LIST"}],
+                    "changes": [],
+                }
+            proposed = copy.deepcopy(current)
+            proposed_providers = proposed["providers"]
+            target = next(
+                (
+                    item for item in proposed_providers
+                    if isinstance(item, dict) and item.get("id") == provider_id
+                ),
+                None,
+            )
+            if target is None:
+                return {
+                    "status": "NOT_FOUND",
+                    "provider": provider_id,
+                    "simulation_only": True,
+                    "activation_performed": False,
+                    "findings": [{"severity": "BLOCKER", "code": "PROVIDER_NOT_FOUND"}],
+                    "changes": [],
+                }
+            target["enabled"] = enabled
+        from .policy_simulator import ProviderPolicySimulator
+        result = ProviderPolicySimulator().simulate(current, proposed)
+        result["provider"] = provider_id
+        result["requested_enabled"] = enabled
+        return result
+
     def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
         """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
         with self._lock:
