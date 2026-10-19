@@ -53,6 +53,10 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.claim_next(worker_id="worker-2")["status"], "CONCURRENCY_LIMIT")
 
     def test_fair_share_rotates_projects_but_preserves_within_project_priority(self):
+        self.manager = ProviderJobManager(
+            self.path, max_queue_size=3, max_concurrent=1,
+            lease_seconds=10, max_attempts=2, clock=lambda: self.now[0],
+        )
         self.manager.submit(job_id="film-low", project_id="film", provider_id="image",
                             payload_ref="payload:film-low", priority=10)
         self.manager.submit(job_id="film-high", project_id="film", provider_id="image",
