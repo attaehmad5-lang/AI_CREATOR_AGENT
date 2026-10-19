@@ -63,6 +63,27 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         bad.write_bytes(b"\x1a\x45\xdf\xa3")
         self.assertEqual(self.validator.validate(bad, modality="video")["status"], "WEBM_SEGMENT_MISSING")
 
+    def test_symlinks_and_invalid_paths_fail_closed(self):
+        source = self.root / "source.wav"
+        self.make_wav(source)
+        link = self.root / "linked.wav"
+        try:
+            link.symlink_to(source)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are unavailable in this environment")
+        self.assertEqual(
+            self.validator.validate(link, modality="audio")["status"],
+            "MEDIA_SYMLINK_REJECTED",
+        )
+        self.assertEqual(
+            self.validator.validate("bad\\x00path.wav", modality="audio")["status"],
+            "INVALID_MEDIA_PATH",
+        )
+        self.assertEqual(
+            self.validator.validate(None, modality="audio")["status"],
+            "INVALID_MEDIA_PATH",
+        )
+
     def test_unsupported_modality_and_size_limit_fail_closed(self):
         path = self.root / "unknown.bin"
         path.write_bytes(b"x" * 3000)
