@@ -60,13 +60,13 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.manager.submit(job_id="music-high", project_id="music", provider_id="audio",
                             payload_ref="payload:music-high", priority=100)
         first = self.manager.claim_next(worker_id="worker-1")
-        self.assertEqual(first["job"]["job_id"], "music-high")
-        self.manager.complete(job_id="music-high", worker_id="worker-1", success=True,
-                              result_ref="asset:music")
-        second = self.manager.claim_next(worker_id="worker-2")
-        self.assertEqual(second["job"]["job_id"], "film-high")
-        self.manager.complete(job_id="film-high", worker_id="worker-2", success=True,
+        self.assertEqual(first["job"]["job_id"], "film-high")
+        self.manager.complete(job_id="film-high", worker_id="worker-1", success=True,
                               result_ref="asset:film")
+        second = self.manager.claim_next(worker_id="worker-2")
+        self.assertEqual(second["job"]["job_id"], "music-high")
+        self.manager.complete(job_id="music-high", worker_id="worker-2", success=True,
+                              result_ref="asset:music")
         third = self.manager.claim_next(worker_id="worker-3")
         self.assertEqual(third["job"]["job_id"], "film-low")
 
