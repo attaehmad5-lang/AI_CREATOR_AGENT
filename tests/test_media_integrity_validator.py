@@ -76,7 +76,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
             "MEDIA_SYMLINK_REJECTED",
         )
         self.assertEqual(
-            self.validator.validate("bad\\x00path.wav", modality="audio")["status"],
+            self.validator.validate("bad\x00path.wav", modality="audio")["status"],
             "INVALID_MEDIA_PATH",
         )
         self.assertEqual(
