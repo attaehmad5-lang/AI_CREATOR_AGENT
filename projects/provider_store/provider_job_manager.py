@@ -52,12 +52,12 @@ class ProviderJobManager:
         self.backpressure_retry_seconds = backpressure_retry_seconds
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
-        self.data: dict[str, Any] = {"version": "1.0", "jobs": {}}
+        self.data: dict[str, Any] = {"version": "1.0", "jobs": {}, "last_served_project": None}
         self._reload()
 
     def _reload(self) -> None:
         if not self.state_path.exists():
-            self.data = {"version": "1.0", "jobs": {}}
+            self.data = {"version": "1.0", "jobs": {}, "last_served_project": None}
             return
         try:
             with self.state_path.open("r", encoding="utf-8") as stream:
@@ -211,7 +211,21 @@ class ProviderJobManager:
                 if changed:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
+
+            # Fair-share scheduling: rotate between projects, while preserving
+            # priority/FIFO ordering among each project's own queued jobs.
+            projects = sorted({job["project_id"] for job in queued})
+            last_project = self.data.get("last_served_project")
+            if last_project in projects and len(projects) > 1:
+                start = (projects.index(last_project) + 1) % len(projects)
+                projects = projects[start:] + projects[:start]
+            project_rank = {project: index for index, project in enumerate(projects)}
+            queued.sort(key=lambda job: (
+                project_rank[job["project_id"]],
+                -job["priority"], job["created_at"], job["job_id"],
+            ))
             job = queued[0]
+            self.data["last_served_project"] = job["project_id"]
             job["status"] = "RUNNING"
             job["worker_id"] = worker_id
             job["attempts"] += 1
