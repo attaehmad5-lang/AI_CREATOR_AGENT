@@ -52,6 +52,24 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(claimed["job"]["job_id"], "high")
         self.assertEqual(self.manager.claim_next(worker_id="worker-2")["status"], "CONCURRENCY_LIMIT")
 
+    def test_fair_share_rotates_projects_but_preserves_within_project_priority(self):
+        self.manager.submit(job_id="film-low", project_id="film", provider_id="image",
+                            payload_ref="payload:film-low", priority=10)
+        self.manager.submit(job_id="film-high", project_id="film", provider_id="image",
+                            payload_ref="payload:film-high", priority=90)
+        self.manager.submit(job_id="music-high", project_id="music", provider_id="audio",
+                            payload_ref="payload:music-high", priority=100)
+        first = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(first["job"]["job_id"], "music-high")
+        self.manager.complete(job_id="music-high", worker_id="worker-1", success=True,
+                              result_ref="asset:music")
+        second = self.manager.claim_next(worker_id="worker-2")
+        self.assertEqual(second["job"]["job_id"], "film-high")
+        self.manager.complete(job_id="film-high", worker_id="worker-2", success=True,
+                              result_ref="asset:film")
+        third = self.manager.claim_next(worker_id="worker-3")
+        self.assertEqual(third["job"]["job_id"], "film-low")
+
     def test_job_lifecycle_poll_and_result_reference(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
