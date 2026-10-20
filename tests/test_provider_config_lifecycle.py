@@ -1,5 +1,6 @@
 """Provider config migration, safe reload, and rollback tests."""
 import json
+from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -161,6 +162,36 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
             json.loads(Path(str(path) + ".bak").read_text(encoding="utf-8")),
             original,
         )
+
+    def test_concurrent_file_migrations_are_serialized_and_leave_valid_config(self):
+        path = self.root / "concurrent-config.json"
+        path.write_text(json.dumps({"schema_version": "1", "providers": {}}), encoding="utf-8")
+
+        def to_v2(config):
+            config["schema_version"] = "2"
+            return config
+
+        def to_v3(config):
+            config["schema_version"] = "3"
+            return config
+
+        migrations = {"1": to_v2, "2": to_v3}
+        managers = [
+            ProviderConfigLifecycleManager(valid_config),
+            ProviderConfigLifecycleManager(valid_config),
+        ]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(
+                lambda manager: manager.migrate_file(
+                    path, target_version="3", migrations=migrations
+                ),
+                managers,
+            ))
+
+        self.assertTrue(all(result["status"] == "CONFIG_MIGRATION_APPLIED" for result in results), results)
+        final_config = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(final_config["schema_version"], "3")
+        self.assertIsInstance(final_config["providers"], dict)
 
     def test_invalid_config_file_is_not_overwritten(self):
         path = self.root / "bad.json"
