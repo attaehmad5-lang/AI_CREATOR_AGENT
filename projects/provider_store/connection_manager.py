@@ -290,6 +290,21 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].connection_type is unsupported")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
+                    if "capabilities" in provider:
+                        capabilities = provider["capabilities"]
+                        if not isinstance(capabilities, list) or len(capabilities) > 100:
+                            errors.append(f"providers[{index}].capabilities must be a list of at most 100 strings")
+                        elif (
+                            any(
+                                not isinstance(capability, str)
+                                or not capability.strip()
+                                or len(capability) > 100
+                                or any(ord(char) < 32 or ord(char) == 127 for char in capability)
+                                for capability in capabilities
+                            )
+                            or len({capability.strip().casefold() for capability in capabilities if isinstance(capability, str)}) != len(capabilities)
+                        ):
+                            errors.append(f"providers[{index}].capabilities contains invalid or duplicate values")
                     if "allowed_hosts" in provider:
                         hosts = provider["allowed_hosts"]
                         if not isinstance(hosts, list) or not hosts or len(hosts) > 100:
