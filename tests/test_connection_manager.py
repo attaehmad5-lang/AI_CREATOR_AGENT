@@ -116,6 +116,49 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
         self.assertEqual(len(self.manager.list_providers()), 2)
 
+    def test_diagnostics_reports_catalog_counts_and_api_configuration_findings(self):
+        registration = self.manager.register_provider({
+            "id": "diagnostic_api",
+            "name": "Diagnostic API",
+            "category": "image",
+            "auth_type": "API_KEY",
+            "connection_type": "API",
+            "enabled": True,
+            "subscription_required": False,
+        })
+        self.assertEqual(registration["status"], "REGISTERED")
+        before = self.catalog_path.read_bytes()
+
+        report = self.manager.diagnostics()
+
+        self.assertEqual(report["status"], "ATTENTION_REQUIRED")
+        self.assertTrue(report["catalog_valid"])
+        self.assertEqual(report["provider_count"], 3)
+        self.assertEqual(report["enabled_count"], 2)
+        self.assertEqual(report["unknown_enabled_state_count"], 1)
+        self.assertEqual(report["category_counts"]["image"], 3)
+        self.assertFalse(report["live_connectivity_verified"])
+        self.assertIn(
+            {"code": "ENABLED_API_MISSING_OR_UNSAFE_ENDPOINT", "provider": "diagnostic_api"},
+            report["findings"],
+        )
+        self.assertIn(
+            {"code": "ENABLED_API_MISSING_ALLOWED_HOSTS", "provider": "diagnostic_api"},
+            report["findings"],
+        )
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_diagnostics_fails_closed_for_unreadable_catalog_without_echoing_content(self):
+        self.catalog_path.write_text("SECRET-CONTENT", encoding="utf-8")
+
+        report = self.manager.diagnostics()
+
+        self.assertEqual(report["status"], "CATALOG_UNREADABLE")
+        self.assertFalse(report["catalog_valid"])
+        self.assertEqual(report["catalog_errors"], ["ValueError"])
+        self.assertFalse(report["live_connectivity_verified"])
+        self.assertNotIn("SECRET-CONTENT", repr(report))
+
     def test_catalog_schema_validation_detects_duplicate_ids_and_secret_fields(self):
         result = ConnectionManager.validate_catalog_schema({
             "providers": [
