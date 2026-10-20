@@ -771,6 +771,18 @@ class ConnectionManagerTests(unittest.TestCase):
         }
         self.assertEqual(self.manager.register_provider(provider)["status"], "INVALID_PROVIDER")
 
+    def test_register_provider_accepts_maximum_length_id(self):
+        provider_id = "p" * 100
+        provider = {
+            "id": provider_id, "name": "Maximum Length", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "REGISTERED")
+        self.assertTrue(result["saved"])
+        reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertEqual(reloaded.get_provider(provider_id)["id"], provider_id)
+
     def test_register_provider_rejects_overlong_id_without_corrupting_catalog(self):
         provider = {
             "id": "p" * 101, "name": "Overlong", "category": "image",
