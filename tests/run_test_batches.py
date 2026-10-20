@@ -43,6 +43,12 @@ def _run_batch(number: int, tests: list[str], env: dict[str, str]) -> tuple[int,
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
+    # Running this script puts tests/ (not the repository root) at sys.path[0].
+    # Add the root before discovery so imports such as projects.provider_store work.
+    root_path = str(root)
+    if root_path not in sys.path:
+        sys.path.insert(0, root_path)
+
     discovered = unittest.defaultTestLoader.discover(
         start_dir=str(root / "tests"),
         pattern="test_*.py",
@@ -59,7 +65,11 @@ def main() -> int:
     ]
     env = os.environ.copy()
     test_path = str(root / "tests")
-    env["PYTHONPATH"] = test_path + os.pathsep + env.get("PYTHONPATH", "")
+    # Child unittest processes need both the repo root (for project imports)
+    # and tests/ (for the discovered top-level test module names).
+    env["PYTHONPATH"] = os.pathsep.join(
+        path for path in (root_path, test_path, env.get("PYTHONPATH", "")) if path
+    )
     print(
         f"Discovered {len(test_ids)} tests; running {len(batches)} batches "
         f"of at most {BATCH_SIZE}, up to {MAX_PARALLEL_BATCHES} batches concurrently."
