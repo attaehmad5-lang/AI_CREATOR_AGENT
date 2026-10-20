@@ -1,4 +1,5 @@
 """Provider feature flag rollout, scope, and persistence tests."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -47,6 +48,41 @@ class ProviderFeatureFlagManagerTests(unittest.TestCase):
         b = self.manager.evaluate("new_router", project_id="film", request_id="job-123")
         self.assertEqual(a, b)
         self.assertIn(a["status"], {"ROLLOUT_ENABLED", "OUTSIDE_ROLLOUT"})
+
+    def test_rollout_decision_is_stable_across_manager_restarts(self):
+        self.manager.set_flag("stable_router", enabled=True, rollout_percent=37.5)
+        before = self.manager.evaluate(
+            "stable_router", project_id="film", request_id="job-stable"
+        )
+        reloaded = ProviderFeatureFlagManager(self.path)
+        after = reloaded.evaluate(
+            "stable_router", project_id="film", request_id="job-stable"
+        )
+        self.assertEqual(before, after)
+
+    def test_constructor_rejects_corrupt_state_without_overwriting_file(self):
+        original = "{broken"
+        self.path.write_text(original, encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid feature flag state JSON"):
+            ProviderFeatureFlagManager(self.path)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), original)
+
+    def test_constructor_rejects_boolean_rollout_percent_in_persisted_state(self):
+        malformed = {
+            "version": "1.0",
+            "flags": {
+                "unsafe_flag": {
+                    "enabled": True,
+                    "rollout_percent": True,
+                    "allow_projects": [],
+                    "deny_projects": [],
+                }
+            },
+        }
+        self.path.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid feature flag record"):
+            ProviderFeatureFlagManager(self.path)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), malformed)
 
     def test_flags_persist_and_invalid_values_fail_closed(self):
         self.manager.set_flag("new_router", enabled=True, rollout_percent=100)

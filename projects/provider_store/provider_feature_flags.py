@@ -22,7 +22,9 @@ class ProviderFeatureFlagManager:
         self.state_path = Path(state_path)
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "flags": {}}
-        self._reload()
+        lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+        with interprocess_file_lock(lock_path):
+            self._reload()
 
     def _reload(self) -> None:
         if not self.state_path.exists():
