@@ -135,6 +135,39 @@ class ConnectionManagerTests(unittest.TestCase):
                 self.assertFalse(invalid["valid"])
                 self.assertTrue(any("allowed_hosts" in error for error in invalid["errors"]))
 
+    def test_catalog_schema_rejects_invalid_supported_model_versions(self):
+        invalid_versions = (
+            "1.0",
+            [""],
+            ["1.0", "1.0"],
+            ["1.0", "V1.0",],
+            ["1.0", 2],
+            ["v" * 101],
+            ["bad\nversion"],
+        )
+        for versions in invalid_versions:
+            with self.subTest(versions=versions):
+                result = ConnectionManager.validate_catalog_schema({
+                    "providers": [{
+                        "id": "model_provider",
+                        "supported_models": [{"id": "safe-model", "versions": versions}],
+                    }]
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("versions" in error for error in result["errors"]))
+
+    def test_catalog_schema_accepts_unique_safe_model_versions(self):
+        result = ConnectionManager.validate_catalog_schema({
+            "providers": [{
+                "id": "model_provider",
+                "supported_models": [{
+                    "id": "safe-model",
+                    "versions": ["v1", "2026.10", "provider/model-v2"],
+                }],
+            }]
+        })
+        self.assertTrue(result["valid"], result)
+
     def test_catalog_schema_rejects_unsafe_auth_headers_and_schemes(self):
         for field, value in (
             ("auth_header_name", "Host"),
