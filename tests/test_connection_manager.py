@@ -719,6 +719,58 @@ class ConnectionManagerTests(unittest.TestCase):
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertEqual(reloaded.get_provider("local_image")["name"], "Local Image")
 
+    def test_provider_registration_preview_is_non_mutating_and_matches_register(self):
+        provider = {
+            "id": "preview_image",
+            "name": "Preview Image",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+        }
+        before = self.catalog_path.read_bytes()
+
+        preview = self.manager.preview_provider_registration(provider)
+
+        self.assertEqual(preview["status"], "READY_TO_REGISTER")
+        self.assertFalse(preview["saved"])
+        self.assertTrue(preview["catalog_valid"])
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+        registered = self.manager.register_provider(provider)
+        self.assertEqual(registered["status"], "REGISTERED")
+        self.assertEqual(registered["provider"], preview["provider"])
+
+    def test_provider_registration_preview_rejects_duplicate_and_secrets(self):
+        duplicate = self.manager.preview_provider_registration({
+            "id": "public_image",
+            "name": "Duplicate",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+        })
+        self.assertEqual(duplicate["status"], "ALREADY_EXISTS")
+        unsafe = self.manager.preview_provider_registration({
+            "id": "unsafe_preview",
+            "name": "Unsafe",
+            "category": "image",
+            "auth_type": "API_KEY",
+            "connection_type": "API",
+            "api_key": "do-not-return-this",
+        })
+        self.assertEqual(unsafe["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertNotIn("do-not-return-this", repr(unsafe))
+        self.assertFalse(self.manager.provider_exists("unsafe_preview"))
+
+    def test_provider_registration_rejects_ids_over_100_characters(self):
+        provider = {
+            "id": "x" * 101,
+            "name": "Too Long",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+        }
+        self.assertEqual(self.manager.preview_provider_registration(provider)["status"], "INVALID_PROVIDER")
+        self.assertEqual(self.manager.register_provider(provider)["status"], "INVALID_PROVIDER")
+
     def test_register_provider_rejects_duplicate_without_overwrite(self):
         provider = {
             "id": "token_image", "name": "Replacement", "category": "image",
