@@ -226,7 +226,7 @@ GitHub Actions run [#39484247410](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 135 | 🔴 | Provider policy activation سے پہلے simulation | OPEN | Policy simulation/dry-run before activation is not implemented. |
 | 136 | 🟡 | Backward compatibility اور automated contract checks | PARTIAL | Compatibility facades and contract tests exist; full versioned compatibility checks remain open. |
 | 137 | 🔴 | Provider configuration اور policy کے لیے admin controls | OPEN | Complete administrative controls and authorization are not implemented. |
-| 138 | 🔴 | Documentation، diagnostics and maintenance tooling | PARTIAL | `ConnectionManager.diagnostics()` now returns a non-mutating, secret-safe catalog/runtime snapshot with schema findings, enabled/disabled/unknown counts, category totals, missing endpoint/allowlist findings, loaded runtime IDs, and an explicit `live_connectivity_verified: false` boundary. Regression tests cover findings, non-mutation, and unreadable catalogs. Complete maintenance workflows and live provider diagnostics remain open. |
+| 138 | 🔴 | Documentation، diagnostics and maintenance tooling | PARTIAL | `ConnectionManager.diagnostics()` returns a non-mutating, secret-safe catalog/runtime snapshot with schema findings, enabled/disabled/unknown counts, category totals, missing endpoint/allowlist findings, loaded runtime IDs, connection-state store validity, and an explicit `live_connectivity_verified: false` boundary. Regression tests cover findings, non-mutation, and unreadable catalog/state stores. Complete maintenance workflows and live provider diagnostics remain open. |
 
 ## Completion gates
 
