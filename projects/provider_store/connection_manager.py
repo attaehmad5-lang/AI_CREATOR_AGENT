@@ -581,11 +581,15 @@ class ConnectionManager:
                 })
 
         try:
-            with self._state_transaction():
-                state_snapshot = json.loads(json.dumps(self.state))
-                state_providers = state_snapshot.get("providers")
-                if not isinstance(state_providers, dict):
-                    raise ValueError("invalid connection state schema")
+            state_lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+            with interprocess_file_lock(state_lock_path):
+                state_snapshot = self._load_json(
+                    self.state_path,
+                    default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}},
+                )
+            state_providers = state_snapshot.get("providers")
+            if not isinstance(state_providers, dict):
+                raise ValueError("invalid connection state schema")
             state_report = {
                 "status": "VALID",
                 "valid": True,
