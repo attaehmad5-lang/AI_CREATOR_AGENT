@@ -402,6 +402,38 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["restored"])
         self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{still-corrupt")
 
+    def test_catalog_recovery_refuses_master_as_own_target(self):
+        master_path = self.root / "same_catalog.json"
+        master = {
+            "version": "3.0",
+            "providers": [{
+                "id": "safe_api", "name": "Safe API", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "subscription_required": False,
+                "allowed_hosts": ["api.example.com"],
+                "official_api_url": "https://api.example.com/docs",
+                "capabilities": ["image_generation"],
+            }],
+        }
+        master_path.write_text(json.dumps(master), encoding="utf-8")
+        before = master_path.read_bytes()
+
+        result = ConnectionManager.restore_catalog_from_master(master_path, master_path)
+
+        self.assertEqual(result["status"], "RECOVERY_TARGET_EQUALS_MASTER")
+        self.assertFalse(result["restored"])
+        self.assertEqual(master_path.read_bytes(), before)
+
+    def test_catalog_recovery_preserves_target_when_master_is_missing(self):
+        master_path = self.root / "missing_master.json"
+        self.catalog_path.write_text("{target-corrupt", encoding="utf-8")
+
+        result = ConnectionManager.restore_catalog_from_master(self.catalog_path, master_path)
+
+        self.assertEqual(result["status"], "MASTER_CATALOG_INVALID")
+        self.assertFalse(result["restored"])
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{target-corrupt")
+
     def test_persisted_authentication_policy_must_be_boolean(self):
         self.state_path.write_text(json.dumps({
             "version": "1.0", "policy": "USER_CONTROLLED",
