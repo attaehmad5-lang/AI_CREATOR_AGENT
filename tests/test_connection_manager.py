@@ -165,6 +165,16 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertIn({"code": "CONNECTION_STATE_UNREADABLE"}, report["findings"])
         self.assertNotIn("PRIVATE-STATE-CONTENT", repr(report))
 
+    def test_diagnostics_does_not_mutate_runtime_state_when_state_schema_is_invalid(self):
+        original_state = json.loads(json.dumps(self.manager.state))
+        self.state_path.write_text(json.dumps({"providers": []}), encoding="utf-8")
+
+        report = self.manager.diagnostics()
+
+        self.assertEqual(report["connection_state"]["status"], "UNREADABLE")
+        self.assertEqual(report["connection_state"]["error_type"], "ValueError")
+        self.assertEqual(self.manager.state, original_state)
+
     def test_diagnostics_fails_closed_for_unreadable_catalog_without_echoing_content(self):
         self.catalog_path.write_text("SECRET-CONTENT", encoding="utf-8")
 
