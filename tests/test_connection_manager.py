@@ -835,6 +835,40 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertEqual(result["contract_version"], "1.0")
 
+    def test_provider_contract_rejects_unsupported_explicit_adapter_version(self):
+        class FutureImageProvider:
+            adapter_api_version = "2.0"
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        contract = self.manager.validate_provider_contract("public_image", FutureImageProvider())
+        self.assertFalse(contract["valid"])
+        self.assertEqual(contract["status"], "UNSUPPORTED_CONTRACT_VERSION")
+        loaded = self.manager.load_provider("public_image", lambda metadata: FutureImageProvider())
+        self.assertEqual(loaded["status"], "CONTRACT_VIOLATION")
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_provider_contract_rejects_malformed_adapter_version(self):
+        class MalformedImageProvider:
+            adapter_api_version = 1.0
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.validate_provider_contract("public_image", MalformedImageProvider())
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "UNSUPPORTED_CONTRACT_VERSION")
+
+    def test_provider_contract_preserves_legacy_adapter_version_default(self):
+        class LegacyImageProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.validate_provider_contract("public_image", LegacyImageProvider())
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["contract_version"], "1.0")
+
     def test_provider_contract_rejects_missing_method_and_prevents_loading(self):
         instance = object()
         contract = self.manager.validate_provider_contract("public_image", instance)
