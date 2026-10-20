@@ -527,8 +527,9 @@ class ConnectionManager:
         access or successful generation by any external provider.
         """
         try:
-            with self._catalog_transaction():
-                catalog = json.loads(json.dumps(self.catalog))
+            catalog_lock_path = self.catalog_path.with_name(self.catalog_path.name + ".lock")
+            with interprocess_file_lock(catalog_lock_path):
+                catalog = self._load_json(self.catalog_path)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             with self._lock:
                 loaded_ids = sorted(self._loaded_providers)
@@ -562,9 +563,14 @@ class ConnectionManager:
             if isinstance(category, str) and category.strip():
                 normalized_category = category.strip().casefold()
                 category_counts[normalized_category] = category_counts.get(normalized_category, 0) + 1
+            provider_id = item.get("id") if isinstance(item.get("id"), str) else None
+            if item.get("enabled") is True and item.get("deprecated") is True:
+                findings.append({
+                    "code": "DEPRECATED_PROVIDER_ENABLED",
+                    **({"provider": provider_id} if provider_id else {}),
+                })
             if item.get("enabled") is not True:
                 continue
-            provider_id = item.get("id") if isinstance(item.get("id"), str) else None
             if str(item.get("connection_type", "")).upper() != "API":
                 continue
             endpoint = item.get("official_api_url")
