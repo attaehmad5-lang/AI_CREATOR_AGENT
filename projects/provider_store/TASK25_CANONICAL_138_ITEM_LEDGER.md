@@ -217,7 +217,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 129 | 🟡 | Plugin-based provider adapters | PARTIAL | Compatibility facades exist; a safe plugin lifecycle and isolation model is incomplete. |
+| 129 | 🟡 | Plugin-based provider adapters | PARTIAL | New `ProviderPluginManager` restricts factories to an explicit bounded allowlist, accepts callable objects only (no catalog-driven imports), delegates contract validation and load/unload to `ConnectionManager`, refuses factory removal while loaded, and exposes a secret-safe status view. Tests cover allowlist rejection, load/unload cleanup, contract failures, cleanup exceptions, and unsafe allowlists. Process sandboxing, package signing, and resource quotas remain open. |
 | 130 | 🟡 | Versioned provider adapter interface | PARTIAL | Capability/contract validation exists; explicit adapter API version negotiation is incomplete. |
 | 131 | 🟡 | Validated metadata کے ساتھ capability discovery | PARTIAL | Validated capability metadata and discovery exist; live provider metadata trust is incomplete. |
 | 132 | 🟡 | نئے providers کو محفوظ طریقے سے شامل کرنے کا workflow | PARTIAL | Catalog registration/schema validation exists; complete onboarding, approval and probe workflow is incomplete. |
