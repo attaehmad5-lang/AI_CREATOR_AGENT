@@ -164,7 +164,7 @@ GitHub Actions run [#39486812259](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 93 | 🔴 | Feature Flags and Controlled Rollout | PARTIAL | `provider_feature_flags.py` persists kill switches, project allow/deny lists, and deterministic request-scoped percentage rollout; `ProviderService` blocks generation when `provider_generation` is disabled or outside rollout. Admin authorization/audit integration and cross-service rollout coordination remain open. |
 | 94 | 🔴 | Provider API/Model Version Compatibility | PARTIAL | Model/endpoint validation exists; live API/model version compatibility matrix is incomplete. |
 | 95 | 🔴 | Rollback to Known-Good Configuration | PARTIAL | `ProviderConfigLifecycleManager.rollback()` now validates the previous generation before consuming the rollback point, preserving history when rollback validation fails. A regression test verifies retry after validation policy changes; runtime-wide rollback integration remains open. |
-| 96 | 🔴 | Configuration Backup/Restore Verification | PARTIAL | Master catalog backup/restore is tested; full config/state backup verification is incomplete. |
+| 96 | 🔴 | Configuration Backup/Restore Verification | PARTIAL | Master-catalog restore tests now cover valid-master recovery, refusal to use the master as its own target, invalid/missing master preservation, and no-op when the target is already valid. Full configuration/state backup verification and crash-injection remain open. |
 
 ## M — Testing, Audit and Release Readiness
 
