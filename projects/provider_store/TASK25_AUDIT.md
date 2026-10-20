@@ -2,7 +2,7 @@
 
 **Branch:** `task-25-provider-connection-manager`  
 **Historical implementation PR:** #1 (merged 2026-10-12)  
-**Current follow-up PR:** #44 (draft; verification pending)  
+**Current follow-up PR:** #72 (draft; verification pending)  
 **Audit status:** In progress — do not mark Task #25 complete yet.
 
 ## Latest automated verification
@@ -12,7 +12,7 @@ GitHub Actions run [#38280619566](https://github.com/attaehmad5-lang/AI_CREATOR_
 - Ubuntu: 292 tests passed, 0 failures.
 - Windows: 292 tests passed, 0 failures.
 
-The current follow-up branch `task-25-progress-50-percent` adds redirect-final-URL validation and bounded retry exponent handling. Its CI run is pending; do not count those changes as verified until both matrix jobs pass.
+The current follow-up branch `task-25-provider-id-boundary-fix-20261020` adds redirect-final-URL validation and bounded retry exponent handling. The exact current head commit `51d0e6b4d6a432570b8545a17a7f67a0caa0d6af` has no workflow run or status returned by the available GitHub checks yet; do not count these changes as verified until fresh Ubuntu and Windows matrix jobs pass.
 - Provider module/test compilation passed.
 - Provider JSON catalog validation passed.
 
