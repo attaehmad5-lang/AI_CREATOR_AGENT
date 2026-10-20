@@ -743,6 +743,44 @@ class ConnectionManager:
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+        # Legacy adapters without a version declaration retain the 1.0 contract.
+        # Explicit declarations must match a version this manager actually supports.
+        supported_contract_versions = {"1.0"}
+        try:
+            adapter_version = getattr(instance, "adapter_api_version", None)
+            if adapter_version is None:
+                adapter_version = getattr(instance, "API_VERSION", None)
+        except Exception:
+            return {
+                "status": "ADAPTER_VERSION_UNREADABLE",
+                "provider": provider_id,
+                "valid": False,
+                "contract_version": None,
+            }
+        metadata_version = provider.get("adapter_api_version")
+        for declared_version in (metadata_version, adapter_version):
+            if declared_version is not None and (
+                not isinstance(declared_version, str)
+                or declared_version not in supported_contract_versions
+            ):
+                return {
+                    "status": "UNSUPPORTED_CONTRACT_VERSION",
+                    "provider": provider_id,
+                    "valid": False,
+                    "contract_version": None,
+                }
+        if (
+            metadata_version is not None
+            and adapter_version is not None
+            and metadata_version != adapter_version
+        ):
+            return {
+                "status": "CONTRACT_VERSION_MISMATCH",
+                "provider": provider_id,
+                "valid": False,
+                "contract_version": None,
+            }
+        contract_version = adapter_version or metadata_version or "1.0"
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
         contracts: dict[str, tuple[tuple[str, ...], ...]] = {
             "image": (("generate_image",),),
@@ -772,7 +810,7 @@ class ConnectionManager:
                 "status": "UNSUPPORTED_MODALITY",
                 "provider": provider_id,
                 "valid": False,
-                "contract_version": "1.0",
+                "contract_version": contract_version,
             }
         def has_callable(name: str) -> bool:
             try:
