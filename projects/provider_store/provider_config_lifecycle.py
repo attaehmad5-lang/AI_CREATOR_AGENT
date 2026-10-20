@@ -11,7 +11,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Callable
 
-from .interprocess_lock import atomic_replace_with_retry
+from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 
 class ProviderConfigLifecycleManager:
@@ -126,12 +126,14 @@ class ProviderConfigLifecycleManager:
         with self._lock:
             if not self._history:
                 return {"status": "NO_CONFIG_ROLLBACK_AVAILABLE", "rolled_back": False}
-            previous = self._history.pop()
-            if self.active_config is not None:
-                self._history.append(copy.deepcopy(self.active_config))
+            previous = self._history[-1]
             valid, reason = self._validate(previous)
             if not valid:
+                # Do not consume the rollback point or mutate history on rejection.
                 return {"status": "ROLLBACK_CONFIG_INVALID", "rolled_back": False, "reason": reason}
+            self._history.pop()
+            if self.active_config is not None:
+                self._history.append(copy.deepcopy(self.active_config))
             self.active_config = copy.deepcopy(previous)
             self.generation += 1
             return {
@@ -148,6 +150,19 @@ class ProviderConfigLifecycleManager:
         migrations: dict[str, Callable[[dict[str, Any]], dict[str, Any]]],
     ) -> dict[str, Any]:
         config_path = Path(path)
+        lock_path = config_path.with_name(config_path.name + ".lock")
+        with interprocess_file_lock(lock_path):
+            return self._migrate_file_locked(
+                config_path, target_version=target_version, migrations=migrations
+            )
+
+    def _migrate_file_locked(
+        self,
+        config_path: Path,
+        *,
+        target_version: str,
+        migrations: dict[str, Callable[[dict[str, Any]], dict[str, Any]]],
+    ) -> dict[str, Any]:
         if not config_path.is_file():
             return {"status": "CONFIG_FILE_NOT_FOUND", "migrated": False}
         try:

@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#39488902640](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39488902640): **431 tests passed on Ubuntu and 431 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite includes interprocess-locked concurrent file migration, rollback-history preservation after validation rejection, migration-cycle/source-immutability coverage, file-replacement failure preserving the original configuration and backup, validator mutation isolation, and fail-closed reload errors.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -158,13 +158,13 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 89 | 🟢 | Registry Schema Validation | VERIFIED | Catalog schema, malformed-version, unsafe-link and primary/master synchronization tests pass. |
-| 90 | 🟡 | Safe Defaults and Invalid-Configuration Handling | PARTIAL | Fail-closed validation exists; complete configuration recovery/default audit remains open. |
-| 91 | 🔴 | Configuration Versioning and Migration | PARTIAL | `provider_config_lifecycle.py` requires explicit version-to-version migration functions, validates each intermediate configuration, and writes migrated JSON via atomic replacement with a backup. Repository-wide migration coverage and cross-process crash-injection tests remain open. |
-| 92 | 🔴 | Safe Hot Reload | PARTIAL | `ProviderConfigLifecycleManager` validates candidate configuration before swapping active state, preserves the last-known-good configuration, and supports rollback after reload failures. Integration into every runtime catalog consumer remains open. |
+| 90 | 🟡 | Safe Defaults and Invalid-Configuration Handling | PARTIAL | Configuration lifecycle tests now cover invalid history limits, validator exceptions that fail closed without leaking messages, and validator mutation isolation. Repository-wide default/recovery behavior remains open. |
+| 91 | 🔴 | Configuration Versioning and Migration | PARTIAL | `provider_config_lifecycle.py` serializes file migrations with an interprocess lock, validates every explicit migration step, and writes atomically with a backup. Regression tests cover concurrent migration calls, migration cycles, source immutability, and replacement-write failure preserving the original file and backup. Process-crash injection and repository-wide migration coverage remain open. |
+| 92 | 🔴 | Safe Hot Reload | PARTIAL | `ProviderConfigLifecycleManager` validates detached candidate data before swapping active state, preserves the last-known-good configuration, and rejects validator exceptions without leaking exception text; regression tests cover mutation isolation and generation preservation. Integration into every runtime catalog consumer remains open. |
 | 93 | 🔴 | Feature Flags and Controlled Rollout | PARTIAL | `provider_feature_flags.py` persists kill switches, project allow/deny lists, and deterministic request-scoped percentage rollout; `ProviderService` blocks generation when `provider_generation` is disabled or outside rollout. Admin authorization/audit integration and cross-service rollout coordination remain open. |
 | 94 | 🔴 | Provider API/Model Version Compatibility | PARTIAL | Model/endpoint validation exists; live API/model version compatibility matrix is incomplete. |
-| 95 | 🔴 | Rollback to Known-Good Configuration | PARTIAL | Catalog restore exists; runtime policy rollback is not fully verified. |
-| 96 | 🔴 | Configuration Backup/Restore Verification | PARTIAL | Master catalog backup/restore is tested; full config/state backup verification is incomplete. |
+| 95 | 🔴 | Rollback to Known-Good Configuration | PARTIAL | `ProviderConfigLifecycleManager.rollback()` now validates the previous generation before consuming the rollback point, preserving history when rollback validation fails. A regression test verifies retry after validation policy changes; runtime-wide rollback integration remains open. |
+| 96 | 🔴 | Configuration Backup/Restore Verification | PARTIAL | Master-catalog restore tests now cover valid-master recovery, refusal to use the master as its own target, invalid/missing master preservation, and no-op when the target is already valid. Full configuration/state backup verification and crash-injection remain open. |
 
 ## M — Testing, Audit and Release Readiness
 
@@ -181,7 +181,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 303 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 430 tests pass on Windows and Ubuntu at configuration lifecycle and restore CI run #39487450444; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
