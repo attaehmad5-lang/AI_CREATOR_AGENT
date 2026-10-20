@@ -233,7 +233,7 @@ class ConnectionManager:
     def validate_catalog_schema(
         catalog: dict[str, Any], *, raise_on_error: bool = False
     ) -> dict[str, Any]:
-        """Validate catalog structure, provider identities, and safe metadata fields."""
+        """Validate catalog structure, provider identities, capability metadata, and safe fields."""
         from urllib.parse import urlsplit
 
         errors: list[str] = []
