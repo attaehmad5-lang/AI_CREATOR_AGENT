@@ -175,6 +175,39 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(report["connection_state"]["error_type"], "ValueError")
         self.assertEqual(self.manager.state, original_state)
 
+    def test_diagnostics_reports_schema_invalid_and_enabled_deprecated_provider(self):
+        catalog = {
+            "version": "3.0",
+            "providers": [{
+                "id": "retired_provider",
+                "name": "Retired Provider",
+                "category": "image",
+                "auth_type": "NONE",
+                "connection_type": "API",
+                "enabled": True,
+                "subscription_required": False,
+                "allowed_hosts": ["api.example.com"],
+                "official_api_url": "https://api.example.com/docs",
+                "capabilities": ["image_generation"],
+                "deprecated": True,
+                "deprecation_reason": "provider retired",
+                "deprecation_date": "2026-10-01",
+            }],
+        }
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        before = self.catalog_path.read_bytes()
+
+        report = self.manager.diagnostics()
+
+        self.assertEqual(report["status"], "ATTENTION_REQUIRED")
+        self.assertFalse(report["catalog_valid"])
+        self.assertTrue(any("deprecated provider must remain disabled" in error for error in report["catalog_errors"]))
+        self.assertIn(
+            {"code": "DEPRECATED_PROVIDER_ENABLED", "provider": "retired_provider"},
+            report["findings"],
+        )
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
     def test_diagnostics_fails_closed_for_unreadable_catalog_without_echoing_content(self):
         self.catalog_path.write_text("SECRET-CONTENT", encoding="utf-8")
 
