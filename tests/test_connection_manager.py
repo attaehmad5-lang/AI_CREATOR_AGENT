@@ -869,6 +869,52 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertEqual(result["contract_version"], "1.0")
 
+    def test_provider_contract_accepts_legacy_api_version_alias(self):
+        class VersionedImageProvider:
+            API_VERSION = "1.0"
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.validate_provider_contract("public_image", VersionedImageProvider())
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["contract_version"], "1.0")
+
+    def test_provider_contract_rejects_unsupported_catalog_version(self):
+        registration = self.manager.register_provider({
+            "id": "future_image",
+            "name": "Future Image",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "API",
+            "enabled": False,
+            "subscription_required": False,
+            "adapter_api_version": "2.0",
+        })
+        self.assertEqual(registration["status"], "REGISTERED")
+
+        class ImageProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.validate_provider_contract("future_image", ImageProvider())
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "UNSUPPORTED_CONTRACT_VERSION")
+
+    def test_provider_contract_fails_closed_when_version_property_raises(self):
+        class BrokenVersionImageProvider:
+            @property
+            def adapter_api_version(self):
+                raise RuntimeError("private adapter metadata")
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.validate_provider_contract("public_image", BrokenVersionImageProvider())
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "ADAPTER_VERSION_UNREADABLE")
+        self.assertNotIn("private adapter metadata", repr(result))
+
     def test_provider_contract_rejects_missing_method_and_prevents_loading(self):
         instance = object()
         contract = self.manager.validate_provider_contract("public_image", instance)
