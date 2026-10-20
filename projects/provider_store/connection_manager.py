@@ -537,6 +537,7 @@ class ConnectionManager:
                 "schema_version": "1.0",
                 "catalog_valid": False,
                 "catalog_errors": [type(exc).__name__],
+                "connection_state": {"status": "NOT_CHECKED", "valid": None},
                 "provider_count": 0,
                 "enabled_count": 0,
                 "disabled_count": 0,
@@ -579,16 +580,37 @@ class ConnectionManager:
                     **({"provider": provider_id} if provider_id else {}),
                 })
 
+        try:
+            with self._state_transaction():
+                state_snapshot = json.loads(json.dumps(self.state))
+                state_providers = state_snapshot.get("providers")
+                if not isinstance(state_providers, dict):
+                    raise ValueError("invalid connection state schema")
+            state_report = {
+                "status": "VALID",
+                "valid": True,
+                "provider_count": len(state_providers),
+            }
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            state_report = {
+                "status": "UNREADABLE",
+                "valid": False,
+                "provider_count": 0,
+                "error_type": type(exc).__name__,
+            }
+            findings.append({"code": "CONNECTION_STATE_UNREADABLE"})
+
         with self._lock:
             loaded_ids = sorted(self._loaded_providers)
         catalog_errors = list(validation.get("errors", []))
         if catalog_errors:
             findings.append({"code": "CATALOG_SCHEMA_INVALID"})
         return {
-            "status": "HEALTHY" if validation.get("valid") is True and not findings else "ATTENTION_REQUIRED",
+            "status": "HEALTHY" if validation.get("valid") is True and state_report["valid"] and not findings else "ATTENTION_REQUIRED",
             "schema_version": "1.0",
             "catalog_valid": validation.get("valid") is True,
             "catalog_errors": catalog_errors,
+            "connection_state": state_report,
             "provider_count": len(providers),
             "enabled_count": enabled_count,
             "disabled_count": disabled_count,
