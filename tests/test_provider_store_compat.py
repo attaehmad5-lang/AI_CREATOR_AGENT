@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
-from projects.provider_store.provider_store_manager import ProviderStoreManager
+from projects.provider_store.provider_store_manager import COMPATIBILITY_API_VERSION, ProviderStoreManager
 from projects.provider_store.category_manager import CategoryManager
 from projects.provider_store.advanced.advanced_provider_manager import AdvancedProviderManager
 from projects.provider_store.unified_provider_registry import UnifiedProviderRegistry
@@ -106,6 +106,38 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             self.assertEqual(after["status"], "ROUTABLE")
             self.assertFalse(after["route_selected"])
             self.assertEqual(after["available"][0]["id"], "image")
+
+    def test_legacy_store_facade_exposes_versioned_stable_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = root / "catalog.json"
+            state = root / "state.json"
+            catalog.write_text(json.dumps({
+                "providers": [{
+                    "id": "contract-image", "name": "Contract Image", "category": "image",
+                    "auth_type": "NONE", "connection_type": "LOCAL", "enabled": True,
+                }]
+            }), encoding="utf-8")
+            state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            store = ProviderStoreManager(catalog, state)
+
+            catalog_view = store.catalog
+            status_view = store.status()
+
+            self.assertEqual(COMPATIBILITY_API_VERSION, "1.0")
+            self.assertEqual(catalog_view["version"], COMPATIBILITY_API_VERSION)
+            self.assertEqual(status_view["version"], COMPATIBILITY_API_VERSION)
+            self.assertEqual(
+                set(catalog_view),
+                {"store", "version", "status", "subscription_policy", "providers"},
+            )
+            self.assertEqual(
+                set(status_view),
+                {"store", "version", "status", "providers_total", "connected_verified", "ready"},
+            )
+            self.assertEqual(status_view["providers_total"], 1)
+            self.assertEqual(status_view["connected_verified"], 0)
+            self.assertTrue(status_view["ready"])
 
     def test_production_registry_contains_all_advanced_provider_entries(self):
         project_root = Path(__file__).resolve().parents[1]
