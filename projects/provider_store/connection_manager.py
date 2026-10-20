@@ -233,7 +233,7 @@ class ConnectionManager:
     def validate_catalog_schema(
         catalog: dict[str, Any], *, raise_on_error: bool = False
     ) -> dict[str, Any]:
-        """Validate catalog structure, provider identities, and safe metadata fields."""
+        """Validate catalog structure, provider identities, capability metadata, and safe fields."""
         from urllib.parse import urlsplit
 
         errors: list[str] = []
@@ -290,6 +290,21 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].connection_type is unsupported")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
+                    if "capabilities" in provider:
+                        capabilities = provider["capabilities"]
+                        if not isinstance(capabilities, list) or len(capabilities) > 100:
+                            errors.append(f"providers[{index}].capabilities must be a list of at most 100 strings")
+                        elif (
+                            any(
+                                not isinstance(capability, str)
+                                or not capability.strip()
+                                or len(capability) > 100
+                                or any(ord(char) < 32 or ord(char) == 127 for char in capability)
+                                for capability in capabilities
+                            )
+                            or len({capability.strip().casefold() for capability in capabilities if isinstance(capability, str)}) != len(capabilities)
+                        ):
+                            errors.append(f"providers[{index}].capabilities contains invalid or duplicate values")
                     if "allowed_hosts" in provider:
                         hosts = provider["allowed_hosts"]
                         if not isinstance(hosts, list) or not hosts or len(hosts) > 100:
@@ -757,10 +772,9 @@ class ConnectionManager:
             discovered.append(dict(provider))
         return discovered
 
-    def register_provider(
-        self, provider: dict[str, Any], *, overwrite: bool = False
-    ) -> dict[str, Any]:
-        """Register validated provider metadata; never accept credentials in catalog data."""
+    @staticmethod
+    def _validate_provider_registration_input(provider: Any) -> dict[str, Any]:
+        """Validate registration inputs without reading or mutating catalog state."""
         if not isinstance(provider, dict):
             return {"status": "INVALID_PROVIDER", "reason": "provider must be an object"}
         required = ("id", "name", "category", "auth_type", "connection_type")
@@ -770,24 +784,82 @@ class ConnectionManager:
                 "reason": "required non-empty string fields: " + ", ".join(required),
             }
         provider_id = provider["id"].strip()
-        if any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id):
-            return {"status": "INVALID_PROVIDER", "reason": "provider id contains unsupported characters"}
-
-        # Metadata may name an environment variable, but must never contain a secret value.
-        if self._contains_credential_value_field(provider):
+        if (
+            len(provider_id) > 100
+            or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id)
+        ):
+            return {
+                "status": "INVALID_PROVIDER",
+                "reason": "provider id must be at most 100 characters and use only letters, digits, '_' or '-'",
+            }
+        if ConnectionManager._contains_credential_value_field(provider):
             return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id}
+        safe_provider = dict(provider)
+        safe_provider["id"] = provider_id
+        return {"status": "VALID", "provider_id": provider_id, "provider": safe_provider}
+
+    def preview_provider_registration(
+        self, provider: dict[str, Any], *, overwrite: bool = False
+    ) -> dict[str, Any]:
+        """Preview registration against the current catalog without persisting changes."""
+        checked = self._validate_provider_registration_input(provider)
+        if checked.get("status") != "VALID":
+            return {**checked, "saved": False}
+        provider_id = checked["provider_id"]
+        safe_provider = checked["provider"]
+        with self._catalog_transaction():
+            providers = self._list_providers_unlocked()
+            existing = next((item for item in providers if item.get("id") == provider_id), None)
+            if existing is not None and not overwrite:
+                return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
+            updated = [item for item in providers if item.get("id") != provider_id]
+            updated.append(safe_provider)
+            candidate = dict(self.catalog)
+            candidate["providers"] = updated
+            validation = self.validate_catalog_schema(candidate)
+            if validation.get("valid") is not True:
+                return {
+                    "status": "INVALID_PROVIDER_METADATA",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
+            return {
+                "status": "READY_TO_REGISTER",
+                "provider": provider_id,
+                "saved": False,
+                "catalog_valid": True,
+                "overwrites": existing is not None,
+                "findings": [],
+            }
+
+    def register_provider(
+        self, provider: dict[str, Any], *, overwrite: bool = False
+    ) -> dict[str, Any]:
+        """Register validated provider metadata; never accept credentials in catalog data."""
+        checked = self._validate_provider_registration_input(provider)
+        if checked.get("status") != "VALID":
+            return checked
+        provider_id = checked["provider_id"]
+        safe_provider = checked["provider"]
 
         with self._catalog_transaction():
             providers = self._list_providers_unlocked()
             existing = next((item for item in providers if item.get("id") == provider_id), None)
             if existing is not None and not overwrite:
                 return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
-            safe_provider = dict(provider)
-            safe_provider["id"] = provider_id
             updated = [item for item in providers if item.get("id") != provider_id]
             updated.append(safe_provider)
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if validation.get("valid") is not True:
+                return {
+                    "status": "INVALID_PROVIDER_METADATA",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
             return {
