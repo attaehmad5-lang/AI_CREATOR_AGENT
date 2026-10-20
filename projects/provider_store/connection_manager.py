@@ -520,6 +520,117 @@ class ConnectionManager:
     def get_provider(self, provider_id: str) -> dict[str, Any] | None:
         return next((p for p in self.list_providers() if p.get("id") == provider_id), None)
 
+    def diagnostics(self) -> dict[str, Any]:
+        """Return a non-mutating, secret-safe snapshot of catalog and runtime readiness.
+
+        This is a local configuration diagnostic, not proof of authenticated network
+        access or successful generation by any external provider.
+        """
+        try:
+            catalog_lock_path = self.catalog_path.with_name(self.catalog_path.name + ".lock")
+            with interprocess_file_lock(catalog_lock_path):
+                catalog = self._load_json(self.catalog_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            with self._lock:
+                loaded_ids = sorted(self._loaded_providers)
+            return {
+                "status": "CATALOG_UNREADABLE",
+                "schema_version": "1.0",
+                "catalog_valid": False,
+                "catalog_errors": [type(exc).__name__],
+                "connection_state": {"status": "NOT_CHECKED", "valid": None},
+                "provider_count": 0,
+                "enabled_count": 0,
+                "disabled_count": 0,
+                "unknown_enabled_state_count": 0,
+                "category_counts": {},
+                "findings": [{"code": "CATALOG_UNREADABLE"}],
+                "loaded_runtime_provider_ids": loaded_ids,
+                "live_connectivity_verified": False,
+            }
+
+        validation = self.validate_catalog_schema(catalog)
+        raw_providers = catalog.get("providers", [])
+        providers = [item for item in raw_providers if isinstance(item, dict)] if isinstance(raw_providers, list) else []
+        enabled_count = sum(item.get("enabled") is True for item in providers)
+        disabled_count = sum(item.get("enabled") is False for item in providers)
+        unknown_count = len(providers) - enabled_count - disabled_count
+        category_counts: dict[str, int] = {}
+        findings: list[dict[str, str]] = []
+
+        for item in providers:
+            category = item.get("category")
+            if isinstance(category, str) and category.strip():
+                normalized_category = category.strip().casefold()
+                category_counts[normalized_category] = category_counts.get(normalized_category, 0) + 1
+            provider_id = item.get("id") if isinstance(item.get("id"), str) else None
+            if item.get("enabled") is True and item.get("deprecated") is True:
+                findings.append({
+                    "code": "DEPRECATED_PROVIDER_ENABLED",
+                    **({"provider": provider_id} if provider_id else {}),
+                })
+            if item.get("enabled") is not True:
+                continue
+            if str(item.get("connection_type", "")).upper() != "API":
+                continue
+            endpoint = item.get("official_api_url")
+            if not isinstance(endpoint, str) or not endpoint.startswith("https://"):
+                findings.append({
+                    "code": "ENABLED_API_MISSING_OR_UNSAFE_ENDPOINT",
+                    **({"provider": provider_id} if provider_id else {}),
+                })
+            hosts = item.get("allowed_hosts")
+            if not isinstance(hosts, list) or not hosts:
+                findings.append({
+                    "code": "ENABLED_API_MISSING_ALLOWED_HOSTS",
+                    **({"provider": provider_id} if provider_id else {}),
+                })
+
+        try:
+            state_lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+            with interprocess_file_lock(state_lock_path):
+                state_snapshot = self._load_json(
+                    self.state_path,
+                    default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}},
+                )
+            state_providers = state_snapshot.get("providers")
+            if not isinstance(state_providers, dict):
+                raise ValueError("invalid connection state schema")
+            state_report = {
+                "status": "VALID",
+                "valid": True,
+                "provider_count": len(state_providers),
+            }
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            state_report = {
+                "status": "UNREADABLE",
+                "valid": False,
+                "provider_count": 0,
+                "error_type": type(exc).__name__,
+            }
+            findings.append({"code": "CONNECTION_STATE_UNREADABLE"})
+
+        with self._lock:
+            loaded_ids = sorted(self._loaded_providers)
+        catalog_errors = list(validation.get("errors", []))
+        if catalog_errors:
+            findings.append({"code": "CATALOG_SCHEMA_INVALID"})
+        return {
+            "status": "HEALTHY" if validation.get("valid") is True and state_report["valid"] and not findings else "ATTENTION_REQUIRED",
+            "schema_version": "1.0",
+            "catalog_valid": validation.get("valid") is True,
+            "catalog_errors": catalog_errors,
+            "connection_state": state_report,
+            "provider_count": len(providers),
+            "enabled_count": enabled_count,
+            "disabled_count": disabled_count,
+            "unknown_enabled_state_count": unknown_count,
+            "category_counts": dict(sorted(category_counts.items())),
+            "findings": findings,
+            "loaded_runtime_provider_ids": loaded_ids,
+            "live_connectivity_verified": False,
+        }
+
     def provider_exists(self, provider_id: str) -> bool:
         return self.get_provider(provider_id) is not None
 

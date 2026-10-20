@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#39487864610](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39487864610): **428 tests passed on Ubuntu and 428 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers non-mutating provider diagnostics, detailed invalid-schema reporting, deprecated-enabled-provider alerts, endpoint/allowlist findings, connection-state store validation, and secret-safe handling of unreadable catalog/state files.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -181,7 +181,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 303 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 428 tests pass on Windows and Ubuntu at diagnostics/deprecation PR #73 CI run #39487864610; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
@@ -222,11 +222,11 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 131 | 🟡 | Validated metadata کے ساتھ capability discovery | PARTIAL | Validated capability metadata and discovery exist; live provider metadata trust is incomplete. |
 | 132 | 🟡 | نئے providers کو محفوظ طریقے سے شامل کرنے کا workflow | PARTIAL | Catalog registration/schema validation exists; complete onboarding, approval and probe workflow is incomplete. |
 | 133 | 🔴 | Self-hosted اور local models کی support، جہاں ممکن ہو | OPEN | Local/self-hosted provider lifecycle and modality verification are not complete. |
-| 134 | 🔴 | Model deprecation اور end-of-life handling | PARTIAL | Catalog schema records a validated deprecation reason/date and rejects deprecated providers that are enabled; OpenAI Sora is marked deprecated and disabled. General deprecation discovery, replacement migration, and EOL routing remain open. Evidence: `tests/test_provider_catalogs.py::test_deprecated_provider_requires_reason_date_and_stays_disabled`. |
+| 134 | 🔴 | Model deprecation اور end-of-life handling | PARTIAL | Catalog schema requires a valid deprecation reason/date and rejects deprecated providers that are enabled; `ConnectionManager.diagnostics()` now reports an actionable `DEPRECATED_PROVIDER_ENABLED` finding even when the catalog schema is invalid. Tests verify the diagnostic is non-mutating. Replacement migration, deprecation discovery and EOL routing remain open. |
 | 135 | 🔴 | Provider policy activation سے پہلے simulation | OPEN | Policy simulation/dry-run before activation is not implemented. |
 | 136 | 🟡 | Backward compatibility اور automated contract checks | PARTIAL | Compatibility facades and contract tests exist; full versioned compatibility checks remain open. |
 | 137 | 🔴 | Provider configuration اور policy کے لیے admin controls | OPEN | Complete administrative controls and authorization are not implemented. |
-| 138 | 🔴 | Documentation، diagnostics and maintenance tooling | PARTIAL | Provider guide and diagnostics exist; complete diagnostics/maintenance workflows remain open. |
+| 138 | 🔴 | Documentation، diagnostics and maintenance tooling | PARTIAL | `ConnectionManager.diagnostics()` returns a non-mutating, secret-safe catalog/runtime snapshot, including detailed schema-invalid findings, enabled-deprecated-provider alerts, enabled/disabled/unknown counts, category totals, missing endpoint/allowlist findings, loaded runtime IDs, connection-state store validity, and an explicit `live_connectivity_verified: false` boundary. Regression tests cover findings, non-mutation, and unreadable catalog/state stores. Complete maintenance workflows and live provider diagnostics remain open. |
 
 ## Completion gates
 

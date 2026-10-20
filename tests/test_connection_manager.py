@@ -116,6 +116,109 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
         self.assertEqual(len(self.manager.list_providers()), 2)
 
+    def test_diagnostics_reports_catalog_counts_and_api_configuration_findings(self):
+        registration = self.manager.register_provider({
+            "id": "diagnostic_api",
+            "name": "Diagnostic API",
+            "category": "image",
+            "auth_type": "API_KEY",
+            "connection_type": "API",
+            "enabled": True,
+            "subscription_required": False,
+        })
+        self.assertEqual(registration["status"], "REGISTERED")
+        before = self.catalog_path.read_bytes()
+
+        report = self.manager.diagnostics()
+
+        self.assertEqual(report["status"], "ATTENTION_REQUIRED")
+        self.assertTrue(report["catalog_valid"])
+        self.assertEqual(report["provider_count"], 3)
+        self.assertEqual(report["enabled_count"], 2)
+        self.assertEqual(report["unknown_enabled_state_count"], 1)
+        self.assertEqual(report["category_counts"]["image"], 3)
+        self.assertFalse(report["live_connectivity_verified"])
+        self.assertIn(
+            {"code": "ENABLED_API_MISSING_OR_UNSAFE_ENDPOINT", "provider": "diagnostic_api"},
+            report["findings"],
+        )
+        self.assertIn(
+            {"code": "ENABLED_API_MISSING_ALLOWED_HOSTS", "provider": "diagnostic_api"},
+            report["findings"],
+        )
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_diagnostics_reports_connection_state_store_health(self):
+        report = self.manager.diagnostics()
+        self.assertEqual(report["connection_state"]["status"], "VALID")
+        self.assertTrue(report["connection_state"]["valid"])
+        self.assertEqual(report["connection_state"]["provider_count"], 0)
+
+    def test_diagnostics_fails_closed_for_unreadable_connection_state(self):
+        self.state_path.write_text("PRIVATE-STATE-CONTENT", encoding="utf-8")
+
+        report = self.manager.diagnostics()
+
+        self.assertEqual(report["status"], "ATTENTION_REQUIRED")
+        self.assertEqual(report["connection_state"]["status"], "UNREADABLE")
+        self.assertEqual(report["connection_state"]["error_type"], "ValueError")
+        self.assertIn({"code": "CONNECTION_STATE_UNREADABLE"}, report["findings"])
+        self.assertNotIn("PRIVATE-STATE-CONTENT", repr(report))
+
+    def test_diagnostics_does_not_mutate_runtime_state_when_state_schema_is_invalid(self):
+        original_state = json.loads(json.dumps(self.manager.state))
+        self.state_path.write_text(json.dumps({"providers": []}), encoding="utf-8")
+
+        report = self.manager.diagnostics()
+
+        self.assertEqual(report["connection_state"]["status"], "UNREADABLE")
+        self.assertEqual(report["connection_state"]["error_type"], "ValueError")
+        self.assertEqual(self.manager.state, original_state)
+
+    def test_diagnostics_reports_schema_invalid_and_enabled_deprecated_provider(self):
+        catalog = {
+            "version": "3.0",
+            "providers": [{
+                "id": "retired_provider",
+                "name": "Retired Provider",
+                "category": "image",
+                "auth_type": "NONE",
+                "connection_type": "API",
+                "enabled": True,
+                "subscription_required": False,
+                "allowed_hosts": ["api.example.com"],
+                "official_api_url": "https://api.example.com/docs",
+                "capabilities": ["image_generation"],
+                "deprecated": True,
+                "deprecation_reason": "provider retired",
+                "deprecation_date": "2026-10-01",
+            }],
+        }
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        before = self.catalog_path.read_bytes()
+
+        report = self.manager.diagnostics()
+
+        self.assertEqual(report["status"], "ATTENTION_REQUIRED")
+        self.assertFalse(report["catalog_valid"])
+        self.assertTrue(any("deprecated provider must remain disabled" in error for error in report["catalog_errors"]))
+        self.assertIn(
+            {"code": "DEPRECATED_PROVIDER_ENABLED", "provider": "retired_provider"},
+            report["findings"],
+        )
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_diagnostics_fails_closed_for_unreadable_catalog_without_echoing_content(self):
+        self.catalog_path.write_text("SECRET-CONTENT", encoding="utf-8")
+
+        report = self.manager.diagnostics()
+
+        self.assertEqual(report["status"], "CATALOG_UNREADABLE")
+        self.assertFalse(report["catalog_valid"])
+        self.assertEqual(report["catalog_errors"], ["ValueError"])
+        self.assertFalse(report["live_connectivity_verified"])
+        self.assertNotIn("SECRET-CONTENT", repr(report))
+
     def test_catalog_schema_validation_detects_duplicate_ids_and_secret_fields(self):
         result = ConnectionManager.validate_catalog_schema({
             "providers": [
