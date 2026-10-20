@@ -771,6 +771,17 @@ class ConnectionManagerTests(unittest.TestCase):
         }
         self.assertEqual(self.manager.register_provider(provider)["status"], "INVALID_PROVIDER")
 
+    def test_register_provider_rejects_overlong_id_without_corrupting_catalog(self):
+        provider = {
+            "id": "p" * 101, "name": "Overlong", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+        }
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "INVALID_PROVIDER")
+        self.assertFalse(result.get("saved", False))
+        reloaded = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertIsNone(reloaded.get_provider("p" * 101))
+
     def test_discovery_filters_by_category_case_insensitively(self):
         results = self.manager.discover_providers(category="IMAGE")
         self.assertEqual({item["id"] for item in results}, {"public_image", "token_image"})
