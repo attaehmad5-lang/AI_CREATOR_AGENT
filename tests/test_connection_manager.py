@@ -148,6 +148,23 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(self.catalog_path.read_bytes(), before)
 
+    def test_diagnostics_reports_connection_state_store_health(self):
+        report = self.manager.diagnostics()
+        self.assertEqual(report["connection_state"]["status"], "VALID")
+        self.assertTrue(report["connection_state"]["valid"])
+        self.assertEqual(report["connection_state"]["provider_count"], 0)
+
+    def test_diagnostics_fails_closed_for_unreadable_connection_state(self):
+        self.state_path.write_text("PRIVATE-STATE-CONTENT", encoding="utf-8")
+
+        report = self.manager.diagnostics()
+
+        self.assertEqual(report["status"], "ATTENTION_REQUIRED")
+        self.assertEqual(report["connection_state"]["status"], "UNREADABLE")
+        self.assertEqual(report["connection_state"]["error_type"], "ValueError")
+        self.assertIn({"code": "CONNECTION_STATE_UNREADABLE"}, report["findings"])
+        self.assertNotIn("PRIVATE-STATE-CONTENT", repr(report))
+
     def test_diagnostics_fails_closed_for_unreadable_catalog_without_echoing_content(self):
         self.catalog_path.write_text("SECRET-CONTENT", encoding="utf-8")
 
