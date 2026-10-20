@@ -684,8 +684,14 @@ class ConnectionManager:
                 "reason": "required non-empty string fields: " + ", ".join(required),
             }
         provider_id = provider["id"].strip()
-        if any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id):
-            return {"status": "INVALID_PROVIDER", "reason": "provider id contains unsupported characters"}
+        if len(provider_id) > 100 or any(
+            ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+            for ch in provider_id
+        ):
+            return {
+                "status": "INVALID_PROVIDER",
+                "reason": "provider id must be 1-100 characters using letters, digits, underscores, or hyphens",
+            }
 
         # Metadata may name an environment variable, but must never contain a secret value.
         if self._contains_credential_value_field(provider):
