@@ -135,6 +135,37 @@ class ConnectionManagerTests(unittest.TestCase):
                 self.assertFalse(invalid["valid"])
                 self.assertTrue(any("allowed_hosts" in error for error in invalid["errors"]))
 
+    def test_catalog_schema_rejects_invalid_capability_metadata(self):
+        invalid_capability_sets = (
+            "image",
+            ["image", ""],
+            ["image", 42],
+            ["image", "IMAGE"],
+            ["x" * 101],
+            ["image\nwrite"],
+        )
+        for capabilities in invalid_capability_sets:
+            with self.subTest(capabilities=capabilities):
+                result = ConnectionManager.validate_catalog_schema({
+                    "providers": [{"id": "capability_test", "capabilities": capabilities}]
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("capabilities" in error for error in result["errors"]))
+
+    def test_provider_registration_preview_rejects_invalid_capabilities_without_writing(self):
+        before = self.catalog_path.read_bytes()
+        result = self.manager.preview_provider_registration({
+            "id": "invalid_capability_provider",
+            "name": "Invalid Capability Provider",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+            "capabilities": ["image", "IMAGE"],
+        })
+        self.assertEqual(result["status"], "INVALID_PROVIDER_METADATA")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
     def test_catalog_schema_rejects_unsafe_auth_headers_and_schemes(self):
         for field, value in (
             ("auth_header_name", "Host"),
