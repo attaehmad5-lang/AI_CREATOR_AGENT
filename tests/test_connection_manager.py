@@ -140,7 +140,7 @@ class ConnectionManagerTests(unittest.TestCase):
             "1.0",
             [""],
             ["1.0", "1.0"],
-            ["1.0", "V1.0",],
+            ["v1", "V1"],
             ["1.0", 2],
             ["v" * 101],
             ["bad\nversion"],
