@@ -126,12 +126,14 @@ class ProviderConfigLifecycleManager:
         with self._lock:
             if not self._history:
                 return {"status": "NO_CONFIG_ROLLBACK_AVAILABLE", "rolled_back": False}
-            previous = self._history.pop()
-            if self.active_config is not None:
-                self._history.append(copy.deepcopy(self.active_config))
+            previous = self._history[-1]
             valid, reason = self._validate(previous)
             if not valid:
+                # Do not consume the rollback point or mutate history on rejection.
                 return {"status": "ROLLBACK_CONFIG_INVALID", "rolled_back": False, "reason": reason}
+            self._history.pop()
+            if self.active_config is not None:
+                self._history.append(copy.deepcopy(self.active_config))
             self.active_config = copy.deepcopy(previous)
             self.generation += 1
             return {
