@@ -159,11 +159,11 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 89 | 🟢 | Registry Schema Validation | VERIFIED | Catalog schema, malformed-version, unsafe-link and primary/master synchronization tests pass. |
 | 90 | 🟡 | Safe Defaults and Invalid-Configuration Handling | PARTIAL | Fail-closed validation exists; complete configuration recovery/default audit remains open. |
-| 91 | 🔴 | Configuration Versioning and Migration | PARTIAL | `provider_config_lifecycle.py` requires explicit version-to-version migration functions, validates each intermediate configuration, and writes migrated JSON via atomic replacement with a backup. Repository-wide migration coverage and cross-process crash-injection tests remain open. |
+| 91 | 🔴 | Configuration Versioning and Migration | PARTIAL | `provider_config_lifecycle.py` validates every explicit migration step and writes files atomically with a backup. Regression tests now cover migration cycles, source immutability, and replacement-write failure preserving the original file and backup. Repository-wide migration coverage and cross-process crash-injection tests remain open. |
 | 92 | 🔴 | Safe Hot Reload | PARTIAL | `ProviderConfigLifecycleManager` validates candidate configuration before swapping active state, preserves the last-known-good configuration, and supports rollback after reload failures. Integration into every runtime catalog consumer remains open. |
 | 93 | 🔴 | Feature Flags and Controlled Rollout | PARTIAL | `provider_feature_flags.py` persists kill switches, project allow/deny lists, and deterministic request-scoped percentage rollout; `ProviderService` blocks generation when `provider_generation` is disabled or outside rollout. Admin authorization/audit integration and cross-service rollout coordination remain open. |
 | 94 | 🔴 | Provider API/Model Version Compatibility | PARTIAL | Model/endpoint validation exists; live API/model version compatibility matrix is incomplete. |
-| 95 | 🔴 | Rollback to Known-Good Configuration | PARTIAL | Catalog restore exists; runtime policy rollback is not fully verified. |
+| 95 | 🔴 | Rollback to Known-Good Configuration | PARTIAL | `ProviderConfigLifecycleManager.rollback()` now validates the previous generation before consuming the rollback point, preserving history when rollback validation fails. A regression test verifies retry after validation policy changes; runtime-wide rollback integration remains open. |
 | 96 | 🔴 | Configuration Backup/Restore Verification | PARTIAL | Master catalog backup/restore is tested; full config/state backup verification is incomplete. |
 
 ## M — Testing, Audit and Release Readiness
