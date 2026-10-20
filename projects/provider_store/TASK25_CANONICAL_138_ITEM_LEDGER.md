@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#39483714279](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39483714279): **456 tests passed on Ubuntu and 456 on Windows, 0 failures**. Compilation, provider JSON catalog validation, and the full unit/regression suite passed on both platforms. This run includes digest-bound policy approvals, stale-preview rejection, mandatory approval for public provider enable/disable APIs, role-authorized admin operations, malformed metadata/diff handling, fail-closed catalog safeguards, and versioned adapter-contract tests for unsupported/malformed declarations, legacy defaults, aliases, and unreadable version properties.
+GitHub Actions run [#39485628642](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39485628642): **457 tests passed on Ubuntu and 457 on Windows, 0 failures**. Compilation, provider JSON catalog validation, and the full unit/regression suite passed on both platforms. This run includes digest-bound policy approvals, stale-preview rejection, role-authorized admin operations, versioned adapter-contract tests, and a versioned legacy-store compatibility contract.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -181,7 +181,7 @@ GitHub Actions run [#39483714279](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 456 tests pass on Windows and Ubuntu at PR #71 versioned-contract hardening run #39483714279; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 457 tests pass on Windows and Ubuntu at PR #71 compatibility-contract run #39485628642; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
