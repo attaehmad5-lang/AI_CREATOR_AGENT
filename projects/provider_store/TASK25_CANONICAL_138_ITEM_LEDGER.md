@@ -218,7 +218,7 @@ GitHub Actions run [#39311220985](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 129 | 🟡 | Plugin-based provider adapters | PARTIAL | Compatibility facades exist; a safe plugin lifecycle and isolation model is incomplete. |
-| 130 | 🟡 | Versioned provider adapter interface | PARTIAL | Capability/contract validation exists; explicit adapter API version negotiation is incomplete. |
+| 130 | 🟡 | Versioned provider adapter interface | PARTIAL | `ConnectionManager.validate_provider_contract()` now negotiates the declared `adapter_api_version`/`API_VERSION`, safely defaults undeclared legacy adapters to 1.0, and rejects malformed or unsupported versions before loading; only contract version 1.0 is currently supported, so broader version negotiation remains open. Regression tests cover unsupported, malformed and legacy declarations. |
 | 131 | 🟡 | Validated metadata کے ساتھ capability discovery | PARTIAL | Validated capability metadata and discovery exist; live provider metadata trust is incomplete. |
 | 132 | 🟡 | نئے providers کو محفوظ طریقے سے شامل کرنے کا workflow | PARTIAL | Catalog registration/schema validation exists; complete onboarding, approval and probe workflow is incomplete. |
 | 133 | 🔴 | Self-hosted اور local models کی support، جہاں ممکن ہو | OPEN | Local/self-hosted provider lifecycle and modality verification are not complete. |
