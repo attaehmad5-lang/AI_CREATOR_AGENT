@@ -50,6 +50,38 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.active_config, good)
         self.assertEqual(self.manager.generation, 1)
 
+    def test_reload_validator_cannot_mutate_caller_or_active_config(self):
+        def mutating_validator(config):
+            config["validator_side_effect"] = True
+            return True
+
+        manager = ProviderConfigLifecycleManager(mutating_validator)
+        candidate = {"schema_version": "1", "providers": {}}
+        result = manager.reload(candidate)
+
+        self.assertEqual(result["status"], "HOT_RELOAD_APPLIED")
+        self.assertEqual(candidate, {"schema_version": "1", "providers": {}})
+        self.assertEqual(manager.active_config, candidate)
+
+    def test_reload_validator_exception_fails_closed_without_leaking_message(self):
+        def raising_validator(config):
+            raise RuntimeError("private validator detail")
+
+        manager = ProviderConfigLifecycleManager(raising_validator)
+        result = manager.reload({"schema_version": "1", "providers": {}})
+
+        self.assertEqual(result["status"], "HOT_RELOAD_REJECTED")
+        self.assertEqual(result["reason"], "CONFIG_VALIDATION_FAILED:RuntimeError")
+        self.assertEqual(result["generation"], 0)
+        self.assertNotIn("private validator detail", repr(result))
+        self.assertIsNone(manager.active_config)
+
+    def test_invalid_history_limits_are_rejected(self):
+        for max_history in (True, 0, 101, 1.5):
+            with self.subTest(max_history=max_history):
+                with self.assertRaises(ValueError):
+                    ProviderConfigLifecycleManager(valid_config, max_history=max_history)
+
     def test_rollback_restores_previous_known_good_generation(self):
         first = {"schema_version": "1", "providers": {"image": {}}}
         second = {"schema_version": "2", "providers": {"video": {}}}
