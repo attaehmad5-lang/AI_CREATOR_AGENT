@@ -1,4 +1,5 @@
 """Queue capacity, idempotency, async lifecycle, and backpressure tests."""
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
