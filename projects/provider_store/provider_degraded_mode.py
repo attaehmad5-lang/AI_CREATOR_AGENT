@@ -83,7 +83,7 @@ class ProviderDegradedModeManager:
             if max_age_seconds is None:
                 state = evidence
             else:
-                if not isinstance(evidence, dict) or set(evidence) < {"status", "checked_at"}:
+                if not isinstance(evidence, dict) or not {"status", "checked_at"}.issubset(evidence):
                     return {
                         "status": "INVALID_PROVIDER_STATES",
                         "mode": "OUTAGE",
