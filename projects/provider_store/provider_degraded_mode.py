@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-_PROVIDER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\\Z")
+_PROVIDER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
 _STATES = {"HEALTHY", "DEGRADED", "UNHEALTHY", "UNKNOWN"}
 _MODES = {"NORMAL", "DEGRADED", "OUTAGE"}
 
