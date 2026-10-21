@@ -651,7 +651,7 @@ class ProviderRoutingManager:
 
             if self.quota_manager is not None:
                 try:
-                    quota = self.quota_manager.reserve(provider_id=provider_id, request_id=request_id)
+                    quota = self.quota_manager.reserve(provider_id=provider_id, request_id=request_id, project_id=project_id)
                 except Exception as exc:
                     cleanup = self._cleanup_new_reservations(
                         project_id=project_id, provider_id=provider_id, request_id=request_id,
