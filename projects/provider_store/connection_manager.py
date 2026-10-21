@@ -1112,21 +1112,29 @@ class ConnectionManager:
             configuration["probe_endpoint"] = probe_endpoint.strip()
         if not configuration:
             return {"status": "NO_CONFIGURATION", "provider": provider_id, "saved": False}
-        with self._state_transaction():
-            state = self.state["providers"].get(provider_id, {})
-            record = dict(state) if isinstance(state, dict) else {}
-            current = record.get("configuration", {})
-            merged = dict(current) if isinstance(current, dict) else {}
-            merged.update(configuration)
-            record["configuration"] = merged
-            record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
-            self.state["providers"][provider_id] = record
-            self._save()
+        try:
+            with self._state_transaction():
+                state = self.state["providers"].get(provider_id, {})
+                record = dict(state) if isinstance(state, dict) else {}
+                current = record.get("configuration", {})
+                merged = dict(current) if isinstance(current, dict) else {}
+                merged.update(configuration)
+                record["configuration"] = merged
+                record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
+                self.state["providers"][provider_id] = record
+                self._save()
+                return {
+                    "status": "CONFIGURED",
+                    "provider": provider_id,
+                    "saved": True,
+                    "configuration": dict(merged),
+                }
+        except (OSError, ValueError) as exc:
             return {
-                "status": "CONFIGURED",
+                "status": "STATE_ACCESS_FAILED",
                 "provider": provider_id,
-                "saved": True,
-                "configuration": dict(merged),
+                "saved": False,
+                "error_type": type(exc).__name__,
             }
 
     def get_provider_configuration(self, provider_id: str) -> dict[str, Any]:
@@ -1142,14 +1150,22 @@ class ConnectionManager:
             }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "configuration": {}}
-        with self._state_transaction():
-            state = self.state["providers"].get(provider_id, {})
-            raw = state.get("configuration", {}) if isinstance(state, dict) else {}
-            if not isinstance(raw, dict):
-                return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
-            if self._contains_credential_value_field(raw):
-                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
-            configuration = self._sanitize_public_data(raw)
+        try:
+            with self._state_transaction():
+                state = self.state["providers"].get(provider_id, {})
+                raw = state.get("configuration", {}) if isinstance(state, dict) else {}
+                if not isinstance(raw, dict):
+                    return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
+                if self._contains_credential_value_field(raw):
+                    return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
+                configuration = self._sanitize_public_data(raw)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "STATE_ACCESS_FAILED",
+                "provider": provider_id,
+                "configuration": {},
+                "error_type": type(exc).__name__,
+            }
         if self._contains_credential_value_field(configuration):
             return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
         authentication_required = configuration.get("authentication_required")
