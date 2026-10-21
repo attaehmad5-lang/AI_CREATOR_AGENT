@@ -150,6 +150,26 @@ class ProviderPluginManagerTests(unittest.TestCase):
         self.assertNotIn("private plugin failure", repr(result))
         self.assertIs(self.connection_manager.get_loaded_provider("public_image"), plugin)
 
+    def test_status_is_consistent_and_never_exposes_factory_or_instance(self):
+        plugin = ImagePlugin()
+        secret_marker = "DO_NOT_EXPOSE_FACTORY_OR_INSTANCE"
+        self.plugins.register_factory(
+            "public_image",
+            lambda provider: (setattr(plugin, "secret_marker", secret_marker) or plugin),
+        )
+        self.assertEqual(self.plugins.load("public_image")["status"], "LOADED")
+
+        status = self.plugins.status()
+        rendered = repr(status)
+
+        self.assertEqual(status["registered_plugin_ids"], ["public_image"])
+        self.assertEqual(status["loaded_plugin_ids"], ["public_image"])
+        self.assertNotIn(secret_marker, rendered)
+        self.assertNotIn("factory", status)
+        self.assertNotIn("instance", status)
+        self.assertFalse(status["arbitrary_module_imports_allowed"])
+        self.assertFalse(status["process_isolation_enabled"])
+
     def test_constructor_rejects_unsafe_allowlist(self):
         for ids in ("public_image", ["bad id"], ["public_image", "public_image"], ["x" * 101]):
             with self.subTest(ids=ids):
