@@ -253,7 +253,10 @@ class ProviderQuotaManager:
             now = self.clock().astimezone(timezone.utc)
             limits = self.limits.get(provider_id, {})
             if project_id is not None:
-                limits = self.project_limits.get(project_id, {}).get(provider_id, limits)
+                scoped_limits = self.project_limits.get(project_id, {}).get(provider_id)
+                if scoped_limits is None:
+                    return {}
+                limits = scoped_limits
             return {
                 period: self._count_in_period(provider_id, period, now, project_id=project_id)
                 for period in limits
