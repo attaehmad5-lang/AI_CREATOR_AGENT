@@ -531,6 +531,28 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotEqual(result.get("status"), "EXECUTION_SUCCEEDED")
         self.assertEqual(calls, [])
 
+    def test_execute_routed_request_blocks_stale_health_evidence(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="stale-health-blocked",
+            estimated_cost=0.0, modality="image",
+            provider_health_states={
+                "image": {"status": "HEALTHY", "checked_at": "2000-01-01T00:00:00+00:00"}
+            },
+            provider_health_max_age_seconds=60,
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": True, "success": True},
+        )
+        self.assertEqual(result["status"], "PROVIDER_OUTAGE_BLOCKED")
+        self.assertEqual(calls, [])
+
     def test_execute_routed_request_fails_closed_when_health_evidence_missing(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
