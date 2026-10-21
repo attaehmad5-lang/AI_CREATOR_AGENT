@@ -9,7 +9,7 @@ from typing import Any, Callable
 from .connection_manager import ConnectionManager
 
 _PROVIDER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}\Z")
-_INTERFACE_VERSION_RE = re.compile(r"(?:0|[1-9][0-9]{0,2})\.(?:0|[1-9][0-9]{0,2})\\Z")
+_INTERFACE_VERSION_RE = re.compile(r"(?:0|[1-9][0-9]{0,2})\.(?:0|[1-9][0-9]{0,2})\Z")
 
 
 class ProviderPluginManager:
