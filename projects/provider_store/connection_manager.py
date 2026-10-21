@@ -738,13 +738,14 @@ class ConnectionManager:
         category: str | None = None,
         capability: str | None = None,
         enabled_only: bool = False,
+        include_deprecated: bool = False,
     ) -> list[dict[str, Any]]:
-        """Discover catalog entries by modality/capability without probing providers."""
+        """Discover validated provider metadata without probing or exposing retired providers by default."""
         if category is not None and (not isinstance(category, str) or not category.strip()):
             return []
         if capability is not None and (not isinstance(capability, str) or not capability.strip()):
             return []
-        if not isinstance(enabled_only, bool):
+        if not isinstance(enabled_only, bool) or not isinstance(include_deprecated, bool):
             return []
         wanted_category = category.strip().casefold() if category else None
         wanted_capability = capability.strip().casefold() if capability else None
@@ -757,6 +758,8 @@ class ConnectionManager:
             # partially parsed, or schema-invalid provider metadata.
             return []
         for provider in providers:
+            if provider.get("deprecated") is True and not include_deprecated:
+                continue
             if wanted_category and str(provider.get("category", "")).casefold() != wanted_category:
                 continue
             if enabled_only and provider.get("enabled") is not True:
