@@ -96,17 +96,18 @@ class ProviderPluginManager:
         return {"status": "FACTORY_UNREGISTERED", "provider": provider_id, "unregistered": True}
 
     def status(self) -> dict[str, Any]:
+        # Keep the factory and loaded-ID lists from one lifecycle snapshot.
         with self._lock:
             registered = sorted(self._factories)
-        loaded = sorted(
-            provider_id for provider_id in registered
-            if self.connection_manager.get_loaded_provider(provider_id) is not None
-        )
-        return {
-            "status": "READY",
-            "approved_plugin_ids": sorted(self._approved_ids),
-            "registered_plugin_ids": registered,
-            "loaded_plugin_ids": loaded,
-            "arbitrary_module_imports_allowed": False,
-            "process_isolation_enabled": False,
-        }
+            loaded = sorted(
+                provider_id for provider_id in registered
+                if self.connection_manager.get_loaded_provider(provider_id) is not None
+            )
+            return {
+                "status": "READY",
+                "approved_plugin_ids": sorted(self._approved_ids),
+                "registered_plugin_ids": registered,
+                "loaded_plugin_ids": loaded,
+                "arbitrary_module_imports_allowed": False,
+                "process_isolation_enabled": False,
+            }
