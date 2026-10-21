@@ -1,5 +1,6 @@
 """Degraded-mode decisions fail closed when health evidence is missing or invalid."""
 import unittest
+from datetime import datetime, timezone
 
 from projects.provider_store.provider_degraded_mode import ProviderDegradedModeManager
 
@@ -50,6 +51,36 @@ class ProviderDegradedModeTests(unittest.TestCase):
                 self.assertEqual(result["status"], "INVALID_PROVIDER_STATES")
                 self.assertEqual(result["mode"], "OUTAGE")
                 self.assertFalse(result["accepting_new_work"])
+
+    def test_stale_or_future_timestamped_health_is_not_treated_as_healthy(self):
+        now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+        result = ProviderDegradedModeManager().evaluate(
+            {
+                "fresh": {"status": "HEALTHY", "checked_at": "2026-01-01T11:59:30+00:00"},
+                "stale": {"status": "HEALTHY", "checked_at": "2026-01-01T11:00:00+00:00"},
+                "future": {"status": "HEALTHY", "checked_at": "2026-01-01T12:01:00+00:00"},
+            },
+            max_age_seconds=60,
+            now=now,
+        )
+        self.assertEqual(result["mode"], "DEGRADED")
+        self.assertEqual(result["healthy_providers"], ["fresh"])
+        self.assertEqual(result["unavailable_providers"], ["future", "stale"])
+
+    def test_freshness_policy_requires_timestamps_and_rejects_invalid_age(self):
+        manager = ProviderDegradedModeManager()
+        missing_timestamp = manager.evaluate(
+            {"image": "HEALTHY"}, max_age_seconds=60,
+            now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+        self.assertEqual(missing_timestamp["mode"], "OUTAGE")
+        self.assertEqual(
+            missing_timestamp["reason_codes"],
+            ["TIMESTAMPED_HEALTH_EVIDENCE_REQUIRED"],
+        )
+        invalid_age = manager.evaluate({"image": "HEALTHY"}, max_age_seconds=float("nan"))
+        self.assertEqual(invalid_age["status"], "INVALID_HEALTH_POLICY")
+        self.assertFalse(invalid_age["accepting_new_work"])
 
     def test_boolean_minimum_is_not_accepted_as_integer(self):
         with self.assertRaisesRegex(ValueError, "minimum_healthy_providers"):
