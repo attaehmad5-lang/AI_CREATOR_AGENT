@@ -133,6 +133,36 @@ class ProviderPluginManagerTests(unittest.TestCase):
         self.assertEqual(status["registered_plugin_ids"], ["public_image"])
         self.assertEqual(status["loaded_plugin_ids"], ["public_image"])
 
+    def test_interface_version_negotiation_rejects_unsupported_versions(self):
+        factory = lambda provider: ImagePlugin()
+        denied = self.plugins.register_factory("public_image", factory, interface_version="2.0")
+        self.assertEqual(denied["status"], "UNSUPPORTED_INTERFACE_VERSION")
+        self.assertFalse(denied["registered"])
+        self.assertEqual(self.plugins.status()["registered_plugin_ids"], [])
+
+        accepted = self.plugins.register_factory("public_image", factory, interface_version="1.0")
+        self.assertEqual(accepted["status"], "FACTORY_REGISTERED")
+        self.assertEqual(accepted["interface_version"], "1.0")
+        status = self.plugins.status()
+        self.assertEqual(status["supported_interface_versions"], ["1.0"])
+        self.assertEqual(status["registered_interface_versions"], {"public_image": "1.0"})
+
+    def test_interface_version_validation_rejects_malformed_versions(self):
+        for version in ("", "v1", "1", "1.0.0", "01.0", "1.1000", "1.0\\n"):
+            with self.subTest(version=version):
+                result = self.plugins.register_factory(
+                    "public_image", lambda provider: ImagePlugin(), interface_version=version
+                )
+                self.assertEqual(result["status"], "INVALID_INTERFACE_VERSION")
+        for versions in (("1.0", "1.0"), ("v1",), (), ("1.0.0",)):
+            with self.subTest(versions=versions):
+                with self.assertRaises(ValueError):
+                    ProviderPluginManager(
+                        self.connection_manager,
+                        approved_plugin_ids={"public_image"},
+                        supported_interface_versions=versions,
+                    )
+
     def test_invalid_plugin_contract_never_enters_runtime(self):
         self.plugins.register_factory("public_image", lambda provider: object())
         result = self.plugins.load("public_image")
