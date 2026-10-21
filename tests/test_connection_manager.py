@@ -713,6 +713,23 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["retry_after"], "12")
         self.assertNotIn("private server detail", repr(result))
 
+    def test_connectivity_maps_response_status_code_for_rate_limit(self):
+        class Response:
+            status_code = 429
+
+        class RateLimitError(Exception):
+            response = Response()
+            headers = {"retry-after": "7"}
+
+        result = self.manager.verify_connectivity(
+            "public_image",
+            lambda provider, **kwargs: (_ for _ in ()).throw(RateLimitError("private rate-limit detail")),
+        )
+        self.assertEqual(result["status"], "RATE_LIMITED")
+        self.assertEqual(result["http_status"], 429)
+        self.assertEqual(result["retry_after"], "7")
+        self.assertNotIn("private rate-limit detail", repr(result))
+
     def test_connectivity_fails_closed_when_state_cannot_be_read_or_saved(self):
         self.state_path.write_text("{invalid-json", encoding="utf-8")
         self.assertEqual(self.manager.get_state("public_image")["status"], "STATE_READ_FAILED")
