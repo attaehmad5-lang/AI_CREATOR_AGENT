@@ -68,16 +68,19 @@ class ProviderPluginManager:
             return {"status": "PLUGIN_NOT_APPROVED", "provider": provider_id, "loaded": False}
         with self._lock:
             factory = self._factories.get(provider_id)
-        if factory is None:
-            return {"status": "PLUGIN_FACTORY_NOT_REGISTERED", "provider": provider_id, "loaded": False}
-        return self.connection_manager.load_provider(provider_id, factory)
+            if factory is None:
+                return {"status": "PLUGIN_FACTORY_NOT_REGISTERED", "provider": provider_id, "loaded": False}
+            # Serialize factory execution and runtime registration against
+            # unload/unregister so an active load cannot lose its factory.
+            return self.connection_manager.load_provider(provider_id, factory)
 
     def unload(self, provider_id: str) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not _PROVIDER_ID_RE.fullmatch(provider_id):
             return {"status": "INVALID_PROVIDER_ID", "unloaded": False}
         if provider_id not in self._approved_ids:
             return {"status": "PLUGIN_NOT_APPROVED", "provider": provider_id, "unloaded": False}
-        return self.connection_manager.unload_provider(provider_id)
+        with self._lock:
+            return self.connection_manager.unload_provider(provider_id)
 
     def unregister_factory(self, provider_id: str) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not _PROVIDER_ID_RE.fullmatch(provider_id):
