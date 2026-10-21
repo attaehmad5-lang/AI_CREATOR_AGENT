@@ -531,6 +531,26 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotEqual(result.get("status"), "EXECUTION_SUCCEEDED")
         self.assertEqual(calls, [])
 
+    def test_execute_routed_request_uses_fresh_persisted_health_when_states_omitted(self):
+        self.health.record_result(
+            "image", success=True, latency_ms=12.0, request_id="fresh-health-evidence"
+        )
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="auto-health-routing",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: {"started": False, "success": False},
+        )
+        self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
+        self.assertEqual(result["provider"], "image")
+
     def test_execute_routed_request_blocks_stale_health_evidence(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
