@@ -1083,6 +1083,15 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
         self.assertFalse(self.manager.is_provider_enabled("public_image"))
 
+    def test_set_provider_enabled_fails_closed_for_invalid_catalog(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        result = self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["saved"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertFalse(self.manager._loaded_providers)
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{not-json")
+
     def test_enabled_flag_rejects_non_boolean_and_unknown_provider(self):
         self.assertEqual(
             self.manager.set_provider_enabled("public_image", "yes")["status"],
