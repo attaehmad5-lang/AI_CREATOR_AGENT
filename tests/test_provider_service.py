@@ -570,7 +570,7 @@ class ProviderServiceTests(unittest.TestCase):
                     "status": "HEALTHY", "checked_at": "2026-10-21T16:00:00+00:00"
                 },
             },
-            provider_health_max_age_seconds=60,
+            provider_health_max_age_seconds=200_000_000,
             adapter=lambda **kwargs: calls.append(kwargs) or {"started": True, "success": True},
         )
         self.assertNotEqual(result.get("status"), "EXECUTION_SUCCEEDED")
