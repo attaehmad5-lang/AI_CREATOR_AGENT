@@ -1034,7 +1034,15 @@ class ConnectionManager:
         Set authentication_required=True only when the configured endpoint is
         documented to require and validate the provider credential.
         """
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
         configuration: dict[str, Any] = {}
@@ -1115,7 +1123,15 @@ class ConnectionManager:
 
     def get_provider_configuration(self, provider_id: str) -> dict[str, Any]:
         """Return validated non-secret runtime configuration for a known provider."""
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "configuration": {},
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "configuration": {}}
         with self._state_transaction():
