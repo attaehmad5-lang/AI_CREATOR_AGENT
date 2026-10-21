@@ -821,32 +821,40 @@ class ConnectionManager:
         if self._contains_credential_value_field(provider):
             return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id}
 
-        with self._catalog_transaction():
-            providers = self._list_providers_unlocked()
-            existing = next((item for item in providers if item.get("id") == provider_id), None)
-            if existing is not None and not overwrite:
-                return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
-            safe_provider = dict(provider)
-            safe_provider["id"] = provider_id
-            updated = [item for item in providers if item.get("id") != provider_id]
-            updated.append(safe_provider)
-            new_catalog = dict(self.catalog)
-            new_catalog["providers"] = updated
-            validation = self.validate_catalog_schema(new_catalog)
-            if not validation.get("valid"):
+        try:
+            with self._catalog_transaction():
+                providers = self._list_providers_unlocked()
+                existing = next((item for item in providers if item.get("id") == provider_id), None)
+                if existing is not None and not overwrite:
+                    return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
+                safe_provider = dict(provider)
+                safe_provider["id"] = provider_id
+                updated = [item for item in providers if item.get("id") != provider_id]
+                updated.append(safe_provider)
+                new_catalog = dict(self.catalog)
+                new_catalog["providers"] = updated
+                validation = self.validate_catalog_schema(new_catalog)
+                if not validation.get("valid"):
+                    return {
+                        "status": "INVALID_PROVIDER_SCHEMA",
+                        "provider": provider_id,
+                        "saved": False,
+                        "errors": validation.get("errors", []),
+                    }
+                self._atomic_write_json(self.catalog_path, new_catalog)
+                self.catalog = new_catalog
                 return {
-                    "status": "INVALID_PROVIDER_SCHEMA",
+                    "status": "REGISTERED",
                     "provider": provider_id,
-                    "saved": False,
-                    "errors": validation.get("errors", []),
+                    "saved": True,
+                    "overwritten": existing is not None,
                 }
-            self._atomic_write_json(self.catalog_path, new_catalog)
-            self.catalog = new_catalog
+        except (OSError, ValueError) as exc:
             return {
-                "status": "REGISTERED",
+                "status": "CATALOG_INVALID",
                 "provider": provider_id,
-                "saved": True,
-                "overwritten": existing is not None,
+                "saved": False,
+                "error_type": type(exc).__name__,
             }
 
     @staticmethod
