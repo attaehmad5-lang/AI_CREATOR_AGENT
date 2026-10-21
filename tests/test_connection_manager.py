@@ -868,7 +868,7 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "CATALOG_INVALID")
         self.assertFalse(result["loaded"])
-        self.assertEqual(result["error_type"], "JSONDecodeError")
+        self.assertEqual(result["error_type"], "ValueError")
         self.assertEqual(factory_calls, [])
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
 
