@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -31,6 +32,7 @@ class ProviderJobManager:
         lease_seconds: int = 120,
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
+        provider_concurrency_limits: dict[str, int] | None = None,
         clock: Any = None,
     ) -> None:
         for value, name, minimum, maximum in (
@@ -44,28 +46,52 @@ class ProviderJobManager:
                 raise ValueError(f"{name} is outside safe limits")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
+        if provider_concurrency_limits is not None and not isinstance(provider_concurrency_limits, dict):
+            raise ValueError("provider_concurrency_limits must be a provider-to-limit mapping")
+        normalized_provider_limits: dict[str, int] = {}
+        for provider_id, limit in (provider_concurrency_limits or {}).items():
+            if not isinstance(provider_id, str) or not _ID_RE.fullmatch(provider_id):
+                raise ValueError("invalid provider concurrency limit key")
+            if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
+                raise ValueError("provider concurrency limits must be positive bounded integers")
+            normalized_provider_limits[provider_id] = limit
         self.state_path = Path(state_path)
         self.max_queue_size = max_queue_size
         self.max_concurrent = max_concurrent
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.backpressure_retry_seconds = backpressure_retry_seconds
+        self.provider_concurrency_limits = normalized_provider_limits
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
-        self.data: dict[str, Any] = {"version": "1.0", "jobs": {}}
+        self.data: dict[str, Any] = {"version": "1.0", "jobs": {}, "last_served_project": None}
         self._reload()
 
     def _reload(self) -> None:
         if not self.state_path.exists():
-            self.data = {"version": "1.0", "jobs": {}}
+            self.data = {"version": "1.0", "jobs": {}, "last_served_project": None}
             return
-        try:
-            with self.state_path.open("r", encoding="utf-8") as stream:
-                loaded = json.load(stream)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise ValueError("invalid provider job state JSON") from exc
+        loaded = None
+        # On Windows, concurrent atomic replacements may briefly deny a read.
+        # Retry transient filesystem races, but never mask invalid JSON/schema.
+        for attempt in range(6):
+            try:
+                with self.state_path.open("r", encoding="utf-8") as stream:
+                    loaded = json.load(stream)
+                break
+            except (PermissionError, FileNotFoundError):
+                if attempt == 5 or not self.state_path.exists():
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ValueError("invalid provider job state JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("jobs"), dict):
             raise ValueError("invalid provider job state schema")
+        last_served_project = loaded.get("last_served_project")
+        if last_served_project is not None and (
+            not isinstance(last_served_project, str) or not _ID_RE.fullmatch(last_served_project)
+        ):
+            raise ValueError("invalid provider job scheduling cursor")
         for job_id, job in loaded["jobs"].items():
             if (
                 not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
@@ -202,16 +228,45 @@ class ProviderJobManager:
                 if changed:
                     self._save()
                 return {"status": "CONCURRENCY_LIMIT", "job": None}
-            queued = [
+            all_queued = [
                 job for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "QUEUED"
             ]
-            queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
-            if not queued:
+            if not all_queued:
                 if changed:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
+            running_by_provider: dict[str, int] = {}
+            for active in self.data["jobs"].values():
+                if isinstance(active, dict) and active.get("status") == "RUNNING":
+                    provider_id = active.get("provider_id")
+                    if isinstance(provider_id, str):
+                        running_by_provider[provider_id] = running_by_provider.get(provider_id, 0) + 1
+            queued = [
+                job for job in all_queued
+                if running_by_provider.get(job["provider_id"], 0)
+                < self.provider_concurrency_limits.get(job["provider_id"], self.max_concurrent)
+            ]
+            if not queued:
+                if changed:
+                    self._save()
+                return {"status": "PROVIDER_CONCURRENCY_LIMIT", "job": None}
+            queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
+
+            # Fair-share scheduling: rotate between projects, while preserving
+            # priority/FIFO ordering among each project's own queued jobs.
+            projects = sorted({job["project_id"] for job in queued})
+            last_project = self.data.get("last_served_project")
+            if last_project in projects and len(projects) > 1:
+                start = (projects.index(last_project) + 1) % len(projects)
+                projects = projects[start:] + projects[:start]
+            project_rank = {project: index for index, project in enumerate(projects)}
+            queued.sort(key=lambda job: (
+                project_rank[job["project_id"]],
+                -job["priority"], job["created_at"], job["job_id"],
+            ))
             job = queued[0]
+            self.data["last_served_project"] = job["project_id"]
             job["status"] = "RUNNING"
             job["worker_id"] = worker_id
             job["attempts"] += 1

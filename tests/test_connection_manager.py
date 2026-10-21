@@ -135,6 +135,39 @@ class ConnectionManagerTests(unittest.TestCase):
                 self.assertFalse(invalid["valid"])
                 self.assertTrue(any("allowed_hosts" in error for error in invalid["errors"]))
 
+    def test_catalog_schema_rejects_invalid_supported_model_versions(self):
+        invalid_versions = (
+            "1.0",
+            [""],
+            ["1.0", "1.0"],
+            ["v1", "V1"],
+            ["1.0", 2],
+            ["v" * 101],
+            ["bad\nversion"],
+        )
+        for versions in invalid_versions:
+            with self.subTest(versions=versions):
+                result = ConnectionManager.validate_catalog_schema({
+                    "providers": [{
+                        "id": "model_provider",
+                        "supported_models": [{"id": "safe-model", "versions": versions}],
+                    }]
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("versions" in error for error in result["errors"]))
+
+    def test_catalog_schema_accepts_unique_safe_model_versions(self):
+        result = ConnectionManager.validate_catalog_schema({
+            "providers": [{
+                "id": "model_provider",
+                "supported_models": [{
+                    "id": "safe-model",
+                    "versions": ["v1", "2026.10", "provider/model-v2"],
+                }],
+            }]
+        })
+        self.assertTrue(result["valid"], result)
+
     def test_catalog_schema_rejects_unsafe_auth_headers_and_schemes(self):
         for field, value in (
             ("auth_header_name", "Host"),
@@ -835,6 +868,86 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertEqual(result["contract_version"], "1.0")
 
+    def test_provider_contract_rejects_unsupported_explicit_adapter_version(self):
+        class FutureImageProvider:
+            adapter_api_version = "2.0"
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        contract = self.manager.validate_provider_contract("public_image", FutureImageProvider())
+        self.assertFalse(contract["valid"])
+        self.assertEqual(contract["status"], "UNSUPPORTED_CONTRACT_VERSION")
+        loaded = self.manager.load_provider("public_image", lambda metadata: FutureImageProvider())
+        self.assertEqual(loaded["status"], "CONTRACT_VIOLATION")
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_provider_contract_rejects_malformed_adapter_version(self):
+        class MalformedImageProvider:
+            adapter_api_version = 1.0
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.validate_provider_contract("public_image", MalformedImageProvider())
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "UNSUPPORTED_CONTRACT_VERSION")
+
+    def test_provider_contract_preserves_legacy_adapter_version_default(self):
+        class LegacyImageProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.validate_provider_contract("public_image", LegacyImageProvider())
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["contract_version"], "1.0")
+
+    def test_provider_contract_accepts_legacy_api_version_alias(self):
+        class VersionedImageProvider:
+            API_VERSION = "1.0"
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.validate_provider_contract("public_image", VersionedImageProvider())
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["contract_version"], "1.0")
+
+    def test_provider_contract_rejects_unsupported_catalog_version(self):
+        registration = self.manager.register_provider({
+            "id": "future_image",
+            "name": "Future Image",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "API",
+            "enabled": False,
+            "subscription_required": False,
+            "adapter_api_version": "2.0",
+        })
+        self.assertEqual(registration["status"], "REGISTERED")
+
+        class ImageProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.validate_provider_contract("future_image", ImageProvider())
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "UNSUPPORTED_CONTRACT_VERSION")
+
+    def test_provider_contract_fails_closed_when_version_property_raises(self):
+        class BrokenVersionImageProvider:
+            @property
+            def adapter_api_version(self):
+                raise RuntimeError("private adapter metadata")
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.validate_provider_contract("public_image", BrokenVersionImageProvider())
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "ADAPTER_VERSION_UNREADABLE")
+        self.assertNotIn("private adapter metadata", repr(result))
+
     def test_provider_contract_rejects_missing_method_and_prevents_loading(self):
         instance = object()
         contract = self.manager.validate_provider_contract("public_image", instance)
@@ -914,14 +1027,90 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.unload_provider("public_image")["status"], "NOT_LOADED")
         self.assertEqual(self.manager.unload_provider("missing")["status"], "NOT_FOUND")
 
+    def test_policy_simulation_is_available_from_manager_and_never_writes_catalog(self):
+        before = self.catalog_path.read_text(encoding="utf-8")
+        result = self.manager.simulate_provider_enablement("public_image", False)
+        self.assertEqual(result["status"], "POLICY_SIMULATION_REVIEW_REQUIRED")
+        self.assertTrue(result["simulation_only"])
+        self.assertFalse(result["activation_performed"])
+        self.assertIn("PROVIDER_DISABLEMENT_PROPOSED", {item["code"] for item in result["findings"]})
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), before)
+        self.assertTrue(self.manager.is_provider_enabled("public_image"))
+
+    def test_policy_simulation_rejects_invalid_arguments_and_unknown_provider(self):
+        invalid = self.manager.simulate_provider_enablement("public_image", "yes")
+        self.assertEqual(invalid["status"], "INVALID_ENABLED_VALUE")
+        missing = self.manager.simulate_provider_enablement("missing_provider", True)
+        self.assertEqual(missing["status"], "NOT_FOUND")
+        self.assertFalse(missing["activation_performed"])
+
+    def test_policy_gated_enablement_requires_approval_and_is_atomic(self):
+        before = self.catalog_path.read_text(encoding="utf-8")
+        pending = self.manager.set_provider_enabled_after_policy_simulation(
+            "public_image", False
+        )
+        self.assertEqual(pending["status"], "POLICY_APPROVAL_REQUIRED")
+        self.assertFalse(pending["saved"])
+        self.assertEqual(
+            pending["policy_simulation"]["status"],
+            "POLICY_SIMULATION_REVIEW_REQUIRED",
+        )
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), before)
+        self.assertTrue(self.manager.is_provider_enabled("public_image"))
+
+        approved = self.manager.set_provider_enabled_after_policy_simulation(
+            "public_image", False, approved=True,
+            simulation_digest=pending["simulation_digest"],
+        )
+        self.assertEqual(approved["status"], "DISABLED")
+        self.assertTrue(approved["saved"])
+        self.assertEqual(approved["policy_simulation_status"], "POLICY_SIMULATION_REVIEW_REQUIRED")
+        self.assertTrue(approved["policy_approved"])
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
+
+    def test_policy_approval_requires_matching_preview_digest(self):
+        preview = self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(preview["status"], "POLICY_APPROVAL_REQUIRED")
+        missing = self.manager.set_provider_enabled(
+            "public_image", False, approved=True
+        )
+        self.assertEqual(missing["status"], "POLICY_SIMULATION_DIGEST_REQUIRED")
+        stale = self.manager.set_provider_enabled(
+            "public_image", False, approved=True,
+            simulation_digest="0" * 64,
+        )
+        self.assertEqual(stale["status"], "POLICY_SIMULATION_STALE")
+        self.assertFalse(stale["saved"])
+        self.assertTrue(self.manager.is_provider_enabled("public_image"))
+
+    def test_policy_gated_enablement_rejects_non_boolean_approval(self):
+        result = self.manager.set_provider_enabled_after_policy_simulation(
+            "public_image", False, approved="yes"
+        )
+        self.assertEqual(result["status"], "INVALID_POLICY_APPROVAL")
+        self.assertFalse(result["saved"])
+        self.assertTrue(self.manager.is_provider_enabled("public_image"))
+
     def test_enable_disable_persists_catalog_flag_without_claiming_connection(self):
-        result = self.manager.set_provider_enabled("public_image", False)
+        pending = self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(pending["status"], "POLICY_APPROVAL_REQUIRED")
+        self.assertFalse(pending["saved"])
+        self.assertTrue(self.manager.is_provider_enabled("public_image"))
+        result = self.manager.set_provider_enabled(
+            "public_image", False, approved=True,
+            simulation_digest=pending["simulation_digest"],
+        )
         self.assertEqual(result["status"], "DISABLED")
         self.assertFalse(self.manager.is_provider_enabled("public_image"))
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertFalse(reloaded.is_provider_enabled("public_image"))
-        enabled = reloaded.set_provider_enabled("public_image", True)
+        enable_preview = reloaded.set_provider_enabled("public_image", True)
+        self.assertEqual(enable_preview["status"], "POLICY_APPROVAL_REQUIRED")
+        enabled = reloaded.set_provider_enabled(
+            "public_image", True, approved=True,
+            simulation_digest=enable_preview["simulation_digest"],
+        )
         self.assertEqual(enabled["status"], "ENABLED")
         self.assertTrue(reloaded.is_provider_enabled("public_image"))
         self.assertIn("no purchase", enabled["note"].lower())
@@ -936,7 +1125,11 @@ class ConnectionManagerTests(unittest.TestCase):
                 self.closed = True
         instance = Closable()
         self.manager.load_provider("public_image", lambda metadata: instance)
-        result = self.manager.set_provider_enabled("public_image", False)
+        preview = self.manager.set_provider_enabled("public_image", False)
+        result = self.manager.set_provider_enabled(
+            "public_image", False, approved=True,
+            simulation_digest=preview["simulation_digest"],
+        )
         self.assertEqual(result["status"], "DISABLED")
         self.assertTrue(instance.closed)
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
@@ -964,9 +1157,15 @@ class ConnectionManagerTests(unittest.TestCase):
                 raise TimeoutError("test factory release timed out")
             return instance
 
+        preview = self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(preview["status"], "POLICY_APPROVAL_REQUIRED")
+
         def disable_provider():
             disable_started.set()
-            return self.manager.set_provider_enabled("public_image", False)
+            return self.manager.set_provider_enabled(
+                "public_image", False, approved=True,
+                simulation_digest=preview["simulation_digest"],
+            )
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             load_future = pool.submit(self.manager.load_provider, "public_image", factory)
@@ -1088,7 +1287,11 @@ class ConnectionManagerTests(unittest.TestCase):
             )["status"],
             "INVALID_TIMEOUT",
         )
-        self.manager.set_provider_enabled("public_image", False)
+        preview = self.manager.set_provider_enabled("public_image", False)
+        self.manager.set_provider_enabled(
+            "public_image", False, approved=True,
+            simulation_digest=preview["simulation_digest"],
+        )
         self.assertEqual(
             self.manager.verify_connectivity("public_image", lambda *a, **k: True)["status"],
             "DISABLED",

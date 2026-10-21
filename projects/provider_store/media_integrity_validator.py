@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import struct
 import wave
 from pathlib import Path
@@ -22,10 +23,21 @@ class MediaIntegrityValidator:
     def validate(self, path: str | os.PathLike[str], *, modality: str) -> dict[str, Any]:
         if modality not in {"audio", "video"}:
             return {"valid": False, "status": "UNSUPPORTED_MEDIA_MODALITY"}
+        if (
+            not isinstance(path, (str, os.PathLike))
+            or not str(path).strip()
+            or "\x00" in os.fspath(path)
+        ):
+            return {"valid": False, "status": "INVALID_MEDIA_PATH"}
         try:
             file_path = Path(path)
-            size = file_path.stat().st_size
-            if not file_path.is_file() or size <= 0:
+            if file_path.is_symlink():
+                return {"valid": False, "status": "MEDIA_SYMLINK_REJECTED"}
+            file_stat = file_path.lstat()
+            if not stat.S_ISREG(file_stat.st_mode):
+                return {"valid": False, "status": "MEDIA_NOT_REGULAR_FILE"}
+            size = file_stat.st_size
+            if size <= 0:
                 return {"valid": False, "status": "OUTPUT_FILE_MISSING_OR_EMPTY"}
             if size > self.max_bytes:
                 return {"valid": False, "status": "MEDIA_FILE_TOO_LARGE", "size_bytes": size}

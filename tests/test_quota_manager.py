@@ -112,6 +112,72 @@ class ProviderQuotaManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.reserve(provider_id="unknown", request_id="job")["status"], "NO_QUOTA_POLICY")
         self.assertEqual(self.manager.reserve(provider_id="", request_id="job")["status"], "INVALID_REQUEST")
 
+    def test_project_quotas_are_isolated_and_enforced_independently(self):
+        manager = ProviderQuotaManager(
+            self.path,
+            limits={"image": {"hourly": 10}},
+            project_limits={
+                "film": {"image": {"hourly": 1}},
+                "music": {"image": {"hourly": 2}},
+            },
+            clock=lambda: self.now[0],
+        )
+        self.assertEqual(
+            manager.reserve(provider_id="image", request_id="film-1", project_id="film")["status"],
+            "RESERVED",
+        )
+        blocked = manager.reserve(
+            provider_id="image", request_id="film-2", project_id="film"
+        )
+        self.assertEqual(blocked["status"], "PROJECT_QUOTA_EXCEEDED")
+        self.assertEqual(blocked["used"], 1)
+        self.assertEqual(
+            manager.reserve(provider_id="image", request_id="music-1", project_id="music")["status"],
+            "RESERVED",
+        )
+        self.assertEqual(manager.usage(provider_id="image", project_id="film")["hourly"], 1)
+        self.assertEqual(manager.usage(provider_id="image", project_id="music")["hourly"], 1)
+        self.assertEqual(manager.usage(provider_id="image")["hourly"], 2)
+
+    def test_project_quota_policy_requires_project_and_provider_scope(self):
+        manager = ProviderQuotaManager(
+            self.path,
+            limits={"image": {"hourly": 10}},
+            project_limits={"film": {"image": {"hourly": 1}}},
+            clock=lambda: self.now[0],
+        )
+        self.assertEqual(
+            manager.reserve(provider_id="image", request_id="missing-project")["status"],
+            "PROJECT_ID_REQUIRED",
+        )
+        self.assertEqual(
+            manager.reserve(provider_id="image", request_id="unknown-project", project_id="other")["status"],
+            "NO_PROJECT_QUOTA_POLICY",
+        )
+        self.assertEqual(
+            manager.reserve(provider_id="image", request_id="wrong-scope", project_id="music")["status"],
+            "NO_PROJECT_QUOTA_POLICY",
+        )
+
+    def test_request_id_cannot_be_reused_across_project_scopes(self):
+        manager = ProviderQuotaManager(
+            self.path,
+            limits={"image": {"hourly": 10}},
+            project_limits={
+                "film": {"image": {"hourly": 2}},
+                "music": {"image": {"hourly": 2}},
+            },
+            clock=lambda: self.now[0],
+        )
+        self.assertEqual(
+            manager.reserve(provider_id="image", request_id="shared-id", project_id="film")["status"],
+            "RESERVED",
+        )
+        self.assertEqual(
+            manager.reserve(provider_id="image", request_id="shared-id", project_id="music")["status"],
+            "REQUEST_ID_CONFLICT",
+        )
+
     def test_corrupt_state_is_rejected(self):
         self.path.write_text(json.dumps({"requests": {"job": {"provider_id": "image", "status": "BOGUS", "created_at": "bad"}}}), encoding="utf-8")
         with self.assertRaises(ValueError):

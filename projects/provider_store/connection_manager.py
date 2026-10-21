@@ -5,6 +5,8 @@ unless a separate provider-specific probe has actually succeeded.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -542,13 +544,108 @@ class ConnectionManager:
             safe[key] = value
         return safe
 
-    def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
-        """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
+    def simulate_provider_enablement(
+        self, provider_id: str, enabled: bool = True
+    ) -> dict[str, Any]:
+        """Dry-run a provider enable/disable change without changing persistent state."""
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {
+                "status": "INVALID_PROVIDER_ID",
+                "simulation_only": True,
+                "activation_performed": False,
+                "findings": [{"severity": "BLOCKER", "code": "INVALID_PROVIDER_ID"}],
+                "changes": [],
+            }
+        if not isinstance(enabled, bool):
+            return {
+                "status": "INVALID_ENABLED_VALUE",
+                "simulation_only": True,
+                "activation_performed": False,
+                "findings": [{"severity": "BLOCKER", "code": "INVALID_ENABLED_VALUE"}],
+                "changes": [],
+            }
+        import copy
+        with self._catalog_transaction():
+            current = copy.deepcopy(self.catalog)
+            providers = current.get("providers")
+            if not isinstance(providers, list):
+                return {
+                    "status": "POLICY_SIMULATION_BLOCKED",
+                    "simulation_only": True,
+                    "activation_performed": False,
+                    "findings": [{"severity": "BLOCKER", "code": "PROVIDERS_MUST_BE_LIST"}],
+                    "changes": [],
+                }
+            proposed = copy.deepcopy(current)
+            proposed_providers = proposed["providers"]
+            target = next(
+                (
+                    item for item in proposed_providers
+                    if isinstance(item, dict) and item.get("id") == provider_id
+                ),
+                None,
+            )
+            if target is None:
+                return {
+                    "status": "NOT_FOUND",
+                    "provider": provider_id,
+                    "simulation_only": True,
+                    "activation_performed": False,
+                    "findings": [{"severity": "BLOCKER", "code": "PROVIDER_NOT_FOUND"}],
+                    "changes": [],
+                }
+            target["enabled"] = enabled
+        from .policy_simulator import ProviderPolicySimulator
+        result = ProviderPolicySimulator().simulate(current, proposed)
+        digest_payload = json.dumps(
+            {"current": current, "proposed": proposed},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        ).encode("utf-8")
+        result["simulation_digest"] = hashlib.sha256(digest_payload).hexdigest()
+        result["provider"] = provider_id
+        result["requested_enabled"] = enabled
+        return result
+
+    def set_provider_enabled(
+        self, provider_id: str, enabled: bool, *, approved: bool = False,
+        simulation_digest: str | None = None,
+    ) -> dict[str, Any]:
+        """Simulate and gate lifecycle changes; approval must match the preview digest."""
+        if not isinstance(approved, bool):
+            return {"status": "INVALID_POLICY_APPROVAL", "provider": provider_id, "saved": False}
         with self._lock:
-            return self._set_provider_enabled_locked(provider_id, enabled)
+            return self._set_provider_enabled_locked(
+                provider_id, enabled,
+                require_policy_approval=True,
+                policy_approved=approved,
+                expected_simulation_digest=simulation_digest,
+            )
+
+    def set_provider_enabled_after_policy_simulation(
+        self, provider_id: str, enabled: bool, *, approved: bool = False,
+        simulation_digest: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically simulate and gate a provider lifecycle change.
+
+        Any review finding requires explicit approval. Blocking findings cannot be
+        overridden. The simulation and catalog write share the same interprocess
+        catalog transaction to prevent a stale-preview/activation race.
+        """
+        if not isinstance(approved, bool):
+            return {"status": "INVALID_POLICY_APPROVAL", "provider": provider_id, "saved": False}
+        with self._lock:
+            return self._set_provider_enabled_locked(
+                provider_id, enabled,
+                require_policy_approval=True,
+                policy_approved=approved,
+                expected_simulation_digest=simulation_digest,
+            )
 
     def _set_provider_enabled_locked(
-        self, provider_id: str, enabled: bool
+        self, provider_id: str, enabled: bool, *,
+        require_policy_approval: bool = False,
+        policy_approved: bool = False,
+        expected_simulation_digest: str | None = None,
     ) -> dict[str, Any]:
         """Enable/disable catalog eligibility only; never purchases or proves connectivity."""
         if not isinstance(enabled, bool):
@@ -570,6 +667,48 @@ class ConnectionManager:
                     "saved": False,
                     "errors": validation.get("errors", []),
                 }
+            simulation_result = None
+            if require_policy_approval:
+                from .policy_simulator import ProviderPolicySimulator
+                simulation_result = ProviderPolicySimulator().simulate(self.catalog, new_catalog)
+                digest_payload = json.dumps(
+                    {"current": self.catalog, "proposed": new_catalog},
+                    sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+                ).encode("utf-8")
+                simulation_digest = hashlib.sha256(digest_payload).hexdigest()
+                simulation_result["simulation_digest"] = simulation_digest
+                if simulation_result.get("status") == "POLICY_SIMULATION_BLOCKED":
+                    return {
+                        "status": "POLICY_SIMULATION_BLOCKED",
+                        "provider": provider_id,
+                        "saved": False,
+                        "policy_simulation": simulation_result,
+                    }
+                if simulation_result.get("status") == "POLICY_SIMULATION_REVIEW_REQUIRED":
+                    if not policy_approved:
+                        return {
+                            "status": "POLICY_APPROVAL_REQUIRED",
+                            "provider": provider_id,
+                            "saved": False,
+                            "policy_simulation": simulation_result,
+                            "simulation_digest": simulation_digest,
+                        }
+                    if not isinstance(expected_simulation_digest, str):
+                        return {
+                            "status": "POLICY_SIMULATION_DIGEST_REQUIRED",
+                            "provider": provider_id,
+                            "saved": False,
+                            "policy_simulation": simulation_result,
+                            "simulation_digest": simulation_digest,
+                        }
+                    if not hmac.compare_digest(expected_simulation_digest, simulation_digest):
+                        return {
+                            "status": "POLICY_SIMULATION_STALE",
+                            "provider": provider_id,
+                            "saved": False,
+                            "policy_simulation": simulation_result,
+                            "simulation_digest": simulation_digest,
+                        }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
         if not enabled and provider_id in self._loaded_providers:
@@ -581,13 +720,19 @@ class ConnectionManager:
                     "saved": True,
                     "runtime_unloaded": False,
                 }
-        return {
+        result = {
             "status": "ENABLED" if enabled else "DISABLED",
             "provider": provider_id,
             "saved": True,
             "runtime_unloaded": not enabled,
             "note": "Eligibility only; no purchase, billing, or live connectivity check performed.",
         }
+        if require_policy_approval:
+            result["policy_simulation_status"] = simulation_result.get("status") if simulation_result else None
+            result["policy_approved"] = policy_approved
+            result["policy_findings_count"] = len(simulation_result.get("findings", [])) if simulation_result else 0
+            result["simulation_digest"] = simulation_result.get("simulation_digest") if simulation_result else None
+        return result
 
     def is_provider_enabled(self, provider_id: str) -> bool:
         provider = self.get_provider(provider_id)
@@ -598,6 +743,44 @@ class ConnectionManager:
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+        # Legacy adapters without a version declaration retain the 1.0 contract.
+        # Explicit declarations must match a version this manager actually supports.
+        supported_contract_versions = {"1.0"}
+        try:
+            adapter_version = getattr(instance, "adapter_api_version", None)
+            if adapter_version is None:
+                adapter_version = getattr(instance, "API_VERSION", None)
+        except Exception:
+            return {
+                "status": "ADAPTER_VERSION_UNREADABLE",
+                "provider": provider_id,
+                "valid": False,
+                "contract_version": None,
+            }
+        metadata_version = provider.get("adapter_api_version")
+        for declared_version in (metadata_version, adapter_version):
+            if declared_version is not None and (
+                not isinstance(declared_version, str)
+                or declared_version not in supported_contract_versions
+            ):
+                return {
+                    "status": "UNSUPPORTED_CONTRACT_VERSION",
+                    "provider": provider_id,
+                    "valid": False,
+                    "contract_version": None,
+                }
+        if (
+            metadata_version is not None
+            and adapter_version is not None
+            and metadata_version != adapter_version
+        ):
+            return {
+                "status": "CONTRACT_VERSION_MISMATCH",
+                "provider": provider_id,
+                "valid": False,
+                "contract_version": None,
+            }
+        contract_version = adapter_version or metadata_version or "1.0"
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
         contracts: dict[str, tuple[tuple[str, ...], ...]] = {
             "image": (("generate_image",),),
@@ -627,7 +810,7 @@ class ConnectionManager:
                 "status": "UNSUPPORTED_MODALITY",
                 "provider": provider_id,
                 "valid": False,
-                "contract_version": "1.0",
+                "contract_version": contract_version,
             }
         def has_callable(name: str) -> bool:
             try:

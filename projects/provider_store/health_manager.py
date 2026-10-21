@@ -7,6 +7,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from collections import deque
 from datetime import datetime, timezone
@@ -61,11 +62,21 @@ class ProviderHealthManager:
         if not self.state_path.exists():
             self.data = {"version": "1.0", "providers": {}}
             return
-        try:
-            with self.state_path.open("r", encoding="utf-8") as stream:
-                loaded = json.load(stream)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise ValueError("Invalid provider health state JSON") from exc
+        loaded = None
+        # Windows may briefly deny reads while another process atomically replaces
+        # this state file. Retry transient filesystem races, but reject malformed
+        # JSON immediately rather than resetting or accepting partial state.
+        for attempt in range(6):
+            try:
+                with self.state_path.open("r", encoding="utf-8") as stream:
+                    loaded = json.load(stream)
+                break
+            except (PermissionError, FileNotFoundError):
+                if attempt == 5 or not self.state_path.exists():
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ValueError("Invalid provider health state JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("providers", {}), dict):
             raise ValueError("Invalid provider health state")
         loaded.setdefault("providers", {})

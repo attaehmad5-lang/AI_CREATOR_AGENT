@@ -6,10 +6,12 @@ from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.provider_feature_flags import ProviderFeatureFlagManager
+from projects.provider_store.provider_degraded_mode import ProviderDegradedModeManager
 from projects.provider_store.provider_incident_manager import ProviderIncidentManager
 from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
+from projects.provider_store.provider_slo_manager import ProviderSLOManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
@@ -61,6 +63,33 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_degraded_mode_assessment_requires_provider_read_authorization(self):
+        authorization = ProviderAuthorizationManager(self.root / "degraded-auth.json")
+        authorization.assign_role("reader", "viewer")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        denied = service.evaluate_degraded_mode(
+            {"image": "HEALTHY"}, principal_id="unknown",
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertFalse(denied["accepting_new_work"])
+
+        allowed = service.evaluate_degraded_mode(
+            {"image": "HEALTHY", "video": "UNHEALTHY"},
+            principal_id="reader",
+        )
+        self.assertEqual(allowed["mode"], "DEGRADED")
+        self.assertTrue(allowed["accepting_new_work"])
+
+        unavailable = ProviderService(self.connections).evaluate_degraded_mode(
+            {"image": "HEALTHY"}, principal_id="reader",
+        )
+        self.assertEqual(unavailable["mode"], "OUTAGE")
+        self.assertFalse(unavailable["accepting_new_work"])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
@@ -457,6 +486,155 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
+    def test_execute_routed_request_blocks_outage_before_provider_invocation(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="blocked-during-outage",
+            estimated_cost=1.0, modality="image",
+            provider_health_states={"image": "UNHEALTHY", "video": "UNKNOWN"},
+            adapter=lambda **kwargs: calls.append(kwargs) or {
+                "started": True, "success": True, "actual_cost": 1.0,
+            },
+        )
+        self.assertEqual(result["status"], "PROVIDER_OUTAGE_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+        self.assertNotIn(
+            "blocked-during-outage",
+            self.cost.ledger.get("projects", {}).get("film", {}).get("reservations", {}),
+        )
+
+    def test_degraded_mode_never_routes_to_a_provider_marked_unhealthy(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="unhealthy-provider-excluded",
+            estimated_cost=0.0, modality="image",
+            provider_health_states={"image": "UNHEALTHY", "video": "HEALTHY"},
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": True, "success": True},
+        )
+        self.assertNotEqual(result.get("status"), "EXECUTION_SUCCEEDED")
+        self.assertEqual(calls, [])
+
+    def test_execute_routed_request_uses_fresh_persisted_health_when_states_omitted(self):
+        self.health.record_result(
+            "image", success=True, latency_ms=12.0, request_id="fresh-health-evidence"
+        )
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="auto-health-routing",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: {"started": False, "success": False},
+        )
+        self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
+        self.assertEqual(result["provider"], "image")
+
+    def test_stale_candidate_is_excluded_even_when_another_provider_is_healthy(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="stale-candidate-exclusion",
+            estimated_cost=0.0, modality="image",
+            provider_health_states={
+                "image": {"status": "HEALTHY", "checked_at": "2000-01-01T00:00:00+00:00"},
+                "healthy-but-not-an-image-candidate": {
+                    "status": "HEALTHY", "checked_at": "2026-10-21T16:00:00+00:00"
+                },
+            },
+            provider_health_max_age_seconds=200_000_000,
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": True, "success": True},
+        )
+        self.assertNotEqual(result.get("status"), "EXECUTION_SUCCEEDED")
+        self.assertEqual(calls, [])
+
+    def test_execute_routed_request_blocks_stale_health_evidence(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="stale-health-blocked",
+            estimated_cost=0.0, modality="image",
+            provider_health_states={
+                "image": {"status": "HEALTHY", "checked_at": "2000-01-01T00:00:00+00:00"}
+            },
+            provider_health_max_age_seconds=60,
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": True, "success": True},
+        )
+        self.assertEqual(result["status"], "PROVIDER_OUTAGE_BLOCKED")
+        self.assertEqual(calls, [])
+
+    def test_execute_routed_request_excludes_candidates_missing_health_evidence(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="candidate-health-omitted",
+            estimated_cost=0.0, modality="image",
+            provider_health_states={"unrelated-provider": "HEALTHY"},
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": True, "success": True},
+        )
+        self.assertNotEqual(result.get("status"), "EXECUTION_SUCCEEDED")
+        self.assertEqual(calls, [])
+
+    def test_execute_routed_request_fails_closed_when_health_evidence_missing(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="missing-health-evidence",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": True, "success": True},
+        )
+        self.assertEqual(result["status"], "PROVIDER_OUTAGE_BLOCKED")
+        self.assertEqual(calls, [])
+
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
@@ -835,6 +1013,110 @@ class ProviderServiceTests(unittest.TestCase):
             [0.5],
         )
         self.assertEqual(len(alerts.pending_alerts()["alerts"]), 1)
+
+    def test_provider_admin_lifecycle_requires_role_and_policy_approval(self):
+        unauthenticated = self.service.set_provider_enabled(
+            "image", False, principal_id="admin-user", approved=True
+        )
+        self.assertEqual(unauthenticated["status"], "AUTHORIZATION_MANAGER_REQUIRED")
+        self.assertTrue(self.connections.is_provider_enabled("image"))
+
+        authorization = ProviderAuthorizationManager(self.root / "admin-auth.json")
+        authorization.assign_role("viewer-user", "viewer")
+        authorization.assign_role("admin-user", "admin")
+        service = ProviderService(self.connections, authorization_manager=authorization)
+
+        denied = service.set_provider_enabled(
+            "image", False, principal_id="viewer-user", approved=True
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertTrue(self.connections.is_provider_enabled("image"))
+
+        pending = service.set_provider_enabled(
+            "image", False, principal_id="admin-user"
+        )
+        self.assertEqual(pending["status"], "POLICY_APPROVAL_REQUIRED")
+        self.assertTrue(self.connections.is_provider_enabled("image"))
+
+        approved = service.set_provider_enabled(
+            "image", False, principal_id="admin-user", approved=True,
+            simulation_digest=pending["simulation_digest"],
+        )
+        self.assertEqual(approved["status"], "DISABLED")
+        self.assertFalse(self.connections.is_provider_enabled("image"))
+
+    def test_provider_configuration_requires_admin_permission(self):
+        authorization = ProviderAuthorizationManager(self.root / "configure-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        authorization.assign_role("admin-user", "admin")
+        service = ProviderService(self.connections, authorization_manager=authorization)
+
+        denied = service.configure_provider(
+            "image", principal_id="creator-user", model="new-model"
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertNotEqual(
+            self.connections.get_provider_configuration("image").get("configuration", {}).get("model"),
+            "new-model",
+        )
+        allowed = service.configure_provider(
+            "image", principal_id="admin-user", model="new-model"
+        )
+        self.assertTrue(allowed["saved"])
+        self.assertEqual(
+            self.connections.get_provider_configuration("image")["configuration"]["model"],
+            "new-model",
+        )
+
+    def test_slo_assessments_are_authorized_and_use_provider_metrics(self):
+        metrics = ProviderMetricsManager(max_samples=10)
+        metrics.record(
+            provider_id="image", category="image", success=True, latency_ms=25
+        )
+        slo = ProviderSLOManager(metrics, {
+            "image": {
+                "target_success_rate": 0.9,
+                "max_p95_latency_ms": 100,
+                "min_samples": 1,
+            }
+        })
+        authorization = ProviderAuthorizationManager(self.root / "slo-auth.json")
+        authorization.assign_role("viewer-user", "viewer")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            metrics_manager=metrics,
+            slo_manager=slo,
+        )
+        allowed = service.evaluate_provider_slo(
+            "image", principal_id="viewer-user", category="image"
+        )
+        self.assertEqual(allowed["status"], "SLO_MET")
+        denied = service.evaluate_provider_slo(
+            "image", principal_id="missing-user", category="image"
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertFalse(denied["slo_met"])
+
+    def test_slo_assessment_requires_authorization_and_configured_manager(self):
+        without_auth = ProviderService(
+            self.connections,
+            slo_manager=ProviderSLOManager(ProviderMetricsManager(), {
+                "image": {
+                    "target_success_rate": 0.9,
+                    "max_p95_latency_ms": 100,
+                    "min_samples": 1,
+                }
+            }),
+        )
+        self.assertEqual(
+            without_auth.evaluate_provider_slo("image", principal_id="admin")["status"],
+            "AUTHORIZATION_MANAGER_REQUIRED",
+        )
+        self.assertEqual(
+            self.service.evaluate_provider_slo("image", principal_id="admin")["status"],
+            "SLO_MANAGER_UNAVAILABLE",
+        )
 
     def test_least_privilege_authorization_blocks_generation_before_adapter(self):
         authorization = ProviderAuthorizationManager(self.root / "service-auth.json")

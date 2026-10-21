@@ -30,11 +30,13 @@ class ProviderService:
         webhook_verifier: Any | None = None,
         job_manager: Any | None = None,
         metrics_manager: Any | None = None,
+        slo_manager: Any | None = None,
         quality_policy: Any | None = None,
         benchmark_manager: Any | None = None,
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
+        degraded_mode_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -53,11 +55,13 @@ class ProviderService:
             (webhook_verifier, "verify", "webhook_verifier"),
             (job_manager, "submit", "job_manager"),
             (metrics_manager, "record", "metrics_manager"),
+            (slo_manager, "evaluate", "slo_manager"),
             (quality_policy, "evaluate", "quality_policy"),
             (benchmark_manager, "record", "benchmark_manager"),
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
+            (degraded_mode_manager, "evaluate", "degraded_mode_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -77,11 +81,13 @@ class ProviderService:
         self.webhook_verifier = webhook_verifier
         self.job_manager = job_manager
         self.metrics_manager = metrics_manager
+        self.slo_manager = slo_manager
         self.quality_policy = quality_policy
         self.benchmark_manager = benchmark_manager
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
+        self.degraded_mode_manager = degraded_mode_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -95,6 +101,170 @@ class ProviderService:
                 "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
             }
         return None
+
+    def evaluate_degraded_mode(
+        self,
+        provider_states: Any,
+        *,
+        principal_id: str | None,
+    ) -> dict[str, Any]:
+        """Assess outage mode only for an authorized reader; fail closed on errors."""
+        if self.degraded_mode_manager is None:
+            return {
+                "status": "DEGRADED_MODE_MANAGER_UNAVAILABLE",
+                "mode": "OUTAGE",
+                "accepting_new_work": False,
+            }
+        if self.authorization_manager is None:
+            return {
+                "status": "AUTHORIZATION_MANAGER_REQUIRED",
+                "mode": "OUTAGE",
+                "accepting_new_work": False,
+            }
+        authorization = self._authorize_operation(principal_id, "provider.read")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "mode": "OUTAGE",
+                "accepting_new_work": False,
+                "authorization": authorization,
+            }
+        try:
+            result = self.degraded_mode_manager.evaluate(provider_states)
+            if not isinstance(result, dict) or result.get("mode") not in {"NORMAL", "DEGRADED", "OUTAGE"}:
+                return {
+                    "status": "INVALID_DEGRADED_MODE_RESPONSE",
+                    "mode": "OUTAGE",
+                    "accepting_new_work": False,
+                }
+            return result
+        except Exception as exc:
+            return {
+                "status": "DEGRADED_MODE_EVALUATION_FAILED",
+                "mode": "OUTAGE",
+                "accepting_new_work": False,
+                "error_type": type(exc).__name__,
+            }
+
+    def evaluate_provider_slo(
+        self,
+        provider_id: str,
+        *,
+        principal_id: str | None,
+        category: str | None = None,
+    ) -> dict[str, Any]:
+        """Return an SLO assessment only to an explicitly authorized reader."""
+        if self.slo_manager is None:
+            return {"status": "SLO_MANAGER_UNAVAILABLE", "provider": provider_id, "slo_met": False}
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_REQUIRED", "provider": provider_id, "slo_met": False}
+        authorization = self._authorize_operation(principal_id, "provider.read")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "provider": provider_id,
+                "slo_met": False,
+                "authorization": authorization,
+            }
+        try:
+            return self.slo_manager.evaluate(provider_id, category=category)
+        except Exception as exc:
+            return {
+                "status": "SLO_EVALUATION_FAILED",
+                "provider": provider_id,
+                "slo_met": False,
+                "error_type": type(exc).__name__,
+            }
+
+    def set_provider_enabled(
+        self,
+        provider_id: str,
+        enabled: bool,
+        *,
+        principal_id: str | None,
+        approved: bool = False,
+        simulation_digest: str | None = None,
+    ) -> dict[str, Any]:
+        """Authorize and policy-gate provider lifecycle changes through the service boundary."""
+        if not isinstance(enabled, bool):
+            return {"status": "INVALID_ENABLED_VALUE", "provider": provider_id, "saved": False}
+        if not isinstance(approved, bool):
+            return {"status": "INVALID_POLICY_APPROVAL", "provider": provider_id, "saved": False}
+        if self.authorization_manager is None:
+            return {
+                "status": "AUTHORIZATION_MANAGER_REQUIRED",
+                "provider": provider_id,
+                "saved": False,
+            }
+        operation = "provider.enable" if enabled else "provider.disable"
+        authorization = self._authorize_operation(principal_id, operation)
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "provider": provider_id,
+                "saved": False,
+                "authorization": authorization,
+            }
+        lifecycle = getattr(self.connection_manager, "set_provider_enabled_after_policy_simulation", None)
+        if not callable(lifecycle):
+            return {
+                "status": "POLICY_GATED_LIFECYCLE_UNAVAILABLE",
+                "provider": provider_id,
+                "saved": False,
+            }
+        try:
+            return lifecycle(
+                provider_id, enabled, approved=approved,
+                simulation_digest=simulation_digest,
+            )
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_LIFECYCLE_FAILED",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+
+    def configure_provider(
+        self,
+        provider_id: str,
+        *,
+        principal_id: str | None,
+        model: str | None = None,
+        endpoint: str | None = None,
+        probe_endpoint: str | None = None,
+        authentication_required: bool | None = None,
+    ) -> dict[str, Any]:
+        """Require an explicit configure permission before changing provider settings."""
+        if self.authorization_manager is None:
+            return {
+                "status": "AUTHORIZATION_MANAGER_REQUIRED",
+                "provider": provider_id,
+                "saved": False,
+            }
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "provider": provider_id,
+                "saved": False,
+                "authorization": authorization,
+            }
+        try:
+            return self.connection_manager.configure_provider(
+                provider_id,
+                model=model,
+                endpoint=endpoint,
+                probe_endpoint=probe_endpoint,
+                authentication_required=authentication_required,
+            )
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_CONFIGURATION_FAILED",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
 
     def verify_provider(
         self,
@@ -520,6 +690,92 @@ class ProviderService:
                         "allowed": False, "status": "INVALID_SENSITIVE_DATA_SCAN_RESPONSE"
                     },
                 }
+
+        # If an outage policy is wired, block new work before reserving quota
+        # or invoking a provider. Unknown provider health is never assumed healthy.
+        if self.degraded_mode_manager is not None:
+            try:
+                health_states = route_options.pop("provider_health_states", None)
+                max_health_age = route_options.pop("provider_health_max_age_seconds", None)
+                if health_states is None and self.health_manager is not None:
+                    # Prefer stored health evidence over caller-supplied guesses.
+                    # is_eligible enforces freshness and rejects unknown/stale records.
+                    discovered = self.connection_manager.discover_providers(
+                        category=category, enabled_only=True
+                    )
+                    if not isinstance(discovered, list) or not discovered:
+                        return {"status": "PROVIDER_OUTAGE_BLOCKED", "executed": False}
+                    health_states = {}
+                    stale_after = 300.0 if max_health_age is None else max_health_age
+                    for provider in discovered:
+                        provider_id = provider.get("id") if isinstance(provider, dict) else None
+                        if not isinstance(provider_id, str) or not provider_id.strip():
+                            return {"status": "PROVIDER_OUTAGE_BLOCKED", "executed": False}
+                        health = self.health_manager.is_eligible(
+                            provider_id, stale_after_seconds=stale_after
+                        )
+                        state = health.get("status") if isinstance(health, dict) else None
+                        health_states[provider_id] = (
+                            "HEALTHY"
+                            if isinstance(health, dict)
+                            and health.get("eligible") is True
+                            and state == "HEALTHY"
+                            else state if state in {"DEGRADED", "UNHEALTHY", "UNKNOWN"}
+                            else "UNKNOWN"
+                        )
+                    # Freshness was already enforced by is_eligible above.
+                    max_health_age = None
+                degraded = self.degraded_mode_manager.evaluate(
+                    health_states, max_age_seconds=max_health_age
+                )
+            except Exception as exc:
+                return {
+                    "status": "DEGRADED_MODE_EVALUATION_FAILED",
+                    "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if (
+                not isinstance(degraded, dict)
+                or degraded.get("mode") not in {"NORMAL", "DEGRADED", "OUTAGE"}
+                or degraded.get("accepting_new_work") is not True
+            ):
+                return {
+                    "status": "PROVIDER_OUTAGE_BLOCKED",
+                    "executed": False,
+                    "degraded_mode": degraded if isinstance(degraded, dict) else {
+                        "mode": "OUTAGE", "accepting_new_work": False
+                    },
+                }
+            if not isinstance(health_states, dict):
+                return {"status": "PROVIDER_OUTAGE_BLOCKED", "executed": False}
+            # Never let degraded-mode admission route to a provider whose supplied
+            # health evidence is degraded, unknown, or unhealthy.
+            unhealthy = set(degraded.get("unavailable_providers", []))
+            # Every discovered candidate needs explicit fresh HEALTHY evidence;
+            # an omitted provider is not implicitly eligible.
+            try:
+                candidates = self.connection_manager.discover_providers(
+                    category=category, enabled_only=True
+                )
+            except Exception as exc:
+                return {
+                    "status": "PROVIDER_HEALTH_LOOKUP_FAILED",
+                    "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(candidates, list) or not candidates:
+                return {"status": "PROVIDER_OUTAGE_BLOCKED", "executed": False}
+            candidate_ids = {
+                item.get("id") for item in candidates
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            }
+            if len(candidate_ids) != len(candidates):
+                return {"status": "PROVIDER_OUTAGE_BLOCKED", "executed": False}
+            unhealthy.update(candidate_ids - set(health_states))
+            excluded = route_options.get("excluded_providers", set())
+            if not isinstance(excluded, (set, frozenset)):
+                return {"status": "INVALID_EXCLUDED_PROVIDER_SET", "executed": False}
+            route_options["excluded_providers"] = set(excluded) | unhealthy
 
         route = self.route_request(
             category=category,

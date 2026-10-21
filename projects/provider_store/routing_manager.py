@@ -651,7 +651,18 @@ class ProviderRoutingManager:
 
             if self.quota_manager is not None:
                 try:
-                    quota = self.quota_manager.reserve(provider_id=provider_id, request_id=request_id)
+                    try:
+                        quota = self.quota_manager.reserve(
+                            provider_id=provider_id, request_id=request_id, project_id=project_id
+                        )
+                    except TypeError as exc:
+                        # Preserve compatibility with legacy quota adapters that do
+                        # not yet accept project_id. Do not hide unrelated TypeErrors.
+                        if "project_id" not in str(exc) or "unexpected keyword" not in str(exc):
+                            raise
+                        quota = self.quota_manager.reserve(
+                            provider_id=provider_id, request_id=request_id
+                        )
                 except Exception as exc:
                     cleanup = self._cleanup_new_reservations(
                         project_id=project_id, provider_id=provider_id, request_id=request_id,
@@ -669,7 +680,7 @@ class ProviderRoutingManager:
                         "error_type": type(exc).__name__, "reservation_cleanup": cleanup,
                     })
                     continue
-                if isinstance(quota, dict) and quota.get("status") == "ALREADY_RESERVED":
+                if isinstance(quota, dict) and quota.get("status") in {"ALREADY_RESERVED", "REQUEST_ID_CONFLICT"}:
                     cleanup = self._cleanup_new_reservations(
                         project_id=project_id, provider_id=provider_id, request_id=request_id,
                         cost_created=cost_reservation_created,

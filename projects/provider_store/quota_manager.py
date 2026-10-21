@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import threading
 from contextlib import contextmanager
@@ -20,6 +21,7 @@ class ProviderQuotaManager:
         state_path: str | os.PathLike[str],
         *,
         limits: dict[str, dict[str, int]],
+        project_limits: dict[str, dict[str, dict[str, int]]] | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not isinstance(limits, dict):
@@ -35,10 +37,36 @@ class ProviderQuotaManager:
                 if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
                     raise ValueError("quota limits must be positive integers")
                 normalized[provider_id][period] = limit
+        normalized_project_limits: dict[str, dict[str, dict[str, int]]] = {}
+        if project_limits is not None and not isinstance(project_limits, dict):
+            raise ValueError("project_limits must be a project-to-provider quota mapping")
+        for project_id, provider_map in (project_limits or {}).items():
+            if (
+                not isinstance(project_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", project_id)
+                or not isinstance(provider_map, dict)
+                or not provider_map
+            ):
+                raise ValueError("invalid project quota configuration")
+            normalized_project_limits[project_id] = {}
+            for provider_id, provider_limits in provider_map.items():
+                if (
+                    not isinstance(provider_id, str) or not provider_id.strip()
+                    or not isinstance(provider_limits, dict) or not provider_limits
+                ):
+                    raise ValueError("invalid project provider quota configuration")
+                normalized_project_limits[project_id][provider_id] = {}
+                for period, limit in provider_limits.items():
+                    if period not in {"hourly", "daily", "monthly"}:
+                        raise ValueError("unsupported project quota period")
+                    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+                        raise ValueError("project quota limits must be positive integers")
+                    normalized_project_limits[project_id][provider_id][period] = limit
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.limits = normalized
+        self.project_limits = normalized_project_limits
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "requests": {}}
@@ -65,6 +93,11 @@ class ProviderQuotaManager:
             ):
                 raise ValueError("invalid quota request record")
             self._parse_timestamp(record.get("created_at"))
+            if "project_id" in record and (
+                not isinstance(record["project_id"], str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", record["project_id"])
+            ):
+                raise ValueError("invalid quota project identifier")
             if record.get("status") == "COMMITTED":
                 self._parse_timestamp(record.get("committed_at"))
             if record.get("status") == "RELEASED":
@@ -92,27 +125,40 @@ class ProviderQuotaManager:
             result = result.replace(tzinfo=timezone.utc)
         return result.astimezone(timezone.utc)
 
-    def reserve(self, *, provider_id: str, request_id: str) -> dict[str, Any]:
+    def reserve(self, *, provider_id: str, request_id: str, project_id: str | None = None) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip() or not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST", "reserved": False}
+        if project_id is not None and (
+            not isinstance(project_id, str)
+            or not __import__("re").fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", project_id)
+        ):
+            return {"status": "INVALID_PROJECT_ID", "reserved": False}
         if provider_id not in self.limits:
             return {"status": "NO_QUOTA_POLICY", "provider": provider_id, "reserved": False}
+        if self.project_limits:
+            if project_id is None:
+                return {"status": "PROJECT_ID_REQUIRED", "reserved": False}
+            if provider_id not in self.project_limits.get(project_id, {}):
+                return {"status": "NO_PROJECT_QUOTA_POLICY", "project_id": project_id, "provider": provider_id, "reserved": False}
         with self._transaction():
             existing = self.data["requests"].get(request_id)
             now = self.clock().astimezone(timezone.utc)
             if existing is not None:
-                if existing.get("status") == "RELEASED" and existing.get("provider_id") != provider_id:
+                if existing.get("status") == "RELEASED" and (existing.get("provider_id") != provider_id or (project_id is not None and existing.get("project_id") != project_id)):
                     # A released attempt is known not to have started; preserve its
                     # audit snapshot and permit a new provider attempt under the same
                     # logical request ID. Started/committed attempts cannot be reused.
                     history = existing.setdefault("attempt_history", [])
                     history.append({
                         "provider_id": existing.get("provider_id"),
+                        "project_id": existing.get("project_id"),
                         "status": "RELEASED",
                         "created_at": existing.get("created_at"),
                         "released_at": existing.get("released_at"),
                     })
                     existing["provider_id"] = provider_id
+                    if project_id is not None:
+                        existing["project_id"] = project_id
                     existing["status"] = "RESERVED"
                     existing["created_at"] = now.isoformat()
                     existing.pop("released_at", None)
@@ -122,7 +168,7 @@ class ProviderQuotaManager:
                         "request_id": request_id, "reserved": True,
                         "reused_released_attempt": True,
                     }
-                if existing.get("provider_id") != provider_id:
+                if existing.get("provider_id") != provider_id or (project_id is not None and existing.get("project_id") != project_id):
                     return {"status": "REQUEST_ID_CONFLICT", "request_id": request_id, "reserved": False}
                 existing_status = existing["status"]
                 status = {
@@ -142,8 +188,22 @@ class ProviderQuotaManager:
                         "used": count,
                         "reserved": False,
                     }
+            if project_id is not None and project_id in self.project_limits:
+                for period, limit in self.project_limits[project_id][provider_id].items():
+                    count = self._count_in_period(provider_id, period, now, project_id=project_id)
+                    if count >= limit:
+                        return {
+                            "status": "PROJECT_QUOTA_EXCEEDED",
+                            "project_id": project_id,
+                            "provider": provider_id,
+                            "period": period,
+                            "limit": limit,
+                            "used": count,
+                            "reserved": False,
+                        }
             self.data["requests"][request_id] = {
                 "provider_id": provider_id,
+                **({"project_id": project_id} if project_id is not None else {}),
                 "status": "RESERVED",
                 "created_at": now.isoformat(),
             }
@@ -186,17 +246,23 @@ class ProviderQuotaManager:
             self._save()
             return {"status": "RELEASED", "request_id": request_id, "released": True}
 
-    def usage(self, *, provider_id: str) -> dict[str, int]:
+    def usage(self, *, provider_id: str, project_id: str | None = None) -> dict[str, int]:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {}
         with self._transaction():
             now = self.clock().astimezone(timezone.utc)
+            limits = self.limits.get(provider_id, {})
+            if project_id is not None:
+                scoped_limits = self.project_limits.get(project_id, {}).get(provider_id)
+                if scoped_limits is None:
+                    return {}
+                limits = scoped_limits
             return {
-                period: self._count_in_period(provider_id, period, now)
-                for period in self.limits.get(provider_id, {})
+                period: self._count_in_period(provider_id, period, now, project_id=project_id)
+                for period in limits
             }
 
-    def _count_in_period(self, provider_id: str, period: str, now: datetime) -> int:
+    def _count_in_period(self, provider_id: str, period: str, now: datetime, *, project_id: str | None = None) -> int:
         if period == "monthly":
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         elif period == "daily":
@@ -209,6 +275,7 @@ class ProviderQuotaManager:
                 not isinstance(record, dict)
                 or record.get("provider_id") != provider_id
                 or record.get("status") == "RELEASED"
+                or (project_id is not None and record.get("project_id") != project_id)
             ):
                 continue
             try:

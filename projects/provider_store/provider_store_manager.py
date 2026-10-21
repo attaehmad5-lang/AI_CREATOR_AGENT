@@ -14,6 +14,9 @@ except ImportError:  # direct script execution compatibility
     from connection_manager import ConnectionManager
 
 
+COMPATIBILITY_API_VERSION = "1.0"
+
+
 class ProviderStoreManager:
     def __init__(
         self,
@@ -31,7 +34,7 @@ class ProviderStoreManager:
         """Return a detached compatibility view; runtime connection state stays separate."""
         return {
             "store": "AI_CREATOR_AGENT_PROVIDER_STORE",
-            "version": "1.0",
+            "version": COMPATIBILITY_API_VERSION,
             "status": "READY",
             "subscription_policy": "USER_CONTROLLED",
             "providers": self.list_providers(),
@@ -55,7 +58,7 @@ class ProviderStoreManager:
                 connected_verified += 1
         return {
             "store": "AI_CREATOR_AGENT_PROVIDER_STORE",
-            "version": "1.0",
+            "version": COMPATIBILITY_API_VERSION,
             "status": "READY",
             "providers_total": len(providers),
             "connected_verified": connected_verified,

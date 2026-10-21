@@ -1,12 +1,12 @@
 # Task #25 — Canonical 138-Item Verification Ledger
 
-**Overall status: IN PROGRESS — do not mark Task #25 complete and do not merge PR #7 without explicit approval.**
+**Overall status: IN PROGRESS — do not mark Task #25 complete and do not merge PR #71 without explicit approval.**
 
 This file preserves the user's original A–P headings, feature numbers, feature names and baseline status markers. The **Baseline** column is the user's original 🟢/🟡/🔴 status; it is not the current implementation result. **Current audit** is independently evidence-based. A green baseline does not automatically mean the feature is verified today.
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#39639901002](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39639901002): **478 tests passed on Ubuntu and 478 on Windows, 0 failures**. Compilation, provider JSON catalog validation, and the full unit/regression suite passed on both platforms. This run includes fair-share scheduling, timestamped health freshness, persisted-health routing, exclusion of candidates lacking evidence, partial-outage exclusion, and oversized freshness-bound rejection.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -81,7 +81,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 41 | 🟢 | Provider Health State Tracking | VERIFIED | Persistent provider health states are stored and covered by state/reload tests. |
 | 42 | 🟢 | Basic Success/Failure History | VERIFIED | Success/failure history persistence, bounded history and idempotent request recording are tested. |
-| 43 | 🟡 | Health Check Before Generation | PARTIAL | Health eligibility hooks exist; not every generation path enforces a fresh check. |
+| 43 | 🟡 | Health Check Before Generation | PARTIAL | With degraded-mode enforcement enabled, `ProviderService.execute_routed_request()` derives eligibility from persisted `ProviderHealthManager.is_eligible()` evidence when explicit states are omitted, applies a bounded freshness window, and blocks unknown/stale providers. Workflow #2667 passed 478 tests on both Ubuntu and Windows. Other generation entry points and active probe scheduling remain open. |
 | 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
 | 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
@@ -108,7 +108,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 57 | 🔴 | Free-Credit-First Routing | PARTIAL | Routing and credit reservations exist; provider-specific verified free-credit balances are still required. |
 | 58 | 🔴 | Provider Free-Tier/Quota Verification | PARTIAL | Generic JSON account-balance probe exists; provider-specific documented fields and authorized live checks are missing. |
 | 59 | 🔴 | Explicit Approval Before Paid Usage | PARTIAL | Paid-usage approval guard and tests exist; approval workflow integration is not complete. |
-| 60 | 🔴 | Per-Request/Project Budgets | PARTIAL | Project budget and quota managers are tested; end-to-end tenant/user budgeting is incomplete. |
+| 60 | 🔴 | Per-Request/Project Budgets | PARTIAL | Project-scoped quota policy supports independent hourly/daily/monthly limits, requires project identity when project policies are configured, isolates usage by project, and fails closed when the provider lacks a project quota policy. Regression coverage includes cross-project isolation and missing scope. Workflow #2686 passed 482 tests on Ubuntu and Windows. Full tenant/user budget integration and provider-specific cost reconciliation remain open. |
 | 61 | 🔴 | Estimated vs Actual Usage Reconciliation | PARTIAL | Cost reservation/reconciliation is implemented and tested; provider-specific actual usage adapters are missing. |
 | 62 | 🔴 | Credit Exhaustion and Billing Error Handling | PARTIAL | `provider_error_policy.py` normalizes explicit billing/credit/auth/permission/rate-limit/transient signals; `ProviderService.execute_routed_request` blocks retry for non-retryable billing/credit outcomes, including HTTP 429 with `insufficient_quota`; focused unit and service regression tests added. Provider-specific documented error-code mappings and authorized live account tests remain open. |
 | 63 | 🔴 | Cost-Aware Provider/Model Selection | PARTIAL | Cost/credit-aware routing foundations exist; reliable live prices and model-level cost comparisons remain open. |
@@ -133,8 +133,8 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 73 | 🔴 | Unique Request ID and Trace ID | PARTIAL | Request IDs and duplicate protection exist; distributed trace propagation is incomplete. |
 | 74 | 🔴 | Idempotency and Duplicate Prevention | PARTIAL | Manager-level idempotency is tested; full external-provider request idempotency is not verified. |
-| 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | Cross-process reservations and locking are tested; worker pools and provider-specific concurrency limits are incomplete. |
-| 76 | 🔴 | Queue, Backpressure and Overload Handling | PARTIAL | `provider_job_manager.py` implements a persistent bounded queue, priority ordering, concurrency limits, `QUEUE_FULL` backpressure with retry hints, idempotent submission, and worker lease recovery; `ProviderService` exposes authorized queue operations. Production distributed queue scaling and load tests remain open. |
+| 75 | 🔴 | Concurrency and Provider-Specific Worker Limits | PARTIAL | Cross-process quota reservations and locking are tested. `ProviderJobManager` now accepts validated per-provider concurrency caps, filters queued jobs against active workers per provider, and allows other providers to use remaining global capacity; invalid configuration and isolation behavior are tested. Workflow #2700 passed 485 tests on Ubuntu and Windows. Distributed worker pools and production load/race testing remain open. |
+| 76 | 🔴 | Queue, Backpressure and Overload Handling | PARTIAL | `provider_job_manager.py` implements a persistent bounded queue, priority/FIFO ordering, project fair-share rotation, global and per-provider concurrency limits, `QUEUE_FULL` backpressure with retry hints, idempotent submission, and worker lease recovery; authorized queue operations are exposed by `ProviderService`. Distributed queue scaling and production load tests remain open. |
 | 77 | 🔴 | Async/Long-Running Job and Polling Support | PARTIAL | Persistent `QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED` job states, polling, worker leases, retries on expired leases, cancellation requests, and result references are implemented and tested. Provider-specific remote job polling/webhook orchestration remains open. |
 | 78 | 🔴 | Webhook/Callback Verification | PARTIAL | `provider_webhook_verifier.py` validates HMAC-SHA256 signatures with constant-time comparison, bounded timestamps/payloads, and persistent event replay rejection; `ProviderService.verify_webhook` delegates without echoing secrets. Provider-specific header/signature conventions and production callback ingress integration remain open. |
 | 79 | 🔴 | Cancellation, Deadlines and Graceful Shutdown | PARTIAL | Timeout handling exists; cancellation/deadline/shutdown propagation remains incomplete. |
@@ -162,7 +162,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 91 | 🔴 | Configuration Versioning and Migration | PARTIAL | `provider_config_lifecycle.py` requires explicit version-to-version migration functions, validates each intermediate configuration, and writes migrated JSON via atomic replacement with a backup. Repository-wide migration coverage and cross-process crash-injection tests remain open. |
 | 92 | 🔴 | Safe Hot Reload | PARTIAL | `ProviderConfigLifecycleManager` validates candidate configuration before swapping active state, preserves the last-known-good configuration, and supports rollback after reload failures. Integration into every runtime catalog consumer remains open. |
 | 93 | 🔴 | Feature Flags and Controlled Rollout | PARTIAL | `provider_feature_flags.py` persists kill switches, project allow/deny lists, and deterministic request-scoped percentage rollout; `ProviderService` blocks generation when `provider_generation` is disabled or outside rollout. Admin authorization/audit integration and cross-service rollout coordination remain open. |
-| 94 | 🔴 | Provider API/Model Version Compatibility | PARTIAL | Model/endpoint validation exists; live API/model version compatibility matrix is incomplete. |
+| 94 | 🔴 | Provider API/Model Version Compatibility | PARTIAL | Catalog schema tests now explicitly reject malformed, non-list, duplicate/case-insensitive, non-string, overlong, and control-character model version declarations while accepting unique safe identifiers. Routing fails closed when requested versions are not declared; live provider API/model compatibility matrices remain open. |
 | 95 | 🔴 | Rollback to Known-Good Configuration | PARTIAL | Catalog restore exists; runtime policy rollback is not fully verified. |
 | 96 | 🔴 | Configuration Backup/Restore Verification | PARTIAL | Master catalog backup/restore is tested; full config/state backup verification is incomplete. |
 
@@ -170,7 +170,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 303-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
+| 97 | 🟡 | Routing/Helper Unit Tests | PARTIAL | 438-test cross-platform suite covers helper/routing paths; exact item-level coverage matrix remains incomplete. |
 | 98 | 🟢 | Mock Provider Fallback Integration Test | VERIFIED | Mock/fallback integration regression coverage passes in the cross-platform suite. |
 | 99 | 🔴 | PRIMARY_ONLY and Fallback-Disabled Regression Tests | VERIFIED | PRIMARY_ONLY and automatic-fallback-disabled regression cases now have explicit tests. |
 | 100 | 🟡 | Retry, Backoff and Timeout Tests | VERIFIED | Retry, backoff, Retry-After, timeout and invalid numeric inputs are covered by regression tests. |
@@ -181,7 +181,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 303 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | Latest branch workflow [#39638003973](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39638003973) passed **471 tests on Ubuntu and 471 on Windows**, with compilation and provider JSON validation successful. Complete 138-item coverage, explicit per-item coverage reports, and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
@@ -191,7 +191,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 111 | 🔴 | Multi-Factor Routing: Quality, Latency, Cost and Capability | PARTIAL | Cost/health/capability foundations exist; unified quality-aware scoring is incomplete. |
 | 112 | 🔴 | Project-Specific Provider Selection | PARTIAL | Project identifiers and policies exist; full per-project selection policy is incomplete. |
-| 113 | 🔴 | Automatic Exclusion of Providers That Cannot Meet Constraints | PARTIAL | Capability/health/credit filtering exists; all constraint classes are not covered. |
+| 113 | 🔴 | Automatic Exclusion of Providers That Cannot Meet Constraints | PARTIAL | Routing merges caller exclusions with unhealthy/stale providers and excludes every discovered candidate missing health evidence when degraded-mode enforcement is enabled. Regression tests cover partial outage, missing evidence, and oversized freshness configuration. Workflow #2667 passed 478 tests on both OSes; all capability, region, quota and privacy constraint combinations remain open. |
 | 114 | 🔴 | Confidence-Aware Routing and Uncertainty Handling | PARTIAL | `ProviderRoutingManager.route(confidence_aware=True)` requires model-specific benchmark evidence, configurable minimum sample count/success rate/optional p95 latency, and either explicitly allowed deterministic fallback or fail-closed `CONFIDENCE_INSUFFICIENT`. Confidence-aware route decisions expose bounded benchmark evidence. Calibration and production confidence intervals remain open. |
 | 115 | 🔴 | Controlled A/B Benchmarking Without Unintended Paid Usage | OPEN | Safe controlled A/B benchmarking and paid-usage isolation are not implemented. |
 | 116 | 🔴 | Adaptive Routing Using Verified Historical Performance | PARTIAL | `ProviderRoutingManager` can rank eligible candidates using `ProviderBenchmarkManager` history and exclude low-success/low-sample candidates when confidence-aware routing is enabled. Continuous online adaptation, drift detection, and production experiment validation remain open. |
@@ -205,12 +205,12 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 119 | 🔴 | Multi-Project/Multi-Tenant Provider Policies | OPEN | Complete multi-tenant provider policy isolation is not implemented. |
 | 120 | 🔴 | Tenant Isolation for Credentials, Quotas and Job Data | OPEN | Credential, quota and job data tenant isolation is not implemented. |
 | 121 | 🔴 | Separate User/Project/Tenant Usage Limits | PARTIAL | Project quotas exist; distinct user/project/tenant limits are not fully implemented. |
-| 122 | 🔴 | Fair Scheduling and Workload Prioritization | OPEN | Fair scheduling and priority queues are not implemented. |
+| 122 | 🔴 | Fair Scheduling and Workload Prioritization | PARTIAL | `ProviderJobManager.claim_next()` rotates queued work across projects while preserving priority/FIFO ordering within each project. Regression tests cover rotation, within-project priority, cursor persistence across manager restart, and rejection of malformed persisted cursor state. Workflow run #2587 passed 461 tests on both Ubuntu and Windows. Sustained-load starvation bounds and production fairness metrics remain open. |
 | 123 | 🔴 | Provider/Regional Outage Handling | PARTIAL | Health and fallback primitives exist; region-wide outage handling is not integrated. |
 | 124 | 🔴 | Disaster Recovery and Restore Procedures | PARTIAL | Catalog restore and atomic persistence exist; full disaster recovery/restore drills are not verified. |
-| 125 | 🔴 | Degraded Mode During Partial Service Outages | OPEN | Explicit degraded-mode orchestration is not implemented. |
+| 125 | 🔴 | Degraded Mode During Partial Service Outages | PARTIAL | `ProviderDegradedModeManager` assesses NORMAL/DEGRADED/OUTAGE, enforces minimum healthy capacity, and fails closed on invalid/missing evidence. `ProviderService.execute_routed_request()` derives persisted health eligibility when caller states are omitted, applies optional timestamp freshness, and excludes unhealthy or unevidenced candidates. Workflow #2667 passed 478 tests on both OSes. Active probes, recovery hysteresis, regional coordination and live outage drills remain open. `ProviderService.evaluate_degraded_mode()` requires `provider.read` authorization. |
 | 126 | 🔴 | Capacity Planning and Load Testing | OPEN | Capacity planning and sustained load tests are not complete. |
-| 127 | 🔴 | Service-Level Objectives (SLOs) | OPEN | SLO definitions and tracking are not implemented. |
+| 127 | 🔴 | Service-Level Objectives (SLOs) | PARTIAL | `provider_slo_manager.py` validates SLO policies, evaluates availability and p95 latency against minimum sample counts, reports breaches and remaining error budget, and fails closed on invalid policy/metrics errors. `ProviderService.evaluate_provider_slo()` requires `provider.read`; tests cover met/breached/insufficient-data and authorization. Production telemetry export, alert wiring, per-tenant SLO policies, and calibration against real traffic remain open. |
 | 128 | 🔴 | Operational Runbooks and Incident Recovery | PARTIAL | A provider guide exists; full operational runbooks and incident drills are incomplete. |
 
 ## P — Future-Ready Extensibility
@@ -218,20 +218,20 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 129 | 🟡 | Plugin-based provider adapters | PARTIAL | Compatibility facades exist; a safe plugin lifecycle and isolation model is incomplete. |
-| 130 | 🟡 | Versioned provider adapter interface | PARTIAL | Capability/contract validation exists; explicit adapter API version negotiation is incomplete. |
+| 130 | 🟡 | Versioned provider adapter interface | PARTIAL | `ConnectionManager.validate_provider_contract()` now negotiates the declared `adapter_api_version`/`API_VERSION`, safely defaults undeclared legacy adapters to 1.0, and rejects malformed or unsupported versions before loading; only contract version 1.0 is currently supported, so broader version negotiation remains open. Regression tests cover unsupported adapter/catalog declarations, malformed versions, the `API_VERSION` alias, legacy defaults, and version-property exceptions. |
 | 131 | 🟡 | Validated metadata کے ساتھ capability discovery | PARTIAL | Validated capability metadata and discovery exist; live provider metadata trust is incomplete. |
 | 132 | 🟡 | نئے providers کو محفوظ طریقے سے شامل کرنے کا workflow | PARTIAL | Catalog registration/schema validation exists; complete onboarding, approval and probe workflow is incomplete. |
 | 133 | 🔴 | Self-hosted اور local models کی support، جہاں ممکن ہو | OPEN | Local/self-hosted provider lifecycle and modality verification are not complete. |
 | 134 | 🔴 | Model deprecation اور end-of-life handling | PARTIAL | Catalog schema records a validated deprecation reason/date and rejects deprecated providers that are enabled; OpenAI Sora is marked deprecated and disabled. General deprecation discovery, replacement migration, and EOL routing remain open. Evidence: `tests/test_provider_catalogs.py::test_deprecated_provider_requires_reason_date_and_stays_disabled`. |
-| 135 | 🔴 | Provider policy activation سے پہلے simulation | OPEN | Policy simulation/dry-run before activation is not implemented. |
-| 136 | 🟡 | Backward compatibility اور automated contract checks | PARTIAL | Compatibility facades and contract tests exist; full versioned compatibility checks remain open. |
-| 137 | 🔴 | Provider configuration اور policy کے لیے admin controls | OPEN | Complete administrative controls and authorization are not implemented. |
+| 135 | 🔴 | Provider policy activation سے پہلے simulation | PARTIAL | `policy_simulator.py` performs a non-mutating catalog dry-run, validates schema, reports enable/disable/removal/auth/allowlist/capability changes, blocks invalid enabled API providers and deprecated enablement, and is covered by `tests/test_policy_simulator.py`. `ConnectionManager.simulate_provider_enablement()` exposes a digest-bound preview; both public enable/disable APIs re-simulate inside the same interprocess catalog transaction, require explicit approval for review findings, and reject missing or stale preview digests. Broader project/routing-policy simulation and an end-to-end admin policy workflow remain open. |
+| 136 | 🟡 | Backward compatibility اور automated contract checks | PARTIAL | `ProviderStoreManager` now publishes a single `COMPATIBILITY_API_VERSION` constant for its legacy catalog/status views; contract tests assert stable version and exact public key sets. Other compatibility facades still need explicit version negotiation and a broader cross-version compatibility matrix. |
+| 137 | 🔴 | Provider configuration اور policy کے لیے admin controls | PARTIAL | `ProviderService.configure_provider()` requires `provider.configure`; `ProviderService.set_provider_enabled()` requires `provider.enable`/`provider.disable` plus the atomic policy-approval gate. Tests cover missing authorization manager, least-privilege denial, admin approval, and configuration persistence. Full admin UI, policy management endpoints, identity-provider integration, and audit workflows remain open. |
 | 138 | 🔴 | Documentation، diagnostics and maintenance tooling | PARTIAL | Provider guide and diagnostics exist; complete diagnostics/maintenance workflows remain open. |
 
 ## Completion gates
 
 1. Every one of the 138 items must be reviewed against its original wording; do not infer or rename features.
 2. Any `PARTIAL` or `OPEN` item must remain uncompleted until its implementation, tests and required live/operational evidence exist.
-3. The 328 passing unit/regression tests on Ubuntu and Windows do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
+3. The 450 passing unit/regression tests on Ubuntu and Windows do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
 4. The account-balance adapter is generic. It must be configured only with a provider-documented endpoint and a field representing actual available credits; never mistake a per-key budget cap for free credits.
 5. Task #29 Generation State Manager remains paused and must not be started as a separate task during this Task #25 work.
