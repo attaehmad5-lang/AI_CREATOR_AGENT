@@ -1247,6 +1247,19 @@ class ConnectionManager:
                 "status": "STATE_READ_FAILED", "provider": provider_id,
                 "verified": False, "error_type": type(exc).__name__,
             }
+        if configuration_result.get("status") == "STATE_ACCESS_FAILED":
+            # A corrupt/unreadable state store cannot safely accept an ERROR
+            # write either; preserve the read-failure classification.
+            return {
+                "status": "STATE_READ_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                **(
+                    {"error_type": configuration_result["error_type"]}
+                    if isinstance(configuration_result.get("error_type"), str)
+                    else {}
+                ),
+            }
         if configuration_result.get("status") not in {"CONFIGURED", "NO_CONFIGURATION"}:
             if not save_state("ERROR"):
                 return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
