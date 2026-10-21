@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#39627436087](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39627436087): **444 tests passed on Ubuntu and 444 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite includes allowlisted plugin lifecycle, runtime interface-version verification, fail-closed discovery/loading, schema-validated registration, deprecation filtering, and explicit reporting when disable cleanup fails.
+GitHub Actions run [#39627436087](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39627436087): **444 tests passed on Ubuntu and 444 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite includes allowlisted plugin lifecycle, runtime interface-version verification, fail-closed discovery/loading, schema-validated registration, deprecation filtering, and explicit reporting when disable cleanup fails. Latest commit `cc30bd44313eacc95e007e6414491b47dd0bfe71` adds fail-closed enable/disable behavior for malformed catalogs; that exact head requires a fresh CI run before verification.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
