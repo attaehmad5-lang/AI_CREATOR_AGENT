@@ -654,7 +654,15 @@ class ConnectionManager:
             return self._load_provider_locked(provider_id, factory)
 
     def _load_provider_locked(self, provider_id: str, factory: Any) -> dict[str, Any]:
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except Exception as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "loaded": False,
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "loaded": False}
         if provider.get("enabled") is not True:
