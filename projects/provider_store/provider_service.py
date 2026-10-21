@@ -696,7 +696,10 @@ class ProviderService:
         if self.degraded_mode_manager is not None:
             try:
                 health_states = route_options.pop("provider_health_states", None)
-                degraded = self.degraded_mode_manager.evaluate(health_states)
+                max_health_age = route_options.pop("provider_health_max_age_seconds", None)
+                degraded = self.degraded_mode_manager.evaluate(
+                    health_states, max_age_seconds=max_health_age
+                )
             except Exception as exc:
                 return {
                     "status": "DEGRADED_MODE_EVALUATION_FAILED",
@@ -719,10 +722,7 @@ class ProviderService:
                 return {"status": "PROVIDER_OUTAGE_BLOCKED", "executed": False}
             # Never let degraded-mode admission route to a provider whose supplied
             # health evidence is degraded, unknown, or unhealthy.
-            unhealthy = {
-                provider_id for provider_id, state in health_states.items()
-                if state != "HEALTHY"
-            }
+            unhealthy = set(degraded.get("unavailable_providers", []))
             excluded = route_options.get("excluded_providers", set())
             if not isinstance(excluded, (set, frozenset)):
                 return {"status": "INVALID_EXCLUDED_PROVIDER_SET", "executed": False}
