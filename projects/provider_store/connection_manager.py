@@ -1406,6 +1406,17 @@ class ConnectionManager:
                 "status": "STATE_READ_FAILED", "provider": provider_id,
                 "verified": False, "error_type": type(exc).__name__,
             }
+        if configuration_result.get("status") == "STATE_ACCESS_FAILED":
+            return {
+                "status": "STATE_READ_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                **(
+                    {"error_type": configuration_result["error_type"]}
+                    if isinstance(configuration_result.get("error_type"), str)
+                    else {}
+                ),
+            }
         if configuration_result.get("status") not in {"CONFIGURED", "NO_CONFIGURATION"}:
             return {
                 "status": configuration_result.get("status", "INVALID_CONFIGURATION"),
