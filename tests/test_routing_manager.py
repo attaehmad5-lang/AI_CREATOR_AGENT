@@ -687,6 +687,17 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         reservations = policy.ledger["projects"]["film"]["reservations"]
         self.assertNotIn("paid-job", reservations)
 
+    def test_legacy_quota_adapter_without_project_id_argument_remains_supported(self):
+        class LegacyQuotaStub:
+            def reserve(self, *, provider_id, request_id):
+                return {"status": "RESERVED", "provider": provider_id, "request_id": request_id}
+        router = ProviderRoutingManager(self.connections, quota_manager=LegacyQuotaStub())
+        result = router.route(
+            category="image", project_id="film", request_id="legacy-quota-adapter"
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "primary")
+
     def test_already_reserved_quota_rolls_back_new_cost_reservation(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
         quota = ProviderQuotaManager(
