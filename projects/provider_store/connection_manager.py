@@ -749,7 +749,14 @@ class ConnectionManager:
         wanted_category = category.strip().casefold() if category else None
         wanted_capability = capability.strip().casefold() if capability else None
         discovered: list[dict[str, Any]] = []
-        for provider in self.list_providers():
+        try:
+            providers = self.list_providers()
+        except Exception:
+            # Discovery is advisory, but must fail closed when the on-disk
+            # catalog cannot be reloaded or validated; never expose stale,
+            # partially parsed, or schema-invalid provider metadata.
+            return []
+        for provider in providers:
             if wanted_category and str(provider.get("category", "")).casefold() != wanted_category:
                 continue
             if enabled_only and provider.get("enabled") is not True:
