@@ -728,6 +728,28 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "ALREADY_EXISTS")
         self.assertEqual(self.manager.get_provider("token_image")["auth_type"], "API_TOKEN")
 
+    def test_registration_enforces_version_three_required_fields(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["version"] = "3.0"
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        self.manager = ConnectionManager(self.catalog_path, self.state_path)
+        provider = {
+            "id": "v3_missing_flags",
+            "name": "Missing Flags",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+        }
+        before = self.catalog_path.read_bytes()
+
+        result = self.manager.register_provider(provider)
+
+        self.assertEqual(result["status"], "INVALID_PROVIDER_SCHEMA")
+        self.assertFalse(result["saved"])
+        self.assertTrue(any("enabled" in error for error in result["errors"]))
+        self.assertTrue(any("subscription_required" in error for error in result["errors"]))
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
     def test_register_provider_rejects_schema_invalid_metadata_without_mutating_catalog(self):
         provider = {
             "id": "invalid_enabled",
