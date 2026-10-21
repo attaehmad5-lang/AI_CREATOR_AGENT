@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#39487706558](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39487706558): **459 tests passed on Ubuntu and 459 on Windows, 0 failures**. Compilation, provider JSON catalog validation, and the full unit/regression suite passed on both platforms. This run includes digest-bound policy approvals, stale-preview rejection, role-authorized admin operations, versioned adapter-contract tests, and a versioned legacy-store compatibility contract.
+GitHub Actions run [#39636570621](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39636570621): **461 tests passed on Ubuntu and 461 on Windows, 0 failures**. Compilation, provider JSON catalog validation, and the full unit/regression suite passed on both platforms. This run includes project fair-share scheduling, restart-persistent scheduling cursor, and malformed-cursor rejection tests.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -205,7 +205,7 @@ GitHub Actions run [#39487706558](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 119 | 🔴 | Multi-Project/Multi-Tenant Provider Policies | OPEN | Complete multi-tenant provider policy isolation is not implemented. |
 | 120 | 🔴 | Tenant Isolation for Credentials, Quotas and Job Data | OPEN | Credential, quota and job data tenant isolation is not implemented. |
 | 121 | 🔴 | Separate User/Project/Tenant Usage Limits | PARTIAL | Project quotas exist; distinct user/project/tenant limits are not fully implemented. |
-| 122 | 🔴 | Fair Scheduling and Workload Prioritization | PARTIAL | `ProviderJobManager.claim_next()` now rotates queued work across projects while preserving priority/FIFO ordering within each project; regression test `test_fair_share_rotates_projects_but_preserves_within_project_priority` covers rotation and within-project priority. Latest workflow run #2578 passed on Ubuntu and Windows. Sustained-load starvation bounds, persisted restart behavior, and production fairness metrics remain open. |
+| 122 | 🔴 | Fair Scheduling and Workload Prioritization | PARTIAL | `ProviderJobManager.claim_next()` rotates queued work across projects while preserving priority/FIFO ordering within each project. Regression tests cover rotation, within-project priority, cursor persistence across manager restart, and rejection of malformed persisted cursor state. Workflow run #2587 passed 461 tests on both Ubuntu and Windows. Sustained-load starvation bounds and production fairness metrics remain open. |
 | 123 | 🔴 | Provider/Regional Outage Handling | PARTIAL | Health and fallback primitives exist; region-wide outage handling is not integrated. |
 | 124 | 🔴 | Disaster Recovery and Restore Procedures | PARTIAL | Catalog restore and atomic persistence exist; full disaster recovery/restore drills are not verified. |
 | 125 | 🔴 | Degraded Mode During Partial Service Outages | OPEN | Explicit degraded-mode orchestration is not implemented. |
