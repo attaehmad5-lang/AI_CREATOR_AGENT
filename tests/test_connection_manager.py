@@ -994,6 +994,26 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.unload_provider("public_image")["status"], "NOT_LOADED")
         self.assertEqual(self.manager.unload_provider("missing")["status"], "NOT_FOUND")
 
+    def test_disable_cleanup_failure_reports_provider_remains_loaded(self):
+        class BrokenCleanup:
+            def generate_image(self, prompt, output_path):
+                return None
+            def close(self):
+                raise RuntimeError("private cleanup detail")
+
+        instance = BrokenCleanup()
+        self.manager.load_provider("public_image", lambda metadata: instance)
+        result = self.manager.set_provider_enabled("public_image", False)
+
+        self.assertEqual(result["status"], "DISABLED_CLEANUP_FAILED")
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["runtime_unloaded"])
+        self.assertTrue(result["runtime_loaded"])
+        self.assertEqual(result["cleanup_error_type"], "RuntimeError")
+        self.assertNotIn("private cleanup detail", repr(result))
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
+        self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
+
     def test_enable_disable_persists_catalog_flag_without_claiming_connection(self):
         result = self.manager.set_provider_enabled("public_image", False)
         self.assertEqual(result["status"], "DISABLED")
