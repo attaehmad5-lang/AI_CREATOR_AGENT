@@ -580,6 +580,8 @@ class ConnectionManager:
                     "provider": provider_id,
                     "saved": True,
                     "runtime_unloaded": False,
+                    "runtime_loaded": provider_id in self._loaded_providers,
+                    "cleanup_error_type": unload_result.get("error_type"),
                 }
         return {
             "status": "ENABLED" if enabled else "DISABLED",
