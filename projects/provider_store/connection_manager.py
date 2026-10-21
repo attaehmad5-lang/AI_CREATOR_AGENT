@@ -1306,7 +1306,16 @@ class ConnectionManager:
         except Exception as exc:
             name = type(exc).__name__.casefold()
             http_status = getattr(exc, "status_code", None)
+            if http_status is None:
+                http_status = getattr(exc, "code", None)
+            if http_status is None:
+                response = getattr(exc, "response", None)
+                http_status = getattr(response, "status_code", None)
             retry_after = getattr(exc, "retry_after", None)
+            if retry_after is None:
+                headers = getattr(exc, "headers", None)
+                if callable(getattr(headers, "get", None)):
+                    retry_after = headers.get("Retry-After") or headers.get("retry-after")
             if (
                 not isinstance(http_status, int) or isinstance(http_status, bool)
                 or not 100 <= http_status <= 599
