@@ -106,7 +106,34 @@ class ProviderPluginManager:
                 return {"status": "PLUGIN_FACTORY_NOT_REGISTERED", "provider": provider_id, "loaded": False}
             # Serialize factory execution and runtime registration against
             # unload/unregister so an active load cannot lose its factory.
-            return self.connection_manager.load_provider(provider_id, factory)
+            result = self.connection_manager.load_provider(provider_id, factory)
+            if result.get("status") != "LOADED":
+                return result
+            instance = self.connection_manager.get_loaded_provider(provider_id)
+            try:
+                actual_version = getattr(instance, "interface_version", None)
+            except Exception:
+                actual_version = None
+            declared_version = self._factory_versions[provider_id]
+            if actual_version != declared_version:
+                cleanup = self.connection_manager.unload_provider(provider_id)
+                if cleanup.get("unloaded") is True:
+                    return {
+                        "status": "INTERFACE_VERSION_MISMATCH",
+                        "provider": provider_id,
+                        "declared_interface_version": declared_version,
+                        "actual_interface_version": actual_version if isinstance(actual_version, str) else None,
+                        "loaded": False,
+                    }
+                return {
+                    "status": "INTERFACE_VERSION_MISMATCH_CLEANUP_FAILED",
+                    "provider": provider_id,
+                    "declared_interface_version": declared_version,
+                    "actual_interface_version": actual_version if isinstance(actual_version, str) else None,
+                    "loaded": True,
+                    "cleanup_status": cleanup.get("status", "UNKNOWN"),
+                }
+            return {**result, "interface_version": declared_version}
 
     def unload(self, provider_id: str) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not _PROVIDER_ID_RE.fullmatch(provider_id):
