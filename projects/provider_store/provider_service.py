@@ -715,6 +715,18 @@ class ProviderService:
                         "mode": "OUTAGE", "accepting_new_work": False
                     },
                 }
+            if not isinstance(health_states, dict):
+                return {"status": "PROVIDER_OUTAGE_BLOCKED", "executed": False}
+            # Never let degraded-mode admission route to a provider whose supplied
+            # health evidence is degraded, unknown, or unhealthy.
+            unhealthy = {
+                provider_id for provider_id, state in health_states.items()
+                if state != "HEALTHY"
+            }
+            excluded = route_options.get("excluded_providers", set())
+            if not isinstance(excluded, (set, frozenset)):
+                return {"status": "INVALID_EXCLUDED_PROVIDER_SET", "executed": False}
+            route_options["excluded_providers"] = set(excluded) | unhealthy
 
         route = self.route_request(
             category=category,
