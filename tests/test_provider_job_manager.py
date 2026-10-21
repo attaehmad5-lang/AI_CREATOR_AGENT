@@ -151,6 +151,14 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertNotIn("actual prompt text", state)
         self.assertIn("payload:job-1", state)
 
+    def test_invalid_persisted_fair_share_cursor_fails_closed(self):
+        self.path.write_text(
+            '{"version":"1.0","jobs":{},"last_served_project":{"unexpected":"object"}}',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "scheduling cursor"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
     def test_invalid_inputs_fail_closed(self):
         self.assertEqual(self.manager.submit(
             job_id="bad id", project_id="film", provider_id="image",
