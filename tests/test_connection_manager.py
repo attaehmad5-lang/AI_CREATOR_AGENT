@@ -776,6 +776,17 @@ class ConnectionManagerTests(unittest.TestCase):
         }
         self.assertEqual(self.manager.register_provider(provider)["status"], "INVALID_PROVIDER")
 
+    def test_discovery_fails_closed_for_malformed_or_schema_invalid_catalog(self):
+        invalid_catalogs = (
+            "{not-json",
+            json.dumps({"providers": [{"id": "../unsafe", "category": "image"}]}),
+            json.dumps({"providers": "not-a-list"}),
+        )
+        for raw_catalog in invalid_catalogs:
+            with self.subTest(raw_catalog=raw_catalog):
+                self.catalog_path.write_text(raw_catalog, encoding="utf-8")
+                self.assertEqual(self.manager.discover_providers(), [])
+
     def test_discovery_filters_by_category_case_insensitively(self):
         results = self.manager.discover_providers(category="IMAGE")
         self.assertEqual({item["id"] for item in results}, {"public_image", "token_image"})
