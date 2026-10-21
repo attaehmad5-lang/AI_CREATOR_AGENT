@@ -731,6 +731,14 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_registration_enforces_version_three_required_fields(self):
         catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
         catalog["version"] = "3.0"
+        for index, existing in enumerate(catalog["providers"]):
+            existing.setdefault("name", f"Existing Provider {index}")
+            existing.setdefault(
+                "connection_type",
+                "API" if existing.get("auth_type") == "API_TOKEN" else "LOCAL",
+            )
+            existing.setdefault("enabled", False)
+            existing.setdefault("subscription_required", False)
         self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
         self.manager = ConnectionManager(self.catalog_path, self.state_path)
         provider = {
