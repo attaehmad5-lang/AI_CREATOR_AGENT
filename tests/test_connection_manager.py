@@ -402,6 +402,20 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["restored"])
         self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{still-corrupt")
 
+    def test_provider_configuration_fails_closed_when_catalog_is_invalid(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        before = self.state_path.read_bytes()
+
+        configured = self.manager.configure_provider("public_image", model="safe-model")
+        readback = self.manager.get_provider_configuration("public_image")
+
+        self.assertEqual(configured["status"], "CATALOG_INVALID")
+        self.assertFalse(configured["saved"])
+        self.assertEqual(configured["error_type"], "ValueError")
+        self.assertEqual(readback["status"], "CATALOG_INVALID")
+        self.assertEqual(readback["configuration"], {})
+        self.assertEqual(self.state_path.read_bytes(), before)
+
     def test_persisted_authentication_policy_must_be_boolean(self):
         self.state_path.write_text(json.dumps({
             "version": "1.0", "policy": "USER_CONTROLLED",
