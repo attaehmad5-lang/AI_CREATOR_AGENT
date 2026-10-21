@@ -486,6 +486,50 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
+    def test_execute_routed_request_blocks_outage_before_provider_invocation(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="blocked-during-outage",
+            estimated_cost=1.0, modality="image",
+            provider_health_states={"image": "UNHEALTHY", "video": "UNKNOWN"},
+            adapter=lambda **kwargs: calls.append(kwargs) or {
+                "started": True, "success": True, "actual_cost": 1.0,
+            },
+        )
+        self.assertEqual(result["status"], "PROVIDER_OUTAGE_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+        self.assertNotIn(
+            "blocked-during-outage",
+            self.cost.ledger.get("projects", {}).get("film", {}).get("reservations", {}),
+        )
+
+    def test_execute_routed_request_fails_closed_when_health_evidence_missing(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="missing-health-evidence",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": True, "success": True},
+        )
+        self.assertEqual(result["status"], "PROVIDER_OUTAGE_BLOCKED")
+        self.assertEqual(calls, [])
+
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
