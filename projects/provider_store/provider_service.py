@@ -691,6 +691,31 @@ class ProviderService:
                     },
                 }
 
+        # If an outage policy is wired, block new work before reserving quota
+        # or invoking a provider. Unknown provider health is never assumed healthy.
+        if self.degraded_mode_manager is not None:
+            try:
+                health_states = route_options.pop("provider_health_states", None)
+                degraded = self.degraded_mode_manager.evaluate(health_states)
+            except Exception as exc:
+                return {
+                    "status": "DEGRADED_MODE_EVALUATION_FAILED",
+                    "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if (
+                not isinstance(degraded, dict)
+                or degraded.get("mode") not in {"NORMAL", "DEGRADED", "OUTAGE"}
+                or degraded.get("accepting_new_work") is not True
+            ):
+                return {
+                    "status": "PROVIDER_OUTAGE_BLOCKED",
+                    "executed": False,
+                    "degraded_mode": degraded if isinstance(degraded, dict) else {
+                        "mode": "OUTAGE", "accepting_new_work": False
+                    },
+                }
+
         route = self.route_request(
             category=category,
             project_id=project_id,
