@@ -82,6 +82,14 @@ class ProviderDegradedModeTests(unittest.TestCase):
         self.assertEqual(invalid_age["status"], "INVALID_HEALTH_POLICY")
         self.assertFalse(invalid_age["accepting_new_work"])
 
+    def test_oversized_freshness_window_fails_closed_without_raising(self):
+        result = ProviderDegradedModeManager().evaluate(
+            {"image": "HEALTHY"}, max_age_seconds=10 ** 1000
+        )
+        self.assertEqual(result["status"], "INVALID_HEALTH_POLICY")
+        self.assertEqual(result["mode"], "OUTAGE")
+        self.assertFalse(result["accepting_new_work"])
+
     def test_boolean_minimum_is_not_accepted_as_integer(self):
         with self.assertRaisesRegex(ValueError, "minimum_healthy_providers"):
             ProviderDegradedModeManager(minimum_healthy_providers=True)
