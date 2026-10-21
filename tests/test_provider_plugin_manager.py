@@ -140,6 +140,24 @@ class ProviderPluginManagerTests(unittest.TestCase):
         self.assertEqual(unregister["status"], "PLUGIN_ACTIVE")
         self.assertIs(self.connection_manager.get_loaded_provider("public_image"), plugin)
 
+    def test_contract_violation_closes_partially_initialized_instance(self):
+        plugin = PartialImagePlugin()
+        self.plugins.register_factory("public_image", lambda provider: plugin)
+        result = self.plugins.load("public_image")
+        self.assertEqual(result["status"], "CONTRACT_VIOLATION")
+        self.assertFalse(result["loaded"])
+        self.assertTrue(plugin.closed)
+        self.assertIsNone(self.connection_manager.get_loaded_provider("public_image"))
+
+    def test_contract_violation_reports_cleanup_error_type_without_message(self):
+        plugin = PartialImagePlugin(fail_close=True)
+        self.plugins.register_factory("public_image", lambda provider: plugin)
+        result = self.plugins.load("public_image")
+        self.assertEqual(result["status"], "CONTRACT_VIOLATION")
+        self.assertEqual(result["cleanup_error_type"], "RuntimeError")
+        self.assertNotIn("private cleanup failure", repr(result))
+        self.assertIsNone(self.connection_manager.get_loaded_provider("public_image"))
+
     def test_unload_failure_preserves_loaded_plugin_without_error_message_leak(self):
         plugin = ImagePlugin(fail_close=True)
         self.plugins.register_factory("public_image", lambda provider: plugin)
@@ -175,6 +193,17 @@ class ProviderPluginManagerTests(unittest.TestCase):
             with self.subTest(ids=ids):
                 with self.assertRaises(ValueError):
                     ProviderPluginManager(self.connection_manager, approved_plugin_ids=ids)
+
+
+class PartialImagePlugin:
+    def __init__(self, *, fail_close=False):
+        self.closed = False
+        self.fail_close = fail_close
+
+    def close(self):
+        if self.fail_close:
+            raise RuntimeError("private cleanup failure")
+        self.closed = True
 
 
 class ImagePlugin:
