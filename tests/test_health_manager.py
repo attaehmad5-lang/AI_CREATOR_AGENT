@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -53,6 +54,26 @@ class ProviderHealthManagerTests(unittest.TestCase):
         record = manager.data["providers"]["image"]
         self.assertEqual(len(record["history"]), 100)
         self.assertEqual(record["consecutive_failures"], 100)
+
+    def test_reload_retries_transient_windows_permission_error(self):
+        self.path.write_text(
+            json.dumps({"version": "1.0", "providers": {}}), encoding="utf-8"
+        )
+        original_open = Path.open
+        calls = {"count": 0}
+
+        def flaky_open(path, *args, **kwargs):
+            if path == self.path and calls["count"] < 2:
+                calls["count"] += 1
+                raise PermissionError("transient replace race")
+            if path == self.path:
+                calls["count"] += 1
+            return original_open(path, *args, **kwargs)
+
+        with patch.object(Path, "open", new=flaky_open):
+            self.manager._reload_state()
+        self.assertEqual(calls["count"], 3)
+        self.assertEqual(self.manager.data["providers"], {})
 
     def test_concurrent_health_updates_across_processes_preserve_history(self):
         args = [(str(self.path), index) for index in range(20)]
