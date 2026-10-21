@@ -745,6 +745,22 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.catalog_path.read_bytes(), before)
         self.assertFalse(self.manager.provider_exists("invalid_enabled"))
 
+    def test_invalid_overwrite_preserves_existing_provider_catalog(self):
+        provider = {
+            "id": "public_image",
+            "name": "Broken Replacement",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+            "enabled": "yes",
+        }
+        before = self.catalog_path.read_bytes()
+        result = self.manager.register_provider(provider, overwrite=True)
+        self.assertEqual(result["status"], "INVALID_PROVIDER_SCHEMA")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+        self.assertNotEqual(self.manager.get_provider("public_image").get("name"), "Broken Replacement")
+
     def test_register_provider_requires_boolean_overwrite_flag(self):
         provider = {
             "id": "new_image",
