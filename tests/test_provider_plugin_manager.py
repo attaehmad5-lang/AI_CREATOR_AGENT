@@ -109,6 +109,30 @@ class ProviderPluginManagerTests(unittest.TestCase):
         self.assertNotIn("token=abc", repr(result))
         self.assertIsNone(self.connection_manager.get_loaded_provider("public_image"))
 
+    def test_status_waits_for_inflight_load_and_reports_consistent_snapshot(self):
+        entered_factory = Event()
+        release_factory = Event()
+        plugin = ImagePlugin()
+
+        def slow_factory(provider):
+            entered_factory.set()
+            if not release_factory.wait(timeout=5):
+                raise RuntimeError("test factory timed out")
+            return plugin
+
+        self.plugins.register_factory("public_image", slow_factory)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            load_future = pool.submit(self.plugins.load, "public_image")
+            self.assertTrue(entered_factory.wait(timeout=2))
+            status_future = pool.submit(self.plugins.status)
+            self.assertFalse(status_future.done())
+            release_factory.set()
+            self.assertEqual(load_future.result(timeout=5)["status"], "LOADED")
+            status = status_future.result(timeout=5)
+
+        self.assertEqual(status["registered_plugin_ids"], ["public_image"])
+        self.assertEqual(status["loaded_plugin_ids"], ["public_image"])
+
     def test_invalid_plugin_contract_never_enters_runtime(self):
         self.plugins.register_factory("public_image", lambda provider: object())
         result = self.plugins.load("public_image")
