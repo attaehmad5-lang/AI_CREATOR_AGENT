@@ -512,6 +512,25 @@ class ProviderServiceTests(unittest.TestCase):
             self.cost.ledger.get("projects", {}).get("film", {}).get("reservations", {}),
         )
 
+    def test_degraded_mode_never_routes_to_a_provider_marked_unhealthy(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="unhealthy-provider-excluded",
+            estimated_cost=0.0, modality="image",
+            provider_health_states={"image": "UNHEALTHY", "video": "HEALTHY"},
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": True, "success": True},
+        )
+        self.assertNotEqual(result.get("status"), "EXECUTION_SUCCEEDED")
+        self.assertEqual(calls, [])
+
     def test_execute_routed_request_fails_closed_when_health_evidence_missing(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
