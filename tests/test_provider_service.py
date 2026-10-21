@@ -551,6 +551,31 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
         self.assertEqual(result["provider"], "image")
 
+    def test_stale_candidate_is_excluded_even_when_another_provider_is_healthy(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="stale-candidate-exclusion",
+            estimated_cost=0.0, modality="image",
+            provider_health_states={
+                "image": {"status": "HEALTHY", "checked_at": "2000-01-01T00:00:00+00:00"},
+                "healthy-but-not-an-image-candidate": {
+                    "status": "HEALTHY", "checked_at": "2026-10-21T16:00:00+00:00"
+                },
+            },
+            provider_health_max_age_seconds=60,
+            adapter=lambda **kwargs: calls.append(kwargs) or {"started": True, "success": True},
+        )
+        self.assertNotEqual(result.get("status"), "EXECUTION_SUCCEEDED")
+        self.assertEqual(calls, [])
+
     def test_execute_routed_request_blocks_stale_health_evidence(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
