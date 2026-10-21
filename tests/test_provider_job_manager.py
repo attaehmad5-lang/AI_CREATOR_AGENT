@@ -1,6 +1,7 @@
 """Queue capacity, idempotency, async lifecycle, and backpressure tests."""
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -44,6 +45,27 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(first["status"], "JOB_QUEUED")
         self.assertEqual(same["status"], "ALREADY_SUBMITTED")
         self.assertEqual(conflict["status"], "REQUEST_ID_CONFLICT")
+
+    def test_reload_retries_transient_windows_permission_error(self):
+        self.path.write_text(
+            json.dumps({"version": "1.0", "jobs": {}, "last_served_project": None}),
+            encoding="utf-8",
+        )
+        original_open = Path.open
+        calls = {"count": 0}
+
+        def flaky_open(path, *args, **kwargs):
+            if path == self.path and calls["count"] < 2:
+                calls["count"] += 1
+                raise PermissionError("transient replace race")
+            if path == self.path:
+                calls["count"] += 1
+            return original_open(path, *args, **kwargs)
+
+        with patch.object(Path, "open", new=flaky_open):
+            self.manager._reload()
+        self.assertEqual(calls["count"], 3)
+        self.assertEqual(self.manager.data["jobs"], {})
 
     def test_provider_specific_concurrency_limit_does_not_block_other_providers(self):
         manager = ProviderJobManager(
