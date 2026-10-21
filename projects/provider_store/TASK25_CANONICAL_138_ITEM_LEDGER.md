@@ -32,7 +32,7 @@ GitHub Actions run [#39628632644](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 11 | 🔴 | Credential Expiry and Refresh | PARTIAL | Token expiry/refresh lifecycle primitives exist; OAuth provider lookup errors now fail closed without leaking storage details. Provider-specific refresh semantics and revoked-token recovery remain open. Evidence: `tests/test_provider_service.py::test_oauth_verification_fails_closed_when_provider_lookup_raises`. |
 | 12 | 🔴 | Connection and Network Timeouts | PARTIAL | Bounded timeout validation and tests exist; full generation cancellation/deadline propagation remains open. |
 | 13 | 🔴 | Live Connectivity Verification | PARTIAL | Generic authenticated HTTPS probe and local Hugging Face check are documented; no live credential test was run in CI. |
-| 14 | 🟡 | Provider Endpoint/Model Configuration | VERIFIED | Endpoint/model configuration persistence, safe endpoint validation and passing configuration to probes are tested. |
+| 14 | 🟡 | Endpoint/Model Configuration | PARTIAL | `configure_provider()` and `get_provider_configuration()` now return secret-safe `CATALOG_INVALID` results instead of raising when the catalog cannot be parsed or validated. Tests verify configuration is not written to state in that case. Complete endpoint rotation/version migration remains open. |
 | 15 | 🔴 | TLS/HTTPS/Certificate Verification | PARTIAL | HTTPS validation and standard-library TLS verification are used; deployment-specific certificate/pinning review remains open. |
 | 16 | 🔴 | Authentication, Permission and Access Error Handling | PARTIAL | Safe 401/403 handling exists; provider-specific permission/scope errors need live verification. |
 
