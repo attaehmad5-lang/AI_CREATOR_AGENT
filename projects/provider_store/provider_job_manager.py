@@ -31,6 +31,7 @@ class ProviderJobManager:
         lease_seconds: int = 120,
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
+        provider_concurrency_limits: dict[str, int] | None = None,
         clock: Any = None,
     ) -> None:
         for value, name, minimum, maximum in (
@@ -44,12 +45,22 @@ class ProviderJobManager:
                 raise ValueError(f"{name} is outside safe limits")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
+        if provider_concurrency_limits is not None and not isinstance(provider_concurrency_limits, dict):
+            raise ValueError("provider_concurrency_limits must be a provider-to-limit mapping")
+        normalized_provider_limits: dict[str, int] = {}
+        for provider_id, limit in (provider_concurrency_limits or {}).items():
+            if not isinstance(provider_id, str) or not _ID_RE.fullmatch(provider_id):
+                raise ValueError("invalid provider concurrency limit key")
+            if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
+                raise ValueError("provider concurrency limits must be positive bounded integers")
+            normalized_provider_limits[provider_id] = limit
         self.state_path = Path(state_path)
         self.max_queue_size = max_queue_size
         self.max_concurrent = max_concurrent
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.backpressure_retry_seconds = backpressure_retry_seconds
+        self.provider_concurrency_limits = normalized_provider_limits
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "jobs": {}, "last_served_project": None}
@@ -207,15 +218,30 @@ class ProviderJobManager:
                 if changed:
                     self._save()
                 return {"status": "CONCURRENCY_LIMIT", "job": None}
-            queued = [
+            all_queued = [
                 job for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "QUEUED"
             ]
-            queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
-            if not queued:
+            if not all_queued:
                 if changed:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
+            running_by_provider: dict[str, int] = {}
+            for active in self.data["jobs"].values():
+                if isinstance(active, dict) and active.get("status") == "RUNNING":
+                    provider_id = active.get("provider_id")
+                    if isinstance(provider_id, str):
+                        running_by_provider[provider_id] = running_by_provider.get(provider_id, 0) + 1
+            queued = [
+                job for job in all_queued
+                if running_by_provider.get(job["provider_id"], 0)
+                < self.provider_concurrency_limits.get(job["provider_id"], self.max_concurrent)
+            ]
+            if not queued:
+                if changed:
+                    self._save()
+                return {"status": "PROVIDER_CONCURRENCY_LIMIT", "job": None}
+            queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
 
             # Fair-share scheduling: rotate between projects, while preserving
             # priority/FIFO ordering among each project's own queued jobs.
