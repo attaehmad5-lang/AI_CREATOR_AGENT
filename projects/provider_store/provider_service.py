@@ -36,6 +36,7 @@ class ProviderService:
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
+        degraded_mode_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -60,6 +61,7 @@ class ProviderService:
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
+            (degraded_mode_manager, "evaluate", "degraded_mode_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -85,6 +87,7 @@ class ProviderService:
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
+        self.degraded_mode_manager = degraded_mode_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -98,6 +101,50 @@ class ProviderService:
                 "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
             }
         return None
+
+    def evaluate_degraded_mode(
+        self,
+        provider_states: Any,
+        *,
+        principal_id: str | None,
+    ) -> dict[str, Any]:
+        """Assess outage mode only for an authorized reader; fail closed on errors."""
+        if self.degraded_mode_manager is None:
+            return {
+                "status": "DEGRADED_MODE_MANAGER_UNAVAILABLE",
+                "mode": "OUTAGE",
+                "accepting_new_work": False,
+            }
+        if self.authorization_manager is None:
+            return {
+                "status": "AUTHORIZATION_MANAGER_REQUIRED",
+                "mode": "OUTAGE",
+                "accepting_new_work": False,
+            }
+        authorization = self._authorize_operation(principal_id, "provider.read")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "mode": "OUTAGE",
+                "accepting_new_work": False,
+                "authorization": authorization,
+            }
+        try:
+            result = self.degraded_mode_manager.evaluate(provider_states)
+            if not isinstance(result, dict) or result.get("mode") not in {"NORMAL", "DEGRADED", "OUTAGE"}:
+                return {
+                    "status": "INVALID_DEGRADED_MODE_RESPONSE",
+                    "mode": "OUTAGE",
+                    "accepting_new_work": False,
+                }
+            return result
+        except Exception as exc:
+            return {
+                "status": "DEGRADED_MODE_EVALUATION_FAILED",
+                "mode": "OUTAGE",
+                "accepting_new_work": False,
+                "error_type": type(exc).__name__,
+            }
 
     def evaluate_provider_slo(
         self,
