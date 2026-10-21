@@ -416,6 +416,19 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(readback["configuration"], {})
         self.assertEqual(self.state_path.read_bytes(), before)
 
+    def test_provider_configuration_fails_closed_when_state_store_is_invalid(self):
+        self.state_path.write_text("{not-json", encoding="utf-8")
+        before = self.state_path.read_bytes()
+
+        configured = self.manager.configure_provider("public_image", model="safe-model")
+        readback = self.manager.get_provider_configuration("public_image")
+
+        self.assertEqual(configured["status"], "STATE_ACCESS_FAILED")
+        self.assertFalse(configured["saved"])
+        self.assertEqual(readback["status"], "STATE_ACCESS_FAILED")
+        self.assertEqual(readback["configuration"], {})
+        self.assertEqual(self.state_path.read_bytes(), before)
+
     def test_persisted_authentication_policy_must_be_boolean(self):
         self.state_path.write_text(json.dumps({
             "version": "1.0", "policy": "USER_CONTROLLED",
