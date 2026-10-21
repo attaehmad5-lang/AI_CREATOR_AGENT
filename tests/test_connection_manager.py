@@ -860,6 +860,18 @@ class ConnectionManagerTests(unittest.TestCase):
         results = self.manager.discover_providers(enabled_only=True)
         self.assertEqual([item["id"] for item in results], ["public_image"])
 
+    def test_load_provider_fails_closed_when_catalog_cannot_be_validated(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        factory_calls = []
+        result = self.manager.load_provider(
+            "public_image", lambda metadata: factory_calls.append(metadata) or object()
+        )
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["loaded"])
+        self.assertEqual(result["error_type"], "JSONDecodeError")
+        self.assertEqual(factory_calls, [])
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
     def test_load_provider_uses_factory_and_keeps_instance_in_memory(self):
         class ImageProvider:
             def generate_image(self, prompt, output_path):
