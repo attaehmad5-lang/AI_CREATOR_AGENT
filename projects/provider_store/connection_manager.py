@@ -1222,7 +1222,15 @@ class ConnectionManager:
         """Run an explicitly injected probe; only persisted success marks CONNECTED."""
         import time
 
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "verified": False}
         if provider.get("enabled") is False:
@@ -1375,7 +1383,15 @@ class ConnectionManager:
 
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER", "provider": provider_id, "verified": False}
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "verified": False}
         if provider.get("enabled") is False:
@@ -1483,7 +1499,15 @@ class ConnectionManager:
         }
 
     def credential_status(self, provider_id: str, environ: dict[str, str] | None = None) -> dict[str, Any]:
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "credential_present": False,
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id}
 
