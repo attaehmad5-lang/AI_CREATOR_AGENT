@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import threading
 from contextlib import contextmanager
@@ -42,7 +43,7 @@ class ProviderQuotaManager:
         for project_id, provider_map in (project_limits or {}).items():
             if (
                 not isinstance(project_id, str)
-                or not __import__("re").fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", project_id)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", project_id)
                 or not isinstance(provider_map, dict)
                 or not provider_map
             ):
@@ -94,7 +95,7 @@ class ProviderQuotaManager:
             self._parse_timestamp(record.get("created_at"))
             if "project_id" in record and (
                 not isinstance(record["project_id"], str)
-                or not __import__("re").fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", record["project_id"])
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", record["project_id"])
             ):
                 raise ValueError("invalid quota project identifier")
             if record.get("status") == "COMMITTED":
