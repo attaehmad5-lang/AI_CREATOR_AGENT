@@ -818,6 +818,32 @@ class ConnectionManagerTests(unittest.TestCase):
                 self.catalog_path.write_text(raw_catalog, encoding="utf-8")
                 self.assertEqual(self.manager.discover_providers(), [])
 
+    def test_discovery_hides_deprecated_providers_unless_explicitly_requested(self):
+        retired = {
+            "id": "retired_image",
+            "name": "Retired Image",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+            "enabled": False,
+            "deprecated": True,
+            "deprecation_reason": "provider end of life",
+            "deprecation_date": "2026-10-01",
+        }
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"].append(retired)
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+        self.assertNotIn(
+            "retired_image",
+            {item["id"] for item in self.manager.discover_providers()},
+        )
+        self.assertIn(
+            "retired_image",
+            {item["id"] for item in self.manager.discover_providers(include_deprecated=True)},
+        )
+        self.assertEqual(self.manager.discover_providers(include_deprecated="yes"), [])
+
     def test_discovery_filters_by_category_case_insensitively(self):
         results = self.manager.discover_providers(category="IMAGE")
         self.assertEqual({item["id"] for item in results}, {"public_image", "token_image"})
