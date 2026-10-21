@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -70,11 +71,20 @@ class ProviderJobManager:
         if not self.state_path.exists():
             self.data = {"version": "1.0", "jobs": {}, "last_served_project": None}
             return
-        try:
-            with self.state_path.open("r", encoding="utf-8") as stream:
-                loaded = json.load(stream)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise ValueError("invalid provider job state JSON") from exc
+        loaded = None
+        # On Windows, concurrent atomic replacements may briefly deny a read.
+        # Retry transient filesystem races, but never mask invalid JSON/schema.
+        for attempt in range(6):
+            try:
+                with self.state_path.open("r", encoding="utf-8") as stream:
+                    loaded = json.load(stream)
+                break
+            except (PermissionError, FileNotFoundError):
+                if attempt == 5 or not self.state_path.exists():
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ValueError("invalid provider job state JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("jobs"), dict):
             raise ValueError("invalid provider job state schema")
         last_served_project = loaded.get("last_served_project")
