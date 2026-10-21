@@ -74,6 +74,30 @@ class ProviderJobManagerTests(unittest.TestCase):
         third = self.manager.claim_next(worker_id="worker-3")
         self.assertEqual(third["job"]["job_id"], "film-low")
 
+    def test_fair_share_cursor_survives_manager_restart(self):
+        self.manager = ProviderJobManager(
+            self.path, max_queue_size=3, max_concurrent=1,
+            lease_seconds=10, max_attempts=2, clock=lambda: self.now[0],
+        )
+        self.manager.submit(job_id="film-a", project_id="film", provider_id="image",
+                            payload_ref="payload:film-a", priority=50)
+        self.manager.submit(job_id="film-b", project_id="film", provider_id="image",
+                            payload_ref="payload:film-b", priority=40)
+        self.manager.submit(job_id="music-a", project_id="music", provider_id="audio",
+                            payload_ref="payload:music-a", priority=50)
+        first = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(first["job"]["job_id"], "film-a")
+        self.manager.complete(job_id="film-a", worker_id="worker-1", success=True,
+                              result_ref="asset:film-a")
+
+        restarted = ProviderJobManager(
+            self.path, max_queue_size=3, max_concurrent=1,
+            lease_seconds=10, max_attempts=2, clock=lambda: self.now[0],
+        )
+        next_job = restarted.claim_next(worker_id="worker-2")
+        self.assertEqual(next_job["job"]["job_id"], "music-a")
+        self.assertEqual(restarted.data["last_served_project"], "music")
+
     def test_job_lifecycle_poll_and_result_reference(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
