@@ -15,7 +15,7 @@ GitHub Actions run [#39628936311](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 1 | 🟡 | Provider Registry | PARTIAL | `provider_catalog.json`, `connection_manager.py`, catalog/schema tests; registry lifecycle is not fully integrated with runtime adapters. |
-| 2 | 🟡 | Provider Registration | PARTIAL | Registration and concurrent-registration tests exist; onboarding and runtime adapter registration remain incomplete. |
+| 2 | 🟡 | Provider Registration | PARTIAL | `register_provider()` validates candidate metadata/schema before atomic persistence, rejects unsafe overwrite flags, and now returns a secret-safe `CATALOG_INVALID` result if the existing catalog cannot be parsed or validated. Tests verify malformed existing catalogs are left untouched. Approval-gated onboarding and signed provider packages remain open. |
 | 3 | 🟡 | Provider Discovery | VERIFIED | Provider discovery by declared catalog metadata is implemented and covered by discovery/capability tests. |
 | 4 | 🟡 | Provider Loading | PARTIAL | `ConnectionManager.load_provider()` now converts catalog parse/schema failures into a secret-safe `CATALOG_INVALID` result and never invokes the provider factory when catalog validation fails. Regression test verifies no instance is created for malformed JSON. Cross-process lifecycle supervision and plugin sandboxing remain open. |
 | 5 | 🔴 | Provider Unloading | VERIFIED | `unload_provider()` calls close/shutdown, preserves instances if cleanup fails, and has lifecycle regression tests. |
