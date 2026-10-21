@@ -697,6 +697,34 @@ class ProviderService:
             try:
                 health_states = route_options.pop("provider_health_states", None)
                 max_health_age = route_options.pop("provider_health_max_age_seconds", None)
+                if health_states is None and self.health_manager is not None:
+                    # Prefer stored health evidence over caller-supplied guesses.
+                    # is_eligible enforces freshness and rejects unknown/stale records.
+                    discovered = self.connection_manager.discover_providers(
+                        category=category, enabled_only=True
+                    )
+                    if not isinstance(discovered, list) or not discovered:
+                        return {"status": "PROVIDER_OUTAGE_BLOCKED", "executed": False}
+                    health_states = {}
+                    stale_after = 300.0 if max_health_age is None else max_health_age
+                    for provider in discovered:
+                        provider_id = provider.get("id") if isinstance(provider, dict) else None
+                        if not isinstance(provider_id, str) or not provider_id.strip():
+                            return {"status": "PROVIDER_OUTAGE_BLOCKED", "executed": False}
+                        health = self.health_manager.is_eligible(
+                            provider_id, stale_after_seconds=stale_after
+                        )
+                        state = health.get("status") if isinstance(health, dict) else None
+                        health_states[provider_id] = (
+                            "HEALTHY"
+                            if isinstance(health, dict)
+                            and health.get("eligible") is True
+                            and state == "HEALTHY"
+                            else state if state in {"DEGRADED", "UNHEALTHY", "UNKNOWN"}
+                            else "UNKNOWN"
+                        )
+                    # Freshness was already enforced by is_eligible above.
+                    max_health_age = None
                 degraded = self.degraded_mode_manager.evaluate(
                     health_states, max_age_seconds=max_health_age
                 )
