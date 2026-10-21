@@ -784,6 +784,8 @@ class ConnectionManager:
         """Register validated provider metadata; never accept credentials in catalog data."""
         if not isinstance(provider, dict):
             return {"status": "INVALID_PROVIDER", "reason": "provider must be an object"}
+        if not isinstance(overwrite, bool):
+            return {"status": "INVALID_OVERWRITE_FLAG", "saved": False}
         required = ("id", "name", "category", "auth_type", "connection_type")
         if any(not isinstance(provider.get(key), str) or not provider[key].strip() for key in required):
             return {
@@ -809,6 +811,14 @@ class ConnectionManager:
             updated.append(safe_provider)
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation.get("valid"):
+                return {
+                    "status": "INVALID_PROVIDER_SCHEMA",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
             return {
