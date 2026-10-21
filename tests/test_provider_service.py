@@ -6,6 +6,7 @@ from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.provider_feature_flags import ProviderFeatureFlagManager
+from projects.provider_store.provider_degraded_mode import ProviderDegradedModeManager
 from projects.provider_store.provider_incident_manager import ProviderIncidentManager
 from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
@@ -62,6 +63,33 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_degraded_mode_assessment_requires_provider_read_authorization(self):
+        authorization = ProviderAuthorizationManager(self.root / "degraded-auth.json")
+        authorization.assign_role("reader", "viewer")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            degraded_mode_manager=ProviderDegradedModeManager(),
+        )
+        denied = service.evaluate_degraded_mode(
+            {"image": "HEALTHY"}, principal_id="unknown",
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertFalse(denied["accepting_new_work"])
+
+        allowed = service.evaluate_degraded_mode(
+            {"image": "HEALTHY", "video": "UNHEALTHY"},
+            principal_id="reader",
+        )
+        self.assertEqual(allowed["mode"], "DEGRADED")
+        self.assertTrue(allowed["accepting_new_work"])
+
+        unavailable = ProviderService(self.connections).evaluate_degraded_mode(
+            {"image": "HEALTHY"}, principal_id="reader",
+        )
+        self.assertEqual(unavailable["mode"], "OUTAGE")
+        self.assertFalse(unavailable["accepting_new_work"])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
