@@ -728,6 +728,37 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "ALREADY_EXISTS")
         self.assertEqual(self.manager.get_provider("token_image")["auth_type"], "API_TOKEN")
 
+    def test_register_provider_rejects_schema_invalid_metadata_without_mutating_catalog(self):
+        provider = {
+            "id": "invalid_enabled",
+            "name": "Invalid Enabled",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+            "enabled": "yes",
+        }
+        before = self.catalog_path.read_bytes()
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "INVALID_PROVIDER_SCHEMA")
+        self.assertFalse(result["saved"])
+        self.assertTrue(any("enabled must be boolean" in error for error in result["errors"]))
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+        self.assertFalse(self.manager.provider_exists("invalid_enabled"))
+
+    def test_register_provider_requires_boolean_overwrite_flag(self):
+        provider = {
+            "id": "new_image",
+            "name": "New Image",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+        }
+        before = self.catalog_path.read_bytes()
+        result = self.manager.register_provider(provider, overwrite="yes")
+        self.assertEqual(result["status"], "INVALID_OVERWRITE_FLAG")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
     def test_register_provider_rejects_missing_contract_fields(self):
         result = self.manager.register_provider({"id": "broken"})
         self.assertEqual(result["status"], "INVALID_PROVIDER")
