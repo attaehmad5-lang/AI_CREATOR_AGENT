@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#39638688495](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39638688495): **474 tests passed on Ubuntu and 474 on Windows, 0 failures**. Compilation, provider JSON catalog validation, and the full unit/regression suite passed on both platforms. This run includes project fair-share scheduling, degraded-mode routing exclusion, timestamped health freshness enforcement, and stale/future health regressions.
+GitHub Actions run [#39638973132](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39638973132): **475 tests passed on Ubuntu and 475 on Windows, 0 failures**. Compilation, provider JSON catalog validation, and the full unit/regression suite passed on both platforms. This run includes fair-share scheduling, timestamped health freshness, stale/future evidence rejection, and persisted health eligibility when caller evidence is omitted.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
