@@ -751,6 +751,27 @@ class ProviderService:
             # Never let degraded-mode admission route to a provider whose supplied
             # health evidence is degraded, unknown, or unhealthy.
             unhealthy = set(degraded.get("unavailable_providers", []))
+            # Every discovered candidate needs explicit fresh HEALTHY evidence;
+            # an omitted provider is not implicitly eligible.
+            try:
+                candidates = self.connection_manager.discover_providers(
+                    category=category, enabled_only=True
+                )
+            except Exception as exc:
+                return {
+                    "status": "PROVIDER_HEALTH_LOOKUP_FAILED",
+                    "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(candidates, list) or not candidates:
+                return {"status": "PROVIDER_OUTAGE_BLOCKED", "executed": False}
+            candidate_ids = {
+                item.get("id") for item in candidates
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            }
+            if len(candidate_ids) != len(candidates):
+                return {"status": "PROVIDER_OUTAGE_BLOCKED", "executed": False}
+            unhealthy.update(candidate_ids - set(health_states))
             excluded = route_options.get("excluded_providers", set())
             if not isinstance(excluded, (set, frozenset)):
                 return {"status": "INVALID_EXCLUDED_PROVIDER_SET", "executed": False}
