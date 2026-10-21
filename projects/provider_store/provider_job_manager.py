@@ -66,6 +66,11 @@ class ProviderJobManager:
             raise ValueError("invalid provider job state JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("jobs"), dict):
             raise ValueError("invalid provider job state schema")
+        last_served_project = loaded.get("last_served_project")
+        if last_served_project is not None and (
+            not isinstance(last_served_project, str) or not _ID_RE.fullmatch(last_served_project)
+        ):
+            raise ValueError("invalid provider job scheduling cursor")
         for job_id, job in loaded["jobs"].items():
             if (
                 not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
