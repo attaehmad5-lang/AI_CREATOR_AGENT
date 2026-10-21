@@ -402,6 +402,27 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["restored"])
         self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{still-corrupt")
 
+    def test_connectivity_manual_connection_and_credentials_fail_closed_on_invalid_catalog(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        probe_calls = []
+        connectivity = self.manager.verify_connectivity(
+            "public_image", lambda provider, **kwargs: probe_calls.append("connectivity") or True
+        )
+        manual = self.manager.verify_manual_connection(
+            "public_image",
+            manual_session=object(),
+            probe=lambda provider, **kwargs: probe_calls.append("manual") or True,
+        )
+        credentials = self.manager.credential_status("public_image", environ={})
+
+        self.assertEqual(connectivity["status"], "CATALOG_INVALID")
+        self.assertEqual(manual["status"], "CATALOG_INVALID")
+        self.assertEqual(credentials["status"], "CATALOG_INVALID")
+        self.assertFalse(connectivity["verified"])
+        self.assertFalse(manual["verified"])
+        self.assertFalse(credentials["credential_present"])
+        self.assertEqual(probe_calls, [])
+
     def test_provider_configuration_fails_closed_when_catalog_is_invalid(self):
         self.catalog_path.write_text("{not-json", encoding="utf-8")
         before = self.state_path.read_bytes()
