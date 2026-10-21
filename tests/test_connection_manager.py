@@ -723,6 +723,24 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(state["verified"])
         self.assertEqual(self.manager.summary()["UNKNOWN"], 1)
 
+    def test_register_provider_fails_closed_when_existing_catalog_is_invalid(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        provider = {
+            "id": "new_image",
+            "name": "New Image",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+        }
+        before = self.catalog_path.read_bytes()
+
+        result = self.manager.register_provider(provider)
+
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["saved"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
     def test_register_provider_persists_valid_metadata(self):
         provider = {
             "id": "local_image", "name": "Local Image", "category": "image",
