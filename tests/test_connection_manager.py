@@ -699,6 +699,20 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "MANUAL_SESSION_REQUIRED")
         self.assertEqual(called, [])
 
+    def test_connectivity_maps_standard_http_error_code_and_retry_after_header(self):
+        class StandardHttpError(Exception):
+            code = 401
+            headers = {"Retry-After": "12"}
+
+        result = self.manager.verify_connectivity(
+            "public_image",
+            lambda provider, **kwargs: (_ for _ in ()).throw(StandardHttpError("private server detail")),
+        )
+        self.assertEqual(result["status"], "AUTHENTICATION_OR_PERMISSION_FAILED")
+        self.assertEqual(result["http_status"], 401)
+        self.assertEqual(result["retry_after"], "12")
+        self.assertNotIn("private server detail", repr(result))
+
     def test_connectivity_fails_closed_when_state_cannot_be_read_or_saved(self):
         self.state_path.write_text("{invalid-json", encoding="utf-8")
         self.assertEqual(self.manager.get_state("public_image")["status"], "STATE_READ_FAILED")
