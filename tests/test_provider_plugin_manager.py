@@ -147,6 +147,31 @@ class ProviderPluginManagerTests(unittest.TestCase):
         self.assertEqual(status["supported_interface_versions"], ["1.0"])
         self.assertEqual(status["registered_interface_versions"], {"public_image": "1.0"})
 
+    def test_runtime_interface_version_mismatch_unloads_incompatible_plugin(self):
+        plugin = ImagePlugin(interface_version="2.0")
+        self.plugins.register_factory("public_image", lambda provider: plugin, interface_version="1.0")
+
+        result = self.plugins.load("public_image")
+
+        self.assertEqual(result["status"], "INTERFACE_VERSION_MISMATCH")
+        self.assertEqual(result["declared_interface_version"], "1.0")
+        self.assertEqual(result["actual_interface_version"], "2.0")
+        self.assertFalse(result["loaded"])
+        self.assertTrue(plugin.closed)
+        self.assertIsNone(self.connection_manager.get_loaded_provider("public_image"))
+
+    def test_runtime_interface_version_must_be_declared(self):
+        plugin = ImagePlugin()
+        del plugin.interface_version
+        self.plugins.register_factory("public_image", lambda provider: plugin, interface_version="1.0")
+
+        result = self.plugins.load("public_image")
+
+        self.assertEqual(result["status"], "INTERFACE_VERSION_MISMATCH")
+        self.assertIsNone(result["actual_interface_version"])
+        self.assertTrue(plugin.closed)
+        self.assertIsNone(self.connection_manager.get_loaded_provider("public_image"))
+
     def test_interface_version_validation_rejects_malformed_versions(self):
         for version in ("", "v1", "1", "1.0.0", "01.0", "1.1000", "1.0\\n"):
             with self.subTest(version=version):
@@ -261,9 +286,10 @@ class PartialImagePlugin:
 
 
 class ImagePlugin:
-    def __init__(self, *, fail_close=False):
+    def __init__(self, *, fail_close=False, interface_version="1.0"):
         self.closed = False
         self.fail_close = fail_close
+        self.interface_version = interface_version
 
     def generate_image(self, prompt, output_path):
         return {"ok": True}
