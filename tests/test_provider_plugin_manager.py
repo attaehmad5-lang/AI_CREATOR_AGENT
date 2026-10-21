@@ -67,6 +67,48 @@ class ProviderPluginManagerTests(unittest.TestCase):
         self.assertEqual(self.plugins.unregister_factory("public_image")["status"], "FACTORY_UNREGISTERED")
         self.assertEqual(self.plugins.status()["loaded_plugin_ids"], [])
 
+    def test_disabled_provider_is_rejected_before_factory_execution(self):
+        disabled_catalog = self.root / "disabled-catalog.json"
+        disabled_catalog.write_text(json.dumps({
+            "providers": [{
+                "id": "public_image",
+                "name": "Public Image",
+                "category": "image",
+                "auth_type": "NONE",
+                "connection_type": "LOCAL",
+                "enabled": False,
+            }]
+        }), encoding="utf-8")
+        disabled_manager = ConnectionManager(disabled_catalog, self.state)
+        plugin_manager = ProviderPluginManager(
+            disabled_manager, approved_plugin_ids={"public_image"}
+        )
+        calls = []
+        plugin_manager.register_factory(
+            "public_image",
+            lambda provider: calls.append(provider["id"]) or ImagePlugin(),
+        )
+
+        result = plugin_manager.load("public_image")
+
+        self.assertEqual(result["status"], "DISABLED")
+        self.assertFalse(result["loaded"])
+        self.assertEqual(calls, [])
+        self.assertIsNone(disabled_manager.get_loaded_provider("public_image"))
+
+    def test_factory_exception_is_sanitized_and_runtime_remains_empty(self):
+        def unsafe_factory(provider):
+            raise RuntimeError("secret endpoint https://private.example/token=abc")
+
+        self.plugins.register_factory("public_image", unsafe_factory)
+        result = self.plugins.load("public_image")
+
+        self.assertEqual(result["status"], "LOAD_FAILED")
+        self.assertEqual(result["error_type"], "RuntimeError")
+        self.assertNotIn("private.example", repr(result))
+        self.assertNotIn("token=abc", repr(result))
+        self.assertIsNone(self.connection_manager.get_loaded_provider("public_image"))
+
     def test_invalid_plugin_contract_never_enters_runtime(self):
         self.plugins.register_factory("public_image", lambda provider: object())
         result = self.plugins.load("public_image")
