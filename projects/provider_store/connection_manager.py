@@ -545,7 +545,15 @@ class ConnectionManager:
     def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
         """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
         with self._lock:
-            return self._set_provider_enabled_locked(provider_id, enabled)
+            try:
+                return self._set_provider_enabled_locked(provider_id, enabled)
+            except (OSError, ValueError) as exc:
+                return {
+                    "status": "CATALOG_INVALID",
+                    "provider": provider_id,
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
 
     def _set_provider_enabled_locked(
         self, provider_id: str, enabled: bool
