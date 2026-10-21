@@ -43,20 +43,26 @@ class ProviderDegradedModeManager:
                 "unavailable_providers": [],
                 "reason_codes": ["NO_VALID_HEALTH_EVIDENCE"],
             }
-        if max_age_seconds is not None and (
-            isinstance(max_age_seconds, bool)
-            or not isinstance(max_age_seconds, (int, float))
-            or not math.isfinite(max_age_seconds)
-            or max_age_seconds < 0
-        ):
-            return {
-                "status": "INVALID_HEALTH_POLICY",
-                "mode": "OUTAGE",
-                "accepting_new_work": False,
-                "healthy_providers": [],
-                "unavailable_providers": [],
-                "reason_codes": ["INVALID_MAX_HEALTH_AGE"],
-            }
+        age_limit = None
+        if max_age_seconds is not None:
+            try:
+                age_limit = float(max_age_seconds)
+            except (TypeError, ValueError, OverflowError):
+                age_limit = None
+            if (
+                isinstance(max_age_seconds, bool)
+                or age_limit is None
+                or not math.isfinite(age_limit)
+                or age_limit < 0
+            ):
+                return {
+                    "status": "INVALID_HEALTH_POLICY",
+                    "mode": "OUTAGE",
+                    "accepting_new_work": False,
+                    "healthy_providers": [],
+                    "unavailable_providers": [],
+                    "reason_codes": ["INVALID_MAX_HEALTH_AGE"],
+                }
         current_time = now or datetime.now(timezone.utc)
         if not isinstance(current_time, datetime):
             return {
@@ -80,7 +86,7 @@ class ProviderDegradedModeManager:
                     "unavailable_providers": [],
                     "reason_codes": ["INVALID_HEALTH_EVIDENCE"],
                 }
-            if max_age_seconds is None:
+            if age_limit is None:
                 state = evidence
             else:
                 if not isinstance(evidence, dict) or not {"status", "checked_at"}.issubset(evidence):
@@ -119,7 +125,7 @@ class ProviderDegradedModeManager:
                     }
                 if age < 0:
                     state = "UNKNOWN"
-                elif age > max_age_seconds:
+                elif age > age_limit:
                     state = "UNKNOWN"
             if not isinstance(state, str) or state not in _STATES:
                 return {
