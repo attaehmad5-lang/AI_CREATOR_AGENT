@@ -416,6 +416,21 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(readback["configuration"], {})
         self.assertEqual(self.state_path.read_bytes(), before)
 
+    def test_manual_connection_preserves_state_read_failure_for_corrupt_store(self):
+        self.manager.catalog["providers"][0]["auth_type"] = "MANUAL"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        self.state_path.write_text("{not-json", encoding="utf-8")
+        probe_calls = []
+        result = self.manager.verify_manual_connection(
+            "public_image",
+            manual_session=object(),
+            probe=lambda provider, **kwargs: probe_calls.append(True) or True,
+        )
+        self.assertEqual(result["status"], "STATE_READ_FAILED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertEqual(probe_calls, [])
+
     def test_provider_configuration_fails_closed_when_state_store_is_invalid(self):
         self.state_path.write_text("{not-json", encoding="utf-8")
         before = self.state_path.read_bytes()
