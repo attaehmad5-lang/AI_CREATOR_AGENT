@@ -45,6 +45,42 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(same["status"], "ALREADY_SUBMITTED")
         self.assertEqual(conflict["status"], "REQUEST_ID_CONFLICT")
 
+    def test_provider_specific_concurrency_limit_does_not_block_other_providers(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=3,
+            provider_concurrency_limits={"image": 1, "voice": 2},
+            clock=lambda: self.now[0],
+        )
+        manager.submit(
+            job_id="image-1", project_id="film", provider_id="image",
+            payload_ref="payload:image-1", priority=100,
+        )
+        manager.submit(
+            job_id="image-2", project_id="film", provider_id="image",
+            payload_ref="payload:image-2", priority=90,
+        )
+        manager.submit(
+            job_id="voice-1", project_id="film", provider_id="voice",
+            payload_ref="payload:voice-1", priority=10,
+        )
+        first = manager.claim_next(worker_id="worker-1")
+        self.assertEqual(first["job"]["provider_id"], "image")
+        second = manager.claim_next(worker_id="worker-2")
+        self.assertEqual(second["job"]["provider_id"], "voice")
+        blocked = manager.claim_next(worker_id="worker-3")
+        self.assertEqual(blocked["status"], "PROVIDER_CONCURRENCY_LIMIT")
+        self.assertIsNone(blocked["job"])
+
+    def test_provider_concurrency_limit_configuration_is_validated(self):
+        with self.assertRaises(ValueError):
+            ProviderJobManager(
+                self.path, provider_concurrency_limits={"image": 0}
+            )
+        with self.assertRaises(ValueError):
+            ProviderJobManager(
+                self.path, provider_concurrency_limits={"bad provider": 1}
+            )
+
     def test_priority_order_and_concurrency_limit(self):
         self.submit("low", priority=10)
         self.submit("high", priority=90)
