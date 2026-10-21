@@ -3,9 +3,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from threading import Event
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.provider_plugin_manager import ProviderPluginManager
+from concurrent.futures import ThreadPoolExecutor
 
 
 class ProviderPluginManagerTests(unittest.TestCase):
@@ -70,6 +72,31 @@ class ProviderPluginManagerTests(unittest.TestCase):
         result = self.plugins.load("public_image")
         self.assertEqual(result["status"], "CONTRACT_VIOLATION")
         self.assertIsNone(self.connection_manager.get_loaded_provider("public_image"))
+
+    def test_unregister_waits_for_inflight_load_then_refuses_active_factory_removal(self):
+        entered_factory = Event()
+        release_factory = Event()
+        plugin = ImagePlugin()
+
+        def slow_factory(provider):
+            entered_factory.set()
+            if not release_factory.wait(timeout=5):
+                raise RuntimeError("test factory timed out")
+            return plugin
+
+        self.plugins.register_factory("public_image", slow_factory)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            load_future = pool.submit(self.plugins.load, "public_image")
+            self.assertTrue(entered_factory.wait(timeout=2))
+            unregister_future = pool.submit(self.plugins.unregister_factory, "public_image")
+            self.assertFalse(unregister_future.done())
+            release_factory.set()
+            loaded = load_future.result(timeout=5)
+            unregister = unregister_future.result(timeout=5)
+
+        self.assertEqual(loaded["status"], "LOADED")
+        self.assertEqual(unregister["status"], "PLUGIN_ACTIVE")
+        self.assertIs(self.connection_manager.get_loaded_provider("public_image"), plugin)
 
     def test_unload_failure_preserves_loaded_plugin_without_error_message_leak(self):
         plugin = ImagePlugin(fail_close=True)
