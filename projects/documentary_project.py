@@ -8,6 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
+from projects.folder_engine import FolderEngine
+
 PROJECT_NAME = "World Most Popular Documentary Filming"
 DEFAULT_FOLDERS = (
     "research",
@@ -33,26 +35,9 @@ def create_project_structure(
             rejected to prevent writing outside root.
     """
     base = Path(root).expanduser().resolve() if root is not None else Path(__file__).resolve().parent
-    base.mkdir(parents=True, exist_ok=True)
-
-    created: list[Path] = []
-    for name in folders:
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("folder names must be non-empty strings")
-        candidate = Path(name)
-        if candidate.is_absolute() or any(part == ".." for part in candidate.parts):
-            raise ValueError(f"unsafe folder path: {name!r}")
-        if candidate == Path("."):
-            raise ValueError("folder name must not be the root itself")
-
-        target = (base / candidate).resolve()
-        if target != base and base not in target.parents:
-            raise ValueError(f"folder escapes root: {name!r}")
-        target.mkdir(parents=True, exist_ok=True)
-        if not target.is_dir():
-            raise NotADirectoryError(f"expected a directory: {target}")
-        created.append(target)
-    return created
+    engine = FolderEngine(base)
+    entries = engine.ensure_folders(folders)
+    return [entry.absolute_path for entry in entries]
 
 
 def main() -> int:
