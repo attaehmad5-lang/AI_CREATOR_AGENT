@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#39631109203](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39631109203): **454 tests passed on Ubuntu and 454 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers provider lifecycle, version negotiation, fail-closed catalog/state handling across registration, discovery, loading, configuration, connectivity, credentials, and manual connection, plus deprecation filtering.
+GitHub Actions run [#39710672849](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39710672849): **454 tests passed on Ubuntu and 454 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. Recent regressions cover fail-closed catalog/state handling across registration, discovery, loading, configuration, connectivity, credentials, manual connection, and accurate public-provider credential semantics.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -181,7 +181,7 @@ GitHub Actions run [#39631109203](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 105 | 🔴 | Cost Policy and Paid-Approval Tests | PARTIAL | Cost/budget/approval tests pass; provider billing reconciliation remains open. |
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
-| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 452 tests pass on Windows and Ubuntu at plugin lifecycle/versioning/discovery/onboarding/deprecation PR #77 CI run #39630278390; complete 138-item coverage and production report artifacts remain open. |
+| 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 454 tests pass on Windows and Ubuntu at provider lifecycle/versioning/discovery/onboarding/deprecation PR #77 CI run #39710672849; complete 138-item coverage and production report artifacts remain open. |
 | 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
