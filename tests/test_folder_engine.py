@@ -345,5 +345,22 @@ class FolderEngineTests(unittest.TestCase):
         self.assertEqual(data["folders"], {})
 
 
+    def test_rename_folder_preserves_descendant_metadata_paths(self):
+        self.engine.ensure_folder("parent/child")
+        child_id = self.engine.get_folder_id("parent/child")
+        self.engine.set_metadata("parent/child", "purpose", "scene")
+        self.engine.rename_folder("parent", "renamed")
+        self.assertEqual(self.engine.get_folder_id("renamed/child"), child_id)
+        self.assertEqual(self.engine.get_metadata("renamed/child")["purpose"], "scene")
+
+    def test_copy_folder_copies_metadata_but_regenerates_ids(self):
+        self.engine.ensure_folder("source/nested")
+        self.engine.set_metadata("source/nested", "purpose", "research")
+        source_id = self.engine.get_folder_id("source/nested")
+        self.engine.copy_folder("source", "copy")
+        self.assertEqual(self.engine.get_metadata("copy/nested")["purpose"], "research")
+        self.assertNotEqual(self.engine.get_folder_id("copy/nested"), source_id)
+
+
 if __name__ == "__main__":
     unittest.main()
