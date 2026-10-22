@@ -1110,7 +1110,12 @@ class ConnectionManager:
                 return {"status": "INVALID_AUTHENTICATION_POLICY", "provider": provider_id, "saved": False}
             configuration["authentication_required"] = authentication_required
         if model is not None:
-            if not isinstance(model, str) or not model.strip() or len(model) > 200:
+            if (
+                not isinstance(model, str)
+                or not model.strip()
+                or len(model) > 200
+                or any(ord(char) < 32 or ord(char) == 127 for char in model)
+            ):
                 return {"status": "INVALID_MODEL", "provider": provider_id, "saved": False}
             if any(
                 term in model.casefold()
