@@ -11,6 +11,7 @@ import os
 import re
 import tempfile
 import threading
+import unicodedata
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -1025,7 +1026,7 @@ class ConnectionManager:
             return {"valid": False, "status": "INVALID_LOOPBACK_HTTP_POLICY"}
         if not isinstance(endpoint, str) or not endpoint.strip():
             return {"valid": False, "status": "INVALID_ENDPOINT"}
-        if any(ord(char) < 32 or ord(char) == 127 for char in endpoint):
+        if any(unicodedata.category(char) == "Cc" for char in endpoint):
             return {"valid": False, "status": "INVALID_ENDPOINT"}
         if allowed_hosts is not None and (
             not isinstance(allowed_hosts, (set, frozenset, list, tuple))
@@ -1114,7 +1115,7 @@ class ConnectionManager:
                 not isinstance(model, str)
                 or not model.strip()
                 or len(model) > 200
-                or any(ord(char) < 32 or ord(char) == 127 for char in model)
+                or any(unicodedata.category(char) == "Cc" for char in model)
             ):
                 return {"status": "INVALID_MODEL", "provider": provider_id, "saved": False}
             if any(
