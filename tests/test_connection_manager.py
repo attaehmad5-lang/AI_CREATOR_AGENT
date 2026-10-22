@@ -1081,6 +1081,22 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["contract_version"], "1.0")
         self.assertEqual(result["error_type"], "ValueError")
 
+    def test_failed_load_reports_cleanup_attribute_error_without_raising(self):
+        class IncompatibleProvider:
+            @property
+            def close(self):
+                raise RuntimeError("private cleanup detail")
+
+        result = self.manager.load_provider(
+            "public_image", lambda metadata: IncompatibleProvider()
+        )
+
+        self.assertEqual(result["status"], "CONTRACT_VIOLATION")
+        self.assertFalse(result["loaded"])
+        self.assertEqual(result["cleanup_error_type"], "RuntimeError")
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+        self.assertNotIn("private cleanup detail", repr(result))
+
     def test_unload_fails_closed_when_cleanup_attribute_raises(self):
         class BrokenCleanupProvider:
             def generate_image(self, prompt, output_path):
