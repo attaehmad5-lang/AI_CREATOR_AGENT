@@ -26,6 +26,14 @@ class FolderTypeError(FolderEngineError, NotADirectoryError):
 
 
 @dataclass(frozen=True)
+class FolderTreeNode:
+    """A directory node with deterministic, recursively nested children."""
+
+    entry: "FolderEntry"
+    children: tuple["FolderTreeNode", ...] = ()
+
+
+@dataclass(frozen=True)
 class FolderEntry:
     """A stable, root-relative directory description."""
 
@@ -141,3 +149,46 @@ class FolderEngine:
             if child.is_dir():
                 entries.append(self.describe(child.relative_to(self.root)))
         return entries
+
+    def list_tree(
+        self,
+        relative_path: str | os.PathLike[str] = ".",
+        *,
+        max_depth: int | None = None,
+    ) -> tuple[FolderTreeNode, ...]:
+        """Return a deterministic directory tree rooted at a workspace path.
+
+        Depth is measured from the requested root: 0 includes only the root
+        node, 1 includes its immediate child directories, and so on. None
+        traverses the complete tree. Symbolic links are not followed, avoiding
+        cycles and preventing linked directories from escaping the workspace.
+        """
+        if max_depth is not None:
+            if isinstance(max_depth, bool) or not isinstance(max_depth, int):
+                raise TypeError("max_depth must be a non-negative integer or None")
+            if max_depth < 0:
+                raise ValueError("max_depth must be non-negative")
+
+        raw = os.fspath(relative_path)
+        parent = self.root if raw == "." else self.resolve(relative_path)
+        if not parent.exists():
+            return ()
+        if not parent.is_dir():
+            raise FolderTypeError(f"path is not a directory: {parent}")
+
+        def build(directory: Path, depth: int) -> FolderTreeNode:
+            entry = self.describe(".") if directory == self.root else self.describe(
+                directory.relative_to(self.root)
+            )
+            if max_depth is not None and depth >= max_depth:
+                return FolderTreeNode(entry=entry)
+            children = []
+            for child in sorted(
+                directory.iterdir(), key=lambda item: (item.name.casefold(), item.name)
+            ):
+                if child.is_symlink() or not child.is_dir():
+                    continue
+                children.append(build(child, depth + 1))
+            return FolderTreeNode(entry=entry, children=tuple(children))
+        
+        return (build(parent, 0),)
