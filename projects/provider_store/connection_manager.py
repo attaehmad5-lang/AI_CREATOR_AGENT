@@ -1233,7 +1233,7 @@ class ConnectionManager:
             not isinstance(model, str)
             or not model.strip()
             or len(model) > 200
-            or any(ord(char) < 32 or ord(char) == 127 for char in model)
+            or any(unicodedata.category(char) == "Cc" for char in model)
         ):
             return {"status": "INVALID_MODEL", "provider": provider_id, "configuration": {}}
         if isinstance(model, str) and any(
