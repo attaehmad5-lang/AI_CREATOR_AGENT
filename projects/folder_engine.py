@@ -304,14 +304,35 @@ class FolderEngine:
             raise FileExistsError(f"destination already exists: {destination}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source, destination, symlinks=True)
-        # Do not copy directory symlinks: remove them from the copied tree.
-        for current, dirs, _files in os.walk(destination, topdown=True, followlinks=False):
+        # Do not retain symlinks in the copied tree; they could point outside
+        # the workspace or change meaning on another platform.
+        for current, dirs, files in os.walk(destination, topdown=True, followlinks=False):
             for name in list(dirs):
                 candidate = Path(current) / name
                 if candidate.is_symlink():
                     candidate.unlink()
                     dirs.remove(name)
-        return self.describe(destination.relative_to(self.root).as_posix())
+            for name in files:
+                candidate = Path(current) / name
+                if candidate.is_symlink():
+                    candidate.unlink()
+
+        data = self._read_metadata()
+        source_key = source.relative_to(self.root).as_posix()
+        destination_key = destination.relative_to(self.root).as_posix()
+        copied_records = {}
+        for key, record in data["folders"].items():
+            if key == source_key or key.startswith(source_key + "/"):
+                suffix = key[len(source_key):]
+                metadata = record.get("metadata", {}) if isinstance(record, dict) else {}
+                copied_records[destination_key + suffix] = {
+                    "id": str(uuid.uuid4()),
+                    "metadata": dict(metadata) if isinstance(metadata, dict) else {},
+                }
+        if copied_records:
+            data["folders"].update(copied_records)
+            self._write_metadata(data)
+        return self.describe(destination_key)
 
     def delete_folder(self, relative_path: str | os.PathLike[str], *, recursive: bool = False) -> None:
         """Delete a child folder; non-empty deletion requires explicit recursive=True."""
