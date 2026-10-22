@@ -273,7 +273,8 @@ class FolderEngineTests(unittest.TestCase):
         alpha_id = self.engine.get_folder_id("alpha")
         self.assertEqual(self.engine.get_folder_id("alpha"), alpha_id)
         self.assertNotEqual(alpha_id, self.engine.get_folder_id("beta"))
-        self.assertIsNone(self.engine.get_folder_id("beta", create=False) if False else None)
+        self.engine.ensure_folder("gamma")
+        self.assertIsNone(self.engine.get_folder_id("gamma", create=False))
 
     def test_metadata_round_trip_and_defensive_copy(self):
         self.engine.ensure_folder("research")
