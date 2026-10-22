@@ -116,6 +116,61 @@ class FolderEngineTests(unittest.TestCase):
     def test_list_missing_path_is_empty(self):
         self.assertEqual(self.engine.list_folders("not-created"), [])
 
+    def test_list_tree_preserves_nested_parent_child_relationships(self):
+        self.engine.ensure_folders([
+            "story/scenes/scene-02",
+            "story/scenes/scene-01",
+            "research",
+        ])
+        tree = self.engine.list_tree()
+        self.assertEqual(len(tree), 1)
+        root = tree[0]
+        self.assertEqual(root.entry.relative_path, ".")
+        self.assertEqual(
+            [node.entry.name for node in root.children], ["research", "story"]
+        )
+        story = root.children[1]
+        self.assertEqual([node.entry.name for node in story.children], ["scenes"])
+        scenes = story.children[0]
+        self.assertEqual(
+            [node.entry.name for node in scenes.children], ["scene-01", "scene-02"]
+        )
+
+    def test_list_tree_depth_zero_returns_only_root(self):
+        self.engine.ensure_folder("story/scenes")
+        tree = self.engine.list_tree(max_depth=0)
+        self.assertEqual(len(tree), 1)
+        self.assertEqual(tree[0].entry.relative_path, ".")
+        self.assertEqual(tree[0].children, ())
+
+    def test_list_tree_depth_one_returns_immediate_children_only(self):
+        self.engine.ensure_folder("story/scenes")
+        tree = self.engine.list_tree(max_depth=1)
+        story = next(node for node in tree[0].children if node.entry.name == "story")
+        self.assertEqual(story.children, ())
+
+    def test_list_tree_rejects_negative_depth(self):
+        with self.assertRaises(ValueError):
+            self.engine.list_tree(max_depth=-1)
+
+    def test_list_tree_rejects_non_integer_depth(self):
+        with self.assertRaises(TypeError):
+            self.engine.list_tree(max_depth=1.5)
+
+    def test_list_tree_missing_root_returns_empty_tuple(self):
+        self.assertEqual(self.engine.list_tree("missing"), ())
+
+    def test_list_tree_does_not_follow_symlinks(self):
+        self.engine.ensure_root()
+        outside = Path(self.tmp.name) / "outside-tree"
+        outside.mkdir()
+        link = self.root / "external-link"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"directory symlinks unavailable: {exc}")
+        self.assertEqual(self.engine.list_tree()[0].children, ())
+
     def test_workspace_root_file_collision_is_reported(self):
         self.root.parent.mkdir(parents=True, exist_ok=True)
         self.root.write_text("occupied", encoding="utf-8")
