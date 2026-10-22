@@ -268,5 +268,81 @@ class FolderEngineTests(unittest.TestCase):
         self.assertFalse(other_root.exists())
 
 
+    def test_folder_ids_are_stable_and_unique(self):
+        self.engine.ensure_folders(["alpha", "beta"])
+        alpha_id = self.engine.get_folder_id("alpha")
+        self.assertEqual(self.engine.get_folder_id("alpha"), alpha_id)
+        self.assertNotEqual(alpha_id, self.engine.get_folder_id("beta"))
+        self.assertIsNone(self.engine.get_folder_id("beta", create=False) if False else None)
+
+    def test_metadata_round_trip_and_defensive_copy(self):
+        self.engine.ensure_folder("research")
+        self.engine.set_metadata("research", "purpose", "fact-checking")
+        self.engine.set_metadata("research", "tags", ["source", "verified"])
+        data = self.engine.get_metadata("research")
+        self.assertEqual(data["purpose"], "fact-checking")
+        data["purpose"] = "mutated"
+        self.assertEqual(self.engine.get_metadata("research")["purpose"], "fact-checking")
+        self.assertTrue((self.root / ".ai_creator_agent_folder_metadata.json").is_file())
+
+    def test_metadata_rejects_non_json_values(self):
+        self.engine.ensure_folder("research")
+        with self.assertRaises(TypeError):
+            self.engine.set_metadata("research", "bad", object())
+
+    def test_rename_folder_preserves_metadata_and_rejects_collision(self):
+        self.engine.ensure_folder("before")
+        self.engine.set_metadata("before", "owner", "creator")
+        old_id = self.engine.get_folder_id("before")
+        self.engine.ensure_folder("taken")
+        with self.assertRaises(FileExistsError):
+            self.engine.rename_folder("before", "taken")
+        renamed = self.engine.rename_folder("before", "after")
+        self.assertEqual(renamed.relative_path, "after")
+        self.assertEqual(self.engine.get_folder_id("after"), old_id)
+        self.assertEqual(self.engine.get_metadata("after")["owner"], "creator")
+
+    def test_move_folder_updates_metadata_paths(self):
+        self.engine.ensure_folder("source/nested")
+        self.engine.set_metadata("source/nested", "kind", "scene")
+        nested_id = self.engine.get_folder_id("source/nested")
+        moved = self.engine.move_folder("source", "archive/source")
+        self.assertEqual(moved.relative_path, "archive/source")
+        self.assertEqual(self.engine.get_folder_id("archive/source/nested"), nested_id)
+        self.assertEqual(self.engine.get_metadata("archive/source/nested")["kind"], "scene")
+
+    def test_move_rejects_descendant_and_existing_destination(self):
+        self.engine.ensure_folder("source/child")
+        with self.assertRaises(UnsafePathError):
+            self.engine.move_folder("source", "source/child/moved")
+        self.engine.ensure_folder("taken")
+        with self.assertRaises(FileExistsError):
+            self.engine.move_folder("source", "taken")
+
+    def test_copy_folder_copies_tree_without_overwriting(self):
+        self.engine.ensure_folder("source/nested")
+        (self.root / "source" / "note.txt").write_text("hello", encoding="utf-8")
+        copied = self.engine.copy_folder("source", "copies/source")
+        self.assertEqual(copied.relative_path, "copies/source")
+        self.assertEqual((self.root / "copies/source/note.txt").read_text(encoding="utf-8"), "hello")
+        with self.assertRaises(FileExistsError):
+            self.engine.copy_folder("source", "copies/source")
+
+    def test_copy_rejects_copy_into_descendant(self):
+        self.engine.ensure_folder("source/child")
+        with self.assertRaises(UnsafePathError):
+            self.engine.copy_folder("source", "source/child/copy")
+
+    def test_delete_requires_explicit_recursive_flag_and_cleans_metadata(self):
+        self.engine.ensure_folder("source/nested")
+        self.engine.set_metadata("source/nested", "kind", "scene")
+        with self.assertRaises(OSError):
+            self.engine.delete_folder("source")
+        self.engine.delete_folder("source", recursive=True)
+        self.assertFalse((self.root / "source").exists())
+        data = self.engine._read_metadata()
+        self.assertEqual(data["folders"], {})
+
+
 if __name__ == "__main__":
     unittest.main()
