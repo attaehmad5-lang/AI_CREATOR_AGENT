@@ -1229,7 +1229,10 @@ class ConnectionManager:
             return {"status": "INVALID_AUTHENTICATION_POLICY", "provider": provider_id, "configuration": {}}
         model = configuration.get("model")
         if model is not None and (
-            not isinstance(model, str) or not model.strip() or len(model) > 200
+            not isinstance(model, str)
+            or not model.strip()
+            or len(model) > 200
+            or any(ord(char) < 32 or ord(char) == 127 for char in model)
         ):
             return {"status": "INVALID_MODEL", "provider": provider_id, "configuration": {}}
         if isinstance(model, str) and any(
