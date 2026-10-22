@@ -34,3 +34,9 @@ This audit covers the user's 200-feature Project Structure / Folders checklist a
 5. Keep PR #78 unmerged until its checks and review are complete.
 
 PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
+
+
+## Feature-specific CI added
+- Added `.github/workflows/project-structure-folders.yml` to compile the feature and run its focused tests on Ubuntu and Windows with Python 3.11, 3.12, and 3.13.
+- The dedicated Project Structure matrix run passed **6/6 jobs** on commit `1d92ca6f2d04ffc6af4d934f0767cdcc620485d5`: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39822521327
+- PR #78 remains open and unmerged. The current PR head is mergeable, but Feature #1's 200-point implementation is not complete.
