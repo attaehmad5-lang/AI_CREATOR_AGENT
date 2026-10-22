@@ -248,6 +248,17 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["saved"])
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
 
+    def test_set_state_fails_closed_when_state_store_is_corrupt(self):
+        self.state_path.write_text("{not-json", encoding="utf-8")
+        before = self.state_path.read_bytes()
+
+        result = self.manager.set_state("public_image", "READY")
+
+        self.assertEqual(result["status"], "STATE_ACCESS_FAILED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertEqual(self.state_path.read_bytes(), before)
+
     def test_set_state_fails_closed_when_catalog_is_corrupt(self):
         self.catalog_path.write_text("{not-json", encoding="utf-8")
 
