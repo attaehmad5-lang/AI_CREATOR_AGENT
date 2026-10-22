@@ -88,7 +88,10 @@ class FolderEngine:
 
     def ensure_root(self) -> Path:
         """Create the root if needed and verify that it is a directory."""
-        self.root.mkdir(parents=True, exist_ok=True)
+        try:
+            self.root.mkdir(parents=True, exist_ok=True)
+        except FileExistsError as exc:
+            raise FolderTypeError(f"workspace root is occupied by a file: {self.root}") from exc
         if not self.root.is_dir():
             raise FolderTypeError(f"workspace root is not a directory: {self.root}")
         return self.root
