@@ -5,7 +5,9 @@ on:
     branches: [main]
     paths:
       - "projects/documentary_project.py"
+      - "projects/folder_engine.py"
       - "tests/test_project_structure.py"
+      - "tests/test_folder_engine.py"
       - ".github/workflows/project-structure-folders.yml"
   push:
     branches:
@@ -13,7 +15,9 @@ on:
       - feature/project-structure-folders-hardening
     paths:
       - "projects/documentary_project.py"
+      - "projects/folder_engine.py"
       - "tests/test_project_structure.py"
+      - "tests/test_folder_engine.py"
       - ".github/workflows/project-structure-folders.yml"
 
 permissions:
@@ -36,6 +40,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compile feature code and tests
-        run: python -m compileall -q projects/documentary_project.py tests/test_project_structure.py
+        run: python -m compileall -q projects/documentary_project.py projects/folder_engine.py tests/test_project_structure.py tests/test_folder_engine.py
       - name: Run Project Structure / Folders tests
-        run: python -m unittest tests.test_project_structure -v
+        run: python -m unittest tests.test_project_structure tests.test_folder_engine -v
