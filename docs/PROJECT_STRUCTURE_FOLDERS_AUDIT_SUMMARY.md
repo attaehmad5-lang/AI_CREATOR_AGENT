@@ -32,7 +32,7 @@ This audit covers the user's 200-feature Project Structure / Folders checklist a
 - `projects/documentary_project.py` delegates standard project-folder creation to the shared engine.
 - Regression tests cover unsafe names, Windows-reserved names, traversal and symlink escapes, root/file collisions, non-mutating structure validation, nested-tree depth/sorting, and batch preflight behavior.
 - Latest confirmed six-job CI run before the most recent symlink-listing regression: `39825920895`, all six Ubuntu/Windows × Python 3.11/3.12/3.13 jobs passed. https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39825920895
-- New symlink-listing test is in commit `2849d79a3a40e8aaf6f7591c0c745f1be76fbaf3`; its CI run is pending/in progress at https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39826550448. Do not claim this newest revision passes until all six jobs finish successfully.
+- New symlink-listing test is in commit `2849d79a3a40e8aaf6f7591c0c745f1be76fbaf3`. The subsequent feature-specific CI run `39826560879` completed successfully: all six Ubuntu/Windows × Python 3.11/3.12/3.13 jobs passed, including compile and focused tests. https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39826560879
 - These checks verify the implemented foundation only; they do not certify the 200-feature checklist as complete.
 
 ## Next actions
