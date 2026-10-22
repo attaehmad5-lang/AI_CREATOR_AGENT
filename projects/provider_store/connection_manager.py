@@ -669,6 +669,8 @@ class ConnectionManager:
 
     def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
         """Load one validated runtime instance while holding the lifecycle lock."""
+        if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", provider_id):
+            return {"status": "INVALID_PROVIDER", "provider": provider_id, "loaded": False}
         with self._lock:
             return self._load_provider_locked(provider_id, factory)
 
