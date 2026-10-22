@@ -6,12 +6,12 @@
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#39819580770](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39819580770) completed successfully on Python 3.13:
+GitHub Actions code-verification run [#39820701328](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39820701328) completed successfully on Python 3.13:
 
-- Ubuntu: 470 tests passed, 0 failures.
-- Windows: 470 tests passed, 0 failures.
+- Ubuntu: 471 tests passed, 0 failures.
+- Windows: 471 tests passed, 0 failures.
 - Provider module/test compilation and provider JSON catalog validation passed on both platforms.
-- Current code includes explicit certificate and hostname verification for the default provider-balance HTTPS transport, safe TLS failure reporting, and model control-character rejection on both writes and persisted-state reads. The active follow-up is draft PR #77; this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
+- Current code includes explicit certificate and hostname verification for the default provider-balance HTTPS transport, safe TLS failure reporting, and rejection of ASCII/Unicode control characters in endpoints and model configuration before provider probes. The active follow-up is draft PR #77; this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
