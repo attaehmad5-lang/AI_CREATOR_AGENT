@@ -69,3 +69,10 @@ PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
 - Added regression suites `tests/test_workspace_file_ops.py` and `tests/test_workspace_search.py`; the feature workflow now compiles and runs all five focused test modules.
 - Latest verified feature-specific run: **98 tests passed across all six Ubuntu/Windows × Python 3.11/3.12/3.13 jobs**: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39829166172
 - These are backend primitives, not proof of full application/UI integration. The canonical checklist's complete 210 user-provided items (the PDF contains a separate 200-row ledger) remains open; no full-task PASS is claimed.
+
+
+## Latest continuation — recycle bin and recovery audit
+- Added `projects/workspace_recycle_bin.py` with workspace-contained soft delete, manifest-backed restore, configurable retention, expiry purge, and bounded recovery audit events.
+- Added `tests/test_workspace_recycle_bin.py` covering restore, collision safety, traversal rejection, retention expiry, audit events, missing IDs, and invalid configuration.
+- Updated the feature workflow to compile and run the new module and tests across Ubuntu/Windows and Python 3.11–3.13. The workflow trigger path list was corrected for both pull requests and feature-branch pushes.
+- **Verification pending:** the newest commit must receive a completed six-job Actions run before these new tests can be reported as PASS. This module is a backend primitive and does not complete the full 210-item checklist.
