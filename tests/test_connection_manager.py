@@ -510,6 +510,14 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "INVALID_AUTHENTICATION_POLICY")
         self.assertFalse(result["saved"])
 
+    def test_configure_provider_rejects_control_characters_in_model_without_persisting(self):
+        for model in ("image-v1\nmalicious", "image-v1\tmalicious", "image-v1\x7f"):
+            with self.subTest(model=repr(model)):
+                result = self.manager.configure_provider("public_image", model=model)
+                self.assertEqual(result["status"], "INVALID_MODEL")
+                self.assertFalse(result["saved"])
+        self.assertNotIn("configuration", self.manager.state["providers"].get("public_image", {}))
+
     def test_configured_endpoint_and_model_are_passed_to_probe(self):
         self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
