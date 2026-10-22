@@ -1,7 +1,7 @@
 # Feature #1 — Project Structure / Folders Audit
 
 ## Scope
-This audit covers the user's 200-feature Project Structure / Folders checklist and the uploaded `Workspace_Engine_Source_Code.pdf`. It is **not Task #25 Provider Connection Manager**.
+This audit covers the user's 210-feature Project Structure / Folders checklist and the uploaded `Workspace_Engine_Source_Code.pdf`. It is **not Task #25 Provider Connection Manager**.
 
 ## Findings
 - The PDF status ledger has 200 feature rows: 153 labelled Full and 47 labelled Partial. These are the PDF's own claims, not proof of integration into AI_CREATOR_AGENT.
@@ -36,7 +36,7 @@ This audit covers the user's 200-feature Project Structure / Folders checklist a
 - These checks verify the implemented foundation only; they do not certify the 200-feature checklist as complete.
 
 ## Next actions
-1. Keep each of the 200 feature IDs stable.
+1. Keep all 210 user-provided feature IDs stable; separately track any source PDF's 200-row ledger without silently merging or renumbering it.
 2. Integrate and harden the PDF engine into AI_CREATOR_AGENT only after a reviewable source-level import; do not blindly copy the PDF package.
 3. Run the 200-feature test suite in GitHub Actions on the feature branch and fix failures before declaring PASS.
 4. Add integration, security, race-condition, recovery, and platform-specific tests; replace documented production limitations before production readiness.
@@ -68,4 +68,4 @@ PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
 - Added `projects/workspace_search.py`: deterministic filename and folder search, bounded text-content search, extension filters, case-sensitive/regex modes, symlink exclusion, result caps, and persistent saved searches.
 - Added regression suites `tests/test_workspace_file_ops.py` and `tests/test_workspace_search.py`; the feature workflow now compiles and runs all five focused test modules.
 - Latest verified feature-specific run: **98 tests passed across all six Ubuntu/Windows × Python 3.11/3.12/3.13 jobs**: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39829166172
-- These are backend primitives, not proof of full application/UI integration. The canonical checklist's complete 200 items (and the user's mention of 210) remains open; no full-task PASS is claimed.
+- These are backend primitives, not proof of full application/UI integration. The canonical checklist's complete 210 user-provided items (the PDF contains a separate 200-row ledger) remains open; no full-task PASS is claimed.
