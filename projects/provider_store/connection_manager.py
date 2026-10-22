@@ -738,11 +738,21 @@ class ConnectionManager:
             return self._unload_provider_locked(provider_id)
 
     def _unload_provider_locked(self, provider_id: str) -> dict[str, Any]:
-        if not self.provider_exists(provider_id):
-            return {"status": "NOT_FOUND", "provider": provider_id, "unloaded": False}
-        if provider_id not in self._loaded_providers:
+        # Runtime cleanup must remain possible even if the on-disk catalog is
+        # corrupted after a provider was loaded; otherwise resources can leak.
+        instance = self._loaded_providers.get(provider_id)
+        if instance is None:
+            try:
+                if not self.provider_exists(provider_id):
+                    return {"status": "NOT_FOUND", "provider": provider_id, "unloaded": False}
+            except Exception as exc:
+                return {
+                    "status": "CATALOG_INVALID",
+                    "provider": provider_id,
+                    "unloaded": False,
+                    "error_type": type(exc).__name__,
+                }
             return {"status": "NOT_LOADED", "provider": provider_id, "unloaded": False}
-        instance = self._loaded_providers[provider_id]
         cleanup = getattr(instance, "close", None)
         if not callable(cleanup):
             cleanup = getattr(instance, "shutdown", None)
