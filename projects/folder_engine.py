@@ -59,7 +59,7 @@ class FolderEngine:
             raise UnsafePathError("leading or trailing whitespace is not allowed")
         if any(ord(ch) < 32 for ch in normalized):
             raise UnsafePathError("control characters are not allowed in folder names")
-        if any(ch in normalized for ch in ("/", "\\\\", "\\0")):
+        if any(ch in normalized for ch in ("/", "\\", "\0")):
             raise UnsafePathError("folder name must not contain path separators")
         if re.match(r"^[A-Za-z]:", normalized):
             raise UnsafePathError("drive-qualified names are not allowed")
