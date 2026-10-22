@@ -1416,6 +1416,12 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("status", metadata)
         self.assertNotEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
 
+    def test_metadata_returns_none_for_malformed_or_schema_invalid_catalog(self):
+        for raw_catalog in ('{not-json', '{"providers": "not-a-list"}'):
+            with self.subTest(raw_catalog=raw_catalog):
+                self.catalog_path.write_text(raw_catalog, encoding="utf-8")
+                self.assertIsNone(self.manager.get_provider_metadata("public_image"))
+
     def test_metadata_returns_none_for_unknown_provider(self):
         self.assertIsNone(self.manager.get_provider_metadata("not_registered"))
 
