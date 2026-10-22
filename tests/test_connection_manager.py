@@ -1229,6 +1229,13 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("sensitive endpoint details", repr(result))
         self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
 
+    def test_unload_rejects_non_string_or_malformed_provider_ids_without_raising(self):
+        for provider_id in (None, [], "bad provider id", "x" * 101):
+            with self.subTest(provider_id=repr(provider_id)):
+                result = self.manager.unload_provider(provider_id)
+                self.assertEqual(result["status"], "INVALID_PROVIDER")
+                self.assertFalse(result["unloaded"])
+
     def test_unload_provider_reports_not_loaded_and_unknown(self):
         self.assertEqual(self.manager.unload_provider("public_image")["status"], "NOT_LOADED")
         self.assertEqual(self.manager.unload_provider("missing")["status"], "NOT_FOUND")
