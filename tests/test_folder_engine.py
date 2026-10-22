@@ -60,6 +60,18 @@ class FolderEngineTests(unittest.TestCase):
         with self.assertRaises(UnsafePathError):
             self.engine.resolve("C:\\\\outside")
 
+    def test_rejects_symlink_escape(self):
+        self.engine.ensure_root()
+        outside = Path(self.tmp.name) / "outside"
+        outside.mkdir()
+        link = self.root / "escape"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"directory symlinks unavailable: {exc}")
+        with self.assertRaises(UnsafePathError):
+            self.engine.resolve("escape/secret")
+
     def test_rejects_workspace_root_as_child_folder(self):
         with self.assertRaises(UnsafePathError):
             self.engine.ensure_folder(".")
