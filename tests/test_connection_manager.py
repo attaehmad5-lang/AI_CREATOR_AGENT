@@ -1068,6 +1068,19 @@ class ConnectionManagerTests(unittest.TestCase):
             "NOT_FOUND",
         )
 
+    def test_provider_contract_fails_closed_when_catalog_is_corrupt(self):
+        class ImageProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        result = self.manager.validate_provider_contract("public_image", ImageProvider())
+
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["contract_version"], "1.0")
+        self.assertEqual(result["error_type"], "ValueError")
+
     def test_provider_contract_accepts_required_modality_method(self):
         class ImageProvider:
             def generate_image(self, prompt, output_path):
