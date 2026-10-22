@@ -6,8 +6,11 @@ caller-selected workspace root.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -164,6 +167,162 @@ class FolderEngine:
             if self.root.exists() and not self.root.is_dir():
                 raise FolderTypeError(f"workspace root is occupied by a file: {self.root}")
         return [self.ensure_folder(path) for path in requested]
+
+    def _metadata_path(self) -> Path:
+        return self.root / ".ai_creator_agent_folder_metadata.json"
+
+    def _read_metadata(self) -> dict:
+        path = self._metadata_path()
+        if not path.exists():
+            return {"version": 1, "folders": {}}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise FolderEngineError(f"folder metadata is unreadable: {exc}") from exc
+        if not isinstance(data, dict) or data.get("version") != 1 or not isinstance(data.get("folders"), dict):
+            raise FolderEngineError("folder metadata has an unsupported or invalid format")
+        return data
+
+    def _write_metadata(self, data: dict) -> None:
+        self.ensure_root()
+        path = self._metadata_path()
+        temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+        try:
+            temporary.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2) + "\\n", encoding="utf-8")
+            temporary.replace(path)
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def get_folder_id(self, relative_path: str | os.PathLike[str], *, create: bool = True) -> str | None:
+        """Return a stable UUID for a folder; optionally persist one on first access."""
+        target = self.resolve(relative_path)
+        if target == self.root or not target.is_dir():
+            raise FolderTypeError("folder ID requires an existing child directory")
+        data = self._read_metadata()
+        key = target.relative_to(self.root).as_posix()
+        record = data["folders"].get(key)
+        if isinstance(record, dict) and isinstance(record.get("id"), str):
+            return record["id"]
+        if not create:
+            return None
+        folder_id = str(uuid.uuid4())
+        data["folders"][key] = {"id": folder_id, "metadata": {}}
+        self._write_metadata(data)
+        return folder_id
+
+    def get_metadata(self, relative_path: str | os.PathLike[str]) -> dict:
+        """Return a defensive copy of user metadata for an existing folder."""
+        target = self.resolve(relative_path)
+        if target == self.root or not target.is_dir():
+            raise FolderTypeError("metadata requires an existing child directory")
+        record = self._read_metadata()["folders"].get(target.relative_to(self.root).as_posix(), {})
+        metadata = record.get("metadata", {}) if isinstance(record, dict) else {}
+        return dict(metadata) if isinstance(metadata, dict) else {}
+
+    def set_metadata(self, relative_path: str | os.PathLike[str], key: str, value: object) -> None:
+        """Persist JSON-compatible metadata for a folder using atomic replacement."""
+        if not isinstance(key, str) or not key.strip() or key != key.strip():
+            raise ValueError("metadata key must be a non-empty trimmed string")
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("metadata value must be JSON serializable") from exc
+        target = self.resolve(relative_path)
+        if target == self.root or not target.is_dir():
+            raise FolderTypeError("metadata requires an existing child directory")
+        data = self._read_metadata()
+        path_key = target.relative_to(self.root).as_posix()
+        record = data["folders"].setdefault(path_key, {"id": str(uuid.uuid4()), "metadata": {}})
+        if not isinstance(record, dict) or not isinstance(record.get("metadata", {}), dict):
+            raise FolderEngineError("folder metadata record is invalid")
+        record.setdefault("metadata", {})[key] = value
+        self._write_metadata(data)
+
+    def rename_folder(self, relative_path: str | os.PathLike[str], new_name: str) -> FolderEntry:
+        """Rename a folder in place; never overwrite an existing destination."""
+        source = self.resolve(relative_path)
+        if source == self.root or not source.is_dir():
+            raise FolderTypeError("rename requires an existing child directory")
+        safe_name = self.validate_name(new_name)
+        destination = source.with_name(safe_name)
+        if destination.exists():
+            raise FileExistsError(f"destination already exists: {destination}")
+        destination.relative_to(self.root)
+        source.rename(destination)
+        data = self._read_metadata()
+        old_key = source.relative_to(self.root).as_posix()
+        new_key = destination.relative_to(self.root).as_posix()
+        if old_key in data["folders"]:
+            data["folders"][new_key] = data["folders"].pop(old_key)
+            self._write_metadata(data)
+        return self.describe(new_key)
+
+    def move_folder(self, relative_path: str | os.PathLike[str], destination_path: str | os.PathLike[str]) -> FolderEntry:
+        """Move a folder beneath the workspace, rejecting self/descendant moves."""
+        source = self.resolve(relative_path)
+        destination = self.resolve(destination_path)
+        if source == self.root or not source.is_dir():
+            raise FolderTypeError("move requires an existing child directory")
+        if destination == source or source in destination.parents:
+            raise UnsafePathError("a folder cannot be moved into itself or its descendants")
+        if destination.exists():
+            raise FileExistsError(f"destination already exists: {destination}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.relative_to(self.root)
+        old_key = source.relative_to(self.root).as_posix()
+        source.rename(destination)
+        data = self._read_metadata()
+        moved = {}
+        for key, value in list(data["folders"].items()):
+            if key == old_key or key.startswith(old_key + "/"):
+                moved[destination.relative_to(self.root).as_posix() + key[len(old_key):]] = data["folders"].pop(key)
+        if moved:
+            data["folders"].update(moved)
+            self._write_metadata(data)
+        return self.describe(destination.relative_to(self.root).as_posix())
+
+    def copy_folder(self, relative_path: str | os.PathLike[str], destination_path: str | os.PathLike[str]) -> FolderEntry:
+        """Copy a folder tree without following symlinks or overwriting a destination."""
+        source = self.resolve(relative_path)
+        destination = self.resolve(destination_path)
+        if source == self.root or not source.is_dir():
+            raise FolderTypeError("copy requires an existing child directory")
+        if destination == source or source in destination.parents:
+            raise UnsafePathError("a folder cannot be copied into itself or its descendants")
+        if destination.exists():
+            raise FileExistsError(f"destination already exists: {destination}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, destination, symlinks=True)
+        # Do not copy directory symlinks: remove them from the copied tree.
+        for current, dirs, _files in os.walk(destination, topdown=True, followlinks=False):
+            for name in list(dirs):
+                candidate = Path(current) / name
+                if candidate.is_symlink():
+                    candidate.unlink()
+                    dirs.remove(name)
+        return self.describe(destination.relative_to(self.root).as_posix())
+
+    def delete_folder(self, relative_path: str | os.PathLike[str], *, recursive: bool = False) -> None:
+        """Delete a child folder; non-empty deletion requires explicit recursive=True."""
+        target = self.resolve(relative_path)
+        if target == self.root or not target.is_dir():
+            raise FolderTypeError("delete requires an existing child directory")
+        if target.is_symlink():
+            raise UnsafePathError("deleting directory symlinks is not supported")
+        if recursive:
+            shutil.rmtree(target)
+        else:
+            target.rmdir()
+        key = target.relative_to(self.root).as_posix()
+        data = self._read_metadata()
+        removed = [item for item in data["folders"] if item == key or item.startswith(key + "/")]
+        for item in removed:
+            data["folders"].pop(item, None)
+        if removed:
+            self._write_metadata(data)
 
     def describe(self, relative_path: str | os.PathLike[str]) -> FolderEntry:
         """Describe a path without creating it."""
