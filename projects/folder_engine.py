@@ -188,7 +188,7 @@ class FolderEngine:
         path = self._metadata_path()
         temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
         try:
-            temporary.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2) + "\\n", encoding="utf-8")
+            temporary.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
             temporary.replace(path)
         finally:
             try:
