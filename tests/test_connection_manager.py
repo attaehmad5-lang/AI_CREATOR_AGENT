@@ -248,6 +248,16 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["saved"])
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
 
+    def test_set_state_fails_closed_when_catalog_is_corrupt(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+
+        result = self.manager.set_state("public_image", "READY")
+
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["saved"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertEqual(self.manager.state["providers"].get("public_image"), None)
+
     def test_public_state_setter_cannot_mint_verified_connection(self):
         for state in ("CONNECTED", "READY"):
             with self.subTest(state=state):
