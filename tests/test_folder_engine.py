@@ -236,6 +236,13 @@ class FolderEngineTests(unittest.TestCase):
             self.engine.ensure_folders(["safe-folder", "../outside"])
         self.assertFalse(self.root.exists())
 
+    def test_bulk_creation_preflights_file_collisions_before_creating(self):
+        self.engine.ensure_root()
+        (self.root / "blocked").write_text("x", encoding="utf-8")
+        with self.assertRaises(FolderTypeError):
+            self.engine.ensure_folders(["safe-folder", "blocked/child"])
+        self.assertFalse((self.root / "safe-folder").exists())
+
     def test_name_must_be_string(self):
         with self.assertRaises(TypeError):
             self.engine.validate_name(None)
