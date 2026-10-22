@@ -126,6 +126,40 @@ class FolderEngineTests(unittest.TestCase):
     def test_list_missing_path_is_empty(self):
         self.assertEqual(self.engine.list_folders("not-created"), [])
 
+    def test_validate_structure_reports_valid_layout(self):
+        self.engine.ensure_folders(["research", "story/scenes"])
+        report = self.engine.validate_structure(["research", "story/scenes"])
+        self.assertTrue(report.valid)
+        self.assertEqual(report.checked_paths, ("research", "story/scenes"))
+        self.assertEqual(report.missing_paths, ())
+        self.assertEqual(report.non_directory_paths, ())
+
+    def test_validate_structure_reports_missing_paths_without_creating_them(self):
+        report = self.engine.validate_structure(["research", "story/scenes"])
+        self.assertFalse(report.valid)
+        self.assertEqual(report.missing_paths, ("research", "story/scenes"))
+        self.assertFalse(self.root.exists())
+
+    def test_validate_structure_reports_file_collisions_separately(self):
+        self.engine.ensure_root()
+        (self.root / "not-a-folder").write_text("x", encoding="utf-8")
+        report = self.engine.validate_structure(["missing", "not-a-folder"])
+        self.assertFalse(report.valid)
+        self.assertEqual(report.missing_paths, ("missing",))
+        self.assertEqual(report.non_directory_paths, ("not-a-folder",))
+
+    def test_validate_structure_rejects_unsafe_paths(self):
+        with self.assertRaises(UnsafePathError):
+            self.engine.validate_structure(["../outside"])
+
+    def test_validate_structure_rejects_root_as_child(self):
+        with self.assertRaises(UnsafePathError):
+            self.engine.validate_structure(["."])
+
+    def test_validate_structure_rejects_single_string_argument(self):
+        with self.assertRaises(TypeError):
+            self.engine.validate_structure("research")
+
     def test_list_tree_preserves_nested_parent_child_relationships(self):
         self.engine.ensure_folders([
             "story/scenes/scene-02",
