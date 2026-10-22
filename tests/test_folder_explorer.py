@@ -86,8 +86,8 @@ class FolderExplorerTests(unittest.TestCase):
         explorer.navigate("stories")
         explorer.navigate("assets")
         self.assertEqual(explorer.back(), "stories")
-        self.assertEqual(explorer.back(), "assets")
-        self.assertEqual(explorer.back(), "assets")
+        self.assertEqual(explorer.back(), "research")
+        self.assertEqual(explorer.back(), "research")
 
     def test_invalid_history_limit(self):
         with self.assertRaises(ValueError):
