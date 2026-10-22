@@ -231,6 +231,11 @@ class FolderEngineTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.engine.ensure_folders("research")
 
+    def test_bulk_creation_prevalidates_all_paths_before_creating(self):
+        with self.assertRaises(UnsafePathError):
+            self.engine.ensure_folders(["safe-folder", "../outside"])
+        self.assertFalse(self.root.exists())
+
     def test_name_must_be_string(self):
         with self.assertRaises(TypeError):
             self.engine.validate_name(None)
