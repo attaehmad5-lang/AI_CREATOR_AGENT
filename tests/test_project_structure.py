@@ -46,6 +46,27 @@ class ProjectStructureTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 create_project_structure(root, ("",))
 
+    def test_rejects_nonportable_folder_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "projects"
+            with self.assertRaises(ValueError):
+                create_project_structure(root, ("safe", "CON"))
+            self.assertFalse(root.exists())
+
+    def test_rejects_single_string_as_folder_collection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "projects"
+            with self.assertRaises(TypeError):
+                create_project_structure(root, "research")
+            self.assertFalse(root.exists())
+
+    def test_bulk_invalid_input_does_not_create_partial_structure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "projects"
+            with self.assertRaises(ValueError):
+                create_project_structure(root, ("valid-folder", "../outside"))
+            self.assertFalse(root.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
