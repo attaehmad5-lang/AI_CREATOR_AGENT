@@ -98,7 +98,12 @@ class WorkspaceSearch:
         if not root.is_dir():
             raise NotADirectoryError(str(root))
         needle = query if case_sensitive else query.casefold()
-        maximum = min(limit or self.max_results, self.max_results)
+        if limit is None:
+            maximum = self.max_results
+        elif isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("limit must be a positive integer")
+        else:
+            maximum = min(limit, self.max_results)
         found = []
         for current, dirs, _files in os.walk(root, topdown=True, followlinks=False):
             base = Path(current)
