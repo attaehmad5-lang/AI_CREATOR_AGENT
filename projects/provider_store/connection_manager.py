@@ -706,9 +706,13 @@ class ConnectionManager:
             # Factories may allocate resources before returning an incompatible
             # object. Best-effort cleanup prevents a failed load leaking them.
             cleanup_error_type = None
-            cleanup = getattr(instance, "close", None)
-            if not callable(cleanup):
-                cleanup = getattr(instance, "shutdown", None)
+            try:
+                cleanup = getattr(instance, "close", None)
+                if not callable(cleanup):
+                    cleanup = getattr(instance, "shutdown", None)
+            except Exception as exc:
+                cleanup = None
+                cleanup_error_type = type(exc).__name__
             if callable(cleanup):
                 try:
                     cleanup()
