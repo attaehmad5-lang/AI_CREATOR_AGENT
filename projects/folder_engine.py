@@ -178,7 +178,7 @@ class FolderEngine:
 
         def build(directory: Path, depth: int) -> FolderTreeNode:
             entry = self.describe(".") if directory == self.root else self.describe(
-                directory.relative_to(self.root)
+                directory.relative_to(self.root).as_posix()
             )
             if max_depth is not None and depth >= max_depth:
                 return FolderTreeNode(entry=entry)
