@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REQUIRED_IGNORE_PATTERNS = {"hf_token.txt", ".env", ".env.*", "hf_token_setup.py"}
+REQUIRED_IGNORE_PATTERNS = {"hf_token.txt", ".env", ".env.*", "!.env.example", "hf_token_setup.py"}
 FORBIDDEN_BASENAMES = {"hf_token.txt", "hf_token_setup.py", ".env"}
 
 
