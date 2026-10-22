@@ -142,7 +142,14 @@ class FolderEngine:
         """Create multiple folders in input order; repeated paths are safe."""
         if isinstance(paths, (str, bytes, os.PathLike)):
             raise TypeError("paths must be an iterable of paths, not a single path")
-        return [self.ensure_folder(path) for path in paths]
+        requested = list(paths)
+        # Validate the complete batch before making filesystem changes, so an
+        # unsafe later entry cannot leave earlier folders partially created.
+        for path in requested:
+            target = self.resolve(path)
+            if target == self.root:
+                raise UnsafePathError("workspace root cannot be created as a child folder")
+        return [self.ensure_folder(path) for path in requested]
 
     def describe(self, relative_path: str | os.PathLike[str]) -> FolderEntry:
         """Describe a path without creating it."""
