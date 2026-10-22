@@ -605,7 +605,16 @@ class ConnectionManager:
 
     def validate_provider_contract(self, provider_id: str, instance: Any) -> dict[str, Any]:
         """Validate the callable surface required by the provider's declared modality."""
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "valid": False,
+                "contract_version": "1.0",
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
