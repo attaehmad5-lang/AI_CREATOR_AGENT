@@ -218,8 +218,11 @@ class FolderEngine:
             raise FolderTypeError(f"path is not a directory: {parent}")
         entries = []
         for child in sorted(parent.iterdir(), key=lambda item: (item.name.casefold(), item.name)):
-            if child.is_dir():
-                entries.append(self.describe(child.relative_to(self.root)))
+            # Directory symlinks are intentionally excluded: following them
+            # can expose external trees or make listings platform-dependent.
+            if child.is_symlink() or not child.is_dir():
+                continue
+            entries.append(self.describe(child.relative_to(self.root).as_posix()))
         return entries
 
     def list_tree(
