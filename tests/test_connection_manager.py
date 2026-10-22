@@ -510,8 +510,16 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "INVALID_AUTHENTICATION_POLICY")
         self.assertFalse(result["saved"])
 
+    def test_endpoint_validation_rejects_unicode_control_characters(self):
+        result = ConnectionManager.validate_endpoint(
+            "https://api.example.com/path\u0085header-injection",
+            allowed_hosts={"api.example.com"},
+        )
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "INVALID_ENDPOINT")
+
     def test_configure_provider_rejects_control_characters_in_model_without_persisting(self):
-        for model in ("image-v1\nmalicious", "image-v1\tmalicious", "image-v1\x7f"):
+        for model in ("image-v1\nmalicious", "image-v1\tmalicious", "image-v1\x7f", "image-v1\u0085malicious"):
             with self.subTest(model=repr(model)):
                 result = self.manager.configure_provider("public_image", model=model)
                 self.assertEqual(result["status"], "INVALID_MODEL")
@@ -619,7 +627,7 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_persisted_model_control_characters_are_rejected_before_probe(self):
         self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
-        for model in ("image-v1\nmalicious", "image-v1\tmalicious", "image-v1\x7f"):
+        for model in ("image-v1\nmalicious", "image-v1\tmalicious", "image-v1\x7f", "image-v1\u0085malicious"):
             with self.subTest(model=repr(model)):
                 self.manager.state["providers"]["public_image"] = {
                     "status": "CONNECTED",
