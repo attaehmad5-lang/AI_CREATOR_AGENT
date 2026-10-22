@@ -68,8 +68,14 @@ class FolderEngine:
     def resolve(self, relative_path: str | os.PathLike[str]) -> Path:
         """Resolve a relative path and reject absolute paths or root escape."""
         raw = os.fspath(relative_path)
+        if not isinstance(raw, str):
+            raise TypeError("relative path must be a string path")
         if not raw or not raw.strip():
             raise UnsafePathError("relative path must not be empty")
+        if "\\\\" in raw or any(ord(ch) < 32 for ch in raw):
+            raise UnsafePathError("non-portable path separator or control character")
+        if re.match(r"^[A-Za-z]:", raw):
+            raise UnsafePathError("drive-qualified paths are not allowed")
         candidate = Path(raw)
         if candidate.is_absolute() or candidate.drive:
             raise UnsafePathError("absolute paths are not allowed")
@@ -90,6 +96,8 @@ class FolderEngine:
     def ensure_folder(self, relative_path: str | os.PathLike[str]) -> FolderEntry:
         """Create one folder, including parents, and return its description."""
         target = self.resolve(relative_path)
+        if target == self.root:
+            raise UnsafePathError("workspace root cannot be created as a child folder")
         self.ensure_root()
         try:
             target.mkdir(parents=True, exist_ok=True)
