@@ -954,7 +954,16 @@ class ConnectionManager:
     ) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER", "saved": False}
-        if not self.provider_exists(provider_id):
+        try:
+            exists = self.provider_exists(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not exists:
             return {"status": "NOT_FOUND", "provider": provider_id}
         if not isinstance(status, str) or status not in self.VALID_STATES:
             return {"status": "INVALID_STATE", "provider": provider_id}
