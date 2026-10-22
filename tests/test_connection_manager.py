@@ -1081,6 +1081,26 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["contract_version"], "1.0")
         self.assertEqual(result["error_type"], "ValueError")
 
+    def test_unload_fails_closed_when_cleanup_attribute_raises(self):
+        class BrokenCleanupProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+            @property
+            def close(self):
+                raise RuntimeError("private cleanup detail")
+
+        instance = BrokenCleanupProvider()
+        loaded = self.manager.load_provider("public_image", lambda metadata: instance)
+        self.assertTrue(loaded["loaded"])
+
+        result = self.manager.unload_provider("public_image")
+
+        self.assertEqual(result["status"], "UNLOAD_FAILED")
+        self.assertEqual(result["error_type"], "RuntimeError")
+        self.assertFalse(result["unloaded"])
+        self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
+        self.assertNotIn("private cleanup detail", repr(result))
+
     def test_unload_cleans_loaded_provider_even_if_catalog_becomes_corrupt(self):
         class ImageProvider:
             def __init__(self):
