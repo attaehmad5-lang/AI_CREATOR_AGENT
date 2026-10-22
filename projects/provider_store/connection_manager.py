@@ -1281,8 +1281,9 @@ class ConnectionManager:
 
         credentials = self.credential_status(provider_id, environ)
         blocked_credential_states = {
-            "CREDENTIALS_MISSING", "CREDENTIALS_EXPIRED", "CREDENTIAL_EXPIRY_INVALID",
-            "CREDENTIAL_EXPIRY_UNKNOWN", "INVALID_ENVIRONMENT", "MANUAL_CONNECTION_REQUIRED",
+            "CATALOG_INVALID", "NOT_FOUND", "CREDENTIALS_MISSING", "CREDENTIALS_EXPIRED",
+            "CREDENTIAL_EXPIRY_INVALID", "CREDENTIAL_EXPIRY_UNKNOWN",
+            "INVALID_ENVIRONMENT", "MANUAL_CONNECTION_REQUIRED",
         }
         if credentials["status"] in blocked_credential_states:
             if not save_state("ERROR"):
