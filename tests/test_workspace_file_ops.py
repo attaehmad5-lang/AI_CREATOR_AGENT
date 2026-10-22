@@ -1,0 +1,88 @@
+"""Regression tests for safe workspace file operations."""
+import tempfile
+import unittest
+from pathlib import Path
+
+from projects.folder_engine import FolderEngine, UnsafePathError
+from projects.workspace_file_ops import WorkspaceFileOps
+
+
+class WorkspaceFileOpsTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "workspace"
+        self.engine = FolderEngine(self.root)
+        self.engine.ensure_root()
+        self.files = WorkspaceFileOps(self.engine, max_file_bytes=64)
+
+    def test_upload_download_and_checksum(self):
+        payload = b"hello world"
+        info = self.files.upload_bytes("research/note.txt", payload)
+        self.assertEqual(self.files.download_bytes("research/note.txt"), payload)
+        self.assertEqual(info["sha256"], self.files.sha256_bytes(payload))
+        self.assertEqual(info["size"], len(payload))
+
+    def test_upload_rejects_oversize_and_existing_destination(self):
+        with self.assertRaises(ValueError):
+            self.files.upload_bytes("large.bin", b"x" * 65)
+        self.files.upload_bytes("note.txt", b"first")
+        with self.assertRaises(FileExistsError):
+            self.files.upload_bytes("note.txt", b"second")
+        self.assertEqual(self.files.download_bytes("note.txt"), b"first")
+
+    def test_upload_overwrite_is_explicit(self):
+        self.files.upload_bytes("note.txt", b"first")
+        self.files.upload_bytes("note.txt", b"second", overwrite=True)
+        self.assertEqual(self.files.download_bytes("note.txt"), b"second")
+
+    def test_rejects_absolute_and_traversal_paths(self):
+        with self.assertRaises(UnsafePathError):
+            self.files.upload_bytes("../outside.txt", b"x")
+        with self.assertRaises(UnsafePathError):
+            self.files.download_bytes(str(self.root / "outside.txt"))
+
+    def test_describe_detects_png_magic_and_extension(self):
+        info = self.files.upload_bytes("image.png", b"\x89PNG\r\n\x1a\nrest")
+        self.assertEqual(info["mime_type"], "image/png")
+        self.assertEqual(info["extension"], ".png")
+
+    def test_rename_move_copy_and_delete(self):
+        self.files.upload_bytes("source.txt", b"content")
+        self.files.rename("source.txt", "renamed.txt")
+        self.files.copy("renamed.txt", "copies/copy.txt")
+        self.files.move("copies/copy.txt", "archive/moved.txt")
+        self.assertEqual(self.files.download_bytes("archive/moved.txt"), b"content")
+        self.files.delete("renamed.txt")
+        self.assertFalse((self.root / "renamed.txt").exists())
+
+    def test_file_collision_is_not_overwritten_by_copy(self):
+        self.files.upload_bytes("a.txt", b"a")
+        self.files.upload_bytes("b.txt", b"b")
+        with self.assertRaises(FileExistsError):
+            self.files.copy("a.txt", "b.txt")
+        self.assertEqual(self.files.download_bytes("b.txt"), b"b")
+
+    def test_bulk_rename_supports_swaps(self):
+        self.files.upload_bytes("a.txt", b"A")
+        self.files.upload_bytes("b.txt", b"B")
+        self.files.bulk_rename([("a.txt", "b.txt"), ("b.txt", "a.txt")])
+        self.assertEqual(self.files.download_bytes("a.txt"), b"B")
+        self.assertEqual(self.files.download_bytes("b.txt"), b"A")
+
+    def test_bulk_rename_preflights_duplicate_destinations(self):
+        self.files.upload_bytes("a.txt", b"A")
+        self.files.upload_bytes("b.txt", b"B")
+        with self.assertRaises(FileExistsError):
+            self.files.bulk_rename([("a.txt", "same.txt"), ("b.txt", "same.txt")])
+        self.assertTrue((self.root / "a.txt").exists())
+        self.assertTrue((self.root / "b.txt").exists())
+
+    def test_download_rejects_oversize_existing_file(self):
+        (self.root / "big.bin").write_bytes(b"x" * 65)
+        with self.assertRaises(ValueError):
+            self.files.download_bytes("big.bin")
+
+
+if __name__ == "__main__":
+    unittest.main()
