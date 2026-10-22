@@ -366,7 +366,7 @@ class ConnectionManager:
                                 not isinstance(raw_url, str)
                                 or not raw_url.strip()
                                 or len(raw_url) > 2048
-                                or any(ord(char) < 32 or ord(char) == 127 for char in raw_url)
+                                or any(unicodedata.category(char) == "Cc" for char in raw_url)
                                 or parsed_url is None
                                 or parsed_url.scheme != "https"
                                 or not parsed_url.hostname
