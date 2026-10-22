@@ -45,8 +45,16 @@ class WorkspaceSearch:
 
     def search(self, query: str, *, within: str = ".", mode: str = "name",
                extensions: Iterable[str] | None = None, case_sensitive: bool = False,
-               regex: bool = False, limit: int | None = None) -> list[dict]:
-        """Search names or bounded text content. Regex errors are surfaced."""
+               regex: bool = False, limit: int | None = None,
+               min_size: int | None = None, max_size: int | None = None,
+               modified_after: float | None = None, modified_before: float | None = None,
+               sort_by: str = "path", descending: bool = False,
+               include_hidden: bool = False) -> list[dict]:
+        """Search names or bounded text content with optional metadata filters.
+
+        Modification timestamps are Unix seconds. Supported sort keys are path,
+        name, size, and modified. Search is deterministic when sort keys tie.
+        """
         if not isinstance(query, str) or not query:
             raise ValueError("query must be a non-empty string")
         if mode not in {"name", "content"}:
@@ -61,6 +69,18 @@ class WorkspaceSearch:
             return []
         if not root.is_dir():
             raise NotADirectoryError(str(root))
+        for field, value in (("min_size", min_size), ("max_size", max_size)):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                raise ValueError(f"{field} must be a non-negative integer")
+        if min_size is not None and max_size is not None and min_size > max_size:
+            raise ValueError("min_size cannot exceed max_size")
+        for field, value in (("modified_after", modified_after), ("modified_before", modified_before)):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+                raise TypeError(f"{field} must be a Unix timestamp")
+        if modified_after is not None and modified_before is not None and modified_after > modified_before:
+            raise ValueError("modified_after cannot exceed modified_before")
+        if sort_by not in {"path", "name", "size", "modified"}:
+            raise ValueError("sort_by must be path, name, size, or modified")
         suffixes = None
         if extensions is not None:
             suffixes = {ext.casefold() if ext.startswith(".") else "." + ext.casefold()
@@ -69,6 +89,17 @@ class WorkspaceSearch:
         pattern = re.compile(query if regex else re.escape(query), flags)
         results = []
         for path in self._files(root):
+            if not include_hidden and any(part.startswith(".") for part in path.relative_to(root).parts):
+                continue
+            stat = path.stat()
+            if min_size is not None and stat.st_size < min_size:
+                continue
+            if max_size is not None and stat.st_size > max_size:
+                continue
+            if modified_after is not None and stat.st_mtime < modified_after:
+                continue
+            if modified_before is not None and stat.st_mtime > modified_before:
+                continue
             if suffixes is not None and path.suffix.casefold() not in suffixes:
                 continue
             match = None
@@ -82,11 +113,17 @@ class WorkspaceSearch:
                 match = pattern.search(content)
             if match:
                 results.append({"path": self._relative(path), "name": path.name,
-                                "size": path.stat().st_size, "mode": mode,
+                                "size": stat.st_size, "modified": stat.st_mtime,
+                                "extension": path.suffix.casefold(), "mode": mode,
                                 "match": match.group(0)[:160]})
-                if len(results) >= limit:
-                    break
-        return results
+        keys = {
+            "path": lambda item: (item["path"].casefold(), item["path"]),
+            "name": lambda item: (item["name"].casefold(), item["path"].casefold(), item["path"]),
+            "size": lambda item: (item["size"], item["path"].casefold(), item["path"]),
+            "modified": lambda item: (item["modified"], item["path"].casefold(), item["path"]),
+        }
+        results.sort(key=keys[sort_by], reverse=descending)
+        return results[:limit]
 
     def search_folders(self, query: str, *, within: str = ".", case_sensitive: bool = False,
                        limit: int | None = None) -> list[dict]:
