@@ -123,6 +123,20 @@ class FolderEngineTests(unittest.TestCase):
         (self.root / "note.txt").write_text("not a folder", encoding="utf-8")
         self.assertEqual([e.name for e in self.engine.list_folders()], ["Alpha", "beta", "zeta"])
 
+    def test_list_folders_does_not_follow_directory_symlinks(self):
+        self.engine.ensure_folder("inside")
+        outside = Path(self.tmp.name) / "outside"
+        outside.mkdir()
+        link = self.root / "linked-outside"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks are unavailable on this platform")
+        self.assertEqual(
+            [entry.name for entry in self.engine.list_folders()],
+            ["inside"],
+        )
+
     def test_list_missing_path_is_empty(self):
         self.assertEqual(self.engine.list_folders("not-created"), [])
 
