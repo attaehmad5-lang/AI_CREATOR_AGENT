@@ -738,6 +738,8 @@ class ConnectionManager:
 
     def unload_provider(self, provider_id: str) -> dict[str, Any]:
         """Unload a runtime instance under the same lock used by loading/disabling."""
+        if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", provider_id):
+            return {"status": "INVALID_PROVIDER", "provider": provider_id, "unloaded": False}
         with self._lock:
             return self._unload_provider_locked(provider_id)
 
