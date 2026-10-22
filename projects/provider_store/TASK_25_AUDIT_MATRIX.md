@@ -6,7 +6,7 @@ The exact canonical feature names, original baseline markers and item-by-item ev
 
 ## Latest code verification
 
-GitHub Actions code-verification run [#39819580770](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39819580770) completed successfully on Python 3.13: **470 tests passed on Ubuntu and 470 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. Current evidence includes explicit certificate and hostname verification for the default provider-balance HTTPS transport, safe TLS failure reporting, fail-closed catalog/state operations, and rejection of control characters in submitted or persisted model configuration.
+GitHub Actions code-verification run [#39820701328](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39820701328) completed successfully on Python 3.13: **471 tests passed on Ubuntu and 471 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. Current evidence includes explicit certificate and hostname verification for the default provider-balance HTTPS transport, safe TLS failure reporting, fail-closed catalog/state operations, and rejection of ASCII/Unicode control characters in endpoint and model configuration before provider probes.
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
