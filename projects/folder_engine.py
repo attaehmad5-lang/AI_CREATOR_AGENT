@@ -72,7 +72,7 @@ class FolderEngine:
             raise TypeError("relative path must be a string path")
         if not raw or not raw.strip():
             raise UnsafePathError("relative path must not be empty")
-        if "\\\\" in raw or any(ord(ch) < 32 for ch in raw):
+        if "\" in raw or any(ord(ch) < 32 for ch in raw):
             raise UnsafePathError("non-portable path separator or control character")
         if re.match(r"^[A-Za-z]:", raw):
             raise UnsafePathError("drive-qualified paths are not allowed")
