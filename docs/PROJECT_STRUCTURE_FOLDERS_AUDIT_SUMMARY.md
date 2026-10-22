@@ -49,3 +49,10 @@ PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
 - Added `.github/workflows/project-structure-folders.yml` to compile the feature and run its focused tests on Ubuntu and Windows with Python 3.11, 3.12, and 3.13.
 - The earlier six-job run passed on commit `1d92ca6f2d04ffc6af4d934f0767cdcc620485d5`: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39822521327
 - PR #78 remains open and unmerged. The current PR head is mergeable, but Feature #1's 200-point implementation is not complete.
+
+## Latest continuation — folder lifecycle hardening
+- Added persistent UUID assignment for folders, JSON-compatible folder metadata with atomic file replacement, metadata reads that return defensive copies, and validation of metadata keys/values.
+- Added rename/move/copy/delete operations with workspace-contained paths, collision rejection, self/descendant move-copy guards, metadata path migration for rename/move, regenerated IDs for copied trees, symlink removal from copies, and explicit opt-in for recursive deletion.
+- Added focused regression tests for stable IDs, metadata persistence, rename/move/copy metadata behavior, collision protection, descendant-cycle prevention, and safe deletion.
+- A regression in metadata JSON serialization was caught by CI and fixed; a subsequent focused CI run passed on its then-current commit. The latest lifecycle-operation and test additions are queued for their own complete six-job verification; do not mark them PASS until that run finishes.
+- These additions extend the implemented core, but the full 200-feature (user-referenced 210-feature count needs reconciliation against the canonical checklist) scope is still not complete or fully integrated. Keep all feature IDs stable and update the ledger only from evidence.
