@@ -616,6 +616,29 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertEqual(called, [])
 
+    def test_persisted_model_control_characters_are_rejected_before_probe(self):
+        self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        for model in ("image-v1\nmalicious", "image-v1\tmalicious", "image-v1\x7f"):
+            with self.subTest(model=repr(model)):
+                self.manager.state["providers"]["public_image"] = {
+                    "status": "CONNECTED",
+                    "verified": True,
+                    "configuration": {
+                        "endpoint": "https://api.example.com/health",
+                        "model": model,
+                    },
+                }
+                self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+                called = []
+                result = self.manager.verify_connectivity(
+                    "public_image",
+                    lambda provider, **kwargs: called.append(True) or {"ok": True},
+                )
+                self.assertEqual(result["status"], "INVALID_MODEL")
+                self.assertFalse(result["verified"])
+                self.assertEqual(called, [])
+
     def test_persisted_secret_bearing_model_is_rejected_before_probe(self):
         self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
