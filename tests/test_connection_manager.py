@@ -1311,6 +1311,26 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
         self.assertTrue(self.manager.get_state("public_image")["verified"])
 
+    def test_connectivity_does_not_probe_when_credential_check_reports_invalid_catalog(self):
+        original_credential_status = self.manager.credential_status
+        probe_calls = []
+        self.manager.credential_status = lambda *args, **kwargs: {
+            "status": "CATALOG_INVALID",
+            "credential_present": False,
+        }
+        try:
+            result = self.manager.verify_connectivity(
+                "public_image",
+                lambda provider, **kwargs: probe_calls.append(True) or True,
+            )
+        finally:
+            self.manager.credential_status = original_credential_status
+
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["verified"])
+        self.assertEqual(probe_calls, [])
+        self.assertNotEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
+
     def test_connectivity_probe_requires_credentials_and_never_probes_without_them(self):
         called = []
         result = self.manager.verify_connectivity(
