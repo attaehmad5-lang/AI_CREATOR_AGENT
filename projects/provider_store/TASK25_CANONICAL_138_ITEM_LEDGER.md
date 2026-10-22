@@ -79,7 +79,7 @@ GitHub Actions run [#39712507679](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 41 | 🟢 | Provider Health State Tracking | VERIFIED | Persistent provider health states are stored and covered by state/reload tests. |
+| 41 | 🟢 | Provider Health State Tracking | VERIFIED | Health/state tracking rejects attempts to mint verified connectivity and now returns `CATALOG_INVALID` when provider existence cannot be validated, without mutating state. Existing state-schema and secret-redaction checks remain; full distributed health consistency remains open under later items. |
 | 42 | 🟢 | Basic Success/Failure History | VERIFIED | Success/failure history persistence, bounded history and idempotent request recording are tested. |
 | 43 | 🟡 | Health Check Before Generation | PARTIAL | Health eligibility hooks exist; not every generation path enforces a fresh check. |
 | 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
