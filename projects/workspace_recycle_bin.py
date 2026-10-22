@@ -79,6 +79,7 @@ class WorkspaceRecycleBin:
             raise FileNotFoundError(str(source))
         if not (source.is_file() or source.is_dir()):
             raise RecycleBinError("unsupported filesystem object")
+        state = self._read()
         self.trash.mkdir(parents=True, exist_ok=True)
         item_id = uuid.uuid4().hex
         payload = self.trash / item_id
@@ -86,7 +87,6 @@ class WorkspaceRecycleBin:
         now = time.time()
         # Rename is atomic on a single filesystem and does not follow a symlink.
         source.rename(payload)
-        state = self._read()
         item = {"id": item_id, "original_path": original, "payload": item_id,
                 "deleted_at": now, "expires_at": now + self.retention_seconds,
                 "is_directory": payload.is_dir()}
@@ -126,7 +126,15 @@ class WorkspaceRecycleBin:
         state["items"].remove(item)
         now = time.time()
         self._audit(state, "restore", item_id, target.relative_to(self.engine.root).as_posix(), now)
-        self._write(state)
+        try:
+            self._write(state)
+        except Exception:
+            # Best-effort compensation preserves the prior manifest/payload pair.
+            if target.exists() and not payload.exists():
+                target.rename(payload)
+            state["items"].append(item)
+            state["items"].sort(key=lambda entry: entry.get("deleted_at", 0))
+            raise
         return target.relative_to(self.engine.root).as_posix()
 
     def purge_expired(self, *, now: float | None = None) -> list[str]:
