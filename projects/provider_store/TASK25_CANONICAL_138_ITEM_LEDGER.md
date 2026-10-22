@@ -1,6 +1,6 @@
 # Task #25 — Canonical 138-Item Verification Ledger
 
-**Overall status: IN PROGRESS — do not mark Task #25 complete and do not merge PR #7 without explicit approval.**
+**Overall status: IN PROGRESS — do not mark Task #25 complete and do not merge PR #77 without explicit approval.**
 
 This file preserves the user's original A–P headings, feature numbers, feature names and baseline status markers. The **Baseline** column is the user's original 🟢/🟡/🔴 status; it is not the current implementation result. **Current audit** is independently evidence-based. A green baseline does not automatically mean the feature is verified today.
 
@@ -182,7 +182,7 @@ GitHub Actions run [#39712945309](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
 | 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 464 tests pass on Windows and Ubuntu at provider lifecycle/versioning/discovery/onboarding/deprecation PR #77 CI run #39712945309; complete 138-item coverage and production report artifacts remain open. |
-| 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
+| 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and under review in draft PR #77; dedicated secret scanning and backup verification are not complete. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
 ## N — High-Advanced Routing Intelligence
