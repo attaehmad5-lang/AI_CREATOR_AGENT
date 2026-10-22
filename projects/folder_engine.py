@@ -44,6 +44,16 @@ class FolderEntry:
     is_directory: bool
 
 
+@dataclass(frozen=True)
+class StructureValidation:
+    """Immutable result of checking a required folder layout."""
+
+    valid: bool
+    checked_paths: tuple[str, ...]
+    missing_paths: tuple[str, ...]
+    non_directory_paths: tuple[str, ...]
+
+
 class FolderEngine:
     """Create, inspect, and enumerate directories safely beneath a root."""
 
@@ -145,6 +155,37 @@ class FolderEngine:
             absolute_path=target,
             exists=exists,
             is_directory=is_directory,
+        )
+
+    def validate_structure(
+        self, required_paths: Iterable[str | os.PathLike[str]]
+    ) -> StructureValidation:
+        """Check a required folder layout without creating or modifying files.
+
+        Missing folders and paths occupied by files are reported separately.
+        Unsafe paths raise :class:`UnsafePathError` instead of being hidden in
+        the report, so callers cannot mistake invalid input for a valid layout.
+        """
+        if isinstance(required_paths, (str, bytes, os.PathLike)):
+            raise TypeError("required_paths must be an iterable of relative paths")
+        checked: list[str] = []
+        missing: list[str] = []
+        non_directories: list[str] = []
+        for raw_path in required_paths:
+            target = self.resolve(raw_path)
+            if target == self.root:
+                raise UnsafePathError("workspace root cannot be a required child folder")
+            relative = target.relative_to(self.root).as_posix()
+            checked.append(relative)
+            if not target.exists():
+                missing.append(relative)
+            elif not target.is_dir():
+                non_directories.append(relative)
+        return StructureValidation(
+            valid=not missing and not non_directories,
+            checked_paths=tuple(checked),
+            missing_paths=tuple(missing),
+            non_directory_paths=tuple(non_directories),
         )
 
     def list_folders(self, relative_path: str | os.PathLike[str] = ".") -> list[FolderEntry]:
