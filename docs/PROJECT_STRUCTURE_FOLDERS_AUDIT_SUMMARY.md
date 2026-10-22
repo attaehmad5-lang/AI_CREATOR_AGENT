@@ -6,7 +6,7 @@ This audit covers the user's 200-feature Project Structure / Folders checklist a
 ## Findings
 - The PDF status ledger has 200 feature rows: 153 labelled Full and 47 labelled Partial. These are the PDF's own claims, not proof of integration into AI_CREATOR_AGENT.
 - The PDF describes a separate `wsengine/`, `web/`, and `tests/` package. Those directories are not present in the current AI_CREATOR_AGENT main tree.
-- The current main-branch `projects/documentary_project.py` is a small script that creates seven documentary folders. PR #78 adds a reusable, import-safe folder creation function, root containment checks, and six focused tests; it remains unmerged.
+- The current main-branch `projects/documentary_project.py` is a small script that creates seven documentary folders. PR #78 adds a reusable, import-safe folder creation function, root containment checks, plus `projects/folder_engine.py` with safe root-relative resolution, idempotent/nested creation, folder descriptions, and deterministic listing. The PR adds six legacy regression tests and 19 core-engine tests; it remains unmerged.
 - Therefore, do not mark the full 200-feature Feature #1 complete based on the PDF's status table.
 
 ## Verification run
@@ -26,6 +26,12 @@ This audit covers the user's 200-feature Project Structure / Folders checklist a
 - Locks, limits, and metrics are in-process only.
 - The PDF says Pydroid 3 was not executed; this local test run used Python 3.13.
 
+## Latest implementation and CI update
+- Added `projects/folder_engine.py` and `tests/test_folder_engine.py` to the PR branch.
+- Expanded the dedicated workflow to compile and run both test modules on Ubuntu and Windows with Python 3.11, 3.12, and 3.13.
+- GitHub Actions run `39823159319` showed the compile and test steps successful on all six matrix jobs; final job cleanup was still finishing when checked. Run: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39823159319
+- This verifies the currently implemented foundation only; it does not certify the 200-feature checklist as complete.
+
 ## Next actions
 1. Keep each of the 200 feature IDs stable.
 2. Integrate and harden the PDF engine into AI_CREATOR_AGENT only after a reviewable source-level import; do not blindly copy the PDF package.
@@ -38,5 +44,5 @@ PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
 
 ## Feature-specific CI added
 - Added `.github/workflows/project-structure-folders.yml` to compile the feature and run its focused tests on Ubuntu and Windows with Python 3.11, 3.12, and 3.13.
-- The dedicated Project Structure matrix run passed **6/6 jobs** on commit `1d92ca6f2d04ffc6af4d934f0767cdcc620485d5`: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39822521327
+- The earlier six-job run passed on commit `1d92ca6f2d04ffc6af4d934f0767cdcc620485d5`: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39822521327
 - PR #78 remains open and unmerged. The current PR head is mergeable, but Feature #1's 200-point implementation is not complete.
