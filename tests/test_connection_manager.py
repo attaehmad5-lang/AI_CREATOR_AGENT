@@ -1005,6 +1005,14 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(self.manager.discover_providers(include_deprecated="yes"), [])
 
+    def test_discovery_normalizes_category_alias_separators(self):
+        self.manager.catalog["providers"][0]["category"] = "image-editing"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+
+        results = self.manager.discover_providers(category="IMAGE EDITING")
+
+        self.assertEqual([item["id"] for item in results], ["public_image"])
+
     def test_discovery_filters_by_category_case_insensitively(self):
         results = self.manager.discover_providers(category="IMAGE")
         self.assertEqual({item["id"] for item in results}, {"public_image", "token_image"})
