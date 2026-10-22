@@ -116,6 +116,12 @@ class FolderEngineTests(unittest.TestCase):
     def test_list_missing_path_is_empty(self):
         self.assertEqual(self.engine.list_folders("not-created"), [])
 
+    def test_workspace_root_file_collision_is_reported(self):
+        self.root.parent.mkdir(parents=True, exist_ok=True)
+        self.root.write_text("occupied", encoding="utf-8")
+        with self.assertRaises(FolderTypeError):
+            self.engine.ensure_root()
+
     def test_file_collision_is_reported(self):
         self.engine.ensure_root()
         (self.root / "occupied").write_text("x", encoding="utf-8")
