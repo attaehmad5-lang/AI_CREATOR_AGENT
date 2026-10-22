@@ -56,3 +56,9 @@ PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
 - Added focused regression tests for stable IDs, metadata persistence, rename/move/copy metadata behavior, collision protection, descendant-cycle prevention, and safe deletion.
 - A regression in metadata JSON serialization was caught by CI and fixed; a subsequent focused CI run passed on its then-current commit. The latest lifecycle-operation and test additions are queued for their own complete six-job verification; do not mark them PASS until that run finishes.
 - These additions extend the implemented core, but the full 200-feature (user-referenced 210-feature count needs reconciliation against the canonical checklist) scope is still not complete or fully integrated. Keep all feature IDs stable and update the ledger only from evidence.
+
+## Explorer/navigation continuation and latest CI
+- Added `projects/folder_explorer.py`, a UI-agnostic navigation service for breadcrumbs, back/forward history, recent/favorite/pinned folders, persisted view preferences, stable multi-field sorting, name/path-prefix filtering, labels/icons, and per-folder overview data.
+- Added `tests/test_folder_explorer.py` and expanded the feature-specific workflow to compile and test the explorer on Ubuntu and Windows with Python 3.11, 3.12, and 3.13.
+- Latest feature-specific CI run: **76 tests passed on all six OS/Python matrix jobs**. Run: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39828652440
+- This is evidence for the implemented folder-engine/explorer subset only. GUI rendering, cross-process concurrent state writes, complete 200-feature checklist coverage, the user's stated 210-feature count reconciliation, and full production integration remain open; do not mark Feature #1 complete yet.
