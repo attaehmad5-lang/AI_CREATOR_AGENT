@@ -9,9 +9,10 @@ import json
 import math
 import os
 import re
+import ssl
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPSHandler, HTTPRedirectHandler, Request, build_opener
 
 from .connection_manager import ConnectionManager
 
@@ -107,7 +108,9 @@ class ProviderJSONBalanceProbe:
         self.timeout_seconds = timeout_value
         self.max_response_bytes = max_response_bytes
         self.environ = os.environ if environ is None else environ
-        self.opener = opener or build_opener(_RejectRedirects())
+        self.opener = opener or build_opener(
+            _RejectRedirects(), HTTPSHandler(context=ssl.create_default_context())
+        )
 
     def __call__(self, provider_id: str) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", provider_id):
