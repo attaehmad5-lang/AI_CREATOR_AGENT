@@ -69,8 +69,16 @@ class FolderEngine:
             raise UnsafePathError("control characters are not allowed in folder names")
         if any(ch in normalized for ch in ("/", "\\", "\0")):
             raise UnsafePathError("folder name must not contain path separators")
+        if any(ch in normalized for ch in '<>:"|?*'):
+            raise UnsafePathError("folder name contains a character not portable across platforms")
+        if normalized.endswith("."):
+            raise UnsafePathError("folder names must not end with a dot")
         if re.match(r"^[A-Za-z]:", normalized):
             raise UnsafePathError("drive-qualified names are not allowed")
+        # Windows reserves these device names even when an extension is added.
+        device_stem = normalized.split(".", 1)[0].casefold()
+        if device_stem in {"con", "prn", "aux", "nul"} or re.fullmatch(r"(?:com|lpt)[1-9]", device_stem):
+            raise UnsafePathError("reserved device names are not portable folder names")
         return normalized
 
     def resolve(self, relative_path: str | os.PathLike[str]) -> Path:
@@ -89,6 +97,8 @@ class FolderEngine:
             raise UnsafePathError("absolute paths are not allowed")
         if any(part == ".." for part in candidate.parts):
             raise UnsafePathError("parent traversal is not allowed")
+        for part in candidate.parts:
+            self.validate_name(part)
         target = (self.root / candidate).resolve()
         if target != self.root and self.root not in target.parents:
             raise UnsafePathError("path escapes workspace root")
