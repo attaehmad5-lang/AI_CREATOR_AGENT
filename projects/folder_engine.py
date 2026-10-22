@@ -259,8 +259,12 @@ class FolderEngine:
         data = self._read_metadata()
         old_key = source.relative_to(self.root).as_posix()
         new_key = destination.relative_to(self.root).as_posix()
-        if old_key in data["folders"]:
-            data["folders"][new_key] = data["folders"].pop(old_key)
+        renamed = {}
+        for key, value in list(data["folders"].items()):
+            if key == old_key or key.startswith(old_key + "/"):
+                renamed[new_key + key[len(old_key):]] = data["folders"].pop(key)
+        if renamed:
+            data["folders"].update(renamed)
             self._write_metadata(data)
         return self.describe(new_key)
 
