@@ -510,6 +510,17 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "INVALID_AUTHENTICATION_POLICY")
         self.assertFalse(result["saved"])
 
+    def test_catalog_rejects_unicode_control_characters_in_official_urls(self):
+        result = ConnectionManager.validate_catalog_schema({
+            "version": "1.0",
+            "providers": [{
+                "id": "public_image",
+                "official_api_url": "https://api.example.com/docs\u0085injected",
+            }],
+        })
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("safe HTTPS URL" in error for error in result["errors"]))
+
     def test_endpoint_validation_rejects_unicode_control_characters(self):
         result = ConnectionManager.validate_endpoint(
             "https://api.example.com/path\u0085header-injection",
