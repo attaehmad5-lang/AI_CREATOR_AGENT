@@ -1,17 +1,17 @@
 # Task #25 — Provider Connection Manager Verification Audit
 
-**Follow-up branch:** `task-25-followup-audit`  
-**Pull request:** #1 (merged; follow-up work requires a new branch/PR)  
+**Active follow-up branch:** `task-25-safe-provider-plugin-lifecycle-20261020`  
+**Active pull request:** [#77](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/77) (draft; not merged)  
 **Audit status:** In progress — do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#38305883948](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680) completed successfully on Python 3.13:
+GitHub Actions code-verification run [#39819580770](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39819580770) completed successfully on Python 3.13:
 
-- Ubuntu: 312 tests passed, 0 failures.
-- Windows: 304 tests passed, 0 failures.
+- Ubuntu: 470 tests passed, 0 failures.
+- Windows: 470 tests passed, 0 failures.
 - Provider module/test compilation and provider JSON catalog validation passed on both platforms.
-- The only changes after that code-verification run are audit/documentation updates. Follow-up work is isolated in draft PR #7; PR #1 is already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
+- Current code includes explicit certificate and hostname verification for the default provider-balance HTTPS transport, safe TLS failure reporting, and model control-character rejection on both writes and persisted-state reads. The active follow-up is draft PR #77; this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
