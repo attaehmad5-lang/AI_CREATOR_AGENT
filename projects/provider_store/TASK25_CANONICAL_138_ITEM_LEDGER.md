@@ -21,7 +21,7 @@ GitHub Actions run [#39710886719](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 5 | 🔴 | Provider Unloading | VERIFIED | `unload_provider()` calls close/shutdown, preserves instances if cleanup fails, and has lifecycle regression tests. |
 | 6 | 🟡 | Provider Enable/Disable | PARTIAL | Enable/disable now fails closed with a secret-safe `CATALOG_INVALID` result when the catalog cannot be parsed or schema-validated. Cleanup failures also report whether the runtime instance remains loaded, without exposing exception messages. Tests verify both corrupt-catalog rejection and disable cleanup failure. Cross-process runtime isolation and forced cleanup remain open. |
 | 7 | 🟡 | Provider Metadata | PARTIAL | Metadata/schema validation exists; live capability/version/price metadata refresh is incomplete. |
-| 8 | 🔴 | Provider Interface Contract | VERIFIED | Required modality callables are checked before loading; missing/raising methods fail closed in contract tests. |
+| 8 | 🔴 | Provider Interface Contract | PARTIAL | Modality-specific callable contracts are versioned and checked before load; contract validation now returns `CATALOG_INVALID` instead of raising when catalog parsing/schema validation fails. Regression test verifies corrupt catalog fails closed. Interface compatibility migration and contract negotiation beyond v1.0 remain open. |
 
 ## B — Authentication and Connection
 
