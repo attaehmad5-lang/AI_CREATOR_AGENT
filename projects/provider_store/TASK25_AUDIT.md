@@ -50,4 +50,4 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 ## Completion gate
 
-Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and platform/runtime constraints are tested. PR #1 is already merged; that merge is not a completion signal.
+Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and platform/runtime constraints are tested. PR #77 remains a draft and is not a completion signal.
