@@ -1067,6 +1067,17 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn(secret, repr(result))
         self.assertEqual(result["error_type"], "RuntimeError")
 
+    def test_load_rejects_malformed_provider_ids_without_calling_factory(self):
+        factory_calls = []
+        for provider_id in (None, [], "bad provider id", "x" * 101):
+            with self.subTest(provider_id=repr(provider_id)):
+                result = self.manager.load_provider(
+                    provider_id, lambda metadata: factory_calls.append(metadata) or object()
+                )
+                self.assertEqual(result["status"], "INVALID_PROVIDER")
+                self.assertFalse(result["loaded"])
+        self.assertEqual(factory_calls, [])
+
     def test_load_provider_rejects_missing_factory_and_unknown_provider(self):
         self.assertEqual(
             self.manager.load_provider("public_image", None)["status"], "INVALID_FACTORY"
