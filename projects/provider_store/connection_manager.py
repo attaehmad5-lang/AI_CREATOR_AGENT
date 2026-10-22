@@ -753,9 +753,17 @@ class ConnectionManager:
                     "error_type": type(exc).__name__,
                 }
             return {"status": "NOT_LOADED", "provider": provider_id, "unloaded": False}
-        cleanup = getattr(instance, "close", None)
-        if not callable(cleanup):
-            cleanup = getattr(instance, "shutdown", None)
+        try:
+            cleanup = getattr(instance, "close", None)
+            if not callable(cleanup):
+                cleanup = getattr(instance, "shutdown", None)
+        except Exception as exc:
+            return {
+                "status": "UNLOAD_FAILED",
+                "provider": provider_id,
+                "error_type": type(exc).__name__,
+                "unloaded": False,
+            }
         if callable(cleanup):
             try:
                 cleanup()
