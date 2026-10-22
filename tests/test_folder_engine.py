@@ -52,6 +52,18 @@ class FolderEngineTests(unittest.TestCase):
         with self.assertRaises(UnsafePathError):
             self.engine.resolve("safe/../../outside")
 
+    def test_rejects_windows_separator_on_all_platforms(self):
+        with self.assertRaises(UnsafePathError):
+            self.engine.resolve("safe\\\\..\\\\outside")
+
+    def test_rejects_windows_drive_path_on_all_platforms(self):
+        with self.assertRaises(UnsafePathError):
+            self.engine.resolve("C:\\\\outside")
+
+    def test_rejects_workspace_root_as_child_folder(self):
+        with self.assertRaises(UnsafePathError):
+            self.engine.ensure_folder(".")
+
     def test_rejects_path_separator_in_single_name(self):
         with self.assertRaises(UnsafePathError):
             self.engine.validate_name("nested/folder")
