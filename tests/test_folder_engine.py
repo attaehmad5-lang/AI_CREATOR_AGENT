@@ -93,6 +93,16 @@ class FolderEngineTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(UnsafePathError):
                 self.engine.validate_name(name)
 
+    def test_rejects_nonportable_windows_folder_names(self):
+        for name in ("folder?", "folder*", "folder:", "folder.", "CON", "nul.txt", "COM1", "LPT9.log"):
+            with self.subTest(name=name), self.assertRaises(UnsafePathError):
+                self.engine.validate_name(name)
+
+    def test_resolve_rejects_nonportable_nested_folder_names(self):
+        for path in ("story/scene?", "story/CON", "story/trailing."):
+            with self.subTest(path=path), self.assertRaises(UnsafePathError):
+                self.engine.resolve(path)
+
     def test_rejects_trailing_whitespace_name(self):
         with self.assertRaises(UnsafePathError):
             self.engine.validate_name("folder ")
