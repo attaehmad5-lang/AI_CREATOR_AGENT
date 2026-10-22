@@ -68,6 +68,14 @@ class FolderEngineTests(unittest.TestCase):
         with self.assertRaises(UnsafePathError):
             self.engine.validate_name("nested/folder")
 
+    def test_rejects_single_backslash_in_name(self):
+        with self.assertRaises(UnsafePathError):
+            self.engine.validate_name("folder\\child")
+
+    def test_rejects_null_byte_in_name(self):
+        with self.assertRaises(UnsafePathError):
+            self.engine.validate_name("folder\0child")
+
     def test_rejects_dot_names(self):
         for name in ("", ".", ".."):
             with self.subTest(name=name), self.assertRaises(UnsafePathError):
