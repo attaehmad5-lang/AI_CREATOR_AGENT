@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - task-25-provider-connection-manager
+      - task-25-safe-provider-plugin-lifecycle-20261020
   pull_request:
     branches:
       - main
