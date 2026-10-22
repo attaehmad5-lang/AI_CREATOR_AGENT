@@ -7,9 +7,11 @@ on:
       - "projects/documentary_project.py"
       - "projects/folder_engine.py"
       - "projects/folder_explorer.py"
+      - "projects/workspace_file_ops.py"
       - "tests/test_project_structure.py"
       - "tests/test_folder_engine.py"
       - "tests/test_folder_explorer.py"
+      - "tests/test_workspace_file_ops.py"
       - ".github/workflows/project-structure-folders.yml"
   push:
     branches:
@@ -42,6 +44,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compile feature code and tests
-        run: python -m compileall -q projects/documentary_project.py projects/folder_engine.py projects/folder_explorer.py tests/test_project_structure.py tests/test_folder_engine.py tests/test_folder_explorer.py
+        run: python -m compileall -q projects/documentary_project.py projects/folder_engine.py projects/folder_explorer.py projects/workspace_file_ops.py tests/test_project_structure.py tests/test_folder_engine.py tests/test_folder_explorer.py tests/test_workspace_file_ops.py
       - name: Run Project Structure / Folders tests
-        run: python -m unittest tests.test_project_structure tests.test_folder_engine tests.test_folder_explorer -v
+        run: python -m unittest tests.test_project_structure tests.test_folder_engine tests.test_folder_explorer tests.test_workspace_file_ops -v
