@@ -145,10 +145,24 @@ class FolderEngine:
         requested = list(paths)
         # Validate the complete batch before making filesystem changes, so an
         # unsafe later entry cannot leave earlier folders partially created.
+        targets: list[Path] = []
         for path in requested:
             target = self.resolve(path)
             if target == self.root:
                 raise UnsafePathError("workspace root cannot be created as a child folder")
+            targets.append(target)
+
+        # Also detect known file collisions before creating any requested path.
+        # This avoids partial batches when a later target or one of its parents
+        # is already occupied by a regular file.
+        for target in targets:
+            current = target
+            while current != self.root:
+                if current.exists() and not current.is_dir():
+                    raise FolderTypeError(f"path is occupied by a file: {current}")
+                current = current.parent
+            if self.root.exists() and not self.root.is_dir():
+                raise FolderTypeError(f"workspace root is occupied by a file: {self.root}")
         return [self.ensure_folder(path) for path in requested]
 
     def describe(self, relative_path: str | os.PathLike[str]) -> FolderEntry:
