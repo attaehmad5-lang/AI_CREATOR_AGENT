@@ -796,8 +796,11 @@ class ConnectionManager:
             return []
         if not isinstance(enabled_only, bool) or not isinstance(include_deprecated, bool):
             return []
-        wanted_category = category.strip().casefold() if category else None
-        wanted_capability = capability.strip().casefold() if capability else None
+        def normalize_filter(value: str) -> str:
+            return value.strip().casefold().replace("-", "_").replace(" ", "_")
+
+        wanted_category = normalize_filter(category) if category else None
+        wanted_capability = normalize_filter(capability) if capability else None
         discovered: list[dict[str, Any]] = []
         try:
             providers = self.list_providers()
@@ -809,7 +812,7 @@ class ConnectionManager:
         for provider in providers:
             if provider.get("deprecated") is True and not include_deprecated:
                 continue
-            if wanted_category and str(provider.get("category", "")).casefold() != wanted_category:
+            if wanted_category and normalize_filter(str(provider.get("category", ""))) != wanted_category:
                 continue
             if enabled_only and provider.get("enabled") is not True:
                 continue
@@ -822,9 +825,9 @@ class ConnectionManager:
                 else:
                     capabilities = []
                 # Category is also a discoverable modality for simple legacy catalog entries.
-                supported = {item.casefold() for item in capabilities}
+                supported = {normalize_filter(item) for item in capabilities}
                 if provider.get("category"):
-                    supported.add(str(provider["category"]).casefold())
+                    supported.add(normalize_filter(str(provider["category"])))
                 if wanted_capability not in supported:
                     continue
             discovered.append(dict(provider))
