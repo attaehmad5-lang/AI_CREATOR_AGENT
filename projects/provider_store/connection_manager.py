@@ -978,17 +978,25 @@ class ConnectionManager:
                 "saved": False,
             }
 
-        with self._state_transaction():
-            existing = self.state["providers"].get(provider_id, {})
-            record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
-            record.update({
-                "status": status,
-                "verified": bool(verified),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
-            self.state["providers"][provider_id] = record
-            self._save()
-            return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
+        try:
+            with self._state_transaction():
+                existing = self.state["providers"].get(provider_id, {})
+                record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+                record.update({
+                    "status": status,
+                    "verified": bool(verified),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+                self.state["providers"][provider_id] = record
+                self._save()
+                return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "STATE_ACCESS_FAILED",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
 
     def _mark_connected_after_probe(self, provider_id: str) -> dict[str, Any]:
         """Record CONNECTED only after the provider-specific probe succeeds."""
