@@ -293,7 +293,11 @@ class FolderEngine:
         return self.describe(destination.relative_to(self.root).as_posix())
 
     def copy_folder(self, relative_path: str | os.PathLike[str], destination_path: str | os.PathLike[str]) -> FolderEntry:
-        """Copy a folder tree without following symlinks or overwriting a destination."""
+        """Copy a folder tree without retaining symlinks or overwriting a destination.
+
+        Folder metadata is copied with fresh IDs so the copy is independent of
+        the original while retaining descriptive metadata values.
+        """
         source = self.resolve(relative_path)
         destination = self.resolve(destination_path)
         if source == self.root or not source.is_dir():
