@@ -199,7 +199,11 @@ class FolderEngine:
     def get_folder_id(self, relative_path: str | os.PathLike[str], *, create: bool = True) -> str | None:
         """Return a stable UUID for a folder; optionally persist one on first access."""
         target = self.resolve(relative_path)
-        if target == self.root or not target.is_dir():
+        if target == self.root:
+            raise FolderTypeError("folder ID requires an existing child directory")
+        if not target.exists() and not create:
+            return None
+        if not target.is_dir():
             raise FolderTypeError("folder ID requires an existing child directory")
         data = self._read_metadata()
         key = target.relative_to(self.root).as_posix()
