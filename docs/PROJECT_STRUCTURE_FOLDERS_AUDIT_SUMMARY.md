@@ -62,3 +62,10 @@ PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
 - Added `tests/test_folder_explorer.py` and expanded the feature-specific workflow to compile and test the explorer on Ubuntu and Windows with Python 3.11, 3.12, and 3.13.
 - Latest feature-specific CI run: **76 tests passed on all six OS/Python matrix jobs**. Run: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39828652440
 - This is evidence for the implemented folder-engine/explorer subset only. GUI rendering, cross-process concurrent state writes, complete 200-feature checklist coverage, the user's stated 210-feature count reconciliation, and full production integration remain open; do not mark Feature #1 complete yet.
+
+## File operations and workspace search continuation
+- Added `projects/workspace_file_ops.py`: size-bounded atomic uploads, bounded downloads, SHA-256 integrity descriptions, basic magic-byte type detection, rename/move/copy/delete, and preflighted bulk rename (including swaps).
+- Added `projects/workspace_search.py`: deterministic filename and folder search, bounded text-content search, extension filters, case-sensitive/regex modes, symlink exclusion, result caps, and persistent saved searches.
+- Added regression suites `tests/test_workspace_file_ops.py` and `tests/test_workspace_search.py`; the feature workflow now compiles and runs all five focused test modules.
+- Latest verified feature-specific run: **98 tests passed across all six Ubuntu/Windows × Python 3.11/3.12/3.13 jobs**: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39829166172
+- These are backend primitives, not proof of full application/UI integration. The canonical checklist's complete 200 items (and the user's mention of 210) remains open; no full-task PASS is claimed.
