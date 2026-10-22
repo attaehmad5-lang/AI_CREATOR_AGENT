@@ -8,10 +8,12 @@ on:
       - "projects/folder_engine.py"
       - "projects/folder_explorer.py"
       - "projects/workspace_file_ops.py"
+      - "projects/workspace_search.py"
       - "tests/test_project_structure.py"
       - "tests/test_folder_engine.py"
       - "tests/test_folder_explorer.py"
       - "tests/test_workspace_file_ops.py"
+      - "tests/test_workspace_search.py"
       - ".github/workflows/project-structure-folders.yml"
   push:
     branches:
@@ -44,6 +46,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compile feature code and tests
-        run: python -m compileall -q projects/documentary_project.py projects/folder_engine.py projects/folder_explorer.py projects/workspace_file_ops.py tests/test_project_structure.py tests/test_folder_engine.py tests/test_folder_explorer.py tests/test_workspace_file_ops.py
+        run: python -m compileall -q projects/documentary_project.py projects/folder_engine.py projects/folder_explorer.py projects/workspace_file_ops.py projects/workspace_search.py tests/test_project_structure.py tests/test_folder_engine.py tests/test_folder_explorer.py tests/test_workspace_file_ops.py tests/test_workspace_search.py
       - name: Run Project Structure / Folders tests
-        run: python -m unittest tests.test_project_structure tests.test_folder_engine tests.test_folder_explorer tests.test_workspace_file_ops -v
+        run: python -m unittest tests.test_project_structure tests.test_folder_engine tests.test_folder_explorer tests.test_workspace_file_ops tests.test_workspace_search -v
