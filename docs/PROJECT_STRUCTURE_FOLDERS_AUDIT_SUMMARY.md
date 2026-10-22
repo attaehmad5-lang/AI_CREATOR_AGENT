@@ -27,10 +27,13 @@ This audit covers the user's 200-feature Project Structure / Folders checklist a
 - The PDF says Pydroid 3 was not executed; this local test run used Python 3.13.
 
 ## Latest implementation and CI update
-- Added `projects/folder_engine.py` and `tests/test_folder_engine.py` to the PR branch.
-- Expanded the dedicated workflow to compile and run both test modules on Ubuntu and Windows with Python 3.11, 3.12, and 3.13.
-- GitHub Actions run `39823159319` showed the compile and test steps successful on all six matrix jobs; final job cleanup was still finishing when checked. Run: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39823159319
-- This verifies the currently implemented foundation only; it does not certify the 200-feature checklist as complete.
+- The shared `projects/folder_engine.py` now supports safe root-relative paths, cross-platform folder-name checks, nested/idempotent folder creation, bulk-input preflight, file-collision preflight, read-only structure validation, deterministic immediate-child listing, and bounded/unbounded nested tree listing.
+- Directory symlinks are excluded from both immediate-child and recursive listings; path resolution rejects symlink escapes.
+- `projects/documentary_project.py` delegates standard project-folder creation to the shared engine.
+- Regression tests cover unsafe names, Windows-reserved names, traversal and symlink escapes, root/file collisions, non-mutating structure validation, nested-tree depth/sorting, and batch preflight behavior.
+- Latest confirmed six-job CI run before the most recent symlink-listing regression: `39825920895`, all six Ubuntu/Windows × Python 3.11/3.12/3.13 jobs passed. https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39825920895
+- New symlink-listing test is in commit `2849d79a3a40e8aaf6f7591c0c745f1be76fbaf3`; its CI run is pending/in progress at https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39826550448. Do not claim this newest revision passes until all six jobs finish successfully.
+- These checks verify the implemented foundation only; they do not certify the 200-feature checklist as complete.
 
 ## Next actions
 1. Keep each of the 200 feature IDs stable.
