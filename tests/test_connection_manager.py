@@ -1382,10 +1382,23 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_metadata_returns_detached_copy_and_filters_sensitive_fields(self):
         self.manager.catalog["providers"][0]["official_api_url"] = "https://example.invalid"
         self.manager.catalog["providers"][0]["token_env"] = "PUBLIC_IMAGE_TOKEN"
+        self.manager.catalog["providers"][0]["private_key"] = "never-return-private-key"
+        self.manager.catalog["providers"][0]["authorization_header"] = "never-return-bearer"
+        self.manager.catalog["providers"][0]["metadata"] = {
+            "session_cookie": "never-return-cookie",
+            "display_region": "global",
+        }
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         metadata = self.manager.get_provider_metadata("public_image")
         self.assertEqual(metadata["official_api_url"], "https://example.invalid")
         self.assertEqual(metadata["token_env"], "PUBLIC_IMAGE_TOKEN")
+        self.assertNotIn("private_key", metadata)
+        self.assertNotIn("authorization_header", metadata)
+        self.assertNotIn("session_cookie", metadata["metadata"])
+        self.assertEqual(metadata["metadata"]["display_region"], "global")
+        self.assertNotIn("never-return-private-key", repr(metadata))
+        self.assertNotIn("never-return-bearer", repr(metadata))
+        self.assertNotIn("never-return-cookie", repr(metadata))
         self.assertNotIn("access_token", metadata)
         sanitized = ConnectionManager._sanitize_public_data({
             "access_token": "must-not-appear",
