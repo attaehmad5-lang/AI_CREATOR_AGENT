@@ -533,19 +533,10 @@ class ConnectionManager:
             return None
         if provider is None:
             return None
-        safe: dict[str, Any] = {}
-        for key, value in provider.items():
-            normalized = str(key).casefold().replace("-", "_")
-            # Environment-variable/reference names are metadata, not credential values.
-            if normalized in {"token_env", "token_expiry_env", "api_key_env", "secret_ref", "credential_env"}:
-                safe[key] = value
-                continue
-            if any(term in normalized for term in ("password", "secret", "credential", "api_key", "apikey", "access_token", "refresh_token")):
-                continue
-            if normalized == "token":
-                continue
-            safe[key] = value
-        return safe
+        # Reuse the shared recursive sanitizer so catalog metadata and runtime
+        # status/configuration responses enforce the same credential redaction.
+        sanitized = self._sanitize_public_data(provider)
+        return sanitized if isinstance(sanitized, dict) else None
 
     def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
         """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
