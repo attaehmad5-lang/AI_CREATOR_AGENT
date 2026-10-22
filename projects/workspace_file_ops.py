@@ -5,6 +5,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Iterable
 
@@ -74,9 +75,12 @@ class WorkspaceFileOps:
                 os.fsync(stream.fileno())
             if target.is_symlink():
                 raise UnsafePathError("file symlinks are not supported")
-            if target.exists() and not overwrite:
-                raise FileExistsError(f"destination already exists: {target}")
-            os.replace(temp_name, target)
+            if overwrite:
+                os.replace(temp_name, target)
+            else:
+                # Hard-link publication is atomic and fails if another writer
+                # creates the destination after the initial existence check.
+                os.link(temp_name, target)
         finally:
             try:
                 os.unlink(temp_name)
@@ -134,6 +138,8 @@ class WorkspaceFileOps:
         destination = self._resolve(destination_path)
         if destination.exists():
             raise FileExistsError(str(destination))
+        if source.stat().st_size > self.max_file_bytes:
+            raise ValueError("file exceeds configured size limit")
         destination.parent.mkdir(parents=True, exist_ok=True)
         with source.open("rb") as reader, destination.open("xb") as writer:
             shutil.copyfileobj(reader, writer, length=1024 * 1024)
@@ -160,14 +166,20 @@ class WorkspaceFileOps:
         # Use unique temporary names so swaps such as a.txt <-> b.txt are safe.
         temporary = []
         for source in sources:
-            temp = source.with_name(".rename-" + next(tempfile._get_candidate_names()))
+            temp = source.with_name(".rename-" + uuid.uuid4().hex)
             source.rename(temp)
             temporary.append(temp)
+        committed = []
         try:
             for temp, destination in zip(temporary, destinations):
                 temp.rename(destination)
+                committed.append((destination, temp))
         except OSError:
-            # Best-effort rollback of entries not yet committed.
+            # Restore completed destinations to their staging names first,
+            # then restore every staging name to its original path.
+            for destination, temp in reversed(committed):
+                if destination.exists():
+                    destination.rename(temp)
             for temp, source in zip(temporary, sources):
                 if temp.exists():
                     temp.rename(source)
