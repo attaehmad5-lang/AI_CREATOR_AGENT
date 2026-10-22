@@ -1564,7 +1564,12 @@ class ConnectionManager:
             }.get(provider_id)
 
         if auth_type in {"NONE", "PUBLIC", "ANONYMOUS"}:
-            return {"provider": provider_id, "status": "NO_CREDENTIAL_REQUIRED", "credential_present": True}
+            return {
+                "provider": provider_id,
+                "status": "NO_CREDENTIAL_REQUIRED",
+                "credential_required": False,
+                "credential_present": False,
+            }
         if not token_env:
             return {"provider": provider_id, "status": "MANUAL_CONNECTION_REQUIRED", "credential_present": False}
         if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
