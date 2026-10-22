@@ -1,8 +1,10 @@
 import json
+import ssl
 import tempfile
 import unittest
 from pathlib import Path
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPSHandler
 
 from projects.provider_store.account_balance_probe import ProviderJSONBalanceProbe
 from projects.provider_store.credit_manager import ProviderCreditManager
@@ -53,6 +55,30 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
         }
         options.update(overrides)
         return ProviderJSONBalanceProbe(**options)
+
+    def test_default_https_transport_requires_certificate_and_hostname_verification(self):
+        probe = ProviderJSONBalanceProbe(
+            endpoint="https://api.example.com/account/balance",
+            allowed_hosts=["api.example.com"],
+            token_env="PROVIDER_TOKEN",
+            unit="credits",
+            authentication_required=True,
+            balance_field_is_available_credits=True,
+            environ={"PROVIDER_TOKEN": "private-token"},
+        )
+        handler = next(
+            item for item in probe.opener.handlers if isinstance(item, HTTPSHandler)
+        )
+        self.assertTrue(handler._context.check_hostname)
+        self.assertEqual(handler._context.verify_mode, ssl.CERT_REQUIRED)
+
+    def test_tls_certificate_failure_is_safe_and_does_not_expose_transport_details(self):
+        opener = _Opener(error=URLError(ssl.SSLCertVerificationError("private certificate detail")))
+        result = self.make_probe(opener)("provider")
+        self.assertEqual(result["status"], "BALANCE_NETWORK_ERROR")
+        self.assertFalse(result["verified"])
+        self.assertNotIn("private certificate detail", repr(result))
+        self.assertNotIn("private-token", repr(result))
 
     def test_valid_balance_is_normalized_without_exposing_secret_or_body(self):
         opener = _Opener(_Response({"totalBalance": 2.75, "private": "do-not-return"}))

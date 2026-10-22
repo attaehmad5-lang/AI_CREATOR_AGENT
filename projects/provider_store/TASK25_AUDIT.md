@@ -1,17 +1,17 @@
 # Task #25 — Provider Connection Manager Verification Audit
 
-**Follow-up branch:** `task-25-followup-audit`  
-**Pull request:** #1 (merged; follow-up work requires a new branch/PR)  
+**Active follow-up branch:** `task-25-safe-provider-plugin-lifecycle-20261020`  
+**Active pull request:** [#77](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/77) (draft; not merged)  
 **Audit status:** In progress — do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#38305883948](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680) completed successfully on Python 3.13:
+GitHub Actions code-verification run [#39821929285](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39821929285) completed successfully on Python 3.13:
 
-- Ubuntu: 312 tests passed, 0 failures.
-- Windows: 304 tests passed, 0 failures.
-- Provider module/test compilation and provider JSON catalog validation passed on both platforms.
-- The only changes after that code-verification run are audit/documentation updates. Follow-up work is isolated in draft PR #7; PR #1 is already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
+- Ubuntu: 472 tests passed, 0 failures.
+- Windows: 472 tests passed, 0 failures.
+- Provider module/test compilation, provider JSON catalog validation, and the local-secret exclusion guard passed on both platforms.
+- Current code includes explicit certificate and hostname verification for the default provider-balance HTTPS transport, safe TLS failure reporting, rejection of ASCII/Unicode control characters in endpoints, catalog URLs, and model configuration before provider probes, and CI enforcement that known local credential/setup files are not tracked. The active follow-up is draft PR #77; this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
@@ -50,4 +50,4 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 ## Completion gate
 
-Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and platform/runtime constraints are tested. PR #1 is already merged; that merge is not a completion signal.
+Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and platform/runtime constraints are tested. PR #77 remains a draft and is not a completion signal.

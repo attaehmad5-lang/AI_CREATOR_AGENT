@@ -1,12 +1,12 @@
 # Task #25 — A–P Verification Matrix
 
-**Overall status: IN PROGRESS.** PR #1 was merged before Task #25 was complete. Follow-up hardening is isolated in draft PR #7; do not merge it without explicit user approval.
+**Overall status: IN PROGRESS.** Current follow-up branch is `task-25-safe-provider-plugin-lifecycle-20261020`; changes are in [draft PR #77](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/77). Do not merge without explicit user approval.
 
 The exact canonical feature names, original baseline markers and item-by-item evidence are maintained in the [canonical 138-item verification ledger](TASK25_CANONICAL_138_ITEM_LEDGER.md). This summary preserves the original A–P headings and ranges; it does not replace the detailed ledger.
 
 ## Latest code verification
 
-GitHub Actions code-verification run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299) completed successfully on Python 3.13: **328 tests passed on Ubuntu and 328 on Windows, 0 failures on either platform**. Compilation and provider JSON catalog validation passed on both platforms. This run includes bounded Retry-After metadata handling, overflow-safe retry backoff, fail-closed OAuth provider lookup, validated deprecation metadata including malformed-input rejection, and candidate-catalog validation before enablement.
+GitHub Actions code-verification run [#39821929285](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/39821929285) completed successfully on Python 3.13: **472 tests passed on Ubuntu and 472 on Windows, 0 failures on either platform**. Compilation, provider JSON catalog validation, and the local-secret exclusion guard passed on both platforms. Current evidence includes explicit certificate and hostname verification for the default provider-balance HTTPS transport, safe TLS failure reporting, fail-closed catalog/state operations, rejection of ASCII/Unicode control characters in catalog URLs, endpoint configuration and model configuration before provider probes, and CI checks that known local credential/setup files are not tracked.
 
 | Section / IDs | Exact canonical heading | Current status | Evidence / remaining gates |
 |---|---|---|---|
