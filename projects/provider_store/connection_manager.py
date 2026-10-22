@@ -524,8 +524,13 @@ class ConnectionManager:
         return self.get_provider(provider_id) is not None
 
     def get_provider_metadata(self, provider_id: str) -> dict[str, Any] | None:
-        """Return a detached, secret-filtered view of catalog metadata."""
-        provider = self.get_provider(provider_id)
+        """Return a detached, secret-filtered view; invalid catalogs fail closed."""
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError, TypeError):
+            # This legacy API has no status envelope. Returning None avoids
+            # leaking raw catalog/parser errors or exposing stale metadata.
+            return None
         if provider is None:
             return None
         safe: dict[str, Any] = {}
