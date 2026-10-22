@@ -1081,6 +1081,27 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["contract_version"], "1.0")
         self.assertEqual(result["error_type"], "ValueError")
 
+    def test_unload_cleans_loaded_provider_even_if_catalog_becomes_corrupt(self):
+        class ImageProvider:
+            def __init__(self):
+                self.closed = False
+            def generate_image(self, prompt, output_path):
+                return None
+            def close(self):
+                self.closed = True
+
+        instance = ImageProvider()
+        loaded = self.manager.load_provider("public_image", lambda metadata: instance)
+        self.assertTrue(loaded["loaded"])
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+
+        result = self.manager.unload_provider("public_image")
+
+        self.assertEqual(result["status"], "UNLOADED")
+        self.assertTrue(result["unloaded"])
+        self.assertTrue(instance.closed)
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
     def test_provider_contract_accepts_required_modality_method(self):
         class ImageProvider:
             def generate_image(self, prompt, output_path):
