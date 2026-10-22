@@ -217,19 +217,23 @@ class FolderExplorer:
         prefix = filters.get("path_prefix")
         sort_rules = self._state["sort"]
 
-        def sort_key(node: FolderTreeNode):
-            values = []
-            for rule in sort_rules:
+        def sort_children(nodes: tuple[FolderTreeNode, ...]) -> list[FolderTreeNode]:
+            ordered = list(nodes)
+            # Stable multi-field sort: the last rule is applied first.
+            for rule in reversed(sort_rules):
                 field = rule["field"]
-                value = {"name": node.entry.name.casefold(),
-                         "path": node.entry.relative_path.casefold(),
-                         "depth": node.entry.relative_path.count("/") + (node.entry.relative_path != ".")}[field]
-                values.append((-value if field == "depth" and rule["descending"] else value))
-            return tuple(values)
+                def key(node: FolderTreeNode):
+                    if field == "name":
+                        return node.entry.name.casefold()
+                    if field == "path":
+                        return node.entry.relative_path.casefold()
+                    return node.entry.relative_path.count("/") + (node.entry.relative_path != ".")
+                ordered.sort(key=key, reverse=rule["descending"])
+            return ordered
 
         def filter_node(node: FolderTreeNode) -> FolderTreeNode | None:
-            children = tuple(sorted((filtered for child in node.children
-                                     if (filtered := filter_node(child)) is not None), key=sort_key))
+            children = tuple(filtered for child in sort_children(node.children)
+                             if (filtered := filter_node(child)) is not None)
             node_path = node.entry.relative_path
             matches_name = not name_query or name_query in node.entry.name.casefold()
             matches_prefix = not prefix or node_path == prefix or node_path.startswith(prefix.rstrip("/") + "/")
