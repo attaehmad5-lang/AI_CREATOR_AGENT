@@ -58,6 +58,32 @@ class WorkspaceSearchTests(unittest.TestCase):
         with self.assertRaises(UnsafePathError):
             self.searcher.search("x", within="../outside")
 
+
+    def test_metadata_size_filters_and_sorting(self):
+        small = self.root / "research" / "a.txt"
+        small.write_text("x", encoding="utf-8")
+        results = self.searcher.search("txt", mode="name", min_size=2, sort_by="size")
+        self.assertTrue(all(item["size"] >= 2 for item in results))
+        self.assertEqual(results, sorted(results, key=lambda item: (item["size"], item["path"].casefold(), item["path"])))
+
+    def test_metadata_filter_validation(self):
+        for kwargs in ({"min_size": -1}, {"min_size": 10, "max_size": 2},
+                       {"sort_by": "owner"}, {"modified_after": 10, "modified_before": 2}):
+            with self.subTest(kwargs=kwargs), self.assertRaises((ValueError, TypeError)):
+                self.searcher.search("x", **kwargs)
+
+    def test_hidden_files_excluded_by_default_and_can_be_included(self):
+        hidden = self.root / ".private.txt"
+        hidden.write_text("secret", encoding="utf-8")
+        self.assertEqual(self.searcher.search("private", mode="name"), [])
+        self.assertEqual(len(self.searcher.search("private", mode="name", include_hidden=True)), 1)
+
+    def test_modified_timestamp_filter(self):
+        path = self.root / "research" / "facts.txt"
+        timestamp = path.stat().st_mtime
+        self.assertEqual(len(self.searcher.search("facts", mode="name", modified_after=timestamp - 1)), 1)
+        self.assertEqual(self.searcher.search("facts", mode="name", modified_after=timestamp + 10), [])
+
     def test_saved_search_round_trip_and_delete(self):
         self.searcher.save_search("story-files", {"query": "scene", "mode": "name"})
         second = WorkspaceSearch(self.engine)
