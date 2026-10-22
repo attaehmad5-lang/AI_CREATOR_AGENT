@@ -322,6 +322,9 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_public_provider_needs_no_credential(self):
         result = self.manager.credential_status("public_image", {})
         self.assertEqual(result["status"], "NO_CREDENTIAL_REQUIRED")
+        self.assertFalse(result["credential_required"])
+        self.assertFalse(result["credential_present"])
+        self.assertNotIn("credential_name", result)
 
     def test_credential_expiry_detection_never_exposes_token(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
