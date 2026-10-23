@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -84,7 +85,7 @@ class WorkspaceVersionStore:
             digest = item["sha256"]
             size = item["size"]
             created_at = item["created_at"]
-            if not isinstance(version_id, str) or not version_id or version_id in seen_ids:
+            if not isinstance(version_id, str) or len(version_id) != 32 or any(ch not in "0123456789abcdef" for ch in version_id) or version_id in seen_ids:
                 raise VersioningError("version manifest contains an invalid or duplicate ID")
             seen_ids.add(version_id)
             if not isinstance(path, str) or not path or "\\" in path or path.startswith("/"):
@@ -98,7 +99,7 @@ class WorkspaceVersionStore:
                 raise VersioningError("version manifest contains an invalid blob reference")
             if isinstance(size, bool) or not isinstance(size, int) or not 0 <= size <= self.max_file_bytes:
                 raise VersioningError("version manifest contains an invalid size")
-            if isinstance(created_at, bool) or not isinstance(created_at, (int, float)) or not __import__("math").isfinite(created_at):
+            if isinstance(created_at, bool) or not isinstance(created_at, (int, float)) or !math.isfinite(created_at):
                 raise VersioningError("version manifest contains an invalid timestamp")
             if "note" in item and not isinstance(item["note"], str):
                 raise VersioningError("version manifest contains an invalid note")
