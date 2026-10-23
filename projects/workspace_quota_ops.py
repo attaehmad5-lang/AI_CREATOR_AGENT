@@ -30,6 +30,9 @@ class QuotaAwareWorkspaceFileOps:
         target = self.file_ops.engine.resolve(relative_path)
         if overwrite and target.exists():
             old_size = target.stat().st_size if target.is_file() and not target.is_symlink() else 0
+            tracked = self.quota.snapshot()
+            if old_size and (tracked.bytes_used < old_size or tracked.files_used < 1):
+                raise ValueError("quota usage is not reconciled with the workspace")
             reservation_id = uuid.uuid4().hex
             self.quota.reserve(reservation_id, bytes_count=max(0, len(data) - old_size),
                                files_count=0)
