@@ -319,6 +319,14 @@ class FolderEngineTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.engine.set_metadata("research", "bad", object())
 
+    def test_move_does_not_mutate_filesystem_when_metadata_is_corrupt(self):
+        self.engine.ensure_folder("before")
+        self.engine._metadata_path().write_text("{broken", encoding="utf-8")
+        with self.assertRaises(FolderEngineError):
+            self.engine.move_folder("before", "archive/after")
+        self.assertTrue((self.root / "before").is_dir())
+        self.assertFalse((self.root / "archive" / "after").exists())
+
     def test_rename_does_not_mutate_filesystem_when_metadata_is_corrupt(self):
         self.engine.ensure_folder("before")
         self.engine._metadata_path().write_text("{broken", encoding="utf-8")
