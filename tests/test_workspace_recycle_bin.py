@@ -88,6 +88,30 @@ class WorkspaceRecycleBinTests(unittest.TestCase):
         with self.assertRaises(UnsafePathError):
             self.bin.items()
 
+    def test_manifest_rejects_nonfinite_item_timestamps(self):
+        self.bin.delete("docs/note.txt")
+        manifest = self.bin.state_path
+        for field, value in (("deleted_at", float("nan")), ("expires_at", float("inf"))):
+            state = json.loads(manifest.read_text(encoding="utf-8"))
+            state["items"][0][field] = value
+            manifest.write_text(json.dumps(state), encoding="utf-8")
+            with self.subTest(field=field), self.assertRaises(RecycleBinError):
+                self.bin.items()
+
+    def test_manifest_rejects_malformed_audit_entries(self):
+        self.bin.delete("docs/note.txt")
+        manifest = self.bin.state_path
+        state = json.loads(manifest.read_text(encoding="utf-8"))
+        state["audit"][0]["timestamp"] = float("nan")
+        manifest.write_text(json.dumps(state), encoding="utf-8")
+        with self.assertRaises(RecycleBinError):
+            self.bin.audit_log()
+
+    def test_purge_rejects_nonfinite_timestamp(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.bin.purge_expired(now=value)
+
     def test_bad_retention_rejected(self):
         with self.assertRaises(ValueError):
             WorkspaceRecycleBin(self.engine, retention_seconds=-1)
