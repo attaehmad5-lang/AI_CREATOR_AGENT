@@ -46,6 +46,10 @@ on:
       - "tests/test_workspace_recycle_bin.py"
       - "tests/test_workspace_permissions.py"
       - "tests/test_workspace_quota.py"
+      - "projects/workspace_quota_ops.py"
+      - "projects/workspace_versioning.py"
+      - "tests/test_workspace_quota_ops.py"
+      - "tests/test_workspace_versioning.py"
       - ".github/workflows/project-structure-folders.yml"
 
 permissions:
