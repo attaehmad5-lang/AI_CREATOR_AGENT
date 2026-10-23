@@ -1,4 +1,5 @@
 """Regression tests for workspace recycle-bin safety and lifecycle."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,6 +50,32 @@ class WorkspaceRecycleBinTests(unittest.TestCase):
     def test_missing_item_rejected(self):
         with self.assertRaises(KeyError):
             self.bin.restore("not-a-real-id")
+
+    def test_manifest_rejects_traversal_payload_and_original_path(self):
+        self.bin.delete("docs/note.txt")
+        manifest = self.bin.state_path
+        state = json.loads(manifest.read_text(encoding="utf-8"))
+        state["items"][0]["payload"] = "../../outside"
+        manifest.write_text(json.dumps(state), encoding="utf-8")
+        with self.assertRaises(RecycleBinError):
+            self.bin.items()
+        state["items"][0]["payload"] = state["items"][0]["id"]
+        state["items"][0]["original_path"] = "../outside.txt"
+        manifest.write_text(json.dumps(state), encoding="utf-8")
+        with self.assertRaises(RecycleBinError):
+            self.bin.items()
+
+    def test_rejects_symlinked_trash_directory(self):
+        import shutil
+        outside = Path(self.tmp.name) / "outside-trash"
+        outside.mkdir()
+        shutil.rmtree(self.bin.trash)
+        try:
+            self.bin.trash.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks unavailable on this platform")
+        with self.assertRaises(UnsafePathError):
+            self.bin.items()
 
     def test_bad_retention_rejected(self):
         with self.assertRaises(ValueError):
