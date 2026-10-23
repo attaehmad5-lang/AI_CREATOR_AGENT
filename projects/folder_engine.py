@@ -7,6 +7,7 @@ caller-selected workspace root.
 from __future__ import annotations
 
 import json
+import copy
 import os
 import re
 import shutil
@@ -224,7 +225,7 @@ class FolderEngine:
             raise FolderTypeError("metadata requires an existing child directory")
         record = self._read_metadata()["folders"].get(target.relative_to(self.root).as_posix(), {})
         metadata = record.get("metadata", {}) if isinstance(record, dict) else {}
-        return dict(metadata) if isinstance(metadata, dict) else {}
+        return copy.deepcopy(metadata) if isinstance(metadata, dict) else {}
 
     def set_metadata(self, relative_path: str | os.PathLike[str], key: str, value: object) -> None:
         """Persist JSON-compatible metadata for a folder using atomic replacement."""
