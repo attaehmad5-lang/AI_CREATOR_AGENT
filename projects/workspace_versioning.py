@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -37,6 +38,7 @@ class WorkspaceVersionStore:
         self.engine = engine
         self.max_versions_per_file = max_versions_per_file
         self.max_file_bytes = max_file_bytes
+        self._lock = threading.RLock()
         self.store = self.engine.root / self.STORE_NAME
         self.blobs = self.store / "blobs"
         self.manifest_path = self.store / self.MANIFEST_NAME
@@ -89,6 +91,10 @@ class WorkspaceVersionStore:
         return hashlib.sha256(data).hexdigest()
 
     def create_version(self, relative_path: str, *, note: str = "") -> dict[str, Any]:
+        with self._lock:
+            return self._create_version_locked(relative_path, note=note)
+
+    def _create_version_locked(self, relative_path: str, *, note: str) -> dict[str, Any]:
         target = self._target(relative_path)
         if not target.is_file():
             raise FileNotFoundError(relative_path)
@@ -128,12 +134,20 @@ class WorkspaceVersionStore:
         return dict(entry)
 
     def list_versions(self, relative_path: str) -> list[dict[str, Any]]:
+        with self._lock:
+            return self._list_versions_locked(relative_path)
+
+    def _list_versions_locked(self, relative_path: str) -> list[dict[str, Any]]:
         target = self._target(relative_path)
         path = target.relative_to(self.engine.root).as_posix()
         entries = [dict(v) for v in self._read_manifest()["versions"] if v["path"] == path]
         return sorted(entries, key=lambda v: (v["created_at"], v["id"]), reverse=True)
 
     def restore_version(self, version_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self._restore_version_locked(version_id)
+
+    def _restore_version_locked(self, version_id: str) -> dict[str, Any]:
         if not isinstance(version_id, str) or not version_id:
             raise VersioningError("version_id must be non-empty")
         manifest = self._read_manifest()
@@ -168,6 +182,10 @@ class WorkspaceVersionStore:
         return {"path": entry["path"], "size": len(data), "sha256": entry["sha256"], "version_id": version_id}
 
     def delete_version(self, version_id: str) -> bool:
+        with self._lock:
+            return self._delete_version_locked(version_id)
+
+    def _delete_version_locked(self, version_id: str) -> bool:
         manifest = self._read_manifest()
         updated = [v for v in manifest["versions"] if v["id"] != version_id]
         if len(updated) == len(manifest["versions"]):
