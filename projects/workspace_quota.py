@@ -121,10 +121,14 @@ class WorkspaceQuotaManager:
             self._validate_amount("actual_files", final_files)
             next_bytes = self._bytes_used + final_bytes
             next_files = self._files_used + final_files
-            if self.byte_limit is not None and next_bytes > self.byte_limit:
-                raise QuotaError("actual bytes exceed workspace quota")
-            if self.file_limit is not None and next_files > self.file_limit:
-                raise QuotaError("actual files exceed workspace quota")
+            # Committing one reservation must leave enough quota for all other
+            # active reservations; otherwise concurrent uploads can oversubscribe.
+            other_reserved_bytes = self._bytes_reserved - reserved_bytes
+            other_reserved_files = self._files_reserved - reserved_files
+            if self.byte_limit is not None and next_bytes + other_reserved_bytes > self.byte_limit:
+                raise QuotaError("actual bytes plus other reservations exceed workspace quota")
+            if self.file_limit is not None and next_files + other_reserved_files > self.file_limit:
+                raise QuotaError("actual files plus other reservations exceed workspace quota")
             self._bytes_reserved -= reserved_bytes
             self._files_reserved -= reserved_files
             self._bytes_used, self._files_used = next_bytes, next_files
