@@ -6,7 +6,6 @@ multi-process deployment must replace it with shared transactional accounting.
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 from typing import Any
 
 from projects.workspace_file_ops import WorkspaceFileOps
@@ -25,34 +24,50 @@ class QuotaAwareWorkspaceFileOps:
         self.quota = quota
 
     def upload_bytes(self, relative_path: str, data: bytes, *, overwrite: bool = False) -> dict[str, Any]:
-        # Quota-aware overwrite accounting needs the old size and should not
-        # silently turn a replacement into a second file allocation.
         target = self.file_ops.engine.resolve(relative_path)
         if overwrite and target.exists():
-            old_size = target.stat().st_size if target.is_file() and not target.is_symlink() else 0
+            old_data = self.file_ops.download_bytes(relative_path)
+            old_size = len(old_data)
             tracked = self.quota.snapshot()
             if old_size and (tracked.bytes_used < old_size or tracked.files_used < 1):
                 raise ValueError("quota usage is not reconciled with the workspace")
             reservation_id = uuid.uuid4().hex
             self.quota.reserve(reservation_id, bytes_count=max(0, len(data) - old_size),
                                files_count=0)
+            published = False
             try:
                 result = self.file_ops.upload_bytes(relative_path, data, overwrite=True)
-                # Reconcile authoritative on-disk usage for replacement delta.
-                self.quota.commit(reservation_id, actual_bytes=max(0, len(data) - old_size),
-                                  actual_files=0)
+                published = True
+                try:
+                    self.quota.commit(reservation_id, actual_bytes=max(0, len(data) - old_size),
+                                      actual_files=0)
+                except Exception:
+                    self.file_ops.upload_bytes(relative_path, old_data, overwrite=True)
+                    published = False
+                    raise
                 if len(data) < old_size:
                     self.quota.record_delete(bytes_count=old_size - len(data), files_count=0)
                 return result
             except Exception:
                 self.quota.release(reservation_id)
+                if published:
+                    # A post-commit accounting failure is not safe to undo here:
+                    # usage may already have been committed. Leave evidence on disk.
+                    pass
                 raise
 
         reservation_id = uuid.uuid4().hex
         self.quota.reserve(reservation_id, bytes_count=len(data), files_count=1)
+        published = False
         try:
             result = self.file_ops.upload_bytes(relative_path, data, overwrite=False)
-            self.quota.commit(reservation_id, actual_bytes=result["size"], actual_files=1)
+            published = True
+            try:
+                self.quota.commit(reservation_id, actual_bytes=result["size"], actual_files=1)
+            except Exception:
+                self.file_ops.delete(relative_path)
+                published = False
+                raise
             return result
         except Exception:
             self.quota.release(reservation_id)
@@ -64,7 +79,11 @@ class QuotaAwareWorkspaceFileOps:
         self.quota.reserve(reservation_id, bytes_count=info["size"], files_count=1)
         try:
             result = self.file_ops.copy(source, destination)
-            self.quota.commit(reservation_id, actual_bytes=result["size"], actual_files=1)
+            try:
+                self.quota.commit(reservation_id, actual_bytes=result["size"], actual_files=1)
+            except Exception:
+                self.file_ops.delete(destination)
+                raise
             return result
         except Exception:
             self.quota.release(reservation_id)
@@ -72,7 +91,6 @@ class QuotaAwareWorkspaceFileOps:
 
     def delete(self, relative_path: str) -> None:
         info = self.file_ops.describe(relative_path)
-        # Validate tracked accounting before the irreversible filesystem delete.
         snapshot = self.quota.snapshot()
         if info["size"] > snapshot.bytes_used or snapshot.files_used < 1:
             raise ValueError("quota usage is not reconciled with the workspace")
