@@ -2,8 +2,10 @@
 
 ## Verified in GitHub
 - Branch: `feature/project-structure-folders-hardening`
-- Latest commit checked: `3861ac72f72b8d9862561cbdfa84fe91addb03ca`
-- Workflow run 40005847311: **success**, all 6 matrix jobs completed successfully (Ubuntu/Windows × Python 3.11/3.12/3.13).
+- Latest code commit checked: `f91975df95832f5d76a6039129be2d35f136b295`
+- Project Structure workflow run 40009263505: **success**, all 6 matrix jobs completed (Ubuntu/Windows × Python 3.11/3.12/3.13). Compile and feature-specific test steps passed in each job.
+- Task #25 Provider Connection Manager workflow run 40009244186: **success**, both Ubuntu and Windows jobs passed compile, provider JSON catalog validation, and unit/regression test steps.
+- The latest Project Structure run includes the bulk-rename staging-failure regression test committed at `f91975df95832f5d76a6039129be2d35f136b295`.
 - PR #78 remains **open and unmerged**: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
 
 ## Requirements reconciliation
@@ -23,4 +25,4 @@
 - Do not merge or label Task 01 complete until: (1) the canonical 210-item ledger is reconciled, (2) every item has evidence-backed status, (3) the PDF binary is backed up and integrity-checked, and (4) repository visibility/secret hygiene is resolved by an authorized repository administrator.
 
 ## Current decision
-**CI PASS; Task 01 overall NOT COMPLETE.** CI proves the tested branch passed this workflow matrix, not that all 210 requirements are implemented.
+**Feature-specific CI PASS; Task 01 overall NOT COMPLETE.** The workflows prove their selected tests passed on the listed matrix, not that all 210 requirements are implemented. Continue by addressing the next unverified feature and adding regression tests before updating status.
