@@ -167,39 +167,56 @@ class WorkspaceFileOps:
         self._existing_file(relative_path).unlink()
 
     def bulk_rename(self, mapping: Iterable[tuple[str, str]]) -> list[dict]:
-        """Preflight a rename batch before applying any rename."""
+        """Preflight a rename batch and roll back staging/commit failures."""
         pairs = list(mapping)
         if not pairs:
             return []
-        sources = [self._existing_file(source) for source, _ in pairs]
-        destinations = []
-        for source, (_old, new_name) in zip(sources, pairs):
-            destinations.append(source.with_name(self.engine.validate_name(new_name)))
+        try:
+            sources = [self._existing_file(source) for source, _ in pairs]
+        except (TypeError, ValueError) as exc:
+            raise FileOperationError("mapping must contain (source, new_name) pairs") from exc
+        destinations = [
+            source.with_name(self.engine.validate_name(new_name))
+            for source, (_old, new_name) in zip(sources, pairs)
+        ]
         if len(set(destinations)) != len(destinations):
             raise FileExistsError("bulk rename contains duplicate destinations")
+        if len(set(sources)) != len(sources):
+            raise FileOperationError("bulk rename contains duplicate source paths")
         source_set = set(sources)
         for destination in destinations:
             if destination.exists() and destination not in source_set:
                 raise FileExistsError(f"destination already exists: {destination}")
-        # Use unique temporary names so swaps such as a.txt <-> b.txt are safe.
-        temporary = []
-        for source in sources:
-            temp = source.with_name(".rename-" + uuid.uuid4().hex)
-            source.rename(temp)
-            temporary.append(temp)
-        committed = []
+
+        # Stage every source first so swaps are possible. Include staging in the
+        # transaction: a failure halfway through staging must restore prior files.
+        temporary: list[Path] = []
+        committed: list[tuple[Path, Path]] = []
         try:
+            for source in sources:
+                temp = source.with_name(".rename-" + uuid.uuid4().hex)
+                source.rename(temp)
+                temporary.append(temp)
             for temp, destination in zip(temporary, destinations):
                 temp.rename(destination)
                 committed.append((destination, temp))
         except OSError:
-            # Restore completed destinations to their staging names first,
-            # then restore every staging name to its original path.
+            # Move already-published destinations back to staging names, then
+            # restore every staged file to its original name.
             for destination, temp in reversed(committed):
-                if destination.exists():
-                    destination.rename(temp)
-            for temp, source in zip(temporary, sources):
-                if temp.exists():
-                    temp.rename(source)
+                try:
+                    if destination.exists() and not temp.exists():
+                        destination.rename(temp)
+                except OSError:
+                    pass
+            for temp, source in reversed(list(zip(temporary, sources))):
+                try:
+                    if temp.exists() and not source.exists():
+                        temp.rename(source)
+                except OSError:
+                    pass
             raise
-        return [self.describe(destination.relative_to(self.engine.root).as_posix()) for destination in destinations]
+        return [
+            self.describe(destination.relative_to(self.engine.root).as_posix())
+            for destination in destinations
+        ]
