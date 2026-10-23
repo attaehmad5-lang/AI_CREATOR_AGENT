@@ -65,6 +65,16 @@ class WorkspaceRecycleBinTests(unittest.TestCase):
         with self.assertRaises(RecycleBinError):
             self.bin.items()
 
+    def test_manifest_rejects_traversal_item_identifier(self):
+        self.bin.delete("docs/note.txt")
+        manifest = self.bin.state_path
+        state = json.loads(manifest.read_text(encoding="utf-8"))
+        state["items"][0]["id"] = "../../outside"
+        state["items"][0]["payload"] = "../../outside"
+        manifest.write_text(json.dumps(state), encoding="utf-8")
+        with self.assertRaises(RecycleBinError):
+            self.bin.items()
+
     def test_rejects_symlinked_trash_directory(self):
         import shutil
         outside = Path(self.tmp.name) / "outside-trash"
