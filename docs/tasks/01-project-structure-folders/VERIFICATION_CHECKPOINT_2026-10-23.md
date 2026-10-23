@@ -2,10 +2,10 @@
 
 ## Verified in GitHub
 - Branch: `feature/project-structure-folders-hardening`
-- Latest code commit checked: `f91975df95832f5d76a6039129be2d35f136b295`
-- Project Structure workflow run 40009263505: **success**, all 6 matrix jobs completed (Ubuntu/Windows × Python 3.11/3.12/3.13). Compile and feature-specific test steps passed in each job.
-- Task #25 Provider Connection Manager workflow run 40009244186: **success**, both Ubuntu and Windows jobs passed compile, provider JSON catalog validation, and unit/regression test steps.
-- The latest Project Structure run includes the bulk-rename staging-failure regression test committed at `f91975df95832f5d76a6039129be2d35f136b295`.
+- Latest code commit checked: `1a98e0320600fcc2c3523067fbc9e1428a1183ec`
+- Project Structure workflow run 40010686821: **success**, all 6 matrix jobs completed (Ubuntu/Windows × Python 3.11/3.12/3.13). This run includes version-manifest ID/timestamp validation and regression tests at commit `1a98e0320600fcc2c3523067fbc9e1428a1183ec`.
+- Task #25 Provider Connection Manager workflow run 40010686880: **success**, both Ubuntu and Windows jobs passed compile, provider JSON catalog validation, and unit/regression test steps.
+- The latest Project Structure run includes the versioning manifest malformed-ID and non-finite timestamp regression tests, as well as the previously added workspace hardening tests.
 - PR #78 remains **open and unmerged**: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
 
 ## Requirements reconciliation
