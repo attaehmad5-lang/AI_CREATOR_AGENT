@@ -107,6 +107,14 @@ class WorkspaceSearchTests(unittest.TestCase):
         self.assertTrue(second.delete_saved_search("story-files"))
         self.assertFalse(second.delete_saved_search("story-files"))
 
+    def test_saved_searches_defensively_copy_nested_query_values(self):
+        self.searcher.save_search("nested", {"query": "scene", "filters": {"extensions": ["md"]}})
+        exported = self.searcher.saved_searches()
+        exported["nested"]["filters"]["extensions"].append("exe")
+        self.assertEqual(
+            self.searcher.saved_searches()["nested"]["filters"]["extensions"], ["md"]
+        )
+
     def test_saved_search_rejects_nonserializable_data(self):
         with self.assertRaises(TypeError):
             self.searcher.save_search("bad", {"value": object()})
