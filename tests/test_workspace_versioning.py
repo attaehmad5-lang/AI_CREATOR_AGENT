@@ -98,6 +98,19 @@ class WorkspaceVersionStoreTests(unittest.TestCase):
         with self.assertRaises(UnsafePathError):
             self.store.list_versions("notes.txt")
 
+    def test_manifest_rejects_unsafe_path_and_bad_blob_reference(self):
+        version = self.store.create_version("notes.txt")
+        manifest = json.loads(self.store.manifest_path.read_text(encoding="utf-8"))
+        manifest["versions"][0]["path"] = "../outside.txt"
+        self.store.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaises(VersioningError):
+            self.store.list_versions("notes.txt")
+        manifest["versions"][0]["path"] = "notes.txt"
+        manifest["versions"][0]["blob"] = "../../outside.blob"
+        self.store.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaises(VersioningError):
+            self.store.restore_version(version["id"])
+
     def test_manifest_corruption_fails_closed(self):
         (self.store.manifest_path).write_text("{broken", encoding="utf-8")
         with self.assertRaises(VersioningError):
