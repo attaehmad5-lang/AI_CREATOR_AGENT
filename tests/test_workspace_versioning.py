@@ -131,6 +131,19 @@ class WorkspaceVersionStoreTests(unittest.TestCase):
         with self.assertRaises(VersioningError):
             self.store.list_versions("notes.txt")
 
+    def test_manifest_rejects_nonpositive_created_at(self):
+        version = self.store.create_version("notes.txt")
+        for invalid_timestamp in (0, -1):
+            manifest = json.loads(self.store.manifest_path.read_text(encoding="utf-8"))
+            manifest["versions"][0]["created_at"] = invalid_timestamp
+            self.store.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.subTest(created_at=invalid_timestamp):
+                with self.assertRaises(VersioningError):
+                    self.store.list_versions("notes.txt")
+        # Keep a reference to the generated version so the test documents the
+        # manifest entry whose timestamp is being validated.
+        self.assertTrue(version["id"])
+
     def test_manifest_corruption_fails_closed(self):
         (self.store.manifest_path).write_text("{broken", encoding="utf-8")
         with self.assertRaises(VersioningError):
