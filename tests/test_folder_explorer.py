@@ -93,6 +93,27 @@ class FolderExplorerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             FolderExplorer(self.engine, history_limit=0)
 
+    def test_rejects_symlinked_state_file(self):
+        import json
+        import shutil
+        state = self.root / ".folder_explorer_state.json"
+        state.unlink()
+        outside = Path(self.tmp.name) / "outside-state.json"
+        outside.write_text(json.dumps({"version": 1, "recent": []}), encoding="utf-8")
+        try:
+            state.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("file symlinks unavailable on this platform")
+        with self.assertRaises(UnsafePathError):
+            FolderExplorer(self.engine)
+
+    def test_rejects_unsafe_persisted_recent_path(self):
+        import json
+        state = self.root / ".folder_explorer_state.json"
+        state.write_text(json.dumps({"version": 1, "recent": ["../outside"]}), encoding="utf-8")
+        with self.assertRaises(Exception):
+            FolderExplorer(self.engine)
+
 
 if __name__ == "__main__":
     unittest.main()
