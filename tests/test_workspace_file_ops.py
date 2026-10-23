@@ -1,6 +1,7 @@
 """Regression tests for safe workspace file operations."""
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from projects.folder_engine import FolderEngine, UnsafePathError
@@ -97,6 +98,24 @@ class WorkspaceFileOpsTests(unittest.TestCase):
         (self.root / "big.bin").write_bytes(b"x" * 65)
         with self.assertRaises(ValueError):
             self.files.download_bytes("big.bin")
+
+
+    def test_bulk_rename_restores_files_if_staging_fails(self):
+        self.files.upload_bytes("a.txt", b"A")
+        self.files.upload_bytes("b.txt", b"B")
+        original_rename = Path.rename
+
+        def fail_during_staging(path, target):
+            if path.name == "b.txt" and Path(target).name.startswith(".rename-"):
+                raise OSError("simulated staging failure")
+            return original_rename(path, target)
+
+        with mock.patch.object(Path, "rename", autospec=True, side_effect=fail_during_staging):
+            with self.assertRaisesRegex(OSError, "simulated staging failure"):
+                self.files.bulk_rename([("a.txt", "new-a.txt"), ("b.txt", "new-b.txt")])
+        self.assertEqual(self.files.download_bytes("a.txt"), b"A")
+        self.assertEqual(self.files.download_bytes("b.txt"), b"B")
+        self.assertEqual(list(self.root.glob(".rename-*")), [])
 
 
 if __name__ == "__main__":
