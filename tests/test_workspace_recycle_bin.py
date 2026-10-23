@@ -69,6 +69,7 @@ class WorkspaceRecycleBinTests(unittest.TestCase):
         import shutil
         outside = Path(self.tmp.name) / "outside-trash"
         outside.mkdir()
+        self.bin.trash.mkdir(parents=True, exist_ok=True)
         shutil.rmtree(self.bin.trash)
         try:
             self.bin.trash.symlink_to(outside, target_is_directory=True)
