@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
+from math import isfinite
 from pathlib import PurePosixPath
 from threading import RLock
 from time import time
@@ -62,13 +63,19 @@ class PolicyRule:
     def __post_init__(self) -> None:
         if not isinstance(self.subject, str) or not self.subject.strip():
             raise PolicyError("subject must be a non-empty identity")
-        if self.permission not in PERMISSIONS:
+        if not isinstance(self.permission, str) or self.permission not in PERMISSIONS:
             raise PolicyError(f"unknown permission: {self.permission}")
-        if self.effect not in {"allow", "deny"}:
+        if not isinstance(self.effect, str) or self.effect not in {"allow", "deny"}:
             raise PolicyError("effect must be allow or deny")
         object.__setattr__(self, "scope", normalize_scope(self.scope))
-        if self.expires_at is not None and self.expires_at <= 0:
-            raise PolicyError("expires_at must be a positive timestamp")
+        if self.expires_at is not None:
+            if (
+                isinstance(self.expires_at, bool)
+                or not isinstance(self.expires_at, (int, float))
+                or not isfinite(self.expires_at)
+                or self.expires_at <= 0
+            ):
+                raise PolicyError("expires_at must be a finite positive timestamp")
 
 
 class WorkspacePolicy:
