@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 from projects.folder_engine import FolderEngine, UnsafePathError
 from projects.workspace_versioning import VersioningError, WorkspaceVersionStore
@@ -60,6 +61,16 @@ class WorkspaceVersionStoreTests(unittest.TestCase):
         self.assertFalse(self.store.delete_version(one["id"]))
         self.assertEqual(self.store.list_versions("notes.txt"), [])
         self.assertFalse((self.store.blobs / one["blob"]).exists())
+
+    def test_concurrent_version_creation_keeps_manifest_valid(self):
+        self.file.write_text("shared payload", encoding="utf-8")
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            entries = list(pool.map(lambda _: self.store.create_version("notes.txt"), range(16)))
+        ids = [entry["id"] for entry in entries]
+        self.assertEqual(len(ids), len(set(ids)))
+        current = self.store.list_versions("notes.txt")
+        self.assertLessEqual(len(current), 2)
+        self.assertTrue(all((self.store.blobs / item["blob"]).is_file() for item in current))
 
     def test_manifest_corruption_fails_closed(self):
         (self.store.manifest_path).write_text("{broken", encoding="utf-8")
