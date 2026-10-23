@@ -78,6 +78,21 @@ class WorkspaceFileOpsTests(unittest.TestCase):
         self.assertTrue((self.root / "a.txt").exists())
         self.assertTrue((self.root / "b.txt").exists())
 
+    def test_copy_preserves_existing_destination_on_failure(self):
+        self.files.upload_bytes("source.bin", b"source")
+        self.files.upload_bytes("destination.bin", b"keep")
+        with self.assertRaises(FileExistsError):
+            self.files.copy("source.bin", "destination.bin")
+        self.assertEqual(self.files.download_bytes("destination.bin"), b"keep")
+
+    def test_copy_creates_parent_and_publishes_complete_content(self):
+        payload = b"complete payload" * 3
+        self.files.upload_bytes("source.bin", payload)
+        result = self.files.copy("source.bin", "nested/deeper/copy.bin")
+        self.assertEqual(self.files.download_bytes("nested/deeper/copy.bin"), payload)
+        self.assertEqual(result["sha256"], self.files.sha256_bytes(payload))
+        self.assertFalse(list((self.root / "nested/deeper").glob(".copy-*.tmp")))
+
     def test_download_rejects_oversize_existing_file(self):
         (self.root / "big.bin").write_bytes(b"x" * 65)
         with self.assertRaises(ValueError):
