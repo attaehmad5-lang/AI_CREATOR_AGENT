@@ -115,6 +115,14 @@ class WorkspaceVersionStoreTests(unittest.TestCase):
         with self.assertRaises(VersioningError):
             self.store.restore_version(version["id"])
 
+    def test_manifest_rejects_malformed_version_id(self):
+        self.store.create_version("notes.txt")
+        manifest = json.loads(self.store.manifest_path.read_text(encoding="utf-8"))
+        manifest["versions"][0]["id"] = "../bad-id"
+        self.store.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaises(VersioningError):
+            self.store.list_versions("notes.txt")
+
     def test_manifest_rejects_nonfinite_created_at(self):
         version = self.store.create_version("notes.txt")
         manifest = json.loads(self.store.manifest_path.read_text(encoding="utf-8"))
