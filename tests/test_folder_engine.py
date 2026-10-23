@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from projects.folder_engine import FolderEngine, FolderTypeError, UnsafePathError
+from projects.folder_engine import FolderEngine, FolderEngineError, FolderTypeError, UnsafePathError
 
 
 class FolderEngineTests(unittest.TestCase):
@@ -265,7 +265,7 @@ class FolderEngineTests(unittest.TestCase):
     def test_folder_metadata_rejects_corrupt_json(self):
         self.engine.ensure_folder("research")
         self.engine._metadata_path().write_text("{broken", encoding="utf-8")
-        with self.assertRaises(Exception):
+        with self.assertRaises(FolderEngineError):
             self.engine.get_folder_id("research")
 
     def test_metadata_key_validation_does_not_mutate_state(self):
