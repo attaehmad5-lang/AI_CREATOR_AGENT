@@ -96,14 +96,14 @@ class QuotaAwareWorkspaceFileOpsTests(unittest.TestCase):
         self.assertEqual((snap.bytes_reserved, snap.files_reserved), (0, 0))
 
     def test_delete_restores_file_if_quota_decrement_fails(self):
-        self.ops.upload_bytes("a.txt", b"preserve me")
+        self.ops.upload_bytes("a.txt", b"keep")
         with patch.object(self.quota, "record_delete",
                           side_effect=QuotaError("injected decrement failure")):
             with self.assertRaisesRegex(QuotaError, "injected decrement failure"):
                 self.ops.delete("a.txt")
-        self.assertEqual(self.file_ops.download_bytes("a.txt"), b"preserve me")
+        self.assertEqual(self.file_ops.download_bytes("a.txt"), b"keep")
         snap = self.quota.snapshot()
-        self.assertEqual((snap.bytes_used, snap.files_used), (11, 1))
+        self.assertEqual((snap.bytes_used, snap.files_used), (4, 1))
 
     def test_copy_and_delete_keep_accounting_consistent(self):
         self.ops.upload_bytes("a.txt", b"abc")
