@@ -71,7 +71,10 @@ class WorkspaceVersionStore:
             value = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise VersioningError("version manifest is unreadable") from exc
-        if not isinstance(value, dict) or value.get("schema_version") != 1 or not isinstance(value.get("versions"), list):
+        schema_version = value.get("schema_version") if isinstance(value, dict) else None
+        if (not isinstance(value, dict) or isinstance(schema_version, bool)
+                or not isinstance(schema_version, int) or schema_version != 1
+                or not isinstance(value.get("versions"), list)):
             raise VersioningError("version manifest schema is invalid")
         seen_ids: set[str] = set()
         for item in value["versions"]:
