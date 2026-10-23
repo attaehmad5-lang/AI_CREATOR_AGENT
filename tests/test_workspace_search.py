@@ -84,6 +84,21 @@ class WorkspaceSearchTests(unittest.TestCase):
         self.assertEqual(len(self.searcher.search("facts", mode="name", modified_after=timestamp - 1)), 1)
         self.assertEqual(self.searcher.search("facts", mode="name", modified_after=timestamp + 10), [])
 
+
+    def test_search_rejects_symlink_root(self):
+        outside = Path(self.tmp.name) / "outside-root"
+        outside.mkdir()
+        (outside / "needle.txt").write_text("needle", encoding="utf-8")
+        link = self.root / "linked-root"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable on this platform")
+        with self.assertRaises(UnsafePathError):
+            self.searcher.search("needle", within="linked-root")
+        with self.assertRaises(UnsafePathError):
+            self.searcher.search_folders("needle", within="linked-root")
+
     def test_saved_search_round_trip_and_delete(self):
         self.searcher.save_search("story-files", {"query": "scene", "mode": "name"})
         second = WorkspaceSearch(self.engine)
