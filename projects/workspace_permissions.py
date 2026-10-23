@@ -42,10 +42,12 @@ def normalize_scope(scope: str) -> str:
     if not isinstance(scope, str) or not scope.strip():
         raise PolicyError("scope must be a non-empty relative path")
     value = scope.replace("\\", "/")
+    if value.strip() == ".":
+        return "*"
     path = PurePosixPath(value)
-    if path.is_absolute() or any(part in {".", ".."} for part in value.split("/")):
-        raise PolicyError("scope must not be absolute or contain dot segments")
-    normalized = "/".join(part for part in path.parts if part)
+    if path.is_absolute() or any(part == ".." for part in value.split("/")):
+        raise PolicyError("scope must not be absolute or contain parent traversal")
+    normalized = "/".join(part for part in path.parts if part and part != ".")
     return normalized or "*"
 
 
