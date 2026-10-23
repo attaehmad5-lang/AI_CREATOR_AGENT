@@ -62,7 +62,9 @@ class WorkspaceRecycleBin:
             payload_name = item.get("payload")
             deleted_at = item.get("deleted_at")
             expires_at = item.get("expires_at")
-            if (not isinstance(item_id, str) or not item_id or item_id in seen_ids
+            if (not isinstance(item_id, str) or len(item_id) != 32
+                    or any(char not in "0123456789abcdef" for char in item_id)
+                    or item_id in seen_ids
                     or not isinstance(original, str) or not original
                     or original.startswith("/") or "\\" in original
                     or any(part in ("", ".", "..") for part in original.split("/"))
