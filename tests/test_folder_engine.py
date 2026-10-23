@@ -261,6 +261,34 @@ class FolderEngineTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.engine.validate_name(None)
 
+
+    def test_folder_metadata_rejects_corrupt_json(self):
+        self.engine.ensure_folder("research")
+        self.engine._metadata_path().write_text("{broken", encoding="utf-8")
+        with self.assertRaises(Exception):
+            self.engine.get_folder_id("research")
+
+    def test_metadata_key_validation_does_not_mutate_state(self):
+        self.engine.ensure_folder("research")
+        before = self.engine._metadata_path().read_bytes() if self.engine._metadata_path().exists() else None
+        for key in ("", " title", "title "):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self.engine.set_metadata("research", key, "value")
+        after = self.engine._metadata_path().read_bytes() if self.engine._metadata_path().exists() else None
+        self.assertEqual(before, after)
+
+    def test_folder_id_read_only_does_not_create_metadata(self):
+        self.engine.ensure_folder("research")
+        self.assertIsNone(self.engine.get_folder_id("research", create=False))
+        self.assertFalse(self.engine._metadata_path().exists())
+
+    def test_metadata_nested_values_are_defensively_copied(self):
+        self.engine.ensure_folder("research")
+        self.engine.set_metadata("research", "tags", ["story", {"language": "ur"}])
+        first = self.engine.get_metadata("research")
+        first["tags"][1]["language"] = "changed"
+        self.assertEqual(self.engine.get_metadata("research")["tags"][1]["language"], "ur")
+
     def test_no_import_time_side_effects_contract(self):
         # Constructing the engine does not create the root.
         other_root = self.root / "untouched"
