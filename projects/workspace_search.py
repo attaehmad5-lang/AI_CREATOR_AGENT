@@ -65,6 +65,8 @@ class WorkspaceSearch:
             raise ValueError("limit must be a positive integer")
         limit = min(limit, self.max_results)
         root = self.engine.root if within == "." else self.engine.resolve(within)
+        if root.is_symlink():
+            raise UnsafePathError("search root symlinks are not supported")
         if not root.exists():
             return []
         if not root.is_dir():
@@ -134,6 +136,8 @@ class WorkspaceSearch:
             return []
         if not root.is_dir():
             raise NotADirectoryError(str(root))
+        if root.is_symlink():
+            raise UnsafePathError("search root symlinks are not supported")
         needle = query if case_sensitive else query.casefold()
         if limit is None:
             maximum = self.max_results
@@ -148,6 +152,8 @@ class WorkspaceSearch:
                              key=lambda value: (value.casefold(), value))
             for name in dirs:
                 candidate = base / name
+                if candidate.is_symlink():
+                    continue
                 candidate_name = name if case_sensitive else name.casefold()
                 if needle in candidate_name:
                     found.append({"path": self._relative(candidate), "name": name})
