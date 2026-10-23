@@ -99,7 +99,7 @@ class WorkspaceVersionStore:
                 raise VersioningError("version manifest contains an invalid blob reference")
             if isinstance(size, bool) or not isinstance(size, int) or not 0 <= size <= self.max_file_bytes:
                 raise VersioningError("version manifest contains an invalid size")
-            if isinstance(created_at, bool) or not isinstance(created_at, (int, float)) or not math.isfinite(created_at):
+            if isinstance(created_at, bool) or not isinstance(created_at, (int, float)) or not math.isfinite(created_at) or created_at <= 0:
                 raise VersioningError("version manifest contains an invalid timestamp")
             if "note" in item and not isinstance(item["note"], str):
                 raise VersioningError("version manifest contains an invalid note")
