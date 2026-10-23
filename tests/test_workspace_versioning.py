@@ -30,6 +30,10 @@ class WorkspaceVersionStoreTests(unittest.TestCase):
         self.assertEqual({v["id"] for v in self.store.list_versions("notes.txt")},
                          {first["id"], second["id"]})
 
+    def test_create_version_rejects_non_string_note(self):
+        with self.assertRaises(VersioningError):
+            self.store.create_version("notes.txt", note=object())
+
     def test_retention_prunes_oldest_version(self):
         ids = []
         for value in ("a", "b", "c"):
