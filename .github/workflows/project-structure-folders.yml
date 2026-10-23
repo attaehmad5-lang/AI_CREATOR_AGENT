@@ -33,6 +33,7 @@ on:
       - "projects/workspace_search.py"
       - "projects/workspace_recycle_bin.py"
       - "projects/workspace_permissions.py"
+      - "projects/workspace_quota.py"
       - "tests/test_project_structure.py"
       - "tests/test_folder_engine.py"
       - "tests/test_folder_explorer.py"
@@ -40,6 +41,7 @@ on:
       - "tests/test_workspace_search.py"
       - "tests/test_workspace_recycle_bin.py"
       - "tests/test_workspace_permissions.py"
+      - "tests/test_workspace_quota.py"
       - ".github/workflows/project-structure-folders.yml"
 
 permissions:
