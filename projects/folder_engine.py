@@ -174,6 +174,8 @@ class FolderEngine:
 
     def _read_metadata(self) -> dict:
         path = self._metadata_path()
+        if path.is_symlink():
+            raise UnsafePathError("folder metadata file cannot be a symlink")
         if not path.exists():
             return {"version": 1, "folders": {}}
         try:
@@ -187,6 +189,8 @@ class FolderEngine:
     def _write_metadata(self, data: dict) -> None:
         self.ensure_root()
         path = self._metadata_path()
+        if path.is_symlink():
+            raise UnsafePathError("folder metadata file cannot be a symlink")
         temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
         try:
             temporary.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
