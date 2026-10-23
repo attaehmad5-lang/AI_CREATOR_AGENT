@@ -72,9 +72,36 @@ class WorkspaceVersionStore:
             raise VersioningError("version manifest is unreadable") from exc
         if not isinstance(value, dict) or value.get("schema_version") != 1 or not isinstance(value.get("versions"), list):
             raise VersioningError("version manifest schema is invalid")
+        seen_ids: set[str] = set()
         for item in value["versions"]:
-            if not isinstance(item, dict) or not all(k in item for k in ("id", "path", "blob", "sha256", "size", "created_at")):
+            if not isinstance(item, dict) or not all(
+                k in item for k in ("id", "path", "blob", "sha256", "size", "created_at")
+            ):
                 raise VersioningError("version manifest entry is invalid")
+            version_id = item["id"]
+            path = item["path"]
+            blob = item["blob"]
+            digest = item["sha256"]
+            size = item["size"]
+            created_at = item["created_at"]
+            if not isinstance(version_id, str) or not version_id or version_id in seen_ids:
+                raise VersioningError("version manifest contains an invalid or duplicate ID")
+            seen_ids.add(version_id)
+            if not isinstance(path, str) or not path or "\\" in path or path.startswith("/"):
+                raise VersioningError("version manifest contains an invalid path")
+            parts = path.split("/")
+            if any(part in ("", ".", "..") for part in parts) or parts[0] == self.STORE_NAME:
+                raise VersioningError("version manifest contains an unsafe path")
+            if not isinstance(digest, str) or len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+                raise VersioningError("version manifest contains an invalid digest")
+            if not isinstance(blob, str) or blob != digest + ".blob":
+                raise VersioningError("version manifest contains an invalid blob reference")
+            if isinstance(size, bool) or not isinstance(size, int) or not 0 <= size <= self.max_file_bytes:
+                raise VersioningError("version manifest contains an invalid size")
+            if isinstance(created_at, bool) or not isinstance(created_at, (int, float)) or not __import__("math").isfinite(created_at):
+                raise VersioningError("version manifest contains an invalid timestamp")
+            if "note" in item and not isinstance(item["note"], str):
+                raise VersioningError("version manifest contains an invalid note")
         return value
 
     def _write_manifest(self, manifest: dict[str, Any]) -> None:
