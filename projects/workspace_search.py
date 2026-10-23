@@ -1,6 +1,7 @@
 """Bounded, symlink-safe workspace search with reusable saved queries."""
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -175,7 +176,8 @@ class WorkspaceSearch:
         self._write_saved(state)
 
     def saved_searches(self) -> dict:
-        return {name: dict(query) for name, query in self._read_saved()["searches"].items()}
+        # Callers must not be able to mutate persisted nested query state.
+        return copy.deepcopy(self._read_saved()["searches"])
 
     def run_saved_search(self, name: str) -> list[dict]:
         searches = self._read_saved()["searches"]
