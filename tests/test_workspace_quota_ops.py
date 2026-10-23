@@ -70,6 +70,20 @@ class QuotaAwareWorkspaceFileOpsTests(unittest.TestCase):
         self.assertEqual((snap.bytes_used, snap.files_used), (3, 1))
         self.assertEqual((snap.bytes_reserved, snap.files_reserved), (0, 0))
 
+    def test_shrinking_overwrite_releases_the_byte_difference(self):
+        self.ops.upload_bytes("a.txt", b"123456")
+        self.ops.upload_bytes("a.txt", b"xy", overwrite=True)
+        snap = self.quota.snapshot()
+        self.assertEqual((snap.bytes_used, snap.files_used), (2, 1))
+        self.assertEqual((snap.bytes_reserved, snap.files_reserved), (0, 0))
+
+    def test_growing_overwrite_counts_only_the_byte_difference(self):
+        self.ops.upload_bytes("a.txt", b"abc")
+        self.ops.upload_bytes("a.txt", b"1234567", overwrite=True)
+        snap = self.quota.snapshot()
+        self.assertEqual((snap.bytes_used, snap.files_used), (7, 1))
+        self.assertEqual((snap.bytes_reserved, snap.files_reserved), (0, 0))
+
     def test_copy_and_delete_keep_accounting_consistent(self):
         self.ops.upload_bytes("a.txt", b"abc")
         self.ops.copy("a.txt", "b.txt")
