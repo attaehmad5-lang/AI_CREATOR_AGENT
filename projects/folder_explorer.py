@@ -34,6 +34,8 @@ class FolderExplorer:
         self._state = self._load_state()
 
     def _load_state(self) -> dict:
+        if self.state_path.is_symlink():
+            raise UnsafePathError("explorer state file cannot be a symlink")
         if not self.state_path.exists():
             return {"version": 1, "recent": [], "favorites": [], "pinned": [],
                     "view": "tree", "sort": [{"field": "name", "descending": False}],
@@ -45,7 +47,11 @@ class FolderExplorer:
         if not isinstance(data, dict) or data.get("version") != 1:
             raise FolderEngineError("unsupported explorer state format")
         for key in ("recent", "favorites", "pinned"):
-            if not isinstance(data.get(key, []), list):
+            if not isinstance(data.get(key, []), list) or any(
+                not isinstance(path, str) or not path or path.startswith("/")
+                or "\\" in path or any(part in ("", "..") for part in path.split("/") if part != ".")
+                for path in data.get(key, [])
+            ):
                 raise FolderEngineError(f"invalid explorer state field: {key}")
             data.setdefault(key, [])
         data.setdefault("view", "tree")
@@ -56,6 +62,8 @@ class FolderExplorer:
         return data
 
     def _save_state(self) -> None:
+        if self.state_path.is_symlink():
+            raise UnsafePathError("explorer state file cannot be a symlink")
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(prefix=self.state_path.name + ".", suffix=".tmp",
                                          dir=str(self.state_path.parent))
