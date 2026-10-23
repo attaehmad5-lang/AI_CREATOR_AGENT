@@ -2,6 +2,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from projects.folder_engine import FolderEngine
 from projects.workspace_file_ops import WorkspaceFileOps
@@ -15,8 +16,9 @@ class QuotaAwareWorkspaceFileOpsTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.engine = FolderEngine(Path(self.temp.name) / "workspace")
         self.engine.ensure_root()
+        self.file_ops = WorkspaceFileOps(self.engine)
         self.quota = WorkspaceQuotaManager(byte_limit=8, file_limit=2)
-        self.ops = QuotaAwareWorkspaceFileOps(WorkspaceFileOps(self.engine), self.quota)
+        self.ops = QuotaAwareWorkspaceFileOps(self.file_ops, self.quota)
 
     def test_upload_reserves_and_commits_actual_usage(self):
         info = self.ops.upload_bytes("a.txt", b"hello")
@@ -37,6 +39,35 @@ class QuotaAwareWorkspaceFileOpsTests(unittest.TestCase):
             self.ops.upload_bytes("same.txt", b"b")
         snap = self.quota.snapshot()
         self.assertEqual((snap.bytes_used, snap.files_used), (1, 1))
+        self.assertEqual((snap.bytes_reserved, snap.files_reserved), (0, 0))
+
+    def test_upload_commit_failure_removes_published_file(self):
+        with patch.object(self.quota, "commit", side_effect=QuotaError("injected commit failure")):
+            with self.assertRaisesRegex(QuotaError, "injected commit failure"):
+                self.ops.upload_bytes("a.txt", b"hello")
+        self.assertFalse((self.engine.root / "a.txt").exists())
+        snap = self.quota.snapshot()
+        self.assertEqual((snap.bytes_used, snap.files_used), (0, 0))
+        self.assertEqual((snap.bytes_reserved, snap.files_reserved), (0, 0))
+
+    def test_overwrite_commit_failure_restores_previous_file(self):
+        self.ops.upload_bytes("a.txt", b"old")
+        with patch.object(self.quota, "commit", side_effect=QuotaError("injected commit failure")):
+            with self.assertRaisesRegex(QuotaError, "injected commit failure"):
+                self.ops.upload_bytes("a.txt", b"newer", overwrite=True)
+        self.assertEqual(self.file_ops.download_bytes("a.txt"), b"old")
+        snap = self.quota.snapshot()
+        self.assertEqual((snap.bytes_used, snap.files_used), (3, 1))
+        self.assertEqual((snap.bytes_reserved, snap.files_reserved), (0, 0))
+
+    def test_copy_commit_failure_removes_published_copy(self):
+        self.ops.upload_bytes("a.txt", b"abc")
+        with patch.object(self.quota, "commit", side_effect=QuotaError("injected commit failure")):
+            with self.assertRaisesRegex(QuotaError, "injected commit failure"):
+                self.ops.copy("a.txt", "b.txt")
+        self.assertFalse((self.engine.root / "b.txt").exists())
+        snap = self.quota.snapshot()
+        self.assertEqual((snap.bytes_used, snap.files_used), (3, 1))
         self.assertEqual((snap.bytes_reserved, snap.files_reserved), (0, 0))
 
     def test_copy_and_delete_keep_accounting_consistent(self):
