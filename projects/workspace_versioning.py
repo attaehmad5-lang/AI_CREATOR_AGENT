@@ -64,6 +64,8 @@ class WorkspaceVersionStore:
             self._write_manifest({"schema_version": 1, "versions": []})
 
     def _read_manifest(self) -> dict[str, Any]:
+        if self.store.is_symlink() or self.blobs.is_symlink() or self.manifest_path.is_symlink():
+            raise UnsafePathError("version storage paths cannot be symlinks")
         try:
             value = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
