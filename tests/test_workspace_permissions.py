@@ -1,4 +1,5 @@
 """Regression tests for workspace policy authorization."""
+import math
 import unittest
 from projects.workspace_permissions import (
     PolicyError, PolicyRule, WorkspacePolicy, normalize_scope,
@@ -41,6 +42,19 @@ class WorkspacePolicyTests(unittest.TestCase):
         for scope in ("../secret", "docs/../secret", "/etc/passwd", r"..\\secret"):
             with self.subTest(scope=scope), self.assertRaises(PolicyError):
                 normalize_scope(scope)
+
+    def test_policy_rule_rejects_nonfinite_or_boolean_expiry(self):
+        for expiry in (float("nan"), float("inf"), float("-inf"), True, False, 0, -1):
+            with self.subTest(expiry=expiry), self.assertRaises(PolicyError):
+                PolicyRule("alice", "file.read", expires_at=expiry)
+
+    def test_policy_rule_rejects_malformed_permission_and_effect_types(self):
+        for kwargs in (
+            {"permission": []},
+            {"effect": []},
+        ):
+            with self.subTest(kwargs=kwargs), self.assertRaises(PolicyError):
+                PolicyRule("alice", "file.read", **kwargs) if "permission" not in kwargs else PolicyRule("alice", kwargs["permission"])
 
     def test_unknown_permission_and_role_are_rejected(self):
         with self.assertRaises(PolicyError):
