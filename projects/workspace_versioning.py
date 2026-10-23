@@ -46,8 +46,20 @@ class WorkspaceVersionStore:
 
     def _ensure_store(self) -> None:
         self.engine.ensure_root()
+        # Never follow links for version data: they could redirect writes
+        # outside the workspace or expose another directory's contents.
+        if self.store.is_symlink():
+            raise UnsafePathError("version store cannot be a symlink")
         self.store.mkdir(parents=True, exist_ok=True)
+        if self.store.resolve() != self.engine.root.resolve() / self.STORE_NAME:
+            raise UnsafePathError("version store must remain inside the workspace")
+        if self.blobs.is_symlink():
+            raise UnsafePathError("version blob directory cannot be a symlink")
         self.blobs.mkdir(parents=True, exist_ok=True)
+        if self.blobs.resolve().parent != self.store.resolve():
+            raise UnsafePathError("version blobs must remain inside the version store")
+        if self.manifest_path.is_symlink():
+            raise UnsafePathError("version manifest cannot be a symlink")
         if not self.manifest_path.exists():
             self._write_manifest({"schema_version": 1, "versions": []})
 
@@ -64,6 +76,8 @@ class WorkspaceVersionStore:
         return value
 
     def _write_manifest(self, manifest: dict[str, Any]) -> None:
+        if self.store.is_symlink() or self.blobs.is_symlink() or self.manifest_path.is_symlink():
+            raise UnsafePathError("version storage paths cannot be symlinks")
         self.store.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(prefix=".manifest-", suffix=".tmp", dir=str(self.store))
         try:
