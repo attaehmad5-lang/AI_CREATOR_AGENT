@@ -406,5 +406,30 @@ class FolderEngineTests(unittest.TestCase):
         self.assertNotEqual(self.engine.get_folder_id("copy/nested"), source_id)
 
 
+    def test_rejects_symlinked_metadata_file_when_reading(self):
+        self.engine.ensure_folder("research")
+        metadata = self.root / ".ai_creator_agent_folder_metadata.json"
+        outside = Path(self.tmp.name) / "outside-metadata.json"
+        outside.write_text('{"version":1,"folders":{}}', encoding="utf-8")
+        try:
+            metadata.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("file symlinks unavailable on this platform")
+        with self.assertRaises(UnsafePathError):
+            self.engine.get_folder_id("research")
+
+    def test_rejects_symlinked_metadata_file_when_writing(self):
+        self.engine.ensure_folder("research")
+        metadata = self.root / ".ai_creator_agent_folder_metadata.json"
+        outside = Path(self.tmp.name) / "outside-metadata.json"
+        outside.write_text('{"version":1,"folders":{}}', encoding="utf-8")
+        try:
+            metadata.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("file symlinks unavailable on this platform")
+        with self.assertRaises(UnsafePathError):
+            self.engine.set_metadata("research", "kind", "documentary")
+        self.assertEqual(outside.read_text(encoding="utf-8"), '{"version":1,"folders":{}}')
+
 if __name__ == "__main__":
     unittest.main()
