@@ -97,7 +97,7 @@ class FolderExplorerTests(unittest.TestCase):
         import json
         import shutil
         state = self.root / ".folder_explorer_state.json"
-        state.unlink()
+        state.unlink(missing_ok=True)
         outside = Path(self.tmp.name) / "outside-state.json"
         outside.write_text(json.dumps({"version": 1, "recent": []}), encoding="utf-8")
         try:
