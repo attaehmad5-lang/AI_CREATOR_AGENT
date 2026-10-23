@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -70,11 +71,29 @@ class WorkspaceRecycleBin:
                     or any(part in ("", ".", "..") for part in original.split("/"))
                     or not isinstance(payload_name, str) or payload_name != item_id
                     or not isinstance(deleted_at, (int, float)) or isinstance(deleted_at, bool)
-                    or not isinstance(expires_at, (int, float)) or isinstance(expires_at, bool)):
+                    or not math.isfinite(deleted_at)
+                    or not isinstance(expires_at, (int, float)) or isinstance(expires_at, bool)
+                    or not math.isfinite(expires_at)
+                    or expires_at < deleted_at):
                 raise RecycleBinError("recycle-bin item entry is unsafe")
             seen_ids.add(item_id)
         for event in state["audit"]:
-            if not isinstance(event, dict) or not isinstance(event.get("action"), str):
+            if (
+                not isinstance(event, dict)
+                or not isinstance(event.get("action"), str)
+                or not event["action"]
+                or not isinstance(event.get("item_id"), str)
+                or len(event["item_id"]) != 32
+                or any(char not in "0123456789abcdef" for char in event["item_id"])
+                or not isinstance(event.get("path"), str)
+                or not event["path"]
+                or event["path"].startswith("/")
+                or "\\\\" in event["path"]
+                or any(part in ("", ".", "..") for part in event["path"].split("/"))
+                or isinstance(event.get("timestamp"), bool)
+                or not isinstance(event.get("timestamp"), (int, float))
+                or not math.isfinite(event["timestamp"])
+            ):
                 raise RecycleBinError("recycle-bin audit entry is invalid")
         return state
 
@@ -170,6 +189,8 @@ class WorkspaceRecycleBin:
         cutoff = time.time() if now is None else now
         if isinstance(cutoff, bool) or not isinstance(cutoff, (int, float)):
             raise TypeError("now must be a timestamp")
+        if not math.isfinite(cutoff):
+            raise ValueError("now must be a finite timestamp")
         state = self._read()
         purged = []
         retained = []
