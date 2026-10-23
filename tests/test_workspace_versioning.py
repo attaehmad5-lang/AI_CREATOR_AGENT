@@ -72,6 +72,32 @@ class WorkspaceVersionStoreTests(unittest.TestCase):
         self.assertLessEqual(len(current), 2)
         self.assertTrue(all((self.store.blobs / item["blob"]).is_file() for item in current))
 
+    def test_rejects_symlinked_version_store(self):
+        outside = Path(self.temp.name) / "outside-store"
+        outside.mkdir()
+        store_path = self.engine.root / self.store.STORE_NAME
+        import shutil
+        shutil.rmtree(store_path)
+        try:
+            store_path.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks unavailable on this platform")
+        with self.assertRaises(UnsafePathError):
+            WorkspaceVersionStore(self.engine)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_rejects_symlinked_manifest(self):
+        manifest = self.store.manifest_path
+        manifest.unlink()
+        outside_manifest = Path(self.temp.name) / "outside-manifest.json"
+        outside_manifest.write_text('{"schema_version":1,"versions":[]}', encoding="utf-8")
+        try:
+            manifest.symlink_to(outside_manifest)
+        except (OSError, NotImplementedError):
+            self.skipTest("file symlinks unavailable on this platform")
+        with self.assertRaises(UnsafePathError):
+            self.store.list_versions("notes.txt")
+
     def test_manifest_corruption_fails_closed(self):
         (self.store.manifest_path).write_text("{broken", encoding="utf-8")
         with self.assertRaises(VersioningError):
