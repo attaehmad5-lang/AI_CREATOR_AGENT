@@ -26,6 +26,30 @@ class WorkspaceQuotaTests(unittest.TestCase):
         self.assertEqual(quota.snapshot().bytes_reserved, 60)
         self.assertTrue(quota.release("job"))
 
+    def test_commit_cannot_oversubscribe_other_byte_reservations(self):
+        quota = WorkspaceQuotaManager(byte_limit=100)
+        quota.reserve("first", bytes_count=40)
+        quota.reserve("second", bytes_count=40)
+        with self.assertRaisesRegex(QuotaError, "other reservations"):
+            quota.commit("first", actual_bytes=70)
+        state = quota.snapshot()
+        self.assertEqual((state.bytes_used, state.bytes_reserved), (0, 80))
+        quota.commit("first", actual_bytes=60)
+        state = quota.snapshot()
+        self.assertEqual((state.bytes_used, state.bytes_reserved), (60, 40))
+
+    def test_commit_cannot_oversubscribe_other_file_reservations(self):
+        quota = WorkspaceQuotaManager(file_limit=2)
+        quota.reserve("first", files_count=1)
+        quota.reserve("second", files_count=1)
+        with self.assertRaisesRegex(QuotaError, "other reservations"):
+            quota.commit("first", actual_files=2)
+        state = quota.snapshot()
+        self.assertEqual((state.files_used, state.files_reserved), (0, 2))
+        quota.commit("first", actual_files=1)
+        state = quota.snapshot()
+        self.assertEqual((state.files_used, state.files_reserved), (1, 1))
+
     def test_release_is_idempotently_reported(self):
         quota = WorkspaceQuotaManager(byte_limit=20)
         quota.reserve("job", bytes_count=10)
