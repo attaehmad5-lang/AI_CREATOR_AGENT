@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import re
 import tempfile
@@ -53,13 +54,17 @@ class WorkspaceSearch:
                include_hidden: bool = False) -> list[dict]:
         """Search names or bounded text content with optional metadata filters.
 
-        Modification timestamps are Unix seconds. Supported sort keys are path,
+        Modification timestamps are finite Unix seconds. Supported sort keys are path,
         name, size, and modified. Search is deterministic when sort keys tie.
         """
         if not isinstance(query, str) or not query:
             raise ValueError("query must be a non-empty string")
         if mode not in {"name", "content"}:
             raise ValueError("mode must be 'name' or 'content'")
+        if not isinstance(case_sensitive, bool) or not isinstance(regex, bool):
+            raise TypeError("case_sensitive and regex must be booleans")
+        if not isinstance(descending, bool) or not isinstance(include_hidden, bool):
+            raise TypeError("descending and include_hidden must be booleans")
         if limit is None:
             limit = self.max_results
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
@@ -78,18 +83,31 @@ class WorkspaceSearch:
         if min_size is not None and max_size is not None and min_size > max_size:
             raise ValueError("min_size cannot exceed max_size")
         for field, value in (("modified_after", modified_after), ("modified_before", modified_before)):
-            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
-                raise TypeError(f"{field} must be a Unix timestamp")
+            if value is not None:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise TypeError(f"{field} must be a finite Unix timestamp")
+                if not math.isfinite(value):
+                    raise ValueError(f"{field} must be a finite Unix timestamp")
         if modified_after is not None and modified_before is not None and modified_after > modified_before:
             raise ValueError("modified_after cannot exceed modified_before")
         if sort_by not in {"path", "name", "size", "modified"}:
             raise ValueError("sort_by must be path, name, size, or modified")
         suffixes = None
         if extensions is not None:
-            suffixes = {ext.casefold() if ext.startswith(".") else "." + ext.casefold()
-                        for ext in extensions}
+            try:
+                suffixes = set()
+                for ext in extensions:
+                    if not isinstance(ext, str) or not ext.strip():
+                        raise ValueError("extensions must contain non-empty strings")
+                    normalized = ext.strip().casefold()
+                    suffixes.add(normalized if normalized.startswith(".") else "." + normalized)
+            except TypeError as exc:
+                raise TypeError("extensions must be an iterable of strings") from exc
         flags = 0 if case_sensitive else re.IGNORECASE
-        pattern = re.compile(query if regex else re.escape(query), flags)
+        try:
+            pattern = re.compile(query if regex else re.escape(query), flags)
+        except re.error as exc:
+            raise ValueError(f"invalid regular expression: {exc}") from exc
         results = []
         for path in self._files(root):
             if not include_hidden and any(part.startswith(".") for part in path.relative_to(root).parts):
@@ -108,7 +126,7 @@ class WorkspaceSearch:
             match = None
             if mode == "name":
                 match = pattern.search(path.name)
-            elif path.suffix.casefold() in self.TEXT_EXTENSIONS and path.stat().st_size <= self.max_file_bytes:
+            elif path.suffix.casefold() in self.TEXT_EXTENSIONS and stat.st_size <= self.max_file_bytes:
                 try:
                     content = path.read_text(encoding="utf-8")
                 except (UnicodeDecodeError, OSError):
@@ -132,6 +150,8 @@ class WorkspaceSearch:
                        limit: int | None = None) -> list[dict]:
         if not isinstance(query, str) or not query:
             raise ValueError("query must be a non-empty string")
+        if not isinstance(case_sensitive, bool):
+            raise TypeError("case_sensitive must be a boolean")
         root = self.engine.root if within == "." else self.engine.resolve(within)
         if not root.exists():
             return []
@@ -139,13 +159,13 @@ class WorkspaceSearch:
             raise NotADirectoryError(str(root))
         if root.is_symlink():
             raise UnsafePathError("search root symlinks are not supported")
-        needle = query if case_sensitive else query.casefold()
         if limit is None:
             maximum = self.max_results
         elif isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
             raise ValueError("limit must be a positive integer")
         else:
             maximum = min(limit, self.max_results)
+        needle = query if case_sensitive else query.casefold()
         found = []
         for current, dirs, _files in os.walk(root, topdown=True, followlinks=False):
             base = Path(current)
@@ -176,14 +196,16 @@ class WorkspaceSearch:
         self._write_saved(state)
 
     def saved_searches(self) -> dict:
-        # Callers must not be able to mutate persisted nested query state.
         return copy.deepcopy(self._read_saved()["searches"])
 
     def run_saved_search(self, name: str) -> list[dict]:
         searches = self._read_saved()["searches"]
         if name not in searches:
             raise KeyError(name)
-        query = dict(searches[name])
+        saved = searches[name]
+        if not isinstance(saved, dict) or "query" not in saved:
+            raise FolderEngineError(f"saved search {name!r} has an invalid query format")
+        query = dict(saved)
         term = query.pop("query")
         return self.search(term, **query)
 
