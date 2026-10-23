@@ -11,6 +11,11 @@ class WorkspacePolicyTests(unittest.TestCase):
 
     def test_default_is_deny(self):
         self.assertFalse(self.policy.authorize("alice", "file.read", "docs/a.txt"))
+        self.assertFalse(self.policy.authorize("alice", "file.read"))
+
+    def test_root_scope_rule_applies_to_workspace(self):
+        self.policy.add_rule(PolicyRule("alice", "file.read", "."))
+        self.assertTrue(self.policy.authorize("alice", "file.read", "docs/a.txt"))
 
     def test_role_grants_only_expected_capabilities(self):
         self.policy.assign_role("alice", "viewer")
