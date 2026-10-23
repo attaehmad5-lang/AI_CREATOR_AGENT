@@ -132,5 +132,27 @@ class WorkspaceSearchTests(unittest.TestCase):
         self.assertEqual(self.searcher.search_folders("external"), [])
 
 
+    def test_invalid_extensions_are_reported_as_validation_errors(self):
+        for extensions in ([None], [""], [3], 7):
+            with self.subTest(extensions=extensions), self.assertRaises((ValueError, TypeError)):
+                self.searcher.search("scene", extensions=extensions)
+
+    def test_non_finite_timestamps_are_rejected(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.searcher.search("scene", modified_after=value)
+
+    def test_non_boolean_flags_are_rejected(self):
+        with self.assertRaises(TypeError):
+            self.searcher.search("scene", regex="yes")
+        with self.assertRaises(TypeError):
+            self.searcher.search_folders("scene", case_sensitive=1)
+
+    def test_malformed_saved_search_fails_with_domain_error(self):
+        self.searcher.save_search("broken", {"not_query": "scene"})
+        with self.assertRaisesRegex(Exception, "invalid query format"):
+            self.searcher.run_saved_search("broken")
+
+
 if __name__ == "__main__":
     unittest.main()
