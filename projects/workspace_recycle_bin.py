@@ -41,6 +41,10 @@ class WorkspaceRecycleBin:
         return target
 
     def _read(self) -> dict:
+        if self.trash.is_symlink():
+            raise UnsafePathError("recycle-bin directory cannot be a symlink")
+        if self.state_path.is_symlink():
+            raise UnsafePathError("recycle-bin manifest cannot be a symlink")
         if not self.state_path.exists():
             return {"version": 1, "items": [], "audit": []}
         try:
@@ -49,9 +53,32 @@ class WorkspaceRecycleBin:
             raise RecycleBinError(f"recycle-bin manifest is unreadable: {exc}") from exc
         if not isinstance(state, dict) or state.get("version") != 1 or not isinstance(state.get("items"), list) or not isinstance(state.get("audit"), list):
             raise RecycleBinError("recycle-bin manifest has invalid format")
+        seen_ids: set[str] = set()
+        for item in state["items"]:
+            if not isinstance(item, dict):
+                raise RecycleBinError("recycle-bin item entry is invalid")
+            item_id = item.get("id")
+            original = item.get("original_path")
+            payload_name = item.get("payload")
+            deleted_at = item.get("deleted_at")
+            expires_at = item.get("expires_at")
+            if (not isinstance(item_id, str) or not item_id or item_id in seen_ids
+                    or not isinstance(original, str) or not original
+                    or original.startswith("/") or "\\" in original
+                    or any(part in ("", ".", "..") for part in original.split("/"))
+                    or not isinstance(payload_name, str) or payload_name != item_id
+                    or not isinstance(deleted_at, (int, float)) or isinstance(deleted_at, bool)
+                    or not isinstance(expires_at, (int, float)) or isinstance(expires_at, bool)):
+                raise RecycleBinError("recycle-bin item entry is unsafe")
+            seen_ids.add(item_id)
+        for event in state["audit"]:
+            if not isinstance(event, dict) or not isinstance(event.get("action"), str):
+                raise RecycleBinError("recycle-bin audit entry is invalid")
         return state
 
     def _write(self, state: dict) -> None:
+        if self.trash.is_symlink() or self.state_path.is_symlink():
+            raise UnsafePathError("recycle-bin storage paths cannot be symlinks")
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         fd, name = tempfile.mkstemp(prefix="manifest-", suffix=".tmp", dir=str(self.state_path.parent))
         try:
