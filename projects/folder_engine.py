@@ -283,9 +283,11 @@ class FolderEngine:
             raise FileExistsError(f"destination already exists: {destination}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.relative_to(self.root)
+        # Validate metadata before the filesystem mutation to avoid a moved
+        # directory with stale metadata if the metadata file is corrupt.
+        data = self._read_metadata()
         old_key = source.relative_to(self.root).as_posix()
         source.rename(destination)
-        data = self._read_metadata()
         moved = {}
         for key, value in list(data["folders"].items()):
             if key == old_key or key.startswith(old_key + "/"):
