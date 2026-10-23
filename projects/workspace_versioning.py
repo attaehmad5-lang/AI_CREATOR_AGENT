@@ -138,6 +138,8 @@ class WorkspaceVersionStore:
             return self._create_version_locked(relative_path, note=note)
 
     def _create_version_locked(self, relative_path: str, *, note: str) -> dict[str, Any]:
+        if not isinstance(note, str):
+            raise VersioningError("note must be a string")
         target = self._target(relative_path)
         if not target.is_file():
             raise FileNotFoundError(relative_path)
