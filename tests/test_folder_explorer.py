@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from projects.folder_engine import FolderEngine, UnsafePathError
+from projects.folder_engine import FolderEngine, FolderEngineError, UnsafePathError
 from projects.folder_explorer import FolderExplorer
 
 
@@ -111,7 +111,7 @@ class FolderExplorerTests(unittest.TestCase):
         import json
         state = self.root / ".folder_explorer_state.json"
         state.write_text(json.dumps({"version": 1, "recent": ["../outside"]}), encoding="utf-8")
-        with self.assertRaises(Exception):
+        with self.assertRaises(FolderEngineError):
             FolderExplorer(self.engine)
 
 
