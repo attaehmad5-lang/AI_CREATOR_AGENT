@@ -256,9 +256,11 @@ class FolderEngine:
         if destination.exists():
             raise FileExistsError(f"destination already exists: {destination}")
         destination.relative_to(self.root)
-        source.rename(destination)
+        # Validate metadata before mutating the filesystem, so corrupt
+        # metadata cannot leave a rename with stale metadata paths.
         data = self._read_metadata()
         old_key = source.relative_to(self.root).as_posix()
+        source.rename(destination)
         new_key = destination.relative_to(self.root).as_posix()
         renamed = {}
         for key, value in list(data["folders"].items()):
