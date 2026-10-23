@@ -141,8 +141,26 @@ class WorkspaceFileOps:
         if source.stat().st_size > self.max_file_bytes:
             raise ValueError("file exceeds configured size limit")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with source.open("rb") as reader, destination.open("xb") as writer:
-            shutil.copyfileobj(reader, writer, length=1024 * 1024)
+        # Stage the copy beside its destination, then publish atomically. A
+        # failed/short read must not leave a truncated file at the final path.
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=".copy-", suffix=".tmp", dir=str(destination.parent)
+        )
+        try:
+            with source.open("rb") as reader, os.fdopen(fd, "wb") as writer:
+                shutil.copyfileobj(reader, writer, length=1024 * 1024)
+                writer.flush()
+                os.fsync(writer.fileno())
+            if destination.exists() or destination.is_symlink():
+                raise FileExistsError(str(destination))
+            # Hard-link publication avoids overwriting a destination created
+            # concurrently after the preflight check.
+            os.link(temporary_name, destination)
+        finally:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
         return self.describe(destination.relative_to(self.engine.root).as_posix())
 
     def delete(self, relative_path: str | os.PathLike[str]) -> None:
