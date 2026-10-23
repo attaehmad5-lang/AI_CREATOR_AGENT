@@ -115,6 +115,19 @@ class WorkspaceVersionStoreTests(unittest.TestCase):
         with self.assertRaises(VersioningError):
             self.store.restore_version(version["id"])
 
+    def test_manifest_rejects_boolean_schema_version(self):
+        for invalid_schema in (True, False, "1", 1.0):
+            manifest = json.loads(self.store.manifest_path.read_text(encoding="utf-8"))
+            manifest["schema_version"] = invalid_schema
+            self.store.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.subTest(schema_version=invalid_schema):
+                with self.assertRaises(VersioningError):
+                    self.store.list_versions("notes.txt")
+            # Reset to a valid empty manifest for the next malformed value.
+            self.store.manifest_path.write_text(
+                json.dumps({"schema_version": 1, "versions": []}), encoding="utf-8"
+            )
+
     def test_manifest_rejects_malformed_version_id(self):
         self.store.create_version("notes.txt")
         manifest = json.loads(self.store.manifest_path.read_text(encoding="utf-8"))
