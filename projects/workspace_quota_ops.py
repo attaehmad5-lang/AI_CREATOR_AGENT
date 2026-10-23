@@ -46,7 +46,14 @@ class QuotaAwareWorkspaceFileOps:
                     published = False
                     raise
                 if len(data) < old_size:
-                    self.quota.record_delete(bytes_count=old_size - len(data), files_count=0)
+                    try:
+                        self.quota.record_delete(bytes_count=old_size - len(data), files_count=0)
+                    except Exception:
+                        # The shrink was published but its accounting decrement failed.
+                        # Restore the previous bytes so the old quota snapshot remains truthful.
+                        self.file_ops.upload_bytes(relative_path, old_data, overwrite=True)
+                        published = False
+                        raise
                 return result
             except Exception:
                 self.quota.release(reservation_id)
@@ -94,5 +101,12 @@ class QuotaAwareWorkspaceFileOps:
         snapshot = self.quota.snapshot()
         if info["size"] > snapshot.bytes_used or snapshot.files_used < 1:
             raise ValueError("quota usage is not reconciled with the workspace")
+        original_data = self.file_ops.download_bytes(relative_path)
         self.file_ops.delete(relative_path)
-        self.quota.record_delete(bytes_count=info["size"], files_count=1)
+        try:
+            self.quota.record_delete(bytes_count=info["size"], files_count=1)
+        except Exception:
+            # Restore the deleted file if accounting could not be committed.
+            # If restoration also fails, surface that failure rather than hide data loss.
+            self.file_ops.upload_bytes(relative_path, original_data, overwrite=False)
+            raise
