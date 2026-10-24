@@ -115,12 +115,26 @@ class FolderExplorerTests(unittest.TestCase):
             FolderExplorer(self.engine)
 
 
-    def test_rejects_non_integer_or_boolean_persisted_schema_version(self):
+    def test_rejects_invalid_persisted_preferences(self):
         import json
         state = self.root / ".folder_explorer_state.json"
-        for version in (True, False, "1", 1.0, 2):
-            with self.subTest(version=version):
-                state.write_text(json.dumps({"version": version}), encoding="utf-8")
+        invalid_states = [
+            {"view": "timeline"},
+            {"sort": "name"},
+            {"sort": [{"field": "unknown", "descending": False}]},
+            {"sort": [{"field": "name", "descending": 1}]},
+            {"filters": []},
+            {"filters": {"name_contains": []}},
+            {"filters": {"path_prefix": "../outside"}},
+            {"labels": []},
+            {"labels": {"research": 3}},
+            {"icons": {"../outside": "folder"}},
+            {"icons": {"research": "  "}},
+        ]
+        for invalid in invalid_states:
+            payload = {"version": 1, **invalid}
+            with self.subTest(payload=payload):
+                state.write_text(json.dumps(payload), encoding="utf-8")
                 with self.assertRaises(FolderEngineError):
                     FolderExplorer(self.engine)
 
