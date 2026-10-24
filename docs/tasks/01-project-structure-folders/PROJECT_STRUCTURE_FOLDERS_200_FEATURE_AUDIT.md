@@ -1,4 +1,4 @@
-# Feature #1 — Project Structure / Folders: 210-Feature Audit
+# Feature #1 — Project Structure / Folders: PDF 200-Feature Audit
 
 **Scope:** compare the user-provided 200-point checklist, the uploaded `Workspace_Engine_Source_Code.pdf`, and the current `AI_CREATOR_AGENT` repository/PR state. This is explicitly Feature #1, not Task #25 Provider Connection Manager.
 
@@ -234,19 +234,11 @@
 | 199 | Integration, APIs & Operations | Health Checks and Diagnostics | Full | 20/20 PASS | — | NOT VERIFIED / NOT INTEGRATED into current Feature #1 branch | Map implementation, add focused tests, then mark PASS only with evidence. |
 | 200 | Integration, APIs & Operations | Operational Metrics and Alerts | Partial | 20/20 PASS | In-process metrics + Prometheus text (no endpoint) | NOT VERIFIED / NOT INTEGRATED into current Feature #1 branch | Map implementation, add focused tests, then mark PASS only with evidence. |
 
-| 201 | Advanced Reliability & Safety | Atomic Multi-Folder Operations | Supplemental target | Not yet tested | Added to the 210-feature target at user direction; not claimed by the original 200-row PDF | NOT VERIFIED / NOT INTEGRATED | Implement transactional staging/commit/rollback semantics and failure-injection tests. |
-| 202 | Advanced Reliability & Safety | Concurrent Mutation Protection | Supplemental target | Not yet tested | Added to the 210-feature target at user direction; not claimed by the original 200-row PDF | NOT VERIFIED / NOT INTEGRATED | Define locking policy and test competing create/move/delete operations across threads/processes. |
-| 203 | Advanced Reliability & Safety | Unicode Normalization and Name Collision Detection | Supplemental target | Not yet tested | Added to the 210-feature target at user direction; not claimed by the original 200-row PDF | NOT VERIFIED / NOT INTEGRATED | Normalize portable names consistently and test NFC/NFD and case-fold collisions. |
-| 204 | Advanced Reliability & Safety | Explicit Symlink Policy and Race Checks | Supplemental target | Not yet tested | Added to the 210-feature target at user direction; not claimed by the original 200-row PDF | PARTIAL / NOT VERIFIED | Document allow/deny policy and add race-oriented containment tests. |
-| 205 | Advanced Reliability & Safety | Dry-Run Operation Planner | Supplemental target | Not yet tested | Added to the 210-feature target at user direction; not claimed by the original 200-row PDF | NOT VERIFIED / NOT INTEGRATED | Add side-effect-free plans for batch folder changes and validate plan/apply parity. |
-| 206 | Advanced Reliability & Safety | Structured Audit Events | Supplemental target | Not yet tested | Added to the 210-feature target at user direction; not claimed by the original 200-row PDF | NOT VERIFIED / NOT INTEGRATED | Record operation, actor/context, result and safe error codes without leaking secrets. |
-| 207 | Advanced Reliability & Safety | Crash Recovery for Interrupted Operations | Supplemental target | Not yet tested | Added to the 210-feature target at user direction; not claimed by the original 200-row PDF | NOT VERIFIED / NOT INTEGRATED | Persist recoverable operation journals and test restart after injected failures. |
-| 208 | Advanced Reliability & Safety | Folder Integrity Repair Plan | Supplemental target | Not yet tested | Added to the 210-feature target at user direction; not claimed by the original 200-row PDF | NOT VERIFIED / NOT INTEGRATED | Produce a non-destructive repair plan for orphaned metadata and invalid references. |
-| 209 | Advanced Reliability & Safety | Import/Export Manifest Validation | Supplemental target | Not yet tested | Added to the 210-feature target at user direction; not claimed by the original 200-row PDF | NOT VERIFIED / NOT INTEGRATED | Validate schema, paths, checksums, size limits and duplicate entries before import. |
-| 210 | Advanced Reliability & Safety | Fault-Injection and Recovery Regression Suite | Supplemental target | Not yet tested | Added to the 210-feature target at user direction; not claimed by the original 200-row PDF | NOT VERIFIED / NOT INTEGRATED | Add deterministic fault injection for filesystem errors, rollback, restart and recovery. |
 
-## GitHub reference
+## Scope correction
 
-- Existing hardening PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
-- PR #78 is not merged. Do not mark Feature #1 complete based only on the six core folder tests.
-- Do not commit tokens, credentials, local output media, or secrets.
+The source PDF defines exactly 200 numbered features. Rows 201–210 were supplemental ideas and are intentionally excluded from this PDF-ordered audit so they cannot be mistaken for source-PDF features. The supplemental ideas must be tracked separately if approved.
+
+## Current integration gate
+
+The reconstructed source package passed 225 local unittest methods, but the source package has not yet been integrated into this repository branch. Do not treat the PDF's 153 Full / 47 Partial labels as repository completion. Next gate is to import the reviewed source files in PDF listing order, retain provenance and limitations, run repository CI, and verify the resulting commit.
