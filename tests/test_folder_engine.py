@@ -1,3 +1,4 @@
+import json
 """Tests for the core folder engine."""
 import tempfile
 import unittest
@@ -267,6 +268,19 @@ class FolderEngineTests(unittest.TestCase):
         self.engine._metadata_path().write_text("{broken", encoding="utf-8")
         with self.assertRaises(FolderEngineError):
             self.engine.get_folder_id("research")
+
+    def test_folder_metadata_rejects_invalid_schema_version_types(self):
+        self.engine.ensure_folder("research")
+        path = self.engine._metadata_path()
+        for version in (True, False, "1", 1.0, 2):
+            with self.subTest(version=version):
+                path.write_text(
+                    json.dumps({"version": version, "folders": {}}),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(FolderEngineError):
+                    self.engine.get_folder_id("research")
+
 
     def test_metadata_key_validation_does_not_mutate_state(self):
         self.engine.ensure_folder("research")
