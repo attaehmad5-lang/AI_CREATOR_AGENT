@@ -2,11 +2,11 @@
 
 ## Verified in GitHub
 - Branch: `feature/project-structure-folders-hardening`
-- Latest code commit checked: `b255397c69cb374d609c29db090a1da095fede66`
-- Project Structure workflow run 40085119367: **success**, all 6 matrix jobs completed (Ubuntu/Windows × Python 3.11/3.12/3.13).
-- This verified change hardens `FolderExplorer` persisted state schema validation: booleans, strings, floats, and unsupported integer versions are rejected rather than accepted as schema version 1.
-- Regression test `test_rejects_non_integer_or_boolean_persisted_schema_version` covers `True`, `False`, `"1"`, `1.0`, and unsupported version `2`.
-- Task #25 workflow run 40019507949 on the prior code commit: **success**, both Ubuntu and Windows jobs passed. A rerun triggered by the latest docs/test changes was still running when this checkpoint was updated; it is not represented as a pass here.
+- Latest code commit checked: `2721a8cf78b83adca66702e3803e203311e82fad`
+- Project Structure workflow run 40085297234: **success**, all 6 matrix jobs completed (Ubuntu/Windows × Python 3.11/3.12/3.13).
+- FolderExplorer persisted state schema validation rejects booleans, strings, floats, and unsupported integer versions rather than accepting them as schema version 1; regression test covers `True`, `False`, `"1"`, `1.0`, and unsupported version `2`.
+- FolderEngine folder metadata schema validation now rejects bool/string/float/unsupported versions; regression test covers `True`, `False`, `"1"`, `1.0`, and `2`.
+- Task #25 workflow run 40085289213: **success**, both Ubuntu and Windows jobs passed on commit `b84f84cf3f8fdffe9468e244060a6e99dce5134a`. Its follow-up run on the latest test-only commit was still queued/in progress at checkpoint time; do not treat it as a latest-commit pass.
 - Earlier failures at runs 40010585348 and 40010585353 were on a pre-fix commit containing invalid Python syntax; later commits fixed the syntax and newer listed runs passed.
 - PR #78 remains **open and unmerged**: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
 
