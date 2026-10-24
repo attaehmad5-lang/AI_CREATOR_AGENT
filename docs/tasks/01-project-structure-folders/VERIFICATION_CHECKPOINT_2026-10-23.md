@@ -2,12 +2,12 @@
 
 ## Verified in GitHub
 - Branch: `feature/project-structure-folders-hardening`
-- Latest code commit checked: `586c16b4a55709882a61aea364d3feb4295989ff`
-- Project Structure workflow run 40019507959: **success**, all 6 matrix jobs completed (Ubuntu/Windows × Python 3.11/3.12/3.13).
-- Task #25 Provider Connection Manager workflow run 40019507949: **success**, both Ubuntu and Windows jobs passed compile, provider JSON catalog validation, and unit/regression test steps.
-- Project Structure workflow run 40019502745: **success**, all 6 matrix jobs completed at the same code commit.
-- The verified Project Structure test set includes strict version manifest ID, finite/positive timestamp, and schema-version type validation, plus the previously added workspace hardening regression tests.
-- Earlier failures at runs 40010585348 and 40010585353 were on a pre-fix commit containing invalid Python syntax; later commits fixed the syntax and the newer listed runs passed.
+- Latest code commit checked: `b255397c69cb374d609c29db090a1da095fede66`
+- Project Structure workflow run 40085119367: **success**, all 6 matrix jobs completed (Ubuntu/Windows × Python 3.11/3.12/3.13).
+- This verified change hardens `FolderExplorer` persisted state schema validation: booleans, strings, floats, and unsupported integer versions are rejected rather than accepted as schema version 1.
+- Regression test `test_rejects_non_integer_or_boolean_persisted_schema_version` covers `True`, `False`, `"1"`, `1.0`, and unsupported version `2`.
+- Task #25 workflow run 40019507949 on the prior code commit: **success**, both Ubuntu and Windows jobs passed. A rerun triggered by the latest docs/test changes was still running when this checkpoint was updated; it is not represented as a pass here.
+- Earlier failures at runs 40010585348 and 40010585353 were on a pre-fix commit containing invalid Python syntax; later commits fixed the syntax and newer listed runs passed.
 - PR #78 remains **open and unmerged**: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
 
 ## Requirements reconciliation
