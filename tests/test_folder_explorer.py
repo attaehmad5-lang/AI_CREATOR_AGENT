@@ -115,5 +115,15 @@ class FolderExplorerTests(unittest.TestCase):
             FolderExplorer(self.engine)
 
 
+    def test_rejects_non_integer_or_boolean_persisted_schema_version(self):
+        import json
+        state = self.root / ".folder_explorer_state.json"
+        for version in (True, False, "1", 1.0, 2):
+            with self.subTest(version=version):
+                state.write_text(json.dumps({"version": version}), encoding="utf-8")
+                with self.assertRaises(FolderEngineError):
+                    FolderExplorer(self.engine)
+
+
 if __name__ == "__main__":
     unittest.main()
