@@ -61,6 +61,37 @@ class FolderExplorer:
         data.setdefault("filters", {})
         data.setdefault("labels", {})
         data.setdefault("icons", {})
+
+        if not isinstance(data["view"], str) or data["view"] not in self.VIEWS:
+            raise FolderEngineError("invalid explorer state field: view")
+        sort_rules = data["sort"]
+        if (not isinstance(sort_rules, list) or not sort_rules
+                or any(not isinstance(rule, dict)
+                       or rule.get("field") not in {"name", "path", "depth"}
+                       or not isinstance(rule.get("descending"), bool)
+                       for rule in sort_rules)):
+            raise FolderEngineError("invalid explorer state field: sort")
+        filters = data["filters"]
+        if (not isinstance(filters, dict)
+                or (filters.get("name_contains") is not None
+                    and not isinstance(filters.get("name_contains"), str))
+                or (filters.get("path_prefix") is not None
+                    and (not isinstance(filters.get("path_prefix"), str)
+                         or not filters.get("path_prefix")
+                         or filters["path_prefix"].startswith("/")
+                         or "\\" in filters["path_prefix"]
+                         or any(part in ("", "..") for part in filters["path_prefix"].split("/")
+                                if part != ".")))):
+            raise FolderEngineError("invalid explorer state field: filters")
+        for key in ("labels", "icons"):
+            mapping = data[key]
+            if (not isinstance(mapping, dict)
+                    or any(not isinstance(path, str) or not path or path.startswith("/")
+                           or "\\" in path
+                           or any(part in ("", "..") for part in path.split("/") if part != ".")
+                           or not isinstance(value, str) or not value.strip()
+                           for path, value in mapping.items())):
+                raise FolderEngineError(f"invalid explorer state field: {key}")
         return data
 
     def _save_state(self) -> None:
