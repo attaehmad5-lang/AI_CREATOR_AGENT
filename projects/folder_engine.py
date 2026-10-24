@@ -182,7 +182,10 @@ class FolderEngine:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise FolderEngineError(f"folder metadata is unreadable: {exc}") from exc
-        if not isinstance(data, dict) or data.get("version") != 1 or not isinstance(data.get("folders"), dict):
+        version = data.get("version") if isinstance(data, dict) else None
+        if (not isinstance(data, dict) or isinstance(version, bool)
+                or not isinstance(version, int) or version != 1
+                or not isinstance(data.get("folders"), dict)):
             raise FolderEngineError("folder metadata has an unsupported or invalid format")
         return data
 
