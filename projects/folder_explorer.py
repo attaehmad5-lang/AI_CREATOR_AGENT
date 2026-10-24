@@ -44,7 +44,9 @@ class FolderExplorer:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise FolderEngineError(f"explorer state is unreadable: {exc}") from exc
-        if not isinstance(data, dict) or data.get("version") != 1:
+        version = data.get("version") if isinstance(data, dict) else None
+        if (not isinstance(data, dict) or isinstance(version, bool)
+                or not isinstance(version, int) or version != 1):
             raise FolderEngineError("unsupported explorer state format")
         for key in ("recent", "favorites", "pinned"):
             if not isinstance(data.get(key, []), list) or any(
