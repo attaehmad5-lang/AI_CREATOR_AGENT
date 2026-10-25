@@ -85,6 +85,11 @@ class ProviderQuotaManager:
                 or not isinstance(record, dict)
                 or not isinstance(record.get("provider_id"), str)
                 or record.get("status") not in {"RESERVED", "COMMITTED", "RELEASED"}
+                or any(
+                    key in record
+                    and (not isinstance(record[key], str) or not record[key].strip())
+                    for key in ("user_id", "project_id", "tenant_id")
+                )
             ):
                 raise ValueError("invalid quota request record")
             self._parse_timestamp(record.get("created_at"))
