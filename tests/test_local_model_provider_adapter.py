@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from projects.provider_store.local_model_provider_adapter import LocalModelProviderAdapter
 
@@ -63,29 +65,34 @@ class LocalModelProviderAdapterTests(unittest.TestCase):
         self.assertEqual(bad_system["status"], "INVALID_SYSTEM_PROMPT")
 
     def test_execute_matches_provider_service_contract_without_losing_unknown_outcome(self):
-        adapter = LocalModelProviderAdapter(
-            model_id="local-model",
-            transport=lambda *args, **kwargs: {"response": "local result", "done": True},
-        )
-        result = adapter.execute(
-            prompt="Write a short line.", provider_id="local-ollama", request_id="req-1",
-        )
-        self.assertTrue(result["started"])
-        self.assertTrue(result["success"])
-        self.assertEqual(result["text"], "local result")
-        self.assertEqual(result["request_id"], "req-1")
+        with tempfile.TemporaryDirectory() as directory:
+            output_path = Path(directory) / "local-output.txt"
+            adapter = LocalModelProviderAdapter(
+                model_id="local-model",
+                transport=lambda *args, **kwargs: {"response": "local result", "done": True},
+            )
+            result = adapter.execute(
+                prompt="Write a short line.", provider_id="local-ollama",
+                request_id="req-1", output_path=output_path,
+            )
+            self.assertTrue(result["started"])
+            self.assertTrue(result["success"])
+            self.assertEqual(result["text"], "local result")
+            self.assertEqual(result["request_id"], "req-1")
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "local result\\n")
+            self.assertEqual(result["charge_outcome"], "not_incurred")
 
-        invalid = adapter.execute(prompt="   ")
-        self.assertFalse(invalid["started"])
-        self.assertFalse(invalid["success"])
+            invalid = adapter.execute(prompt="   ", output_path=output_path)
+            self.assertFalse(invalid["started"])
+            self.assertFalse(invalid["success"])
 
-        broken = LocalModelProviderAdapter(
-            model_id="local-model",
-            transport=lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError()),
-        ).execute(prompt="May have reached local runtime")
-        self.assertTrue(broken["started"])
-        self.assertFalse(broken["success"])
-        self.assertEqual(broken["status"], "LOCAL_MODEL_REQUEST_FAILED")
+            broken = LocalModelProviderAdapter(
+                model_id="local-model",
+                transport=lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError()),
+            ).execute(prompt="May have reached local runtime", output_path=output_path)
+            self.assertTrue(broken["started"])
+            self.assertFalse(broken["success"])
+            self.assertEqual(broken["status"], "LOCAL_MODEL_REQUEST_FAILED")
 
     def test_transport_exceptions_do_not_leak_prompt_or_credentials(self):
         def broken_transport(*args, **kwargs):
