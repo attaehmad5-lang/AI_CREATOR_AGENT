@@ -1197,9 +1197,6 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("configuration", self.manager.get_state("public_image"))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 
 class ProviderPolicySimulationTests(unittest.TestCase):
@@ -1338,3 +1335,5 @@ class ProviderPolicySimulationTests(unittest.TestCase):
         self.assertFalse(result["applied"])
 
 
+if __name__ == "__main__":
+    unittest.main()
