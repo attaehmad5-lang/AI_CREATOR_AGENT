@@ -52,6 +52,19 @@ class FolderEngineRegressionTests(unittest.TestCase):
             self.engine.resolve("linked/child")
         self.assertFalse((outside / "child").exists())
 
+    def test_internal_symlink_alias_is_rejected_for_mutating_operations(self):
+        self.engine.ensure_folder("real/child")
+        self.engine.ensure_root()
+        alias = self.root / "alias"
+        try:
+            alias.symlink_to(self.root / "real", target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks are not available on this platform")
+        with self.assertRaises(UnsafePathError):
+            self.engine.delete_folder("alias", recursive=True)
+        self.assertTrue((self.root / "real/child").is_dir())
+        self.assertTrue(alias.is_symlink())
+
     def test_metadata_symlink_is_never_followed(self):
         self.engine.ensure_folder("alpha")
         outside = Path(self.temp.name) / "external-metadata.json"
