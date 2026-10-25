@@ -1576,5 +1576,42 @@ class ProviderAdminControlTests(unittest.TestCase):
 
 
 
+    def test_explicit_provider_rechecks_delegate_to_configured_coordinator(self):
+        class Coordinator:
+            def run_due_rechecks(self):
+                return {"status": "COMPLETED", "probed": ["provider-a"], "results": {}}
+
+        service = ProviderService(self.connection, recovery_coordinator=Coordinator())
+        result = service.run_due_provider_rechecks()
+        self.assertEqual(result["status"], "COMPLETED")
+        self.assertEqual(result["probed"], ["provider-a"])
+
+    def test_provider_rechecks_fail_closed_when_coordinator_missing(self):
+        service = ProviderService(self.connection)
+        result = service.run_due_provider_rechecks()
+        self.assertEqual(result["status"], "RECOVERY_COORDINATOR_UNAVAILABLE")
+        self.assertEqual(result["probed"], [])
+
+    def test_provider_recheck_coordinator_exception_does_not_leak_details(self):
+        class BrokenCoordinator:
+            def run_due_rechecks(self):
+                raise RuntimeError("secret internal probe details")
+
+        service = ProviderService(self.connection, recovery_coordinator=BrokenCoordinator())
+        result = service.run_due_provider_rechecks()
+        self.assertEqual(result["status"], "RECOVERY_RECHECK_FAILED")
+        self.assertNotIn("secret internal", repr(result))
+
+    def test_provider_recheck_non_completed_result_is_blocked(self):
+        class BlockedCoordinator:
+            def run_due_rechecks(self):
+                return {"status": "BLOCKED_INVALID_HEALTH_STATE", "probed": ["provider-a"]}
+
+        service = ProviderService(self.connection, recovery_coordinator=BlockedCoordinator())
+        result = service.run_due_provider_rechecks()
+        self.assertEqual(result["status"], "RECOVERY_RECHECK_BLOCKED")
+        self.assertEqual(result["probed"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
