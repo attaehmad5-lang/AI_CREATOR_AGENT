@@ -454,5 +454,39 @@ class FolderEngineTests(unittest.TestCase):
             self.engine.set_metadata("research", "kind", "documentary")
         self.assertEqual(outside.read_text(encoding="utf-8"), '{"version":1,"folders":{}}')
 
+    def test_portable_reserved_device_names_are_rejected(self):
+        for name in ("CON", "nul.txt", "AUX", "COM1", "lpt9.log"):
+            with self.subTest(name=name):
+                with self.assertRaises(UnsafePathError):
+                    self.engine.ensure_folder(name)
+
+    def test_batch_validation_prevents_partial_creation_on_unsafe_later_path(self):
+        with self.assertRaises(UnsafePathError):
+            self.engine.ensure_folders(["valid-first", "../escape"])
+        self.assertFalse((self.root / "valid-first").exists())
+
+    def test_batch_preflight_prevents_partial_creation_on_file_collision(self):
+        self.engine.ensure_root()
+        (self.root / "occupied").write_text("file", encoding="utf-8")
+        with self.assertRaises(FolderTypeError):
+            self.engine.ensure_folders(["valid-first", "occupied/child"])
+        self.assertFalse((self.root / "valid-first").exists())
+
+    def test_folder_id_is_stable_and_metadata_is_defensively_copied(self):
+        self.engine.ensure_folder("research")
+        folder_id = self.engine.get_folder_id("research")
+        self.assertEqual(self.engine.get_folder_id("research"), folder_id)
+        self.engine.set_metadata("research", "labels", ["documentary"])
+        metadata = self.engine.get_metadata("research")
+        metadata["labels"].append("mutated")
+        self.assertEqual(self.engine.get_metadata("research")["labels"], ["documentary"])
+
+    def test_folder_move_rejects_descendant_and_preserves_source(self):
+        self.engine.ensure_folder("parent/child")
+        with self.assertRaises(UnsafePathError):
+            self.engine.move_folder("parent", "parent/child/moved")
+        self.assertTrue((self.root / "parent/child").is_dir())
+
+
 if __name__ == "__main__":
     unittest.main()
