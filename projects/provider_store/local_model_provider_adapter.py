@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import re
+import tempfile
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
@@ -118,23 +121,68 @@ class LocalModelProviderAdapter:
         system: str | None = None,
         provider_id: str | None = None,
         request_id: str | None = None,
+        output_path: str | os.PathLike[str] | None = None,
     ) -> dict[str, Any]:
         """Adapt local text generation to ProviderService's started/success contract."""
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 100_000:
             return {"started": False, "success": False, "status": "INVALID_PROMPT"}
         if system is not None and (not isinstance(system, str) or len(system) > 20_000):
             return {"started": False, "success": False, "status": "INVALID_SYSTEM_PROMPT"}
+        if not isinstance(output_path, (str, os.PathLike)) or not str(output_path).strip():
+            return {"started": False, "success": False, "status": "OUTPUT_PATH_REQUIRED"}
+        target = Path(output_path)
+        if not target.parent.exists() or not target.parent.is_dir():
+            return {"started": False, "success": False, "status": "OUTPUT_DIRECTORY_UNAVAILABLE"}
         result = self.generate_text(prompt, system=system)
         if result.get("status") in {"INVALID_PROMPT", "INVALID_SYSTEM_PROMPT"}:
             return {"started": False, "success": False, "status": result["status"]}
+        if result.get("generated") is not True:
+            return {
+                "started": True,
+                "success": False,
+                "status": result.get("status"),
+                "provider_id": provider_id or "local-ollama",
+                "request_id": request_id,
+                "result": result,
+                "charge_outcome": "not_incurred",
+                "actual_cost": 0.0,
+            }
+        fd, temporary_path = tempfile.mkstemp(
+            prefix=target.name + ".", suffix=".tmp", dir=str(target.parent)
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\\n") as stream:
+                stream.write(result["text"])
+                stream.write("\\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary_path, target)
+        except Exception as exc:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
+            return {
+                "started": True,
+                "success": False,
+                "status": "LOCAL_OUTPUT_WRITE_FAILED",
+                "error_type": type(exc).__name__,
+                "provider_id": provider_id or "local-ollama",
+                "request_id": request_id,
+                "charge_outcome": "not_incurred",
+                "actual_cost": 0.0,
+            }
         return {
             "started": True,
-            "success": result.get("generated") is True,
+            "success": True,
             "status": result.get("status"),
             "provider_id": provider_id or "local-ollama",
             "request_id": request_id,
+            "output_path": str(target),
             "result": result,
-            "text": result.get("text") if result.get("generated") is True else None,
+            "text": result.get("text"),
+            "actual_cost": 0.0,
+            "charge_outcome": "not_incurred",
         }
 
     def generate_text(self, prompt: str, *, system: str | None = None) -> dict[str, Any]:
