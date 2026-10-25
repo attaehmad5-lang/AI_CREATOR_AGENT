@@ -33,6 +33,7 @@ class ProviderRoutingManager:
         credit_manager: Any | None = None,
         project_policy_manager: Any | None = None,
         tenant_policy_manager: Any | None = None,
+        outage_manager: Any | None = None,
         benchmark_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
         require_verified_connection: bool = True,
@@ -51,6 +52,8 @@ class ProviderRoutingManager:
             raise ValueError("project_policy_manager must support policy lookup")
         if tenant_policy_manager is not None and not callable(getattr(tenant_policy_manager, "get_policy", None)):
             raise ValueError("tenant_policy_manager must support policy lookup")
+        if outage_manager is not None and not callable(getattr(outage_manager, "evaluate_provider", None)):
+            raise ValueError("outage_manager must support provider availability checks")
         if benchmark_manager is not None and not callable(getattr(benchmark_manager, "compare", None)):
             raise ValueError("benchmark_manager must support comparison")
         if not isinstance(require_verified_connection, bool):
@@ -67,6 +70,7 @@ class ProviderRoutingManager:
         self.credit_manager = credit_manager
         self.project_policy_manager = project_policy_manager
         self.tenant_policy_manager = tenant_policy_manager
+        self.outage_manager = outage_manager
         self.benchmark_manager = benchmark_manager
         self.default_strategy = normalized_strategy
         self.require_verified_connection = require_verified_connection
@@ -399,6 +403,23 @@ class ProviderRoutingManager:
             if item_id in denied_providers:
                 decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_DENIED"})
                 continue
+            if self.outage_manager is not None:
+                try:
+                    outage = self.outage_manager.evaluate_provider(
+                        item, required_region=required_region
+                    )
+                except Exception as exc:
+                    return {
+                        "allowed": False, "status": "OUTAGE_CHECK_FAILED",
+                        "error_type": type(exc).__name__,
+                    }
+                if not isinstance(outage, dict) or outage.get("available") is not True:
+                    decisions.append({
+                        "provider": item_id,
+                        "status": outage.get("status", "OUTAGE_CHECK_FAILED")
+                        if isinstance(outage, dict) else "INVALID_OUTAGE_RESPONSE",
+                    })
+                    continue
             if allowed_capabilities is not None and capability is None:
                 item_capabilities = item.get("capabilities", [])
                 if not isinstance(item_capabilities, list) or not set(item_capabilities).intersection(allowed_capabilities):
