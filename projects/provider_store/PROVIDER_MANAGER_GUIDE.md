@@ -95,3 +95,8 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+
+## Cooldown-aware provider recovery rechecks
+
+`recovery_coordinator.py` provides an explicit, caller-driven recheck coordinator around `ProviderHealthManager.active_probe`. It considers only registered probe callbacks and providers whose persisted state is `UNHEALTHY` or `DEGRADED`; it enforces a configurable cooldown from the last failure, rejects future timestamps, and blocks all probing if the persisted snapshot is malformed. Probe exceptions are represented by compact status/error-type metadata rather than exception text. The coordinator only records health evidence through the supplied health manager: it does not trigger generation, alter routing, run a background scheduler, or claim live-provider availability. Call `run_due_rechecks()` from an explicitly managed scheduler/maintenance action after configuring trusted probe callbacks.
