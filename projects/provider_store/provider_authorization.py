@@ -154,11 +154,13 @@ class ProviderAuthorizationManager:
                 "operation": operation,
             }
 
-    def authorize_tenant(self, principal_id: str, tenant_id: str) -> dict[str, Any]:
-        """Authorize access to one tenant; only admins without a tenant binding are global."""
+    def authorize_tenant(
+        self, principal_id: str, tenant_id: str | None
+    ) -> dict[str, Any]:
+        """Authorize tenant access or unscoped legacy work without allowing scope bypass."""
         if not self._valid_principal(principal_id):
             return {"allowed": False, "status": "INVALID_PRINCIPAL_ID"}
-        if not self._valid_principal(tenant_id):
+        if tenant_id is not None and not self._valid_principal(tenant_id):
             return {"allowed": False, "status": "INVALID_TENANT_ID"}
         with self._transaction():
             record = self.data["principals"].get(principal_id)
@@ -170,7 +172,11 @@ class ProviderAuthorizationManager:
             if role not in ROLE_PERMISSIONS:
                 return {"allowed": False, "status": "INVALID_ASSIGNED_ROLE"}
             assigned_tenant = record.get("tenant_id")
-            if assigned_tenant is None:
+            if tenant_id is None:
+                # A tenant-bound principal cannot omit scope to reach legacy/unscoped jobs.
+                allowed = assigned_tenant is None
+                status = "UNSCOPED_ACCESS_ALLOWED" if allowed else "TENANT_SCOPE_REQUIRED"
+            elif assigned_tenant is None:
                 allowed = role == "admin"
                 status = "TENANT_AUTHORIZED" if allowed else "TENANT_SCOPE_REQUIRED"
             elif assigned_tenant == tenant_id:
