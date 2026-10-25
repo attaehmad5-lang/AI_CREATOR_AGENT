@@ -1376,7 +1376,9 @@ class ProviderPolicySimulationTests(unittest.TestCase):
             json.loads(line)
             for line in manager.audit_path.read_text(encoding="utf-8").splitlines()
         ]
-        self.assertEqual(len(events), 0)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["decision"], "DENY")
+        self.assertEqual(events[0]["policy_simulation_status"], "BLOCKED")
 
     def test_provider_activation_runs_policy_simulation_before_persisting(self):
         manager = self._build_manager()
