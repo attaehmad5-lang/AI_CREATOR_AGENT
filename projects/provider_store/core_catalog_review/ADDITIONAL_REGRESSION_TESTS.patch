@@ -1,0 +1,59 @@
+--- a/tests/test_catalog.py
++++ b/tests/test_catalog.py
+@@ -5,7 +5,9 @@
+ import io
+ import json
+ import logging
++import sqlite3
+ import threading
++from contextlib import closing
+ import warnings
+ from pathlib import Path
+ from typing import Any, Dict, List
+
+@@ -364,6 +366,41 @@
+     assert len(ProviderCatalog(SqliteStorage(path))) == 1
+
+
++def test_encrypted_catalog_requires_cipher(tmp_path: Path) -> None:
++    path = tmp_path / "encrypted.json"
++    cipher = MetadataCipher(b"k" * 32)
++    ProviderCatalog(JsonFileStorage(path, cipher)).register(make("encrypted"))
++    with pytest.raises(DecryptionError):
++        ProviderCatalog(JsonFileStorage(path))
++
++
++def test_corrupt_primary_and_backup_are_both_reported(tmp_path: Path) -> None:
++    path = tmp_path / "broken.json"
++    path.write_text("not-json", encoding="utf-8")
++    path.with_name(path.name + ".bak").write_text("also-not-json", encoding="utf-8")
++    result = JsonFileStorage(path).load()
++    assert result.records == {}
++    assert any("primary file unreadable" in issue for issue in result.issues)
++    assert any("backup unreadable" in issue for issue in result.issues)
++    assert any("corrupt file moved" in issue for issue in result.issues)
++
++
++def test_sqlite_invalid_json_row_is_skipped(tmp_path: Path) -> None:
++    path = tmp_path / "rows.db"
++    with closing(sqlite3.connect(path)) as conn:
++        with conn:
++            conn.execute(
++                "CREATE TABLE providers (provider_id TEXT PRIMARY KEY, data TEXT NOT NULL)"
++            )
++            conn.execute("INSERT INTO providers VALUES (?, ?)", ("broken", "{bad json"))
++            conn.execute(
++                "INSERT INTO providers VALUES (?, ?)",
++                ("valid", json.dumps(make("valid", provider_id="valid"))),
++            )
++    result = SqliteStorage(path).load()
++    assert result.records["valid"]["name"] == "valid"
++    assert any("invalid JSON" in issue for issue in result.issues)
++
++
++def test_storage_fingerprint_is_none_for_missing_file(tmp_path: Path) -> None:
++    assert JsonFileStorage(tmp_path / "missing.json").fingerprint() is None
++    assert SqliteStorage(tmp_path / "missing.db").fingerprint() is None
++
++
+ # --------------------------------------------------------- G. lifecycle
