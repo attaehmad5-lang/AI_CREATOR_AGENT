@@ -1,0 +1,54 @@
+diff --git a/provider_store/observability.py b/provider_store/observability.py
+--- a/provider_store/observability.py
++++ b/provider_store/observability.py
+@@
+-        return scrub(json.dumps(payload, ensure_ascii=False, default=str))
++        # Redact values before JSON encoding. Scrubbing serialized JSON can
++        # corrupt escaping (for example, exception text containing quotes or
++        # newlines), producing invalid JSON log records.
++        return json.dumps(redact(payload), ensure_ascii=False, default=str)
+
+diff --git a/provider_store/storage.py b/provider_store/storage.py
+--- a/provider_store/storage.py
++++ b/provider_store/storage.py
+@@
+         self._path.parent.mkdir(parents=True, exist_ok=True)
+         conn = sqlite3.connect(str(self._path), timeout=10)
+-        conn.execute(
+-            "CREATE TABLE IF NOT EXISTS providers "
+-            "(provider_id TEXT PRIMARY KEY, data TEXT NOT NULL)"
+-        )
++        try:
++            conn.execute(
++                "CREATE TABLE IF NOT EXISTS providers "
++                "(provider_id TEXT PRIMARY KEY, data TEXT NOT NULL)"
++            )
++        except Exception:
++            # Do not leak a connection if schema initialization fails, e.g.
++            # when an existing SQLite file is corrupt and must be quarantined.
++            conn.close()
++            raise
+         return conn
+
+diff --git a/tests/test_catalog.py b/tests/test_catalog.py
+--- a/tests/test_catalog.py
++++ b/tests/test_catalog.py
+@@
+ def test_json_formatter_includes_extras_and_exception() -> None:
+@@
+     assert payload["provider_id"] == "p1" and "hunter2" not in payload["exception"]
+ 
+ 
++def test_json_formatter_preserves_json_when_scrubbing_escaped_exception() -> None:
++    fmt = JsonFormatter()
++    try:
++        raise ValueError('password=hunter2hunter2\\nquote="and\\nnewline')
++    except ValueError:
++        import sys
++
++        rec = logging.LogRecord("n", logging.ERROR, "f", 1, "msg", None, sys.exc_info())
++    payload = json.loads(fmt.format(rec))
++    assert "hunter2" not in payload["exception"]
++    assert "[REDACTED]" in payload["exception"]
++
++
