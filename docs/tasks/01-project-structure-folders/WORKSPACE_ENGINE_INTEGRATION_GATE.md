@@ -11,7 +11,8 @@ A feature is COMPLETE only when all of these are true:
 ## Baseline facts
 - Source PDF has exactly 200 numbered rows (rows 201–210 are supplemental, not part of this count).
 - PDF-reported status: 153 Full, 47 Partial. These are source-document claims, not repository completion.
-- Reconstructed package previously passed compileall, 225 unittest methods, demo, and ZIP integrity checks locally. This is not yet proof of repository integration or GitHub CI.
+- Reconstructed package passed a fresh local verification on 2026-10-25: compileall PASS; 225 unittest methods PASS; demo PASS (upload/search/version compare/script organization/backup verification/health/integrity); ZIP integrity PASS.
+- These results apply to the repaired reconstruction archive, not to the AI_CREATOR_AGENT repository or Pydroid 3.
 - Audit: PROJECT_STRUCTURE_FOLDERS_200_FEATURE_AUDIT.md
 - Source manifest: WORKSPACE_ENGINE_PDF_SOURCE_MANIFEST.md
 
@@ -29,15 +30,24 @@ A feature is COMPLETE only when all of these are true:
 - [ ] Update the 200-row ledger with per-feature code/test/CI evidence.
 - [ ] Request review through PR; do not merge without owner approval.
 
+## Fresh security triage (static inspection; not a penetration test)
+- `wsengine/security.py` includes custom at-rest encryption described in the source audit as SHAKE-256 XOR + HMAC; do not treat it as production-ready.
+- Password verification uses PBKDF2-HMAC-SHA256 with 20,000 iterations in one auth path and 5,000 iterations for share-link passwords; these parameters need a current security review and upgrade/migration tests before production.
+- Malware scanner defaults to an EICAR test signature only; this is not a real antivirus integration.
+- `web/server.py` uses Python's `ThreadingHTTPServer`; TLS must be provided and correctly enforced by a trusted reverse proxy or replaced by a hardened deployment layer. Do not expose the development server directly to the public internet.
+- Static inspection found a rate-limit response in an integration component, but this alone does not prove per-client HTTP rate limiting.
+
 ## Evidence ledger
 | Gate | Status | Evidence |
 |---|---|---|
 | Source PDF feature count and numbering | PASS | Audit documents 200 rows; supplemental 201–210 excluded |
-| Reconstructed package syntax/tests/demo/archive | PASS (local reconstruction only) | Audit and repair notes |
-| Integrated into AI_CREATOR_AGENT branch | NOT YET VERIFIED | Must verify repository tree and commit |
-| Full repository CI for integrated engine | NOT YET VERIFIED | Must record workflow run URL and result |
-| Production security review | NOT PASS | Known encryption, TLS, CSRF, malware-scanning limitations |
-| All 200 features repository-verified | NOT PASS | Requires per-feature evidence |
+| Reconstructed package syntax | PASS (local reconstruction only) | compileall completed without errors on 2026-10-25 |
+| Reconstructed package unit tests | PASS (local reconstruction only) | 225 unittest methods passed on 2026-10-25 |
+| Reconstructed demo and ZIP integrity | PASS (local reconstruction only) | Demo ended OK; unzip reported no errors |
+| Integrated into AI_CREATOR_AGENT branch | NOT YET VERIFIED | Source modules not yet shown in repository tree |
+| GitHub CI for integrated engine | NOT YET VERIFIED | No workflow runs/status checks returned for integration-gate documentation commit |
+| Production security review | NOT PASS | Encryption, password KDF parameters, TLS/deployment, and malware scanning need remediation/review |
+| All 200 features repository-verified | NOT PASS | Requires per-feature code/test/CI evidence |
 
 ## Status discipline
 Do not report a percentage as verified unless it is calculated from feature rows whose evidence gates pass. Never convert “test method passed” into “feature complete” without confirming the test exercises the actual requirement and production code path.
