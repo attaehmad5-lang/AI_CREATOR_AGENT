@@ -6,17 +6,17 @@
 ## Latest verification
 
 - `python -m compileall -q provider_store tests`: **PASS**
-- `python -W error::ResourceWarning -m pytest -q`: **63 passed, 0 failed**
+- `python -W error::ResourceWarning -m pytest -q`: **64 passed, 0 failed**
 - Statement coverage: **94%** (981 statements; 58 uncovered)
 - JSON formatter regression: escaped quote/newline exception text remains valid JSON and credential-like content is redacted.
-- ZIP integrity and SHA-256 manifest: regenerated for this revision.
+- SHA-256 manifest verification and ZIP integrity check: **PASS**.
 
 ## Defects fixed
 
-1. `JsonFormatter.format()` now redacts payload values before JSON serialization. Scrubbing serialized JSON could corrupt escaped exception text and produce invalid JSON records.
-2. `SqliteStorage._connect()` closes a connection if schema initialization fails before re-raising the original error.
-3. `AuditLog.entries(limit=0)` and negative limits now return an empty list rather than unexpectedly returning entries due to Python's `-0` slice behavior.
-4. Regression tests cover escaped exception JSON and non-positive audit limits.
+1. `JsonFormatter.format()` redacts payload values before JSON serialization, avoiding corrupted escaped exception text.
+2. `SqliteStorage._connect()` closes a connection if schema initialization fails.
+3. `AuditLog.entries(limit=0)` and negative limits now return an empty list.
+4. Regression tests cover escaped exception JSON, non-positive audit limits, and SQLite connection closure when schema initialization fails.
 
 ## Remaining release gates — NOT PASS
 
