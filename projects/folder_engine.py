@@ -290,11 +290,11 @@ class FolderEngine:
             raise UnsafePathError("a folder cannot be moved into itself or its descendants")
         if destination.exists():
             raise FileExistsError(f"destination already exists: {destination}")
-        destination.parent.mkdir(parents=True, exist_ok=True)
         destination.relative_to(self.root)
-        # Validate metadata before the filesystem mutation to avoid a moved
-        # directory with stale metadata if the metadata file is corrupt.
+        # Validate metadata before any filesystem mutation, including creation
+        # of destination parents, so corrupt metadata leaves the workspace intact.
         data = self._read_metadata()
+        destination.parent.mkdir(parents=True, exist_ok=True)
         old_key = source.relative_to(self.root).as_posix()
         source.rename(destination)
         moved = {}
