@@ -278,7 +278,8 @@ class ProviderQuotaManager:
         self, *, scope_type: str, scope_id: str, provider_id: str
     ) -> dict[str, int]:
         if (
-            scope_type not in {"user", "project", "tenant"}
+            not isinstance(scope_type, str)
+            or scope_type not in {"user", "project", "tenant"}
             or not isinstance(scope_id, str) or not scope_id.strip()
             or not isinstance(provider_id, str) or not provider_id.strip()
         ):
