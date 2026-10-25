@@ -1367,6 +1367,14 @@ class ProviderPolicySimulationTests(unittest.TestCase):
         self.assertEqual(events[0]["policy_simulation_status"], "WOULD_APPLY")
         self.assertNotIn("FREE_IMAGE_TOKEN", manager.audit_path.read_text(encoding="utf-8"))
 
+    def test_audit_write_failure_blocks_provider_activation(self):
+        manager = self._build_manager()
+        manager.audit_path = manager.state_path.parent
+        result = manager.set_provider_enabled("free_image", True)
+        self.assertEqual(result["status"], "AUDIT_WRITE_FAILED")
+        self.assertFalse(result["saved"])
+        self.assertFalse(manager.is_provider_enabled("free_image"))
+
     def test_paid_activation_denial_is_audited_without_mutating_catalog(self):
         manager = self._build_manager()
         result = manager.set_provider_enabled("paid_image", True)
