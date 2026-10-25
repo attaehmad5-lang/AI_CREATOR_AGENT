@@ -613,6 +613,20 @@ class ProviderService:
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
 
+        authorization = None
+        if self.authorization_manager is not None:
+            try:
+                authorization = self.authorization_manager.authorize(principal_id, "provider.generate")
+            except Exception as exc:
+                return {"status": "AUTHORIZATION_CHECK_FAILED", "executed": False, "error_type": type(exc).__name__}
+            if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+                return {
+                    "status": "AUTHORIZATION_DENIED", "executed": False,
+                    "authorization": authorization if isinstance(authorization, dict) else {
+                        "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
+                    },
+                }
+
         tenant_id = route_options.get("tenant_id")
         scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
         if scope_authorization is not None:
@@ -640,20 +654,6 @@ class ProviderService:
                     "executed": False,
                     "feature_flag": feature_flag_result if isinstance(feature_flag_result, dict) else {
                         "enabled": False, "status": "INVALID_FEATURE_FLAG_RESPONSE"
-                    },
-                }
-
-        authorization = None
-        if self.authorization_manager is not None:
-            try:
-                authorization = self.authorization_manager.authorize(principal_id, "provider.generate")
-            except Exception as exc:
-                return {"status": "AUTHORIZATION_CHECK_FAILED", "executed": False, "error_type": type(exc).__name__}
-            if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
-                return {
-                    "status": "AUTHORIZATION_DENIED", "executed": False,
-                    "authorization": authorization if isinstance(authorization, dict) else {
-                        "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
                     },
                 }
 
