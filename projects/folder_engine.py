@@ -87,6 +87,8 @@ class FolderEngine:
             raise UnsafePathError("folder name contains a character not portable across platforms")
         if normalized.endswith("."):
             raise UnsafePathError("folder names must not end with a dot")
+        if len(normalized) > 255:
+            raise UnsafePathError("folder names must not exceed 255 characters")
         if re.match(r"^[A-Za-z]:", normalized):
             raise UnsafePathError("drive-qualified names are not allowed")
         # Windows reserves these device names even when an extension is added.
