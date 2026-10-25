@@ -1,12 +1,12 @@
 # Task #25 — Canonical 138-Item Verification Ledger
 
-**Overall status: IN PROGRESS — do not mark Task #25 complete and do not merge PR #7 without explicit approval.**
+**Overall status: IN PROGRESS — do not mark Task #25 complete or merge PR #79 without explicit approval.**
 
 This file preserves the user's original A–P headings, feature numbers, feature names and baseline status markers. The **Baseline** column is the user's original 🟢/🟡/🔴 status; it is not the current implementation result. **Current audit** is independently evidence-based. A green baseline does not automatically mean the feature is verified today.
 
 ## Latest code verification
 
-GitHub Actions run [#40192433502](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40192433502): **422 tests passed on Ubuntu and 422 on Windows, 0 failures**. Compilation, JSON catalog validation, and the regression suite—including 7 new portable generation health-gate tests—passed on both platforms. The health-gate checks run in safe mode and explicitly report that no real provider call was made. The suite result verifies repository tests, not live credentials or end-to-end generation across all modalities.
+GitHub Actions run [#40196158681](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40196158681): **437 tests passed on Ubuntu and 437 on Windows, 0 failures**. Compilation, JSON catalog validation, and the regression suite passed on both platforms. Coverage includes fail-closed handling for malformed/missing provider health-gate inputs, duplicate modality connection records, unknown modalities, and non-boolean connection states. The health-gate checks run in safe mode and explicitly report that no real provider call was made. The suite result verifies repository tests, not live credentials or end-to-end generation across all modalities.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
