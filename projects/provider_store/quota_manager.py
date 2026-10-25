@@ -21,6 +21,7 @@ class ProviderQuotaManager:
         *,
         limits: dict[str, dict[str, int]],
         clock: Callable[[], datetime] | None = None,
+        scope_limits: dict[str, dict[str, dict[str, dict[str, int]]]] | None = None,
     ) -> None:
         if not isinstance(limits, dict):
             raise ValueError("limits must be a provider-to-limit mapping")
@@ -35,10 +36,32 @@ class ProviderQuotaManager:
                 if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
                     raise ValueError("quota limits must be positive integers")
                 normalized[provider_id][period] = limit
+        if not isinstance(scope_limits, (dict, type(None))):
+            raise ValueError("scope_limits must be a mapping")
+        normalized_scopes: dict[str, dict[str, dict[str, dict[str, int]]]] = {}
+        for scope_type, scope_records in (scope_limits or {}).items():
+            if scope_type not in {"user", "project", "tenant"} or not isinstance(scope_records, dict):
+                raise ValueError("invalid quota scope configuration")
+            normalized_scopes[scope_type] = {}
+            for scope_id, provider_records in scope_records.items():
+                if not isinstance(scope_id, str) or not scope_id.strip() or not isinstance(provider_records, dict):
+                    raise ValueError("invalid scoped quota identity")
+                normalized_scopes[scope_type][scope_id] = {}
+                for provider_id, provider_limits in provider_records.items():
+                    if provider_id not in normalized or not isinstance(provider_limits, dict):
+                        raise ValueError("scoped quota references an unknown provider")
+                    normalized_scopes[scope_type][scope_id][provider_id] = {}
+                    for period, limit in provider_limits.items():
+                        if period not in {"hourly", "daily", "monthly"}:
+                            raise ValueError("unsupported scoped quota period")
+                        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+                            raise ValueError("scoped quota limits must be positive integers")
+                        normalized_scopes[scope_type][scope_id][provider_id][period] = limit
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.limits = normalized
+        self.scope_limits = normalized_scopes
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "requests": {}}
@@ -92,9 +115,32 @@ class ProviderQuotaManager:
             result = result.replace(tzinfo=timezone.utc)
         return result.astimezone(timezone.utc)
 
-    def reserve(self, *, provider_id: str, request_id: str) -> dict[str, Any]:
-        if not isinstance(provider_id, str) or not provider_id.strip() or not isinstance(request_id, str) or not request_id.strip():
+    def reserve(
+        self,
+        *,
+        provider_id: str,
+        request_id: str,
+        user_id: str | None = None,
+        project_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        if (
+            not isinstance(provider_id, str) or not provider_id.strip()
+            or not isinstance(request_id, str) or not request_id.strip()
+        ):
             return {"status": "INVALID_REQUEST", "reserved": False}
+        scopes = {"user": user_id, "project": project_id, "tenant": tenant_id}
+        for scope_type, scope_id in scopes.items():
+            if scope_id is not None and (
+                not isinstance(scope_id, str) or not scope_id.strip()
+            ):
+                return {"status": "INVALID_SCOPE_ID", "scope": scope_type, "reserved": False}
+            if scope_type in self.scope_limits:
+                if not isinstance(scope_id, str) or not scope_id.strip():
+                    return {"status": "SCOPE_ID_REQUIRED", "scope": scope_type, "reserved": False}
+                scope_provider_limits = self.scope_limits[scope_type].get(scope_id)
+                if not isinstance(scope_provider_limits, dict) or provider_id not in scope_provider_limits:
+                    return {"status": "NO_SCOPE_QUOTA_POLICY", "scope": scope_type, "provider": provider_id, "reserved": False}
         if provider_id not in self.limits:
             return {"status": "NO_QUOTA_POLICY", "provider": provider_id, "reserved": False}
         with self._transaction():
@@ -122,7 +168,10 @@ class ProviderQuotaManager:
                         "request_id": request_id, "reserved": True,
                         "reused_released_attempt": True,
                     }
-                if existing.get("provider_id") != provider_id:
+                if existing.get("provider_id") != provider_id or any(
+                    existing.get(f"{scope_type}_id") != scope_id
+                    for scope_type, scope_id in scopes.items()
+                ):
                     return {"status": "REQUEST_ID_CONFLICT", "request_id": request_id, "reserved": False}
                 existing_status = existing["status"]
                 status = {
@@ -142,11 +191,35 @@ class ProviderQuotaManager:
                         "used": count,
                         "reserved": False,
                     }
-            self.data["requests"][request_id] = {
+            for scope_type, scope_id in scopes.items():
+                if scope_type not in self.scope_limits:
+                    continue
+                scoped_limits = self.scope_limits[scope_type][scope_id][provider_id]
+                for period, limit in scoped_limits.items():
+                    count = self._count_in_period(
+                        provider_id, period, now,
+                        scope_type=scope_type, scope_id=scope_id,
+                    )
+                    if count >= limit:
+                        return {
+                            "status": "SCOPE_QUOTA_EXCEEDED",
+                            "scope": scope_type,
+                            "scope_id": scope_id,
+                            "provider": provider_id,
+                            "period": period,
+                            "limit": limit,
+                            "used": count,
+                            "reserved": False,
+                        }
+            record = {
                 "provider_id": provider_id,
                 "status": "RESERVED",
                 "created_at": now.isoformat(),
             }
+            for scope_type, scope_id in scopes.items():
+                if scope_id is not None:
+                    record[f"{scope_type}_id"] = scope_id
+            self.data["requests"][request_id] = record
             self._save()
             return {"status": "RESERVED", "provider": provider_id, "request_id": request_id, "reserved": True}
 
@@ -196,7 +269,41 @@ class ProviderQuotaManager:
                 for period in self.limits.get(provider_id, {})
             }
 
-    def _count_in_period(self, provider_id: str, period: str, now: datetime) -> int:
+    def usage_for_scope(
+        self, *, scope_type: str, scope_id: str, provider_id: str
+    ) -> dict[str, int]:
+        if (
+            scope_type not in {"user", "project", "tenant"}
+            or not isinstance(scope_id, str) or not scope_id.strip()
+            or not isinstance(provider_id, str) or not provider_id.strip()
+        ):
+            return {}
+        limits = (
+            self.scope_limits.get(scope_type, {})
+            .get(scope_id, {})
+            .get(provider_id, {})
+        )
+        if not limits:
+            return {}
+        with self._transaction():
+            now = self.clock().astimezone(timezone.utc)
+            return {
+                period: self._count_in_period(
+                    provider_id, period, now,
+                    scope_type=scope_type, scope_id=scope_id,
+                )
+                for period in limits
+            }
+
+    def _count_in_period(
+        self,
+        provider_id: str,
+        period: str,
+        now: datetime,
+        *,
+        scope_type: str | None = None,
+        scope_id: str | None = None,
+    ) -> int:
         if period == "monthly":
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         elif period == "daily":
@@ -209,6 +316,10 @@ class ProviderQuotaManager:
                 not isinstance(record, dict)
                 or record.get("provider_id") != provider_id
                 or record.get("status") == "RELEASED"
+                or (
+                    scope_type is not None
+                    and record.get(f"{scope_type}_id") != scope_id
+                )
             ):
                 continue
             try:
