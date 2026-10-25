@@ -494,6 +494,33 @@ class FolderEngineTests(unittest.TestCase):
             self.engine.move_folder("parent", "parent/child/moved")
         self.assertTrue((self.root / "parent/child").is_dir())
 
+    def test_resolve_rejects_existing_symlink_escape(self):
+        self.engine.ensure_root()
+        outside = Path(self.tmp.name) / "outside"
+        outside.mkdir()
+        link = self.root / "linked"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks unavailable on this platform")
+        with self.assertRaises(UnsafePathError):
+            self.engine.resolve("linked/escape")
+        with self.assertRaises(UnsafePathError):
+            self.engine.ensure_folder("linked/escape")
+        self.assertFalse((outside / "escape").exists())
+
+    def test_describe_does_not_follow_symlink_escape_as_workspace_child(self):
+        self.engine.ensure_root()
+        outside = Path(self.tmp.name) / "outside-describe"
+        outside.mkdir()
+        link = self.root / "linked"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks unavailable on this platform")
+        with self.assertRaises(UnsafePathError):
+            self.engine.describe("linked")
+
 
 if __name__ == "__main__":
     unittest.main()
