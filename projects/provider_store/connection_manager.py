@@ -179,8 +179,8 @@ class ConnectionManager:
         self.audit_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path = self.audit_path.with_name(self.audit_path.name + ".lock")
         with interprocess_file_lock(lock_path):
-            with self.audit_path.open("a", encoding="utf-8", newline="\\n") as stream:
-                stream.write(json.dumps(record, sort_keys=True, ensure_ascii=True) + "\\n")
+            with self.audit_path.open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(json.dumps(record, sort_keys=True, ensure_ascii=True) + "\n")
                 stream.flush()
                 os.fsync(stream.fileno())
 
