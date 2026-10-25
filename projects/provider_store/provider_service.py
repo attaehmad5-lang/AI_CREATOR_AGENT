@@ -386,6 +386,7 @@ class ProviderService:
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
@@ -396,38 +397,51 @@ class ProviderService:
             result = self.job_manager.submit(
                 job_id=job_id, project_id=project_id, provider_id=provider_id,
                 payload_ref=payload_ref, priority=priority,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
             )
         except Exception as exc:
             return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
 
-    def poll_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
+    def poll_job(
+        self, *, job_id: str, principal_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
         authorization = self._authorize_operation(principal_id, "provider.read")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
         try:
-            result = self.job_manager.poll(job_id=job_id)
+            result = self.job_manager.poll(
+                job_id=job_id,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
+            )
         except Exception as exc:
             return {"status": "JOB_POLL_FAILED", "job": None, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
 
-    def claim_next_job(self, *, worker_id: str, principal_id: str | None = None) -> dict[str, Any]:
+    def claim_next_job(
+        self, *, worker_id: str, principal_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
         try:
-            result = self.job_manager.claim_next(worker_id=worker_id)
+            result = self.job_manager.claim_next(
+                worker_id=worker_id,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
+            )
         except Exception as exc:
             return {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
 
     def complete_job(self, *, job_id: str, worker_id: str, success: bool,
                      result_ref: str | None = None, error_code: str | None = None,
-                     principal_id: str | None = None) -> dict[str, Any]:
+                     principal_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
         authorization = self._authorize_operation(principal_id, "provider.generate")
@@ -437,19 +451,26 @@ class ProviderService:
             result = self.job_manager.complete(
                 job_id=job_id, worker_id=worker_id, success=success,
                 result_ref=result_ref, error_code=error_code,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
             )
         except Exception as exc:
             return {"status": "JOB_COMPLETION_FAILED", "saved": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
 
-    def cancel_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
+    def cancel_job(
+        self, *, job_id: str, principal_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
         try:
-            result = self.job_manager.cancel(job_id=job_id)
+            result = self.job_manager.cancel(
+                job_id=job_id,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
+            )
         except Exception as exc:
             return {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
