@@ -192,7 +192,15 @@ class TenantScopedProviderJobTests(unittest.TestCase):
         self.assertEqual(self.submit("shared-job", "tenant-a")["status"], "JOB_QUEUED")
         result = self.submit("shared-job", "tenant-b")
         self.assertEqual(result["status"], "REQUEST_ID_CONFLICT")
-        self.assertEqual(result["job"]["tenant_id"], "tenant-a")
+        self.assertFalse(result.get("accepted", True))
+        self.assertNotIn("job", result)
+
+    def test_cross_tenant_conflict_does_not_disclose_payload_reference(self):
+        self.submit("private-job", "tenant-a")
+        result = self.submit("private-job", "tenant-b")
+        self.assertEqual(result["status"], "REQUEST_ID_CONFLICT")
+        self.assertNotIn("job", result)
+        self.assertNotIn("payload_ref", result)
 
     def test_invalid_tenant_identifier_is_rejected(self):
         result = self.manager.submit(
