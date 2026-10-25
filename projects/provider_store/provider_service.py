@@ -109,6 +109,8 @@ class ProviderService:
             return {"status": "AUTHORIZATION_REQUIRED", "saved": False}
         if not isinstance(enabled, bool):
             return {"status": "INVALID_ENABLED_VALUE", "saved": False}
+        if not isinstance(paid_usage_approved, bool):
+            return {"status": "INVALID_PAID_USAGE_APPROVAL", "saved": False}
         operation = "provider.enable" if enabled else "provider.disable"
         authorization = self._authorize_operation(principal_id, operation)
         if authorization is not None:
@@ -117,6 +119,14 @@ class ProviderService:
                 "saved": False,
                 "authorization": authorization,
             }
+        if enabled and paid_usage_approved:
+            billing_authorization = self._authorize_operation(principal_id, "billing.approve")
+            if billing_authorization is not None:
+                return {
+                    "status": "PAID_USAGE_APPROVAL_DENIED",
+                    "saved": False,
+                    "authorization": billing_authorization,
+                }
         setter = getattr(self.connection_manager, "set_provider_enabled", None)
         if not callable(setter):
             return {"status": "MANAGEMENT_OPERATION_UNAVAILABLE", "saved": False}
