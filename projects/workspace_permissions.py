@@ -39,10 +39,18 @@ class PolicyError(ValueError):
 
 
 def normalize_scope(scope: str) -> str:
-    """Normalize a workspace-relative scope and reject traversal/absolute paths."""
+    """Normalize a workspace-relative scope and reject unsafe or ambiguous paths."""
     if not isinstance(scope, str) or not scope.strip():
         raise PolicyError("scope must be a non-empty relative path")
+    if len(scope) > 1024:
+        raise PolicyError("scope exceeds the 1024-character limit")
+    if any(ord(char) < 32 or ord(char) == 127 for char in scope):
+        raise PolicyError("scope must not contain control characters")
     value = scope.replace("\\", "/")
+    # Reject drive-qualified paths even when running on POSIX, where PurePosixPath
+    # would otherwise treat a Windows path such as C:/secret as relative.
+    if len(value) >= 2 and value[0].isalpha() and value[1] == ":":
+        raise PolicyError("scope must not be drive-qualified")
     if value.strip() == ".":
         return "*"
     path = PurePosixPath(value)
