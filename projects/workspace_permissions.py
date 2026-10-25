@@ -101,7 +101,7 @@ class WorkspacePolicy:
         self._lock = RLock()
 
     def assign_role(self, subject: str, role: str) -> None:
-        if not isinstance(subject, str) or not subject.strip():
+        if not isinstance(subject, str) or not subject.strip() or subject != subject.strip():
             raise PolicyError("subject must be a non-empty identity")
         if not isinstance(role, str) or role not in ROLE_PERMISSIONS:
             raise PolicyError(f"unknown role: {role}")
@@ -110,7 +110,7 @@ class WorkspacePolicy:
             self._record(subject, "role.assign", role, "allow")
 
     def revoke_role(self, subject: str) -> bool:
-        if not isinstance(subject, str) or not subject.strip():
+        if not isinstance(subject, str) or not subject.strip() or subject != subject.strip():
             raise PolicyError("subject must be a non-empty identity")
         with self._lock:
             existed = self._roles.pop(subject, None) is not None
@@ -143,12 +143,12 @@ class WorkspacePolicy:
         return requested_scope == rule_scope or requested_scope.startswith(rule_scope + "/")
 
     def authorize(self, subject: str, permission: str, scope: str = ".") -> bool:
-        if not isinstance(subject, str) or not subject.strip():
+        if not isinstance(subject, str) or not subject.strip() or subject != subject.strip():
             raise PolicyError("subject must be a non-empty identity")
         if not isinstance(permission, str) or permission not in PERMISSIONS:
             raise PolicyError(f"unknown permission: {permission}")
         normalized = normalize_scope(scope)
-        if not isinstance(subject, str) or not subject.strip():
+        if not isinstance(subject, str) or not subject.strip() or subject != subject.strip():
             raise PolicyError("subject must be a non-empty identity")
         with self._lock:
             now = time()
