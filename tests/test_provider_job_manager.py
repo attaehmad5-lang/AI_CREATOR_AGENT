@@ -1,5 +1,7 @@
 """Queue capacity, idempotency, async lifecycle, and backpressure tests."""
 import tempfile
+import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -69,7 +71,7 @@ class ProviderJobManagerTests(unittest.TestCase):
             self.assertEqual(result["status"], "JOB_QUEUED")
 
         completed = []
-        completion_lock = __import__("threading").Lock()
+        completion_lock = threading.Lock()
 
         def worker(worker_index):
             while True:
@@ -77,6 +79,7 @@ class ProviderJobManagerTests(unittest.TestCase):
                 if claimed["status"] == "QUEUE_EMPTY":
                     return
                 if claimed["status"] == "CONCURRENCY_LIMIT":
+                    time.sleep(0.001)
                     continue
                 self.assertEqual(claimed["status"], "JOB_CLAIMED")
                 job = claimed["job"]
