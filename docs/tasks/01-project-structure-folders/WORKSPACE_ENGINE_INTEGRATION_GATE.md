@@ -12,12 +12,13 @@ A feature is COMPLETE only when its numbered requirement (1–200) maps to repos
 ## Verified evidence
 - PR #78 adds selected repository-native backend modules. It remains open and unmerged: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/78
 - GitHub Actions run 40019834877 passed all six matrix jobs (Ubuntu/Windows × Python 3.11/3.12/3.13) for the selected Project Structure / Folders tests: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40019834877
+- Follow-up commit `46dfcfef5e11af022693fc9502eef23ef2c7d1f3` added symlink-escape regression coverage. Its dedicated Project Structure / Folders CI run **40177351412 passed 6/6 jobs**; every job passed compilation and focused tests across Ubuntu/Windows and Python 3.11/3.12/3.13: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40177351412
 - Fresh local verification of the reconstructed PDF package on 2026-10-25:
   - `python -m compileall -q wsengine web tests pydroid_demo.py` — PASS.
   - `python -W error::ResourceWarning -m unittest discover -s tests -p 'test_*.py' -t .` — 225 tests PASS.
   - `python pydroid_demo.py` — PASS; upload/search/version compare/script organize/backup verification/health/integrity checks succeeded, integrity issues 0.
   - `unzip -t Workspace_Engine_PDF_Repaired_Reconstruction.zip` — PASS, no archive errors.
-- Important scope boundary: these four local checks were performed on the reconstructed ZIP, not on an integrated repository copy. They do not constitute GitHub CI for the reconstructed engine.
+- Scope boundary: local checks were performed on the reconstructed ZIP, not an integrated repository copy. The passing CI above is for repository-native Project Structure / Folders tests, not the full reconstructed engine.
 
 ## Security triage (static inspection; not a penetration test)
 - At-rest encryption in the reconstructed source is custom SHAKE-256 XOR + HMAC; do not treat as production-ready. Replace with audited authenticated encryption.
@@ -32,22 +33,14 @@ A feature is COMPLETE only when its numbered requirement (1–200) maps to repos
 | Gate | Status | Evidence |
 |---|---|---|
 | PDF feature count and stable numbering | PASS | 200 numbered rows; supplemental rows excluded |
-| Reconstructed source compile/tests/demo/archive | PASS — local reconstruction only | Fresh 2026-10-25 checks above |
+| Reconstructed source compile/tests/demo/archive | PASS — local reconstruction only | 225 tests and other local checks above |
 | Selected repository-native backend modules | PASS — scoped | PR #78 changed files and tests |
-| PR #78 CI matrix | PASS — 6/6 jobs | Run 40019834877 |
+| PR #78 base CI matrix | PASS — 6/6 jobs | Run 40019834877 |
+| Symlink escape regression tests on follow-up commit | PASS — 6/6 CI jobs | Commit 46dfcfef5e11af022693fc9502eef23ef2c7d1f3; run 40177351412 |
 | Reconstructed full Workspace Engine integrated in repository | NOT VERIFIED | Separate package not proven integrated |
 | All 200 PDF features verified against repository code | NOT PASS | Requires row-by-row code/test/CI evidence |
 | Production security review | NOT PASS | Encryption, KDF parameters, TLS/deployment, malware scanning require remediation/review |
 | PR merged into main | NO | PR #78 remains open; do not merge without owner approval |
-
-
-## Follow-up verification — 2026-10-25
-- Inspected PR #78 changed-file list. It contains the repository-native folder/file/search/versioning/permissions/quota/recycle-bin modules and their focused tests, plus audit and verification documents. It does **not** establish that the separate `wsengine/` + `web/` reconstructed PDF package has been imported wholesale.
-- Retrieved workflow jobs for run 40019834877 directly: all six jobs completed successfully. Each job completed both “Compile feature code and tests” and “Run Project Structure / Folders tests” on Ubuntu/Windows with Python 3.11, 3.12, and 3.13.
-- CI evidence URL: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40019834877
-- This is a PASS for the selected PR feature scope only. It is not a pass for all 200 PDF rows, the reconstructed package, Pydroid 3 runtime, or production security.
-- Next action remains: map every feature row to the current repository module and test, then fix gaps in small batches and rerun the full matrix.
-
 
 ## Next gates
 1. Compare all 200 rows with current repository code and tests, preserving numbering.
@@ -55,12 +48,3 @@ A feature is COMPLETE only when its numbered requirement (1–200) maps to repos
 3. Prioritize production-blocking security items; do not present stubs/adapters as full integrations.
 4. Add only verified changes to the feature branch and rerun CI after each batch.
 5. Keep PR open until evidence and security gates are reviewed; never claim 100% from PDF labels alone.
-
-
-## Follow-up code hardening — 2026-10-25
-- Added two focused regression tests in `tests/test_folder_engine.py`:
-  - `test_resolve_rejects_existing_symlink_escape`: confirms existing symlink paths resolving outside the workspace are rejected by both resolve and ensure_folder.
-  - `test_describe_does_not_follow_symlink_escape_as_workspace_child`: confirms describe rejects an external symlink target.
-- Commit: `46dfcfef5e11af022693fc9502eef23ef2c7d1f3`.
-- These tests are committed to the feature branch; **their CI result is pending/not yet returned**, so they are not yet marked PASS.
-- CI run evidence previously verified for the earlier PR commit remains scoped to that earlier commit; it must not be reused as proof for this new test commit.
