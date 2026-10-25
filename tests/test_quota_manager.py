@@ -223,6 +223,14 @@ class ScopedProviderQuotaTests(unittest.TestCase):
         self.assertEqual(project_exhausted["scope"], "project")
         self.assertEqual(other_project["status"], "RESERVED")
 
+    def test_scope_usage_rejects_malformed_scope_type_without_crashing(self):
+        self.assertEqual(
+            self.manager.usage_for_scope(
+                scope_type=["tenant"], scope_id="tenant-a", provider_id="image"
+            ),
+            {},
+        )
+
     def test_scope_configuration_rejects_unknown_providers_and_bad_limits(self):
         with self.assertRaises(ValueError):
             ProviderQuotaManager(
