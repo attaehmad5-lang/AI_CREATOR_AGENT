@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#40196158681](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40196158681): **437 tests passed on Ubuntu and 437 on Windows, 0 failures**. Compilation, JSON catalog validation, and the regression suite passed on both platforms. Coverage includes fail-closed handling for malformed/missing provider health-gate inputs, duplicate modality connection records, unknown modalities, and non-boolean connection states. The health-gate checks run in safe mode and explicitly report that no real provider call was made. The suite result verifies repository tests, not live credentials or end-to-end generation across all modalities.
+GitHub Actions run [#40197075705](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40197075705): **448 tests passed on Ubuntu and 448 on Windows, 0 failures**. Compilation, JSON catalog validation, and unit/regression tests passed on both platforms. Coverage includes fail-closed provider health gates and policy dry-run simulation before activation. Provider activation now rejects deprecated or incomplete API metadata, and subscription-required providers need an explicit paid-usage approval flag. Simulation is side-effect-free and does not call provider APIs. This verifies repository behavior, not live credentials or end-to-end generation across all modalities.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -223,7 +223,7 @@ GitHub Actions run [#40196158681](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 132 | 🟡 | نئے providers کو محفوظ طریقے سے شامل کرنے کا workflow | PARTIAL | Catalog registration/schema validation exists; complete onboarding, approval and probe workflow is incomplete. |
 | 133 | 🔴 | Self-hosted اور local models کی support، جہاں ممکن ہو | OPEN | Local/self-hosted provider lifecycle and modality verification are not complete. |
 | 134 | 🔴 | Model deprecation اور end-of-life handling | PARTIAL | Catalog schema records a validated deprecation reason/date and rejects deprecated providers that are enabled; OpenAI Sora is marked deprecated and disabled. General deprecation discovery, replacement migration, and EOL routing remain open. Evidence: `tests/test_provider_catalogs.py::test_deprecated_provider_requires_reason_date_and_stays_disabled`. |
-| 135 | 🔴 | Provider policy activation سے پہلے simulation | OPEN | Policy simulation/dry-run before activation is not implemented. |
+| 135 | 🔴 | Provider policy activation سے پہلے simulation | VERIFIED | `simulate_provider_policy` performs a side-effect-free dry run; `set_provider_enabled` requires a successful simulation before persisting activation, blocks deprecated/incomplete API providers, and requires explicit paid-usage approval for subscription-required providers. Regression tests cover free activation, paid approval, malformed input, duplicate IDs/changes, and deprecated providers. Evidence: `tests/test_connection_manager.py::ProviderPolicySimulationTests` and run [#40197075705](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40197075705). |
 | 136 | 🟡 | Backward compatibility اور automated contract checks | PARTIAL | Compatibility facades and contract tests exist; full versioned compatibility checks remain open. |
 | 137 | 🔴 | Provider configuration اور policy کے لیے admin controls | OPEN | Complete administrative controls and authorization are not implemented. |
 | 138 | 🔴 | Documentation، diagnostics and maintenance tooling | PARTIAL | Provider guide and diagnostics exist; complete diagnostics/maintenance workflows remain open. |
@@ -232,6 +232,6 @@ GitHub Actions run [#40196158681](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 1. Every one of the 138 items must be reviewed against its original wording; do not infer or rename features.
 2. Any `PARTIAL` or `OPEN` item must remain uncompleted until its implementation, tests and required live/operational evidence exist.
-3. The 328 passing unit/regression tests on Ubuntu and Windows do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
+3. The 448 passing unit/regression tests on Ubuntu and Windows do not substitute for live authorized provider checks, real modality end-to-end tests, Android/Pydroid validation, or enterprise resiliency testing.
 4. The account-balance adapter is generic. It must be configured only with a provider-documented endpoint and a field representing actual available credits; never mistake a per-key budget cap for free credits.
 5. Task #29 Generation State Manager remains paused and must not be started as a separate task during this Task #25 work.
