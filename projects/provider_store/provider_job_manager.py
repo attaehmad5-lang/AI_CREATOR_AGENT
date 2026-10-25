@@ -140,10 +140,13 @@ class ProviderJobManager:
         with self._transaction():
             existing = self.data["jobs"].get(job_id)
             if isinstance(existing, dict):
+                same_tenant = existing.get("tenant_id") == tenant_id
+                if not same_tenant:
+                    # Do not disclose another tenant's job metadata or payload reference.
+                    return {"status": "REQUEST_ID_CONFLICT", "accepted": False}
                 same = all(existing.get(key) == value for key, value in {
                     "project_id": project_id, "provider_id": provider_id,
                     "payload_ref": payload_ref, "priority": priority,
-                    "tenant_id": tenant_id,
                 }.items())
                 return {
                     "status": "ALREADY_SUBMITTED" if same else "REQUEST_ID_CONFLICT",
