@@ -40,7 +40,7 @@ class ProviderDegradedModeManager:
             categories = item.get("categories")
             if (
                 not isinstance(provider_id, str) or not _ID.fullmatch(provider_id)
-                or provider_id in seen or state not in _ALLOWED_STATES
+                or provider_id in seen or not isinstance(state, str) or state not in _ALLOWED_STATES
                 or not isinstance(categories, list)
                 or any(not isinstance(x, str) or not _ID.fullmatch(x) for x in categories)
             ):
