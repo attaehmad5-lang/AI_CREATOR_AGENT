@@ -137,6 +137,7 @@ class TenantScopedProviderJobTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.path = Path(self.temp_dir.name) / "tenant-jobs.json"
+        self.now = [datetime(2026, 10, 25, 12, tzinfo=timezone.utc)]
         self.manager = ProviderJobManager(
             self.path, max_queue_size=10, max_concurrent=4, lease_seconds=10
         )
