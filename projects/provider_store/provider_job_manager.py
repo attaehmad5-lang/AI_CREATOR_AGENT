@@ -32,6 +32,8 @@ class ProviderJobManager:
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
         priority_aging_seconds: int = 60,
+        max_queued_per_tenant: int | None = None,
+        max_concurrent_per_tenant: int | None = None,
         clock: Any = None,
     ) -> None:
         for value, name, minimum, maximum in (
@@ -44,6 +46,18 @@ class ProviderJobManager:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise ValueError(f"{name} is outside safe limits")
+        if max_queued_per_tenant is not None and (
+            isinstance(max_queued_per_tenant, bool)
+            or not isinstance(max_queued_per_tenant, int)
+            or not 1 <= max_queued_per_tenant <= 100000
+        ):
+            raise ValueError("max_queued_per_tenant is outside safe limits")
+        if max_concurrent_per_tenant is not None and (
+            isinstance(max_concurrent_per_tenant, bool)
+            or not isinstance(max_concurrent_per_tenant, int)
+            or not 1 <= max_concurrent_per_tenant <= 10000
+        ):
+            raise ValueError("max_concurrent_per_tenant is outside safe limits")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
@@ -53,6 +67,8 @@ class ProviderJobManager:
         self.max_attempts = max_attempts
         self.backpressure_retry_seconds = backpressure_retry_seconds
         self.priority_aging_seconds = priority_aging_seconds
+        self.max_queued_per_tenant = max_queued_per_tenant or max_queue_size
+        self.max_concurrent_per_tenant = max_concurrent_per_tenant or max_concurrent
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "jobs": {}}
@@ -160,6 +176,19 @@ class ProviderJobManager:
                 1 for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "QUEUED"
             )
+            if tenant_id is not None:
+                tenant_queued_count = sum(
+                    1 for job in self.data["jobs"].values()
+                    if isinstance(job, dict)
+                    and job.get("status") == "QUEUED"
+                    and job.get("tenant_id") == tenant_id
+                )
+                if tenant_queued_count >= self.max_queued_per_tenant:
+                    return {
+                        "status": "TENANT_QUEUE_FULL",
+                        "accepted": False,
+                        "retry_after_seconds": self.backpressure_retry_seconds,
+                    }
             if queued >= self.max_queue_size:
                 return {
                     "status": "QUEUE_FULL",
@@ -222,6 +251,17 @@ class ProviderJobManager:
                 1 for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "RUNNING"
             )
+            if tenant_id is not None:
+                tenant_running = sum(
+                    1 for job in self.data["jobs"].values()
+                    if isinstance(job, dict)
+                    and job.get("status") == "RUNNING"
+                    and job.get("tenant_id") == tenant_id
+                )
+                if tenant_running >= self.max_concurrent_per_tenant:
+                    if changed:
+                        self._save()
+                    return {"status": "TENANT_CONCURRENCY_LIMIT", "job": None}
             if running >= self.max_concurrent:
                 if changed:
                     self._save()
