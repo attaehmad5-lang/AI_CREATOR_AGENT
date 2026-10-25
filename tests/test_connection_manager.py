@@ -242,6 +242,36 @@ class ConnectionManagerTests(unittest.TestCase):
         result = ConnectionManager.validate_catalog_schema(self.manager.catalog)
         self.assertTrue(result["valid"], result["errors"])
 
+    def test_core_catalog_manifest_metadata_is_type_and_control_checked(self):
+        for field, value in (
+            ("store", ""),
+            ("store", "catalog\ninjected"),
+            ("status", "ready"),
+            ("status", "READY\r\nBYPASS"),
+            ("subscription_policy", "USER CONTROLLED"),
+            ("subscription_policy", 7),
+        ):
+            with self.subTest(field=field, value=value):
+                result = ConnectionManager.validate_catalog_schema({
+                    field: value,
+                    "providers": [],
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(
+                    any(f"catalog.{field}" in error for error in result["errors"]),
+                    result["errors"],
+                )
+
+    def test_core_catalog_rejects_oversized_provider_registry(self):
+        result = ConnectionManager.validate_catalog_schema({
+            "providers": [{"id": f"provider_{index}"} for index in range(1001)]
+        })
+        self.assertFalse(result["valid"])
+        self.assertTrue(
+            any("at most 1000" in error for error in result["errors"]),
+            result["errors"],
+        )
+
     def test_rejects_unknown_provider_and_invalid_state(self):
         self.assertEqual(self.manager.set_state("missing", "READY")["status"], "NOT_FOUND")
         self.assertEqual(self.manager.set_state("public_image", "NOT_A_STATE")["status"], "INVALID_STATE")
