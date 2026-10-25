@@ -39,7 +39,7 @@ def main():
         seen_media_types = set()
         for item in connections:
             media_type = item.get("media_type")
-            if media_type not in required:
+            if not isinstance(media_type, str) or media_type not in required:
                 raise ValueError("connection has an unknown media_type")
             if media_type in seen_media_types:
                 raise ValueError("duplicate media_type connection")
