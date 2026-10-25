@@ -1040,7 +1040,7 @@ class ProviderServiceTests(unittest.TestCase):
             max_queue_size=10, max_concurrent=4,
         )
         authorization = ProviderAuthorizationManager(self.root / "tenant-job-auth.json")
-        authorization.assign_role("tenant-creator", "creator")
+        authorization.assign_role("tenant-creator", "creator", tenant_id="tenant-a")
         service = ProviderService(
             self.connections, job_manager=jobs, authorization_manager=authorization,
         )
@@ -1052,18 +1052,18 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(created["status"], "JOB_QUEUED")
         self.assertEqual(
             service.poll_job(job_id="tenant-job", principal_id="tenant-creator")["status"],
-            "TENANT_ID_REQUIRED",
+            "TENANT_AUTHORIZATION_DENIED",
         )
         self.assertEqual(
             service.poll_job(
                 job_id="tenant-job", principal_id="tenant-creator", tenant_id="tenant-b"
             )["status"],
-            "JOB_NOT_FOUND",
+            "TENANT_AUTHORIZATION_DENIED",
         )
         claimed_wrong_tenant = service.claim_next_job(
             worker_id="worker-b", principal_id="tenant-creator", tenant_id="tenant-b"
         )
-        self.assertEqual(claimed_wrong_tenant["status"], "QUEUE_EMPTY")
+        self.assertEqual(claimed_wrong_tenant["status"], "TENANT_AUTHORIZATION_DENIED")
         claimed = service.claim_next_job(
             worker_id="worker-a", principal_id="tenant-creator", tenant_id="tenant-a"
         )
@@ -1073,7 +1073,7 @@ class ProviderServiceTests(unittest.TestCase):
             result_ref="asset:tenant-job", principal_id="tenant-creator",
             tenant_id="tenant-b",
         )
-        self.assertEqual(denied_completion["status"], "JOB_NOT_FOUND")
+        self.assertEqual(denied_completion["status"], "TENANT_AUTHORIZATION_DENIED")
         completed = service.complete_job(
             job_id="tenant-job", worker_id="worker-a", success=True,
             result_ref="asset:tenant-job", principal_id="tenant-creator",
