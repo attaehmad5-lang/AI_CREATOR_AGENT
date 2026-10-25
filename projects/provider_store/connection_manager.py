@@ -574,6 +574,15 @@ class ConnectionManager:
             updated[index]["enabled"] = enabled
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if not validation.get("valid"):
+                return {
+                    "status": "INVALID_PROVIDER_CATALOG",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
+            simulation = None
             if enabled:
                 simulation = simulate_provider_policy(
                     new_catalog,
@@ -591,14 +600,6 @@ class ConnectionManager:
                         "saved": False,
                         "policy_simulation": simulation,
                     }
-            validation = self.validate_catalog_schema(new_catalog)
-            if not validation.get("valid"):
-                return {
-                    "status": "INVALID_PROVIDER_CATALOG",
-                    "provider": provider_id,
-                    "saved": False,
-                    "errors": validation.get("errors", []),
-                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
         if not enabled and provider_id in self._loaded_providers:
