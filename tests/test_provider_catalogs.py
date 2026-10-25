@@ -379,7 +379,7 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         invalid_values = (
             ("store", ""),
             ("store", "x" * 101),
-            ("store", "unsafe\\nstore"),
+            ("store", "unsafe" + chr(10) + "store"),
             ("status", "ready"),
             ("status", "READY NOW"),
             ("subscription_policy", "user-controlled"),
