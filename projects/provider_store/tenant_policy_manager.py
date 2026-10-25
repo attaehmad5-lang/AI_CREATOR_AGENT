@@ -62,9 +62,9 @@ class ProviderTenantPolicyManager:
             prefix=self.path.name + ".", suffix=".tmp", dir=str(self.path.parent)
         )
         try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="\\n") as stream:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
                 json.dump(self.data, stream, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)
-                stream.write("\\n")
+                stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             atomic_replace_with_retry(temp_name, self.path)
