@@ -51,7 +51,7 @@
 +    assert any("invalid JSON" in issue for issue in result.issues)
 +
 +
-+def test_storage_fingerprint_is_none_for_missing_file() -> None:
++def test_storage_fingerprint_is_none_for_missing_file(tmp_path: Path) -> None:
 +    assert JsonFileStorage(tmp_path / "missing.json").fingerprint() is None
 +    assert SqliteStorage(tmp_path / "missing.db").fingerprint() is None
 
