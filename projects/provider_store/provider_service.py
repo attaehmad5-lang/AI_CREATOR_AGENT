@@ -96,6 +96,78 @@ class ProviderService:
             }
         return None
 
+    def set_provider_enabled(
+        self,
+        provider_id: str,
+        enabled: bool,
+        *,
+        principal_id: str | None = None,
+        paid_usage_approved: bool = False,
+    ) -> dict[str, Any]:
+        """Authorize provider activation changes before delegating to the connection manager."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_REQUIRED", "saved": False}
+        if not isinstance(enabled, bool):
+            return {"status": "INVALID_ENABLED_VALUE", "saved": False}
+        operation = "provider.enable" if enabled else "provider.disable"
+        authorization = self._authorize_operation(principal_id, operation)
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "saved": False,
+                "authorization": authorization,
+            }
+        setter = getattr(self.connection_manager, "set_provider_enabled", None)
+        if not callable(setter):
+            return {"status": "MANAGEMENT_OPERATION_UNAVAILABLE", "saved": False}
+        try:
+            result = setter(
+                provider_id,
+                enabled,
+                paid_usage_approved=paid_usage_approved,
+            )
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_ENABLEMENT_FAILED",
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_MANAGEMENT_RESPONSE", "saved": False}
+        return result
+
+    def configure_provider(
+        self,
+        provider_id: str,
+        *,
+        principal_id: str | None = None,
+        **configuration: Any,
+    ) -> dict[str, Any]:
+        """Authorize provider configuration changes and return only safe manager results."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_REQUIRED", "saved": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "saved": False,
+                "authorization": authorization,
+            }
+        configure = getattr(self.connection_manager, "configure_provider", None)
+        if not callable(configure):
+            return {"status": "MANAGEMENT_OPERATION_UNAVAILABLE", "saved": False}
+        try:
+            result = configure(provider_id, **configuration)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_CONFIGURATION_FAILED",
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_MANAGEMENT_RESPONSE", "saved": False}
+        return result
+
     def verify_provider(
         self,
         provider_id: str,
