@@ -87,6 +87,17 @@ class WorkspacePolicyTests(unittest.TestCase):
         self.assertTrue(self.policy.remove_rule(rule))
 
 
+    def test_identity_rejects_leading_or_trailing_whitespace(self):
+        for subject in (" alice", "alice ", " alice "):
+            with self.subTest(subject=repr(subject)), self.assertRaises(PolicyError):
+                PolicyRule(subject, "file.read")
+            with self.subTest(role_subject=repr(subject)), self.assertRaises(PolicyError):
+                self.policy.assign_role(subject, "viewer")
+            with self.subTest(revoke_subject=repr(subject)), self.assertRaises(PolicyError):
+                self.policy.revoke_role(subject)
+            with self.subTest(auth_subject=repr(subject)), self.assertRaises(PolicyError):
+                self.policy.authorize(subject, "file.read")
+
     def test_malformed_identity_role_and_permission_types_fail_closed(self):
         for subject in ("", "   ", None, [], {}):
             with self.subTest(subject=subject), self.assertRaises(PolicyError):
