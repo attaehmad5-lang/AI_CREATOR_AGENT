@@ -87,5 +87,18 @@ class WorkspacePolicyTests(unittest.TestCase):
         self.assertTrue(self.policy.remove_rule(rule))
 
 
+    def test_malformed_identity_role_and_permission_types_fail_closed(self):
+        for subject in ("", "   ", None, [], {}):
+            with self.subTest(subject=subject), self.assertRaises(PolicyError):
+                self.policy.revoke_role(subject)
+            with self.subTest(subject=subject), self.assertRaises(PolicyError):
+                self.policy.authorize(subject, "file.read")
+        for role in (None, [], {}, 1):
+            with self.subTest(role=role), self.assertRaises(PolicyError):
+                self.policy.assign_role("alice", role)
+        for permission in (None, [], {}, 1):
+            with self.subTest(permission=permission), self.assertRaises(PolicyError):
+                self.policy.authorize("alice", permission)
+
 if __name__ == "__main__":
     unittest.main()
