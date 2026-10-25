@@ -6,8 +6,8 @@
 ## Latest verification
 
 - `python -m compileall -q provider_store tests`: **PASS**
-- `python -W error::ResourceWarning -m pytest -q`: **64 passed, 0 failed**
-- Statement coverage: **94%** (979 statements; 58 uncovered)
+- `python -W error::ResourceWarning -m pytest -q`: **68 passed, 0 failed**
+- Statement coverage: **95%** (979 statements; 53 uncovered)
 - Local package installation from extracted archive with `python -m pip install --no-build-isolation --no-deps .`: **PASS**
 - Wheel build with `python -m pip wheel --no-build-isolation --no-deps .`: **PASS**
 - SHA-256 manifest verification and ZIP integrity check: **PASS**.
@@ -18,6 +18,7 @@
 2. `SqliteStorage._connect()` closes a connection if schema initialization fails.
 3. `AuditLog.entries(limit=0)` and negative limits now return an empty list.
 4. Regression tests cover escaped exception JSON, non-positive audit limits, and SQLite connection closure when schema initialization fails.
+5. Additional regression tests cover encrypted catalog access without a cipher, simultaneous primary/backup corruption, malformed SQLite rows, and missing-file fingerprints. The test fixture explicitly closes its SQLite connection.
 
 ## Remaining release gates — NOT PASS
 
