@@ -188,6 +188,23 @@ class TenantScopedProviderJobTests(unittest.TestCase):
             "JOB_NOT_FOUND",
         )
 
+    def test_unscoped_worker_can_claim_legacy_jobs_but_not_tenant_jobs(self):
+        self.submit("tenant-job", "tenant-a")
+        legacy = self.manager.submit(
+            job_id="legacy-job", project_id="film", provider_id="image",
+            payload_ref="payload:legacy",
+        )
+        self.assertEqual(legacy["status"], "JOB_QUEUED")
+        claimed = self.manager.claim_next(worker_id="legacy-worker")
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.assertEqual(claimed["job"]["job_id"], "legacy-job")
+        self.assertNotIn("tenant_id", claimed["job"])
+        tenant_claimed = self.manager.claim_next(
+            worker_id="tenant-worker", tenant_id="tenant-a"
+        )
+        self.assertEqual(tenant_claimed["status"], "JOB_CLAIMED")
+        self.assertEqual(tenant_claimed["job"]["job_id"], "tenant-job")
+
     def test_job_id_cannot_be_reused_by_another_tenant(self):
         self.assertEqual(self.submit("shared-job", "tenant-a")["status"], "JOB_QUEUED")
         result = self.submit("shared-job", "tenant-b")
