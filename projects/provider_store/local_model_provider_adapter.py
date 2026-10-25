@@ -111,6 +111,32 @@ class LocalModelProviderAdapter:
             raise ValueError("local model response must be an object")
         return parsed
 
+    def execute(
+        self,
+        *,
+        prompt: str,
+        system: str | None = None,
+        provider_id: str | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Adapt local text generation to ProviderService's started/success contract."""
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 100_000:
+            return {"started": False, "success": False, "status": "INVALID_PROMPT"}
+        if system is not None and (not isinstance(system, str) or len(system) > 20_000):
+            return {"started": False, "success": False, "status": "INVALID_SYSTEM_PROMPT"}
+        result = self.generate_text(prompt, system=system)
+        if result.get("status") in {"INVALID_PROMPT", "INVALID_SYSTEM_PROMPT"}:
+            return {"started": False, "success": False, "status": result["status"]}
+        return {
+            "started": True,
+            "success": result.get("generated") is True,
+            "status": result.get("status"),
+            "provider_id": provider_id or "local-ollama",
+            "request_id": request_id,
+            "result": result,
+            "text": result.get("text") if result.get("generated") is True else None,
+        }
+
     def generate_text(self, prompt: str, *, system: str | None = None) -> dict[str, Any]:
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 100_000:
             return {"status": "INVALID_PROMPT", "generated": False}
