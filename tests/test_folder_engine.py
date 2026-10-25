@@ -104,6 +104,13 @@ class FolderEngineTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(UnsafePathError):
                 self.engine.resolve(path)
 
+    def test_rejects_folder_names_over_255_characters(self):
+        with self.assertRaises(UnsafePathError):
+            self.engine.validate_name("a" * 256)
+
+    def test_accepts_folder_name_at_255_character_limit(self):
+        self.assertEqual(self.engine.validate_name("a" * 255), "a" * 255)
+
     def test_rejects_trailing_whitespace_name(self):
         with self.assertRaises(UnsafePathError):
             self.engine.validate_name("folder ")
