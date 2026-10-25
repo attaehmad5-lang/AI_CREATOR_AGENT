@@ -613,6 +613,15 @@ class ProviderService:
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
 
+        tenant_id = route_options.get("tenant_id")
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {
+                "status": "TENANT_AUTHORIZATION_DENIED",
+                "executed": False,
+                "authorization": scope_authorization,
+            }
+
         feature_flag_result = None
         if self.feature_flag_manager is not None:
             try:
