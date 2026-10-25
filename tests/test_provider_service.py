@@ -1262,5 +1262,94 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(service.validate_output("missing.png", modality="image")["status"], "OUTPUT_VALIDATOR_UNAVAILABLE")
 
 
+class ProviderAdminControlTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.root = Path(self.temp_dir.name)
+        self.auth = ProviderAuthorizationManager(self.root / "authorization.json")
+        self.auth.assign_role("viewer-1", "viewer")
+        self.auth.assign_role("admin-1", "admin")
+
+        class ConnectionStub:
+            def __init__(self):
+                self.calls = []
+
+            def verify_connectivity(self, *args, **kwargs):
+                return {"verified": False}
+
+            def set_provider_enabled(self, provider_id, enabled, *, paid_usage_approved=False):
+                self.calls.append(("enable", provider_id, enabled, paid_usage_approved))
+                return {"status": "ENABLED" if enabled else "DISABLED", "saved": True}
+
+            def configure_provider(self, provider_id, **configuration):
+                self.calls.append(("configure", provider_id, dict(configuration)))
+                return {"status": "CONFIGURED", "saved": True}
+
+        self.connection = ConnectionStub()
+        self.service = ProviderService(
+            self.connection,
+            authorization_manager=self.auth,
+        )
+
+    def test_viewer_cannot_enable_or_configure_provider(self):
+        enable = self.service.set_provider_enabled(
+            "image", True, principal_id="viewer-1"
+        )
+        configure = self.service.configure_provider(
+            "image", principal_id="viewer-1", model="safe-model"
+        )
+        self.assertEqual(enable["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(configure["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(self.connection.calls, [])
+
+    def test_admin_can_enable_and_paid_approval_is_forwarded(self):
+        result = self.service.set_provider_enabled(
+            "image",
+            True,
+            principal_id="admin-1",
+            paid_usage_approved=True,
+        )
+        self.assertEqual(result["status"], "ENABLED")
+        self.assertEqual(
+            self.connection.calls,
+            [("enable", "image", True, True)],
+        )
+
+    def test_admin_can_configure_provider(self):
+        result = self.service.configure_provider(
+            "image", principal_id="admin-1", model="safe-model"
+        )
+        self.assertEqual(result["status"], "CONFIGURED")
+        self.assertEqual(
+            self.connection.calls,
+            [("configure", "image", {"model": "safe-model"})],
+        )
+
+    def test_management_fails_closed_without_authorization_manager(self):
+        service = ProviderService(self.connection)
+        result = service.set_provider_enabled("image", True, principal_id="admin-1")
+        self.assertEqual(result["status"], "AUTHORIZATION_REQUIRED")
+        self.assertEqual(self.connection.calls, [])
+
+    def test_authorization_manager_exception_fails_closed(self):
+        class BrokenAuthorization:
+            def authorize(self, principal_id, operation):
+                raise RuntimeError("internal detail must not leak")
+
+        service = ProviderService(
+            self.connection,
+            authorization_manager=BrokenAuthorization(),
+        )
+        result = service.configure_provider(
+            "image", principal_id="admin-1", model="safe-model"
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_DENIED")
+        self.assertNotIn("internal detail", repr(result))
+        self.assertEqual(self.connection.calls, [])
+
+
+
+
 if __name__ == "__main__":
     unittest.main()
