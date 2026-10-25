@@ -1367,6 +1367,26 @@ class ProviderPolicySimulationTests(unittest.TestCase):
         self.assertEqual(events[0]["policy_simulation_status"], "WOULD_APPLY")
         self.assertNotIn("FREE_IMAGE_TOKEN", manager.audit_path.read_text(encoding="utf-8"))
 
+    def test_activation_audit_hash_chain_detects_tampering(self):
+        manager = self._build_manager()
+        first = manager.set_provider_enabled("free_image", True)
+        self.assertEqual(first["status"], "ENABLED")
+        records = [
+            json.loads(line)
+            for line in manager.audit_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(records[0]["previous_hash"], "0" * 64)
+        self.assertEqual(len(records[0]["event_hash"]), 64)
+
+        records[0]["decision"] = "DENY"
+        manager.audit_path.write_text(
+            json.dumps(records[0]) + "\n", encoding="utf-8"
+        )
+        second = manager.set_provider_enabled("free_image", False)
+        self.assertEqual(second["status"], "AUDIT_WRITE_FAILED")
+        self.assertFalse(second["saved"])
+        self.assertTrue(manager.is_provider_enabled("free_image"))
+
     def test_audit_write_failure_blocks_provider_activation(self):
         manager = self._build_manager()
         manager.audit_path = manager.state_path.parent
