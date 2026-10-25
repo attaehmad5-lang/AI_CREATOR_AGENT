@@ -1351,6 +1351,33 @@ class ProviderPolicySimulationTests(unittest.TestCase):
         )
         return ConnectionManager(catalog_path, state_path)
 
+    def test_provider_activation_writes_secret_free_audit_event(self):
+        manager = self._build_manager()
+        result = manager.set_provider_enabled("free_image", True)
+        self.assertEqual(result["status"], "ENABLED")
+        self.assertTrue(manager.audit_path.is_file())
+        events = [
+            json.loads(line)
+            for line in manager.audit_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "provider.activation_decision")
+        self.assertEqual(events[0]["provider_id"], "free_image")
+        self.assertEqual(events[0]["decision"], "ALLOW")
+        self.assertEqual(events[0]["policy_simulation_status"], "WOULD_APPLY")
+        self.assertNotIn("FREE_IMAGE_TOKEN", manager.audit_path.read_text(encoding="utf-8"))
+
+    def test_paid_activation_denial_is_audited_without_mutating_catalog(self):
+        manager = self._build_manager()
+        result = manager.set_provider_enabled("paid_image", True)
+        self.assertEqual(result["status"], "POLICY_SIMULATION_BLOCKED")
+        self.assertFalse(manager.is_provider_enabled("paid_image"))
+        events = [
+            json.loads(line)
+            for line in manager.audit_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(len(events), 0)
+
     def test_provider_activation_runs_policy_simulation_before_persisting(self):
         manager = self._build_manager()
         result = manager.set_provider_enabled("free_image", True)
