@@ -63,6 +63,10 @@ class ProviderAuthorizationManager:
                 or record.get("role") not in ROLE_PERMISSIONS
                 or not isinstance(record.get("enabled"), bool)
                 or not isinstance(record.get("updated_at"), str)
+                or ("tenant_id" in record and (
+                    not isinstance(record.get("tenant_id"), str)
+                    or not _PRINCIPAL_RE.fullmatch(record.get("tenant_id", ""))
+                ))
             ):
                 raise ValueError("invalid principal authorization record")
         self.data = loaded
@@ -95,21 +99,37 @@ class ProviderAuthorizationManager:
                 pass
             raise
 
-    def assign_role(self, principal_id: str, role: str, *, enabled: bool = True) -> dict[str, Any]:
+    def assign_role(
+        self,
+        principal_id: str,
+        role: str,
+        *,
+        enabled: bool = True,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         if not self._valid_principal(principal_id):
             return {"status": "INVALID_PRINCIPAL_ID", "saved": False}
         if not isinstance(role, str) or role not in ROLE_PERMISSIONS:
             return {"status": "INVALID_ROLE", "saved": False}
         if not isinstance(enabled, bool):
             return {"status": "INVALID_ENABLED_FLAG", "saved": False}
+        if tenant_id is not None and not self._valid_principal(tenant_id):
+            return {"status": "INVALID_TENANT_ID", "saved": False}
+        record = {
+            "role": role,
+            "enabled": enabled,
+            "updated_at": self.clock().astimezone(timezone.utc).isoformat(),
+        }
+        if tenant_id is not None:
+            record["tenant_id"] = tenant_id
         with self._transaction():
-            self.data["principals"][principal_id] = {
-                "role": role,
-                "enabled": enabled,
-                "updated_at": self.clock().astimezone(timezone.utc).isoformat(),
-            }
+            self.data["principals"][principal_id] = record
             self._save()
-        return {"status": "ROLE_ASSIGNED", "saved": True, "principal_id": principal_id, "role": role}
+        return {
+            "status": "ROLE_ASSIGNED", "saved": True,
+            "principal_id": principal_id, "role": role,
+            "tenant_id": tenant_id,
+        }
 
     def authorize(self, principal_id: str, operation: str) -> dict[str, Any]:
         if not self._valid_principal(principal_id):
@@ -132,6 +152,39 @@ class ProviderAuthorizationManager:
                 "principal_id": principal_id,
                 "role": role,
                 "operation": operation,
+            }
+
+    def authorize_tenant(self, principal_id: str, tenant_id: str) -> dict[str, Any]:
+        """Authorize access to one tenant; only admins without a tenant binding are global."""
+        if not self._valid_principal(principal_id):
+            return {"allowed": False, "status": "INVALID_PRINCIPAL_ID"}
+        if not self._valid_principal(tenant_id):
+            return {"allowed": False, "status": "INVALID_TENANT_ID"}
+        with self._transaction():
+            record = self.data["principals"].get(principal_id)
+            if not isinstance(record, dict):
+                return {"allowed": False, "status": "PRINCIPAL_NOT_FOUND"}
+            if record.get("enabled") is not True:
+                return {"allowed": False, "status": "PRINCIPAL_DISABLED"}
+            role = record.get("role")
+            if role not in ROLE_PERMISSIONS:
+                return {"allowed": False, "status": "INVALID_ASSIGNED_ROLE"}
+            assigned_tenant = record.get("tenant_id")
+            if assigned_tenant is None:
+                allowed = role == "admin"
+                status = "TENANT_AUTHORIZED" if allowed else "TENANT_SCOPE_REQUIRED"
+            elif assigned_tenant == tenant_id:
+                allowed = True
+                status = "TENANT_AUTHORIZED"
+            else:
+                allowed = False
+                status = "TENANT_ACCESS_DENIED"
+            return {
+                "allowed": allowed,
+                "status": status,
+                "principal_id": principal_id,
+                "tenant_id": tenant_id,
+                "role": role,
             }
 
     def disable_principal(self, principal_id: str) -> dict[str, Any]:
