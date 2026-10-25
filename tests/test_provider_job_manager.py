@@ -52,6 +52,24 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(claimed["job"]["job_id"], "high")
         self.assertEqual(self.manager.claim_next(worker_id="worker-2")["status"], "CONCURRENCY_LIMIT")
 
+    def test_priority_aging_prevents_old_low_priority_job_starvation(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=2,
+            priority_aging_seconds=20, clock=lambda: self.now[0],
+        )
+        manager.submit(
+            job_id="old-low", project_id="film", provider_id="image",
+            payload_ref="payload:old", priority=10,
+        )
+        self.now[0] += timedelta(seconds=2000)
+        manager.submit(
+            job_id="new-high", project_id="film", provider_id="image",
+            payload_ref="payload:new", priority=90,
+        )
+        claimed = manager.claim_next(worker_id="worker-aging")
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.assertEqual(claimed["job"]["job_id"], "old-low")
+
     def test_job_lifecycle_poll_and_result_reference(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
