@@ -79,7 +79,7 @@ class LocalModelProviderAdapterTests(unittest.TestCase):
             self.assertTrue(result["success"])
             self.assertEqual(result["text"], "local result")
             self.assertEqual(result["request_id"], "req-1")
-            self.assertEqual(output_path.read_text(encoding="utf-8"), "local result\\n")
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "local result\n")
             self.assertEqual(result["charge_outcome"], "not_incurred")
 
             invalid = adapter.execute(prompt="   ", output_path=output_path)
