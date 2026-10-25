@@ -64,6 +64,18 @@ class LocalModelProviderAdapterTests(unittest.TestCase):
         bad_system = adapter.generate_text("valid", system=[])
         self.assertEqual(bad_system["status"], "INVALID_SYSTEM_PROMPT")
 
+    def test_injected_transport_cannot_bypass_response_size_limit(self):
+        oversized_text = "x" * (2 * 1024 * 1024 + 1)
+        adapter = LocalModelProviderAdapter(
+            model_id="local-model",
+            transport=lambda *args, **kwargs: {"response": oversized_text},
+        )
+        result = adapter.generate_text("private prompt")
+        self.assertEqual(result["status"], "LOCAL_MODEL_REQUEST_FAILED")
+        self.assertFalse(result["generated"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertNotIn("private prompt", repr(result))
+
     def test_execute_matches_provider_service_contract_without_losing_unknown_outcome(self):
         with tempfile.TemporaryDirectory() as directory:
             output_path = Path(directory) / "local-output.txt"
