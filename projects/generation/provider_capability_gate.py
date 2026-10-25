@@ -36,6 +36,16 @@ def main():
             isinstance(item, dict) for item in connections
         ):
             raise ValueError("connections must be a list of objects")
+        seen_media_types = set()
+        for item in connections:
+            media_type = item.get("media_type")
+            if media_type not in required:
+                raise ValueError("connection has an unknown media_type")
+            if media_type in seen_media_types:
+                raise ValueError("duplicate media_type connection")
+            if not isinstance(item.get("connected"), bool):
+                raise ValueError("connected must be a boolean")
+            seen_media_types.add(media_type)
 
         capabilities = {}
         for media_type in required:
