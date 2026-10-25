@@ -118,5 +118,118 @@ class ProviderQuotaManagerTests(unittest.TestCase):
             ProviderQuotaManager(self.path, limits=self.limits)
 
 
+class ScopedProviderQuotaTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.path = Path(self.temp_dir.name) / "scoped-quota.json"
+        self.now = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
+        self.manager = ProviderQuotaManager(
+            self.path,
+            limits={"image": {"daily": 10}},
+            clock=lambda: self.now,
+            scope_limits={
+                "tenant": {
+                    "tenant-a": {"image": {"daily": 1}},
+                    "tenant-b": {"image": {"daily": 1}},
+                },
+                "project": {
+                    "project-a": {"image": {"daily": 2}},
+                    "project-b": {"image": {"daily": 2}},
+                },
+                "user": {
+                    "user-a": {"image": {"daily": 2}},
+                    "user-b": {"image": {"daily": 2}},
+                },
+            },
+        )
+
+    def test_tenant_quotas_are_isolated(self):
+        first = self.manager.reserve(
+            provider_id="image", request_id="tenant-a-1", tenant_id="tenant-a"
+        )
+        exhausted = self.manager.reserve(
+            provider_id="image", request_id="tenant-a-2", tenant_id="tenant-a"
+        )
+        other_tenant = self.manager.reserve(
+            provider_id="image", request_id="tenant-b-1", tenant_id="tenant-b"
+        )
+        self.assertEqual(first["status"], "RESERVED")
+        self.assertEqual(exhausted["status"], "SCOPE_QUOTA_EXCEEDED")
+        self.assertEqual(exhausted["scope"], "tenant")
+        self.assertEqual(other_tenant["status"], "RESERVED")
+        self.assertEqual(
+            self.manager.usage_for_scope(
+                scope_type="tenant", scope_id="tenant-a", provider_id="image"
+            )["daily"],
+            1,
+        )
+        self.assertEqual(
+            self.manager.usage_for_scope(
+                scope_type="tenant", scope_id="tenant-b", provider_id="image"
+            )["daily"],
+            1,
+        )
+
+    def test_configured_scope_requires_identity_and_known_policy(self):
+        missing = self.manager.reserve(provider_id="image", request_id="no-tenant")
+        unknown = self.manager.reserve(
+            provider_id="image", request_id="unknown-tenant", tenant_id="tenant-c"
+        )
+        invalid = self.manager.reserve(
+            provider_id="image", request_id="invalid-tenant", tenant_id=[]
+        )
+        self.assertEqual(missing["status"], "SCOPE_ID_REQUIRED")
+        self.assertEqual(unknown["status"], "NO_SCOPE_QUOTA_POLICY")
+        self.assertEqual(invalid["status"], "INVALID_SCOPE_ID")
+
+    def test_same_request_id_cannot_cross_tenant_boundaries(self):
+        first = self.manager.reserve(
+            provider_id="image", request_id="shared-request", tenant_id="tenant-a"
+        )
+        second = self.manager.reserve(
+            provider_id="image", request_id="shared-request", tenant_id="tenant-b"
+        )
+        self.assertEqual(first["status"], "RESERVED")
+        self.assertEqual(second["status"], "REQUEST_ID_CONFLICT")
+
+    def test_user_and_project_quotas_are_independently_enforced(self):
+        first = self.manager.reserve(
+            provider_id="image", request_id="scoped-1",
+            tenant_id="tenant-a", project_id="project-a", user_id="user-a",
+        )
+        second = self.manager.reserve(
+            provider_id="image", request_id="scoped-2",
+            tenant_id="tenant-a", project_id="project-a", user_id="user-a",
+        )
+        project_exhausted = self.manager.reserve(
+            provider_id="image", request_id="scoped-3",
+            tenant_id="tenant-a", project_id="project-a", user_id="user-b",
+        )
+        other_project = self.manager.reserve(
+            provider_id="image", request_id="scoped-4",
+            tenant_id="tenant-a", project_id="project-b", user_id="user-b",
+        )
+        self.assertEqual(first["status"], "RESERVED")
+        self.assertEqual(second["status"], "RESERVED")
+        self.assertEqual(project_exhausted["status"], "SCOPE_QUOTA_EXCEEDED")
+        self.assertEqual(project_exhausted["scope"], "project")
+        self.assertEqual(other_project["status"], "RESERVED")
+
+    def test_scope_configuration_rejects_unknown_providers_and_bad_limits(self):
+        with self.assertRaises(ValueError):
+            ProviderQuotaManager(
+                self.path,
+                limits={"image": {"daily": 10}},
+                scope_limits={"tenant": {"tenant-a": {"unknown": {"daily": 1}}}},
+            )
+        with self.assertRaises(ValueError):
+            ProviderQuotaManager(
+                self.path,
+                limits={"image": {"daily": 10}},
+                scope_limits={"tenant": {"tenant-a": {"image": {"daily": True}}}},
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
