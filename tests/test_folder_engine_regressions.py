@@ -8,6 +8,7 @@ from pathlib import Path
 
 from projects.folder_engine import (
     FolderEngine,
+    FolderEngineError,
     FolderTypeError,
     UnsafePathError,
 )
@@ -101,6 +102,14 @@ class FolderEngineRegressionTests(unittest.TestCase):
             with self.subTest(value=invalid):
                 with self.assertRaises((TypeError, ValueError)):
                     self.engine.list_tree(max_depth=invalid)
+
+    def test_corrupt_metadata_prevents_folder_deletion(self):
+        self.engine.ensure_folder("parent/child")
+        metadata = self.root / ".ai_creator_agent_folder_metadata.json"
+        metadata.write_text("{ not json", encoding="utf-8")
+        with self.assertRaises(FolderEngineError):
+            self.engine.delete_folder("parent", recursive=True)
+        self.assertTrue((self.root / "parent/child").is_dir())
 
     def test_delete_nonempty_folder_requires_explicit_recursive_flag(self):
         self.engine.ensure_folder("parent/child")
