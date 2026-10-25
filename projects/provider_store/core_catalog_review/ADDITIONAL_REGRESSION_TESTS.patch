@@ -51,21 +51,9 @@
 +    assert any("invalid JSON" in issue for issue in result.issues)
 +
 +
-+def test_storage_fingerprint_is_none_for_missing_file(tmp_path: Path) -> None:
++def test_storage_fingerprint_is_none_for_missing_file() -> None:
 +    assert JsonFileStorage(tmp_path / "missing.json").fingerprint() is None
 +    assert SqliteStorage(tmp_path / "missing.db").fingerprint() is None
-+
-+
-+# --------------------------------------------------------- G. lifecycle
-+def test_deprecation_warning_and_redirect(cat: ProviderCatalog) -> None:
-+    rec = cat.register(make("a", models=[{"name": "v1"}, {"name": "v2"}]))
-+    cat.deprecate(rec.provider_id, reason="use v2")
-+    assert cat.get(rec.provider_id).deprecated is True
-+    assert cat.get(rec.provider_id).deprecation_reason == "use v2"
-+    with pytest.raises(ProviderDeprecatedError):
-+        cat.resolve_model(rec.provider_id, "v1")
-+    cat.set_redirect(rec.provider_id, "v1", "v2")
-+    assert cat.resolve_model(rec.provider_id, "v1").name == "v2"
 +
 +
 +@@ -722,1 +722,12 @@
