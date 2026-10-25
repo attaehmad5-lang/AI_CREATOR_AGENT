@@ -1110,6 +1110,51 @@ class ProviderServiceTests(unittest.TestCase):
             "SUCCEEDED",
         )
 
+    def test_job_state_recovers_expired_worker_lease_across_service_restart(self):
+        from datetime import datetime, timedelta, timezone
+
+        now = [datetime(2026, 10, 25, 12, tzinfo=timezone.utc)]
+        state_path = self.root / "restart-recovery-jobs.json"
+        first_manager = ProviderJobManager(
+            state_path, max_queue_size=10, max_concurrent=1,
+            lease_seconds=10, max_attempts=2, clock=lambda: now[0],
+        )
+        first_service = ProviderService(self.connections, job_manager=first_manager)
+        submitted = first_service.submit_job(
+            job_id="restart-job", project_id="film", provider_id="image",
+            payload_ref="payload:restart-job",
+        )
+        self.assertEqual(submitted["status"], "JOB_QUEUED")
+        first_claim = first_service.claim_next_job(worker_id="worker-crashed")
+        self.assertEqual(first_claim["status"], "JOB_CLAIMED")
+        self.assertEqual(first_claim["job"]["attempts"], 1)
+
+        # Simulate a process restart after the worker lease expired.
+        now[0] += timedelta(seconds=11)
+        recovered_manager = ProviderJobManager(
+            state_path, max_queue_size=10, max_concurrent=1,
+            lease_seconds=10, max_attempts=2, clock=lambda: now[0],
+        )
+        recovered_service = ProviderService(self.connections, job_manager=recovered_manager)
+        recovered_claim = recovered_service.claim_next_job(worker_id="worker-recovered")
+        self.assertEqual(recovered_claim["status"], "JOB_CLAIMED")
+        self.assertEqual(recovered_claim["job"]["job_id"], "restart-job")
+        self.assertEqual(recovered_claim["job"]["attempts"], 2)
+
+        completed = recovered_service.complete_job(
+            job_id="restart-job", worker_id="worker-recovered",
+            success=True, result_ref="asset:restart-job",
+        )
+        self.assertIn(completed["status"], {"JOB_COMPLETED", "JOB_SUCCEEDED"})
+        polled = recovered_service.poll_job(job_id="restart-job")
+        self.assertEqual(polled["job"]["status"], "SUCCEEDED")
+        self.assertEqual(polled["job"]["attempts"], 2)
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["jobs"]["restart-job"]["status"], "SUCCEEDED")
+        serialized = state_path.read_text(encoding="utf-8")
+        self.assertNotIn("secret", serialized.lower())
+        self.assertNotIn("raw_prompt", serialized.lower())
+
     def test_async_job_facade_propagates_tenant_scope(self):
         jobs = ProviderJobManager(
             self.root / "tenant-service-jobs.json",
