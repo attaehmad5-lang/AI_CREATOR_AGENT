@@ -69,7 +69,7 @@ class PolicyRule:
     expires_at: float | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.subject, str) or not self.subject.strip():
+        if not isinstance(self.subject, str) or not self.subject.strip() or self.subject != self.subject.strip():
             raise PolicyError("subject must be a non-empty identity")
         if not isinstance(self.permission, str) or self.permission not in PERMISSIONS:
             raise PolicyError(f"unknown permission: {self.permission}")
