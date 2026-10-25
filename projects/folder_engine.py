@@ -318,6 +318,9 @@ class FolderEngine:
             raise UnsafePathError("a folder cannot be copied into itself or its descendants")
         if destination.exists():
             raise FileExistsError(f"destination already exists: {destination}")
+        # Validate metadata before mutating the filesystem. Otherwise corrupt
+        # metadata could make the operation fail after leaving a copied tree behind.
+        data = self._read_metadata()
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source, destination, symlinks=True)
         # Do not retain symlinks in the copied tree; they could point outside
