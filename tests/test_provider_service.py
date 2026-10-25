@@ -1087,6 +1087,22 @@ class ProviderServiceTests(unittest.TestCase):
             "SUCCEEDED",
         )
 
+    def test_routed_generation_denies_cross_tenant_principal_before_adapter(self):
+        authorization = ProviderAuthorizationManager(self.root / "tenant-generation-auth.json")
+        authorization.assign_role("tenant-a-creator", "creator", tenant_id="tenant-a")
+        service = ProviderService(
+            self.connections, authorization_manager=authorization,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="cross-tenant-request",
+            estimated_cost=0.0, adapter=lambda **kwargs: calls.append(kwargs),
+            modality="image", principal_id="tenant-a-creator", tenant_id="tenant-b",
+        )
+        self.assertEqual(result["status"], "TENANT_AUTHORIZATION_DENIED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
     def test_execution_records_latency_queue_wait_and_failure_metrics(self):
         outer = self
 
