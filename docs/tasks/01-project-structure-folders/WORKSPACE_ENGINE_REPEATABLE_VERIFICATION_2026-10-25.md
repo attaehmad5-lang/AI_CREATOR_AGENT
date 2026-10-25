@@ -13,9 +13,14 @@ unzip -t Workspace_Engine_PDF_Repaired_Reconstruction.zip
 
 ## Results
 - Syntax compilation: PASS
-- Unit tests: PASS — 225 tests, 14.496 seconds
+- Unit tests: PASS — 225 tests, 16.329 seconds
 - Demo smoke test: PASS — upload/search/full-text/version compare/script organization/backup verification/health/integrity
 - Archive integrity: PASS — no ZIP errors
+
+## Repository CI cross-check (separate codebase)
+- PR #78 Project Structure / Folders workflow run: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40019834877
+- Verified all six jobs completed successfully: Ubuntu and Windows × Python 3.11, 3.12, and 3.13; both compile and unit-test steps passed in each job.
+- This CI run tests the repository's existing `projects/` implementation, not the separate PDF-reconstructed `wsengine/` package. It must not be used to claim that package has been integrated.
 
 ## Strict scope limits
 This record does NOT establish:
