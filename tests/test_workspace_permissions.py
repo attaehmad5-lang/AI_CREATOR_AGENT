@@ -43,6 +43,15 @@ class WorkspacePolicyTests(unittest.TestCase):
             with self.subTest(scope=scope), self.assertRaises(PolicyError):
                 normalize_scope(scope)
 
+    def test_scope_rejects_windows_drive_paths_control_chars_and_oversize(self):
+        for scope in ("C:/secret", r"D:\\private", "docs/\x00secret", "docs/\nsecret", "x" * 1025):
+            with self.subTest(scope=repr(scope)), self.assertRaises(PolicyError):
+                normalize_scope(scope)
+
+    def test_scope_normalization_preserves_safe_nested_paths(self):
+        self.assertEqual(normalize_scope(r"docs\\drafts\\file.txt"), "docs/drafts/file.txt")
+        self.assertEqual(normalize_scope("./docs/./file.txt"), "docs/file.txt")
+
     def test_policy_rule_rejects_nonfinite_or_boolean_expiry(self):
         for expiry in (float("nan"), float("inf"), float("-inf"), True, False, 0, -1):
             with self.subTest(expiry=expiry), self.assertRaises(PolicyError):
