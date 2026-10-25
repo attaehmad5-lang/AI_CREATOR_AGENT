@@ -250,7 +250,10 @@ class ConnectionManager:
             if not isinstance(providers, list):
                 errors.append("providers must be a list")
             else:
-                seen: set[str] = set()
+                # Provider IDs are compared case-insensitively at the catalog
+                # boundary. This prevents ambiguous records such as "OpenAI"
+                # and "openai" from coexisting while callers use exact IDs.
+                seen: dict[str, str] = {}
                 for index, provider in enumerate(providers):
                     if not isinstance(provider, dict):
                         errors.append(f"providers[{index}] must be an object")
@@ -266,10 +269,13 @@ class ConnectionManager:
                         )
                     ):
                         errors.append(f"providers[{index}].id contains invalid characters or exceeds 100 characters")
-                    elif provider_id in seen:
-                        errors.append(f"duplicate provider id: {provider_id}")
+                    elif provider_id.casefold() in seen:
+                        errors.append(
+                            f"duplicate provider id (case-insensitive): {provider_id} "
+                            f"conflicts with {seen[provider_id.casefold()]}"
+                        )
                     else:
-                        seen.add(provider_id)
+                        seen[provider_id.casefold()] = provider_id
                     for key in ("name", "category", "auth_type", "connection_type"):
                         if key in provider and not isinstance(provider[key], str):
                             errors.append(f"providers[{index}].{key} must be a string")
