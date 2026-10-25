@@ -1034,6 +1034,59 @@ class ProviderServiceTests(unittest.TestCase):
             "SUCCEEDED",
         )
 
+    def test_async_job_facade_propagates_tenant_scope(self):
+        jobs = ProviderJobManager(
+            self.root / "tenant-service-jobs.json",
+            max_queue_size=10, max_concurrent=4,
+        )
+        authorization = ProviderAuthorizationManager(self.root / "tenant-job-auth.json")
+        authorization.assign_role("tenant-creator", "creator")
+        service = ProviderService(
+            self.connections, job_manager=jobs, authorization_manager=authorization,
+        )
+        created = service.submit_job(
+            job_id="tenant-job", project_id="film", provider_id="image",
+            payload_ref="payload:tenant-job", principal_id="tenant-creator",
+            tenant_id="tenant-a",
+        )
+        self.assertEqual(created["status"], "JOB_QUEUED")
+        self.assertEqual(
+            service.poll_job(job_id="tenant-job", principal_id="tenant-creator")["status"],
+            "TENANT_ID_REQUIRED",
+        )
+        self.assertEqual(
+            service.poll_job(
+                job_id="tenant-job", principal_id="tenant-creator", tenant_id="tenant-b"
+            )["status"],
+            "JOB_NOT_FOUND",
+        )
+        claimed_wrong_tenant = service.claim_next_job(
+            worker_id="worker-b", principal_id="tenant-creator", tenant_id="tenant-b"
+        )
+        self.assertEqual(claimed_wrong_tenant["status"], "QUEUE_EMPTY")
+        claimed = service.claim_next_job(
+            worker_id="worker-a", principal_id="tenant-creator", tenant_id="tenant-a"
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        denied_completion = service.complete_job(
+            job_id="tenant-job", worker_id="worker-a", success=True,
+            result_ref="asset:tenant-job", principal_id="tenant-creator",
+            tenant_id="tenant-b",
+        )
+        self.assertEqual(denied_completion["status"], "JOB_NOT_FOUND")
+        completed = service.complete_job(
+            job_id="tenant-job", worker_id="worker-a", success=True,
+            result_ref="asset:tenant-job", principal_id="tenant-creator",
+            tenant_id="tenant-a",
+        )
+        self.assertEqual(completed["status"], "JOB_COMPLETED")
+        self.assertEqual(
+            service.poll_job(
+                job_id="tenant-job", principal_id="tenant-creator", tenant_id="tenant-a"
+            )["job"]["status"],
+            "SUCCEEDED",
+        )
+
     def test_execution_records_latency_queue_wait_and_failure_metrics(self):
         outer = self
 
