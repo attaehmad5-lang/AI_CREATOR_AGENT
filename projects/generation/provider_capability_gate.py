@@ -13,31 +13,53 @@ OUTPUT = GEN / "provider_capability_gate.json"
 
 def load_json(path):
     with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+        value = json.load(handle)
+    if not isinstance(value, dict):
+        raise ValueError("JSON root must be an object")
+    return value
 
 
 def main():
-    connection_data = load_json(CONNECTION)
-    registry_data = load_json(REGISTRY)
-
     required = {
         "IMAGE": ["text_to_image"],
         "VIDEO": ["text_to_video", "image_to_video"],
         "VOICE": ["text_to_speech"],
     }
+    input_error = None
+    try:
+        connection_data = load_json(CONNECTION)
+        registry_data = load_json(REGISTRY)
+        connections = connection_data.get("connections", [])
+        if not isinstance(connections, list) or not all(
+            isinstance(item, dict) for item in connections
+        ):
+            raise ValueError("connections must be a list of objects")
 
-    capabilities = {
-        "IMAGE": registry_data.get("image", {}).get("capabilities", []),
-        "VIDEO": registry_data.get("video", {}).get("capabilities", []),
-        "VOICE": registry_data.get("voice", {}).get("capabilities", []),
-    }
+        capabilities = {}
+        for media_type in required:
+            key = media_type.lower()
+            provider = registry_data.get(key, {})
+            if not isinstance(provider, dict):
+                raise ValueError("provider metadata must be an object")
+            declared = provider.get("capabilities", [])
+            if not isinstance(declared, list) or not all(
+                isinstance(item, str) for item in declared
+            ):
+                raise ValueError("capabilities must be a list of strings")
+            capabilities[media_type] = declared
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        # Do not expose filesystem paths or exception details in status output.
+        input_error = type(exc).__name__
+        connection_data = {}
+        connections = []
+        capabilities = {media_type: [] for media_type in required}
 
     checks = []
     for media_type, required_capabilities in required.items():
         provider_connection = next(
             (
                 item
-                for item in connection_data.get("connections", [])
+                for item in connections
                 if item.get("media_type") == media_type
             ),
             {},
@@ -47,7 +69,7 @@ def main():
         capability_available = all(
             item in provider_capabilities for item in required_capabilities
         )
-        gate_pass = provider_connected and capability_available
+        gate_pass = input_error is None and provider_connected and capability_available
 
         checks.append({
             "media_type": media_type,
@@ -60,17 +82,23 @@ def main():
 
     passed = sum(1 for item in checks if item["gate_pass"])
     blocked = len(checks) - passed
+    status = (
+        "BLOCKED" if input_error is not None or passed == 0
+        else ("READY" if blocked == 0 else "DEGRADED")
+    )
     result = {
         "gate": "PROVIDER_CAPABILITY_GATE",
         "strategy": "CONNECTION_AND_CAPABILITY_VALIDATION",
         "total_checks": len(checks),
         "passed": passed,
         "blocked": blocked,
-        "all_capabilities_ready": blocked == 0,
+        "all_capabilities_ready": blocked == 0 and input_error is None,
+        "input_valid": input_error is None,
+        "input_error_type": input_error,
         "real_provider_call": False,
         "safe_mode": True,
         "checks": checks,
-        "status": "READY" if blocked == 0 else ("DEGRADED" if passed else "BLOCKED"),
+        "status": status,
         "created_at": datetime.now().isoformat(),
     }
 
