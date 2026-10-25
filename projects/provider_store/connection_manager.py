@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import math
+import hashlib
+import hmac
 import os
 import re
 import tempfile
@@ -171,14 +173,53 @@ class ConnectionManager:
 
     def _append_audit_event(self, event: dict[str, Any]) -> None:
         """Append a secret-free, structured audit event under a cross-process lock."""
-        record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "schema_version": "1.0",
-            **event,
-        }
         self.audit_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path = self.audit_path.with_name(self.audit_path.name + ".lock")
         with interprocess_file_lock(lock_path):
+            previous_hash = "0" * 64
+            if self.audit_path.exists():
+                with self.audit_path.open("r", encoding="utf-8") as existing:
+                    for line_number, line in enumerate(existing, start=1):
+                        try:
+                            prior_record = json.loads(line)
+                        except json.JSONDecodeError as exc:
+                            raise ValueError(
+                                f"Audit log contains invalid JSON at line {line_number}"
+                            ) from exc
+                        if not isinstance(prior_record, dict):
+                            raise ValueError(
+                                f"Audit log record at line {line_number} is not an object"
+                            )
+                        supplied_hash = prior_record.get("event_hash")
+                        claimed_previous = prior_record.get("previous_hash")
+                        if not isinstance(supplied_hash, str) or claimed_previous != previous_hash:
+                            raise ValueError(
+                                f"Audit log hash chain is invalid at line {line_number}"
+                            )
+                        payload = dict(prior_record)
+                        payload.pop("event_hash", None)
+                        expected_hash = hashlib.sha256(
+                            json.dumps(
+                                payload, sort_keys=True, separators=(",", ":"),
+                                ensure_ascii=True,
+                            ).encode("utf-8")
+                        ).hexdigest()
+                        if not hmac.compare_digest(supplied_hash, expected_hash):
+                            raise ValueError(
+                                f"Audit log integrity check failed at line {line_number}"
+                            )
+                        previous_hash = supplied_hash
+            record = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "schema_version": "1.0",
+                "previous_hash": previous_hash,
+                **event,
+            }
+            record["event_hash"] = hashlib.sha256(
+                json.dumps(
+                    record, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+                ).encode("utf-8")
+            ).hexdigest()
             with self.audit_path.open("a", encoding="utf-8", newline="\n") as stream:
                 stream.write(json.dumps(record, sort_keys=True, ensure_ascii=True) + "\n")
                 stream.flush()
@@ -619,7 +660,7 @@ class ConnectionManager:
                             "policy_simulation_status": simulation.get("status"),
                             "paid_usage_approved": paid_usage_approved,
                         })
-                    except OSError as exc:
+                    except (OSError, ValueError) as exc:
                         return {
                             "status": "AUDIT_WRITE_FAILED",
                             "provider": provider_id,
@@ -649,7 +690,7 @@ class ConnectionManager:
                     ),
                     "paid_usage_approved": paid_usage_approved if enabled else False,
                 })
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 return {
                     "status": "AUDIT_WRITE_FAILED",
                     "provider": provider_id,
