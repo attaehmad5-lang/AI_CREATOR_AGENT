@@ -11,6 +11,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
+from projects.provider_store.tenant_policy_manager import ProviderTenantPolicyManager
 
 
 class ProviderRoutingManagerTests(unittest.TestCase):
@@ -366,6 +367,40 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             decision["status"] == "REGION_METADATA_UNVERIFIED"
             for decision in result["decisions"]
         ))
+
+    def test_tenant_policy_is_required_and_intersects_project_allowlist(self):
+        tenant_policies = ProviderTenantPolicyManager(self.root / "tenant-policies.json")
+        router_missing = ProviderRoutingManager(
+            self.connections, tenant_policy_manager=tenant_policies
+        )
+        missing = router_missing.route(category="image", project_id="film")
+        self.assertFalse(missing["allowed"])
+        self.assertEqual(missing["status"], "TENANT_POLICY_REQUIRED")
+
+        project_policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        project_policies.set_policy("film", {"allowed_providers": ["primary", "fallback"]})
+        tenant_policies.set_policy("tenant-a", {"allowed_providers": ["fallback"]})
+        router = ProviderRoutingManager(
+            self.connections, project_policy_manager=project_policies,
+            tenant_policy_manager=tenant_policies,
+        )
+        result = router.route(category="image", project_id="film", tenant_id="tenant-a")
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertTrue(all(
+            decision["status"] != "TENANT_PROVIDER_NOT_ALLOWED"
+            for decision in result["decisions"]
+        ))
+
+    def test_tenant_policy_alone_restricts_providers(self):
+        policies = ProviderTenantPolicyManager(self.root / "tenant-policies.json")
+        policies.set_policy("tenant-a", {"allowed_providers": ["fallback"]})
+        router = ProviderRoutingManager(self.connections, tenant_policy_manager=policies)
+        result = router.route(
+            category="image", project_id="film", tenant_id="tenant-a"
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
 
     def test_project_policy_can_require_health_evidence(self):
         policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
