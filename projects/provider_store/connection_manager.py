@@ -49,9 +49,14 @@ class ConnectionManager:
         self,
         catalog_path: str | os.PathLike[str] | None = None,
         state_path: str | os.PathLike[str] | None = None,
+        audit_path: str | os.PathLike[str] | None = None,
     ) -> None:
         self.catalog_path = Path(catalog_path) if catalog_path else self._default_catalog()
         self.state_path = Path(state_path) if state_path else DEFAULT_STATE
+        self.audit_path = (
+            Path(audit_path) if audit_path
+            else self.state_path.with_name(self.state_path.stem + ".audit.jsonl")
+        )
         # Constructor reads must use the same interprocess locks as writers. On
         # Windows, an unlocked read can race with atomic replacement and fail with
         # a transient sharing violation while another process registers a provider.
@@ -163,6 +168,21 @@ class ConnectionManager:
             except FileNotFoundError:
                 pass
             raise
+
+    def _append_audit_event(self, event: dict[str, Any]) -> None:
+        """Append a secret-free, structured audit event under a cross-process lock."""
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "schema_version": "1.0",
+            **event,
+        }
+        self.audit_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self.audit_path.with_name(self.audit_path.name + ".lock")
+        with interprocess_file_lock(lock_path):
+            with self.audit_path.open("a", encoding="utf-8", newline="\\n") as stream:
+                stream.write(json.dumps(record, sort_keys=True, ensure_ascii=True) + "\\n")
+                stream.flush()
+                os.fsync(stream.fileno())
 
     def _save(self) -> None:
         self._atomic_write_json(self.state_path, self.state)
@@ -600,6 +620,26 @@ class ConnectionManager:
                         "saved": False,
                         "policy_simulation": simulation,
                     }
+            try:
+                self._append_audit_event({
+                    "event": "provider.activation_decision",
+                    "provider_id": provider_id,
+                    "requested_enabled": enabled,
+                    "decision": "ALLOW" if not enabled or (
+                        simulation is not None and simulation.get("status") == "WOULD_APPLY"
+                    ) else "DENY",
+                    "policy_simulation_status": (
+                        simulation.get("status") if simulation is not None else "NOT_REQUIRED"
+                    ),
+                    "paid_usage_approved": paid_usage_approved if enabled else False,
+                })
+            except OSError as exc:
+                return {
+                    "status": "AUDIT_WRITE_FAILED",
+                    "provider": provider_id,
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
         if not enabled and provider_id in self._loaded_providers:
