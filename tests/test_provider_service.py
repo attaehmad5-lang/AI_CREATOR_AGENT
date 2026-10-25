@@ -8,6 +8,7 @@ from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.provider_feature_flags import ProviderFeatureFlagManager
 from projects.provider_store.provider_incident_manager import ProviderIncidentManager
 from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
+from projects.provider_store.provider_ab_benchmark_manager import ProviderABBenchmarkManager
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_slo_manager import ProviderSLOManager
@@ -62,6 +63,80 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_ab_benchmark_paid_usage_requires_authenticated_billing_approval(self):
+        class Authorization:
+            def __init__(self, allowed):
+                self.allowed = allowed
+                self.calls = []
+
+            def authorize(self, principal_id, operation):
+                self.calls.append((principal_id, operation))
+                return {"allowed": self.allowed, "status": "OK" if self.allowed else "DENIED"}
+
+        candidates = [
+            {"provider_id": "provider-a", "model_id": "model-a", "estimated_cost_per_run": 0.1},
+            {"provider_id": "provider-b", "model_id": "model-b", "estimated_cost_per_run": 0.2},
+        ]
+        denied_auth = Authorization(False)
+        denied_service = ProviderService(
+            self.connections, authorization_manager=denied_auth,
+            ab_benchmark_manager=ProviderABBenchmarkManager(),
+        )
+        denied = denied_service.plan_ab_benchmark(
+            principal_id="user-1", benchmark_id="paid-plan", category="image",
+            candidates=candidates, repetitions=2, allow_paid=True, max_total_cost=1.0,
+            paid_approval={"approved": True, "benchmark_id": "paid-plan", "approved_by": "forged"},
+        )
+        self.assertEqual(denied["status"], "PAID_BENCHMARK_APPROVAL_DENIED")
+        self.assertEqual(denied_auth.calls, [("user-1", "billing.approve")])
+
+        approved_auth = Authorization(True)
+        approved_service = ProviderService(
+            self.connections, authorization_manager=approved_auth,
+            ab_benchmark_manager=ProviderABBenchmarkManager(),
+        )
+        approved = approved_service.plan_ab_benchmark(
+            principal_id="user-1", benchmark_id="paid-plan", category="image",
+            candidates=candidates, repetitions=2, allow_paid=True, max_total_cost=1.0,
+            paid_approval={"approved": False, "benchmark_id": "wrong", "approved_by": "forged"},
+        )
+        self.assertEqual(approved["status"], "BENCHMARK_PLAN_READY")
+        self.assertEqual(approved["estimated_total_cost"], 0.6)
+        self.assertFalse(approved["executable"])
+        self.assertEqual(approved["provider_calls_made"], 0)
+        self.assertEqual(approved_auth.calls, [("user-1", "billing.approve")])
+
+    def test_ab_benchmark_requires_authorization_manager_for_paid_plan(self):
+        service = ProviderService(
+            self.connections, ab_benchmark_manager=ProviderABBenchmarkManager(),
+        )
+        result = service.plan_ab_benchmark(
+            principal_id="user-1", benchmark_id="paid-plan", category="image",
+            candidates=[
+                {"provider_id": "provider-a", "model_id": "model-a", "estimated_cost_per_run": 0.1},
+                {"provider_id": "provider-b", "model_id": "model-b", "estimated_cost_per_run": 0.2},
+            ],
+            repetitions=1, allow_paid=True, max_total_cost=1.0,
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_REQUIRED")
+        self.assertFalse(result["executable"])
+
+    def test_ab_benchmark_rejects_forged_approval_when_paid_usage_not_enabled(self):
+        service = ProviderService(
+            self.connections, ab_benchmark_manager=ProviderABBenchmarkManager(),
+        )
+        result = service.plan_ab_benchmark(
+            benchmark_id="forged-plan", category="image",
+            candidates=[
+                {"provider_id": "provider-a", "model_id": "model-a", "estimated_cost_per_run": 0.1},
+                {"provider_id": "provider-b", "model_id": "model-b", "estimated_cost_per_run": 0.2},
+            ],
+            repetitions=1, allow_paid=False, max_total_cost=1.0,
+            paid_approval={"approved": True, "benchmark_id": "forged-plan", "approved_by": "forged"},
+        )
+        self.assertEqual(result["status"], "PAID_BENCHMARK_APPROVAL_REQUIRED")
+        self.assertFalse(result["executable"])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
