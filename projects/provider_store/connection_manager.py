@@ -611,13 +611,16 @@ class ConnectionManager:
                     "saved": True,
                     "runtime_unloaded": False,
                 }
-        return {
+        result = {
             "status": "ENABLED" if enabled else "DISABLED",
             "provider": provider_id,
             "saved": True,
             "runtime_unloaded": not enabled,
             "note": "Eligibility only; no purchase, billing, or live connectivity check performed.",
         }
+        if simulation is not None:
+            result["policy_simulation"] = simulation
+        return result
 
     def is_provider_enabled(self, provider_id: str) -> bool:
         provider = self.get_provider(provider_id)
