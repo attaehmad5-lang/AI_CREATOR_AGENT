@@ -8,7 +8,7 @@
 - `python -m compileall -q provider_store tests`: **PASS**
 - `python -W error::ResourceWarning -m pytest -q`: **64 passed, 0 failed**
 - Statement coverage: **94%** (981 statements; 58 uncovered)
-- JSON formatter regression: escaped quote/newline exception text remains valid JSON and credential-like content is redacted.
+- Local package installation with `python -m pip install --no-build-isolation --no-deps .`: **PASS**
 - SHA-256 manifest verification and ZIP integrity check: **PASS**.
 
 ## Defects fixed
