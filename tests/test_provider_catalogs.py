@@ -336,5 +336,102 @@ class ProviderCatalogValidationTests(unittest.TestCase):
         self.assertTrue(catalogs, "No provider catalog JSON files were found")
 
 
+    def test_catalog_rejects_case_insensitive_provider_id_collisions(self):
+        base = {
+            "version": "3.0",
+            "providers": [
+                {
+                    "id": "OpenAI",
+                    "name": "OpenAI",
+                    "category": "text",
+                    "auth_type": "NONE",
+                    "connection_type": "API",
+                    "enabled": False,
+                    "subscription_required": False,
+                },
+                {
+                    "id": "openai",
+                    "name": "OpenAI Duplicate",
+                    "category": "text",
+                    "auth_type": "NONE",
+                    "connection_type": "API",
+                    "enabled": False,
+                    "subscription_required": False,
+                },
+            ],
+        }
+        result = ConnectionManager.validate_catalog_schema(base)
+        self.assertFalse(result["valid"])
+        self.assertTrue(
+            any("duplicate provider id (case-insensitive)" in error for error in result["errors"]),
+            result["errors"],
+        )
+
+    def test_catalog_rejects_invalid_root_manifest_metadata(self):
+        valid = {
+            "store": "AI_CREATOR_AGENT_PROVIDER_STORE",
+            "version": "3.0",
+            "status": "READY",
+            "subscription_policy": "USER_CONTROLLED",
+            "providers": [],
+        }
+        self.assertTrue(ConnectionManager.validate_catalog_schema(valid)["valid"])
+        invalid_values = (
+            ("store", ""),
+            ("store", "x" * 101),
+            ("store", "unsafe\\nstore"),
+            ("status", "ready"),
+            ("status", "READY NOW"),
+            ("subscription_policy", "user-controlled"),
+            ("subscription_policy", 7),
+        )
+        for field, value in invalid_values:
+            with self.subTest(field=field, value=value):
+                candidate = dict(valid)
+                candidate[field] = value
+                result = ConnectionManager.validate_catalog_schema(candidate)
+                self.assertFalse(result["valid"], result)
+                self.assertTrue(
+                    any(f"catalog.{field}" in error for error in result["errors"]),
+                    result["errors"],
+                )
+
+    def test_catalog_provider_count_is_bounded_at_one_thousand(self):
+        def record(index):
+            return {
+                "id": f"provider_{index}",
+                "name": f"Provider {index}",
+                "category": "image",
+                "auth_type": "NONE",
+                "connection_type": "API",
+                "enabled": False,
+                "subscription_required": False,
+            }
+
+        accepted = ConnectionManager.validate_catalog_schema({
+            "version": "3.0",
+            "providers": [record(index) for index in range(1000)],
+        })
+        self.assertTrue(accepted["valid"], accepted["errors"])
+        rejected = ConnectionManager.validate_catalog_schema({
+            "version": "3.0",
+            "providers": [record(index) for index in range(1001)],
+        })
+        self.assertFalse(rejected["valid"])
+        self.assertTrue(
+            any("at most 1000 records" in error for error in rejected["errors"]),
+            rejected["errors"],
+        )
+
+    def test_catalog_requires_providers_to_be_a_list_of_objects(self):
+        for providers in (None, {}, "providers", [None], [1], ["provider"]):
+            with self.subTest(providers=providers):
+                result = ConnectionManager.validate_catalog_schema({
+                    "version": "3.0",
+                    "providers": providers,
+                })
+                self.assertFalse(result["valid"])
+
+
 if __name__ == "__main__":
     unittest.main()
