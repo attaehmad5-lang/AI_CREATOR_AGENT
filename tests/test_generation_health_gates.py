@@ -97,6 +97,30 @@ class ProviderCapabilityGateTests(unittest.TestCase):
         self.assertFalse(result["input_valid"])
         self.assertEqual(result["passed"], 0)
 
+
+    def test_missing_connections_field_fails_closed(self):
+        self.module.CONNECTION.write_text(json.dumps({}), encoding="utf-8")
+        self.module.REGISTRY.write_text(json.dumps({
+            "image": {"capabilities": ["text_to_image"]},
+            "video": {"capabilities": ["text_to_video", "image_to_video"]},
+            "voice": {"capabilities": ["text_to_speech"]},
+        }), encoding="utf-8")
+        result = self.module.main()
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertFalse(result["input_valid"])
+        self.assertEqual(result["input_error_type"], "ValueError")
+
+    def test_missing_provider_entry_fails_closed(self):
+        self.module.CONNECTION.write_text(json.dumps({"connections": []}), encoding="utf-8")
+        self.module.REGISTRY.write_text(json.dumps({
+            "image": {"capabilities": ["text_to_image"]},
+            "video": {"capabilities": ["text_to_video", "image_to_video"]},
+        }), encoding="utf-8")
+        result = self.module.main()
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertFalse(result["input_valid"])
+        self.assertEqual(result["input_error_type"], "ValueError")
+
     def test_missing_capability_degrades_when_another_modality_passes(self):
         capabilities = {
             "image": {"capabilities": ["text_to_image"]},
