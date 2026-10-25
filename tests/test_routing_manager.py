@@ -354,6 +354,19 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             for decision in capability_denied["decisions"]
         ))
 
+    def test_persisted_project_region_policy_is_enforced_by_router(self):
+        policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        saved = policies.set_policy("film", {"required_region": "SAUDI-ARABIA"})
+        self.assertTrue(saved["saved"])
+        router = ProviderRoutingManager(self.connections, project_policy_manager=policies)
+        result = router.route(category="image", project_id="film")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertTrue(all(
+            decision["status"] == "REGION_METADATA_UNVERIFIED"
+            for decision in result["decisions"]
+        ))
+
     def test_project_policy_can_require_health_evidence(self):
         policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
         policies.set_policy("film", {"require_health_evidence": True})
