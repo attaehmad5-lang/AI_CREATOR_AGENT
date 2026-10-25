@@ -387,6 +387,15 @@ class FolderEngineTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             self.engine.copy_folder("source", "copies/source")
 
+    def test_copy_does_not_mutate_filesystem_when_metadata_is_corrupt(self):
+        self.engine.ensure_folder("before")
+        self.engine._metadata_path().write_text("{broken", encoding="utf-8")
+        with self.assertRaises(FolderEngineError):
+            self.engine.copy_folder("before", "archive/copy")
+        self.assertTrue((self.root / "before").is_dir())
+        self.assertFalse((self.root / "archive" / "copy").exists())
+        self.assertFalse((self.root / "archive").exists())
+
     def test_copy_rejects_copy_into_descendant(self):
         self.engine.ensure_folder("source/child")
         with self.assertRaises(UnsafePathError):
