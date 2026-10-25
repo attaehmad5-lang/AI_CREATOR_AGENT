@@ -46,6 +46,26 @@ class ProviderAuthorizationManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderAuthorizationManager(self.path, clock=lambda: self.now)
 
+    def test_tenant_membership_denies_cross_tenant_and_missing_scope(self):
+        self.manager.assign_role("tenant-user", "creator", tenant_id="tenant-a")
+        self.assertTrue(self.manager.authorize_tenant("tenant-user", "tenant-a")["allowed"])
+        self.assertEqual(
+            self.manager.authorize_tenant("tenant-user", "tenant-b")["status"],
+            "TENANT_ACCESS_DENIED",
+        )
+        self.assertEqual(
+            self.manager.authorize_tenant("tenant-user", None)["status"],
+            "TENANT_SCOPE_REQUIRED",
+        )
+        self.manager.assign_role("legacy-user", "creator")
+        self.assertTrue(self.manager.authorize_tenant("legacy-user", None)["allowed"])
+        self.assertEqual(
+            self.manager.authorize_tenant("legacy-user", "tenant-a")["status"],
+            "TENANT_SCOPE_REQUIRED",
+        )
+        self.manager.assign_role("global-admin", "admin")
+        self.assertTrue(self.manager.authorize_tenant("global-admin", "tenant-a")["allowed"])
+
     def test_invalid_assignments_fail_closed(self):
         self.assertEqual(self.manager.assign_role("bad id", "admin")["status"], "INVALID_PRINCIPAL_ID")
         self.assertEqual(self.manager.assign_role("creator-1", "root")["status"], "INVALID_ROLE")
