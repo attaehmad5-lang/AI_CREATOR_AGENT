@@ -96,6 +96,29 @@ class ProviderService:
             }
         return None
 
+    def _authorize_job_scope(
+        self, principal_id: str | None, tenant_id: str | None
+    ) -> dict[str, Any] | None:
+        """Check tenant membership before any job metadata or state is accessed."""
+        if self.authorization_manager is None:
+            if tenant_id is not None:
+                return {"allowed": False, "status": "TENANT_AUTHORIZATION_REQUIRED"}
+            return None
+        checker = getattr(self.authorization_manager, "authorize_tenant", None)
+        if not callable(checker):
+            if tenant_id is not None:
+                return {"allowed": False, "status": "TENANT_AUTHORIZATION_UNAVAILABLE"}
+            return None
+        try:
+            result = checker(principal_id, tenant_id)
+        except Exception as exc:
+            return {"allowed": False, "status": "TENANT_AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("allowed") is not True:
+            return result if isinstance(result, dict) else {
+                "allowed": False, "status": "INVALID_TENANT_AUTHORIZATION_RESPONSE"
+            }
+        return None
+
     def set_provider_enabled(
         self,
         provider_id: str,
@@ -390,6 +413,9 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {"status": "TENANT_AUTHORIZATION_DENIED", "accepted": False, "authorization": scope_authorization}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "accepted": False, "authorization": authorization}
@@ -409,6 +435,9 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {"status": "TENANT_AUTHORIZATION_DENIED", "job": None, "authorization": scope_authorization}
         authorization = self._authorize_operation(principal_id, "provider.read")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
@@ -427,6 +456,9 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {"status": "TENANT_AUTHORIZATION_DENIED", "job": None, "authorization": scope_authorization}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
@@ -444,6 +476,9 @@ class ProviderService:
                      principal_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {"status": "TENANT_AUTHORIZATION_DENIED", "saved": False, "authorization": scope_authorization}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
@@ -463,6 +498,9 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {"status": "TENANT_AUTHORIZATION_DENIED", "saved": False, "authorization": scope_authorization}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
