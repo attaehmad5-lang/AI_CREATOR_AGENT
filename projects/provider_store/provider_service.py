@@ -38,6 +38,7 @@ class ProviderService:
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
         local_model_adapter: Any | None = None,
+        recovery_coordinator: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -64,6 +65,7 @@ class ProviderService:
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
             (local_model_adapter, "generate_text", "local_model_adapter"),
+            (recovery_coordinator, "run_due_rechecks", "recovery_coordinator"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -91,6 +93,7 @@ class ProviderService:
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
         self.local_model_adapter = local_model_adapter
+        self.recovery_coordinator = recovery_coordinator
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -1416,3 +1419,21 @@ class ProviderService:
             for item in results.values()
         )
         return {"status": "RELEASED" if released else "RELEASE_PARTIAL", "released": released, **results}
+
+
+    def run_due_provider_rechecks(self) -> dict[str, Any]:
+        """Explicitly run due health rechecks; never starts generation or reroutes work."""
+        if self.recovery_coordinator is None:
+            return {"status": "RECOVERY_COORDINATOR_UNAVAILABLE", "probed": [], "results": {}}
+        try:
+            result = self.recovery_coordinator.run_due_rechecks()
+        except Exception as exc:
+            return {
+                "status": "RECOVERY_RECHECK_FAILED",
+                "probed": [],
+                "results": {},
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict) or result.get("status") != "COMPLETED":
+            return {"status": "RECOVERY_RECHECK_BLOCKED", "probed": [], "results": {}}
+        return result
