@@ -229,16 +229,20 @@ class ProviderJobManager:
                 and job.get("status") == "QUEUED"
                 and "tenant_id" in job
             ]
-            if tenant_queued and tenant_id is None:
-                if changed:
-                    self._save()
-                return {"status": "TENANT_ID_REQUIRED", "job": None}
             queued = [
                 job for job in self.data["jobs"].values()
                 if isinstance(job, dict)
                 and job.get("status") == "QUEUED"
-                and job.get("tenant_id") == tenant_id
+                and (
+                    job.get("tenant_id") == tenant_id
+                    if tenant_id is not None
+                    else "tenant_id" not in job
+                )
             ]
+            if tenant_id is None and tenant_queued and not queued:
+                if changed:
+                    self._save()
+                return {"status": "TENANT_ID_REQUIRED", "job": None}
             queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
             if not queued:
                 if changed:
