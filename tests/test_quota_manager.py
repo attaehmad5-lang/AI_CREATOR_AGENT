@@ -133,14 +133,6 @@ class ScopedProviderQuotaTests(unittest.TestCase):
                     "tenant-a": {"image": {"daily": 1}},
                     "tenant-b": {"image": {"daily": 1}},
                 },
-                "project": {
-                    "project-a": {"image": {"daily": 2}},
-                    "project-b": {"image": {"daily": 2}},
-                },
-                "user": {
-                    "user-a": {"image": {"daily": 2}},
-                    "user-b": {"image": {"daily": 2}},
-                },
             },
         )
 
@@ -194,21 +186,36 @@ class ScopedProviderQuotaTests(unittest.TestCase):
         self.assertEqual(second["status"], "REQUEST_ID_CONFLICT")
 
     def test_user_and_project_quotas_are_independently_enforced(self):
-        first = self.manager.reserve(
+        scoped = ProviderQuotaManager(
+            self.path,
+            limits={"image": {"daily": 10}},
+            clock=lambda: self.now,
+            scope_limits={
+                "project": {
+                    "project-a": {"image": {"daily": 2}},
+                    "project-b": {"image": {"daily": 2}},
+                },
+                "user": {
+                    "user-a": {"image": {"daily": 2}},
+                    "user-b": {"image": {"daily": 2}},
+                },
+            },
+        )
+        first = scoped.reserve(
             provider_id="image", request_id="scoped-1",
-            tenant_id="tenant-a", project_id="project-a", user_id="user-a",
+            project_id="project-a", user_id="user-a",
         )
-        second = self.manager.reserve(
+        second = scoped.reserve(
             provider_id="image", request_id="scoped-2",
-            tenant_id="tenant-a", project_id="project-a", user_id="user-a",
+            project_id="project-a", user_id="user-a",
         )
-        project_exhausted = self.manager.reserve(
+        project_exhausted = scoped.reserve(
             provider_id="image", request_id="scoped-3",
-            tenant_id="tenant-a", project_id="project-a", user_id="user-b",
+            project_id="project-a", user_id="user-b",
         )
-        other_project = self.manager.reserve(
+        other_project = scoped.reserve(
             provider_id="image", request_id="scoped-4",
-            tenant_id="tenant-a", project_id="project-b", user_id="user-b",
+            project_id="project-b", user_id="user-b",
         )
         self.assertEqual(first["status"], "RESERVED")
         self.assertEqual(second["status"], "RESERVED")
