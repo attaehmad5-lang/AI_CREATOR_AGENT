@@ -542,13 +542,25 @@ class ConnectionManager:
             safe[key] = value
         return safe
 
-    def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
-        """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
+    def set_provider_enabled(
+        self,
+        provider_id: str,
+        enabled: bool,
+        *,
+        paid_usage_approved: bool = False,
+    ) -> dict[str, Any]:
+        """Serialize enable/disable and require a successful policy dry-run to enable."""
         with self._lock:
-            return self._set_provider_enabled_locked(provider_id, enabled)
+            return self._set_provider_enabled_locked(
+                provider_id, enabled, paid_usage_approved=paid_usage_approved
+            )
 
     def _set_provider_enabled_locked(
-        self, provider_id: str, enabled: bool
+        self,
+        provider_id: str,
+        enabled: bool,
+        *,
+        paid_usage_approved: bool = False,
     ) -> dict[str, Any]:
         """Enable/disable catalog eligibility only; never purchases or proves connectivity."""
         if not isinstance(enabled, bool):
@@ -562,6 +574,23 @@ class ConnectionManager:
             updated[index]["enabled"] = enabled
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
+            if enabled:
+                simulation = simulate_provider_policy(
+                    new_catalog,
+                    [{"provider_id": provider_id, "enabled": True}],
+                    paid_usage_approved=paid_usage_approved,
+                )
+                if simulation.get("status") != "WOULD_APPLY":
+                    return {
+                        "status": (
+                            "POLICY_SIMULATION_BLOCKED"
+                            if simulation.get("status") == "BLOCKED"
+                            else "POLICY_SIMULATION_INVALID"
+                        ),
+                        "provider": provider_id,
+                        "saved": False,
+                        "policy_simulation": simulation,
+                    }
             validation = self.validate_catalog_schema(new_catalog)
             if not validation.get("valid"):
                 return {
