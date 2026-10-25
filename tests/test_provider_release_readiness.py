@@ -38,7 +38,8 @@ class ProviderReleaseReadinessTests(unittest.TestCase):
             result = self.gate.evaluate(evidence)
             self.assertEqual(result["status"], "RELEASE_BLOCKED")
             self.assertFalse(result["release_ready"])
-            self.assertIn("all_features_verified", result["missing_or_failed"])
+            expected_gate = "zero_partial_features" if key == "partial_features" else "zero_open_features"
+            self.assertIn(expected_gate, result["missing_or_failed"])
 
     def test_missing_live_modality_or_backup_evidence_blocks_release(self):
         for key in ("all_supported_modalities_e2e_passed", "live_credentials_verified",
