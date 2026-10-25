@@ -37,6 +37,7 @@ class ProviderService:
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
+        local_model_adapter: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -62,6 +63,7 @@ class ProviderService:
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
+            (local_model_adapter, "generate_text", "local_model_adapter"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -88,6 +90,7 @@ class ProviderService:
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
+        self.local_model_adapter = local_model_adapter
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -550,6 +553,53 @@ class ProviderService:
         return result if isinstance(result, dict) else {
             "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
+
+    def generate_local_text(
+        self,
+        *,
+        prompt: str,
+        system: str | None = None,
+        principal_id: str | None = None,
+        project_id: str = "default",
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Generate through an injected loopback-only local adapter with service policy gates."""
+        if self.local_model_adapter is None:
+            return {"status": "LOCAL_MODEL_ADAPTER_UNAVAILABLE", "generated": False}
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 100_000:
+            return {"status": "INVALID_PROMPT", "generated": False}
+        if system is not None and (not isinstance(system, str) or len(system) > 20_000):
+            return {"status": "INVALID_SYSTEM_PROMPT", "generated": False}
+        if not isinstance(project_id, str) or not project_id.strip():
+            return {"status": "INVALID_PROJECT_ID", "generated": False}
+        if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
+            return {"status": "INVALID_REQUEST_ID", "generated": False}
+        authorization = self._authorize_operation(principal_id, "provider.generate")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "generated": False, "authorization": authorization}
+        if self.feature_flag_manager is not None:
+            try:
+                flag = self.feature_flag_manager.evaluate(
+                    "provider_generation", project_id=project_id, request_id=request_id
+                )
+            except Exception as exc:
+                return {"status": "FEATURE_FLAG_CHECK_FAILED", "generated": False, "error_type": type(exc).__name__}
+            if not isinstance(flag, dict) or flag.get("enabled") is not True:
+                return {"status": "FEATURE_DISABLED", "generated": False}
+        if self.sensitive_data_policy is not None:
+            try:
+                scan = self.sensitive_data_policy.inspect({"prompt": prompt, "system": system or ""})
+            except Exception as exc:
+                return {"status": "SENSITIVE_DATA_SCAN_FAILED", "generated": False, "error_type": type(exc).__name__}
+            if not isinstance(scan, dict) or scan.get("allowed") is not True:
+                return {"status": "SENSITIVE_DATA_BLOCKED", "generated": False}
+        try:
+            result = self.local_model_adapter.generate_text(prompt, system=system)
+        except Exception as exc:
+            return {"status": "LOCAL_MODEL_REQUEST_FAILED", "generated": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or not isinstance(result.get("generated"), bool):
+            return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
+        return result
 
     def plan_ab_benchmark(self, *, principal_id: str | None = None, **plan_options: Any) -> dict[str, Any]:
         """Create a safe A/B plan and require billing.approve for any paid estimate."""
