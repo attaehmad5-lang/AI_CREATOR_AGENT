@@ -62,6 +62,31 @@ class LocalModelProviderAdapterTests(unittest.TestCase):
         bad_system = adapter.generate_text("valid", system=[])
         self.assertEqual(bad_system["status"], "INVALID_SYSTEM_PROMPT")
 
+    def test_execute_matches_provider_service_contract_without_losing_unknown_outcome(self):
+        adapter = LocalModelProviderAdapter(
+            model_id="local-model",
+            transport=lambda *args, **kwargs: {"response": "local result", "done": True},
+        )
+        result = adapter.execute(
+            prompt="Write a short line.", provider_id="local-ollama", request_id="req-1",
+        )
+        self.assertTrue(result["started"])
+        self.assertTrue(result["success"])
+        self.assertEqual(result["text"], "local result")
+        self.assertEqual(result["request_id"], "req-1")
+
+        invalid = adapter.execute(prompt="   ")
+        self.assertFalse(invalid["started"])
+        self.assertFalse(invalid["success"])
+
+        broken = LocalModelProviderAdapter(
+            model_id="local-model",
+            transport=lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError()),
+        ).execute(prompt="May have reached local runtime")
+        self.assertTrue(broken["started"])
+        self.assertFalse(broken["success"])
+        self.assertEqual(broken["status"], "LOCAL_MODEL_REQUEST_FAILED")
+
     def test_transport_exceptions_do_not_leak_prompt_or_credentials(self):
         def broken_transport(*args, **kwargs):
             raise TimeoutError("secret prompt must not appear in returned error")
