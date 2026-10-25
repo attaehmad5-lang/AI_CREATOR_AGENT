@@ -1501,3 +1501,116 @@ if __name__ == "__main__":
     print("Tracked connections:", len(manager.state["providers"]))
     print("Summary:", manager.summary())
     print("Credential checks report presence only; they do not prove live API access.")
+
+
+def simulate_provider_policy(
+    catalog: dict[str, Any],
+    changes: list[dict[str, Any]],
+    *,
+    paid_usage_approved: bool = False,
+) -> dict[str, Any]:
+    """Dry-run provider enable/disable changes without mutating state or contacting APIs.
+
+    Enabling a provider is rejected unless its identity, supported capabilities,
+    official documentation, network allowlist, and credential reference (when
+    authentication is required) are declared. Paid providers additionally require
+    an explicit approval flag. This function never writes files or invokes providers.
+    """
+    def blocked(status: str, reason: str) -> dict[str, Any]:
+        return {
+            "status": status,
+            "dry_run": True,
+            "applied": False,
+            "real_provider_call": False,
+            "results": [],
+            "errors": [reason],
+        }
+
+    if not isinstance(catalog, dict):
+        return blocked("INVALID_INPUT", "catalog must be an object")
+    providers = catalog.get("providers")
+    if not isinstance(providers, list) or any(not isinstance(p, dict) for p in providers):
+        return blocked("INVALID_INPUT", "catalog providers must be a list of objects")
+    if not isinstance(changes, list) or any(not isinstance(c, dict) for c in changes):
+        return blocked("INVALID_INPUT", "changes must be a list of objects")
+    if not isinstance(paid_usage_approved, bool):
+        return blocked("INVALID_INPUT", "paid_usage_approved must be boolean")
+
+    index: dict[str, dict[str, Any]] = {}
+    for provider in providers:
+        provider_id = provider.get("id")
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return blocked("INVALID_CATALOG", "every provider must have a non-empty string id")
+        if provider_id in index:
+            return blocked("INVALID_CATALOG", "duplicate provider id in catalog")
+        index[provider_id] = provider
+
+    seen: set[str] = set()
+    results: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for change in changes:
+        provider_id = change.get("provider_id")
+        enabled = change.get("enabled")
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            errors.append("provider_id must be a non-empty string")
+            continue
+        if provider_id in seen:
+            errors.append("duplicate provider change")
+            continue
+        seen.add(provider_id)
+        if not isinstance(enabled, bool):
+            errors.append("enabled must be boolean")
+            continue
+        provider = index.get(provider_id)
+        if provider is None:
+            errors.append("unknown provider id")
+            continue
+
+        reasons: list[str] = []
+        if enabled:
+            if provider.get("deprecated") is True:
+                reasons.append("deprecated providers cannot be enabled")
+            if provider.get("connection_type") in {"API", "API_OR_ACCOUNT", "API_OR_ACCOUNT"}:
+                docs = provider.get("official_api_url")
+                if not isinstance(docs, str) or not docs.startswith("https://"):
+                    reasons.append("official HTTPS API documentation is required")
+                hosts = provider.get("allowed_hosts")
+                if not isinstance(hosts, list) or not hosts or not all(
+                    isinstance(host, str) and host.strip() for host in hosts
+                ):
+                    reasons.append("non-empty allowed_hosts is required")
+                capabilities = provider.get("capabilities")
+                if not isinstance(capabilities, list) or not capabilities or not all(
+                    isinstance(capability, str) and capability.strip()
+                    for capability in capabilities
+                ):
+                    reasons.append("declared capabilities are required")
+                auth_type = provider.get("auth_type", "NONE")
+                if auth_type != "NONE":
+                    token_env = provider.get("token_env")
+                    if not isinstance(token_env, str) or not token_env.strip():
+                        reasons.append("credential environment-variable reference is required")
+            if provider.get("subscription_required") is True and not paid_usage_approved:
+                reasons.append("explicit paid-usage approval is required")
+        results.append({
+            "provider_id": provider_id,
+            "requested_enabled": enabled,
+            "allowed": not reasons,
+            "decision": "ALLOW" if not reasons else "DENY",
+            "reasons": reasons,
+        })
+
+    rejected = sum(1 for item in results if not item["allowed"])
+    rejected += len(errors)
+    status = "INVALID_INPUT" if errors else ("BLOCKED" if rejected else "WOULD_APPLY")
+    return {
+        "status": status,
+        "dry_run": True,
+        "applied": False,
+        "real_provider_call": False,
+        "total_changes": len(changes),
+        "allowed": sum(1 for item in results if item["allowed"]),
+        "rejected": rejected,
+        "results": results,
+        "errors": errors,
+    }
