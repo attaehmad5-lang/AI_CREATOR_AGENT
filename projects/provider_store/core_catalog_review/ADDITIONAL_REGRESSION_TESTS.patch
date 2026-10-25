@@ -54,18 +54,17 @@
 +def test_storage_fingerprint_is_none_for_missing_file() -> None:
 +    assert JsonFileStorage(tmp_path / "missing.json").fingerprint() is None
 +    assert SqliteStorage(tmp_path / "missing.db").fingerprint() is None
+
+
+@@ -722,1 +722,12 @@
++def test_audit_entries_zero_or_negative_limit_returns_empty() -> None:
++    audit = AuditLog(max_memory=10)
++    audit.record("created", provider_id="p1")
++    audit.record("updated", provider_id="p1")
++
++    assert audit.entries(limit=0) == []
++    assert audit.entries(limit=-1) == []
++    assert len(audit.entries(limit=1)) == 1
 +
 +
-+@@ -722,1 +722,12 @@
-++def test_audit_entries_zero_or_negative_limit_returns_empty() -> None:
-++    audit = AuditLog(max_memory=10)
-++    audit.record("created", provider_id="p1")
-++    audit.record("updated", provider_id="p1")
-++
-++    assert audit.entries(limit=0) == []
-++    assert audit.entries(limit=-1) == []
-++    assert len(audit.entries(limit=1)) == 1
-++
-++
-+ def test_audit_file_and_redaction(tmp_path: Path) -> None
-+
+ def test_audit_file_and_redaction(tmp_path: Path) -> None
