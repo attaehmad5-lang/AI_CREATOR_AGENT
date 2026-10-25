@@ -31,6 +31,7 @@ class ProviderJobManager:
         lease_seconds: int = 120,
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
+        priority_aging_seconds: int = 60,
         clock: Any = None,
     ) -> None:
         for value, name, minimum, maximum in (
@@ -39,6 +40,7 @@ class ProviderJobManager:
             (lease_seconds, "lease_seconds", 1, 86400),
             (max_attempts, "max_attempts", 1, 20),
             (backpressure_retry_seconds, "backpressure_retry_seconds", 1, 3600),
+            (priority_aging_seconds, "priority_aging_seconds", 1, 86400),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise ValueError(f"{name} is outside safe limits")
@@ -50,6 +52,7 @@ class ProviderJobManager:
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.backpressure_retry_seconds = backpressure_retry_seconds
+        self.priority_aging_seconds = priority_aging_seconds
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "jobs": {}}
@@ -243,7 +246,19 @@ class ProviderJobManager:
                 if changed:
                     self._save()
                 return {"status": "TENANT_ID_REQUIRED", "job": None}
-            queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
+            def queue_order(job: dict[str, Any]) -> tuple[int, str, str]:
+                # Gradually raise old jobs' effective priority to prevent starvation.
+                try:
+                    created = datetime.fromisoformat(job["created_at"]).astimezone(timezone.utc)
+                    age_seconds = max(0, int((now - created).total_seconds()))
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    age_seconds = 0
+                effective_priority = min(
+                    100, job["priority"] + age_seconds // self.priority_aging_seconds
+                )
+                return (-effective_priority, str(job.get("created_at", "")), str(job.get("job_id", "")))
+
+            queued.sort(key=queue_order)
             if not queued:
                 if changed:
                     self._save()
