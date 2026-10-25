@@ -126,6 +126,18 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("duplicate" in error for error in result["errors"]))
         self.assertTrue(any("credential value" in error for error in result["errors"]))
+
+        case_collision = ConnectionManager.validate_catalog_schema({
+            "providers": [
+                {"id": "OpenAI", "category": "image"},
+                {"id": "openai", "category": "image"},
+            ]
+        })
+        self.assertFalse(case_collision["valid"])
+        self.assertTrue(
+            any("case-insensitive" in error for error in case_collision["errors"]),
+            case_collision["errors"],
+        )
         self.assertTrue(any("enabled must be boolean" in error for error in result["errors"]))
         for hosts in ([], ["https://api.example.com"], ["api..example.com"], ["api.example.com", "API.EXAMPLE.COM"], ["-bad.example"]):
             with self.subTest(hosts=hosts):
