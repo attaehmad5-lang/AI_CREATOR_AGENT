@@ -610,6 +610,22 @@ class ConnectionManager:
                     paid_usage_approved=paid_usage_approved,
                 )
                 if simulation.get("status") != "WOULD_APPLY":
+                    try:
+                        self._append_audit_event({
+                            "event": "provider.activation_decision",
+                            "provider_id": provider_id,
+                            "requested_enabled": True,
+                            "decision": "DENY",
+                            "policy_simulation_status": simulation.get("status"),
+                            "paid_usage_approved": paid_usage_approved,
+                        })
+                    except OSError as exc:
+                        return {
+                            "status": "AUDIT_WRITE_FAILED",
+                            "provider": provider_id,
+                            "saved": False,
+                            "error_type": type(exc).__name__,
+                        }
                     return {
                         "status": (
                             "POLICY_SIMULATION_BLOCKED"
