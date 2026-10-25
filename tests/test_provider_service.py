@@ -10,6 +10,7 @@ from projects.provider_store.provider_incident_manager import ProviderIncidentMa
 from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
+from projects.provider_store.provider_slo_manager import ProviderSLOManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
@@ -1122,12 +1123,17 @@ class ProviderServiceTests(unittest.TestCase):
                 return {"allowed": True, "provider": "image", "billing_mode": "PAID_APPROVED"}
 
         metrics = ProviderMetricsManager()
+        slo = ProviderSLOManager(metrics, self.root / "service-slo-policies.json")
+        self.assertTrue(slo.set_policy("image", "image", {
+            "minimum_samples": 1, "min_success_rate": 0.9,
+        })["saved"])
         service = ProviderService(
             self.connections,
             routing_manager=RoutingStub(),
             cost_policy=self.cost,
             quota_manager=self.quota,
             metrics_manager=metrics,
+            slo_manager=slo,
         )
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="metrics-job",
@@ -1139,6 +1145,8 @@ class ProviderServiceTests(unittest.TestCase):
             },
         )
         self.assertEqual(result["metrics"]["status"], "METRIC_RECORDED")
+        self.assertEqual(result["slo"]["status"], "SLO_BREACH")
+        self.assertIn("SUCCESS_RATE_BELOW_TARGET", result["slo"]["breaches"])
         snapshot = metrics.snapshot(provider_id="image")["metrics"]
         self.assertEqual(snapshot["failure_count"], 1)
         self.assertEqual(snapshot["avg_latency_ms"], 25.0)
