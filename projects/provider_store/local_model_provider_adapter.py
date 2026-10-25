@@ -89,6 +89,17 @@ class LocalModelProviderAdapter:
             )
             if not isinstance(response, dict):
                 raise ValueError("transport returned invalid response")
+            # Apply the same response-size bound to injected transports as to the
+            # real HTTP transport; otherwise a custom transport can bypass the
+            # resource limit and hand downstream code an unbounded payload.
+            try:
+                encoded_response = json.dumps(
+                    response, ensure_ascii=False, separators=(",", ":")
+                ).encode("utf-8")
+            except (TypeError, ValueError, UnicodeEncodeError) as exc:
+                raise ValueError("transport returned a non-JSON response") from exc
+            if len(encoded_response) > _MAX_RESPONSE_BYTES:
+                raise ValueError("local model response exceeds size limit")
             return response
         request = urllib.request.Request(
             self.endpoint,
