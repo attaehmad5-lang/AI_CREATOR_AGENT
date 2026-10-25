@@ -30,6 +30,7 @@ class ProviderService:
         webhook_verifier: Any | None = None,
         job_manager: Any | None = None,
         metrics_manager: Any | None = None,
+        slo_manager: Any | None = None,
         quality_policy: Any | None = None,
         benchmark_manager: Any | None = None,
         incident_manager: Any | None = None,
@@ -53,6 +54,7 @@ class ProviderService:
             (webhook_verifier, "verify", "webhook_verifier"),
             (job_manager, "submit", "job_manager"),
             (metrics_manager, "record", "metrics_manager"),
+            (slo_manager, "evaluate", "slo_manager"),
             (quality_policy, "evaluate", "quality_policy"),
             (benchmark_manager, "record", "benchmark_manager"),
             (incident_manager, "record", "incident_manager"),
@@ -77,6 +79,7 @@ class ProviderService:
         self.webhook_verifier = webhook_verifier
         self.job_manager = job_manager
         self.metrics_manager = metrics_manager
+        self.slo_manager = slo_manager
         self.quality_policy = quality_policy
         self.benchmark_manager = benchmark_manager
         self.incident_manager = incident_manager
@@ -918,6 +921,18 @@ class ProviderService:
                     "saved": False,
                     "error_type": type(exc).__name__,
                 }
+        slo_result = None
+        if self.slo_manager is not None:
+            try:
+                slo_result = self.slo_manager.evaluate(
+                    provider_id=provider_id, category=category
+                )
+            except Exception as exc:
+                slo_result = {
+                    "status": "SLO_EVALUATION_FAILED",
+                    "compliant": False,
+                    "error_type": type(exc).__name__,
+                }
         budget_alerts = None
         if self.budget_alert_manager is not None and self.cost_policy is not None:
             try:
@@ -1015,6 +1030,7 @@ class ProviderService:
             "quality": quality_result,
             "finalization": finalization,
             "metrics": metrics_result,
+            "slo": slo_result,
             "benchmark": benchmark_result,
             "incident": incident_result,
             "provider_error": provider_error,
