@@ -56,4 +56,28 @@
 +    assert SqliteStorage(tmp_path / "missing.db").fingerprint() is None
 +
 +
- # --------------------------------------------------------- G. lifecycle
++# --------------------------------------------------------- G. lifecycle
++def test_deprecation_warning_and_redirect(cat: ProviderCatalog) -> None:
++    rec = cat.register(make("a", models=[{"name": "v1"}, {"name": "v2"}]))
++    cat.deprecate(rec.provider_id, reason="use v2")
++    assert cat.get(rec.provider_id).deprecated is True
++    assert cat.get(rec.provider_id).deprecation_reason == "use v2"
++    with pytest.raises(ProviderDeprecatedError):
++        cat.resolve_model(rec.provider_id, "v1")
++    cat.set_redirect(rec.provider_id, "v1", "v2")
++    assert cat.resolve_model(rec.provider_id, "v1").name == "v2"
++
++
++@@ -722,1 +722,12 @@
+++def test_audit_entries_zero_or_negative_limit_returns_empty() -> None:
+++    audit = AuditLog(max_memory=10)
+++    audit.record("created", provider_id="p1")
+++    audit.record("updated", provider_id="p1")
+++
+++    assert audit.entries(limit=0) == []
+++    assert audit.entries(limit=-1) == []
+++    assert len(audit.entries(limit=1)) == 1
+++
+++
++ def test_audit_file_and_redaction(tmp_path: Path) -> None
++
