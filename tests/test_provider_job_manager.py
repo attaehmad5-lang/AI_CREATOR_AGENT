@@ -52,6 +52,52 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(claimed["job"]["job_id"], "high")
         self.assertEqual(self.manager.claim_next(worker_id="worker-2")["status"], "CONCURRENCY_LIMIT")
 
+    def test_concurrent_queue_load_completes_every_job_once(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        manager = ProviderJobManager(
+            self.path, max_queue_size=100, max_concurrent=4,
+            clock=lambda: self.now[0],
+        )
+        total = 60
+        for index in range(total):
+            result = manager.submit(
+                job_id=f"load-{index}", project_id="load-project",
+                provider_id="image", payload_ref=f"payload:load-{index}",
+                priority=index % 5,
+            )
+            self.assertEqual(result["status"], "JOB_QUEUED")
+
+        completed = []
+        completion_lock = __import__("threading").Lock()
+
+        def worker(worker_index):
+            while True:
+                claimed = manager.claim_next(worker_id=f"load-worker-{worker_index}")
+                if claimed["status"] == "QUEUE_EMPTY":
+                    return
+                if claimed["status"] == "CONCURRENCY_LIMIT":
+                    continue
+                self.assertEqual(claimed["status"], "JOB_CLAIMED")
+                job = claimed["job"]
+                result = manager.complete(
+                    job_id=job["job_id"],
+                    worker_id=f"load-worker-{worker_index}",
+                    success=True,
+                    result_ref=f"asset:{job['job_id']}",
+                )
+                self.assertEqual(result["status"], "JOB_COMPLETED")
+                with completion_lock:
+                    completed.append(job["job_id"])
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(worker, range(8)))
+
+        self.assertEqual(len(completed), total)
+        self.assertEqual(len(set(completed)), total)
+        statuses = [manager.poll(job_id=f"load-{index}")["job"]["status"] for index in range(total)]
+        self.assertEqual(set(statuses), {"SUCCEEDED"})
+
     def test_priority_aging_prevents_old_low_priority_job_starvation(self):
         manager = ProviderJobManager(
             self.path, max_queue_size=10, max_concurrent=2,
