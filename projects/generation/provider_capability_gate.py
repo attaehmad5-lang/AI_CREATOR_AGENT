@@ -29,7 +29,9 @@ def main():
     try:
         connection_data = load_json(CONNECTION)
         registry_data = load_json(REGISTRY)
-        connections = connection_data.get("connections", [])
+        if "connections" not in connection_data:
+            raise ValueError("connections field is required")
+        connections = connection_data["connections"]
         if not isinstance(connections, list) or not all(
             isinstance(item, dict) for item in connections
         ):
@@ -38,7 +40,9 @@ def main():
         capabilities = {}
         for media_type in required:
             key = media_type.lower()
-            provider = registry_data.get(key, {})
+            if key not in registry_data:
+                raise ValueError("provider metadata is missing")
+            provider = registry_data[key]
             if not isinstance(provider, dict):
                 raise ValueError("provider metadata must be an object")
             declared = provider.get("capabilities", [])
