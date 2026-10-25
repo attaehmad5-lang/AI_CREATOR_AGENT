@@ -1570,7 +1570,7 @@ def simulate_provider_policy(
         if enabled:
             if provider.get("deprecated") is True:
                 reasons.append("deprecated providers cannot be enabled")
-            if provider.get("connection_type") in {"API", "API_OR_ACCOUNT", "API_OR_ACCOUNT"}:
+            if provider.get("connection_type") in {"API", "API_OR_ACCOUNT"}:
                 docs = provider.get("official_api_url")
                 if not isinstance(docs, str) or not docs.startswith("https://"):
                     reasons.append("official HTTPS API documentation is required")
