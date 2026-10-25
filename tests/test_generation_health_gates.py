@@ -149,6 +149,21 @@ class ProviderCapabilityGateTests(unittest.TestCase):
         self.assertEqual(result["status"], "BLOCKED")
         self.assertFalse(result["input_valid"])
 
+
+    def test_unknown_connection_media_type_fails_closed(self):
+        self.module.CONNECTION.write_text(json.dumps({"connections": [
+            {"media_type": "IMAGE", "connected": True},
+            {"media_type": "ALIEN", "connected": True},
+        ]}), encoding="utf-8")
+        self.module.REGISTRY.write_text(json.dumps({
+            "image": {"capabilities": ["text_to_image"]},
+            "video": {"capabilities": ["text_to_video", "image_to_video"]},
+            "voice": {"capabilities": ["text_to_speech"]},
+        }), encoding="utf-8")
+        result = self.module.main()
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertFalse(result["input_valid"])
+
     def test_missing_capability_degrades_when_another_modality_passes(self):
         capabilities = {
             "image": {"capabilities": ["text_to_image"]},
