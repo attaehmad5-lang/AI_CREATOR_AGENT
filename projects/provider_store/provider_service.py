@@ -33,6 +33,7 @@ class ProviderService:
         slo_manager: Any | None = None,
         quality_policy: Any | None = None,
         benchmark_manager: Any | None = None,
+        ab_benchmark_manager: Any | None = None,
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
@@ -57,6 +58,7 @@ class ProviderService:
             (slo_manager, "evaluate", "slo_manager"),
             (quality_policy, "evaluate", "quality_policy"),
             (benchmark_manager, "record", "benchmark_manager"),
+            (ab_benchmark_manager, "plan", "ab_benchmark_manager"),
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
@@ -82,6 +84,7 @@ class ProviderService:
         self.slo_manager = slo_manager
         self.quality_policy = quality_policy
         self.benchmark_manager = benchmark_manager
+        self.ab_benchmark_manager = ab_benchmark_manager
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
@@ -547,6 +550,48 @@ class ProviderService:
         return result if isinstance(result, dict) else {
             "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
+
+    def plan_ab_benchmark(self, *, principal_id: str | None = None, **plan_options: Any) -> dict[str, Any]:
+        """Create a safe A/B plan and require billing.approve for any paid estimate."""
+        if self.ab_benchmark_manager is None:
+            return {"status": "AB_BENCHMARK_MANAGER_UNAVAILABLE", "executable": False}
+        if not isinstance(plan_options, dict):
+            return {"status": "INVALID_BENCHMARK_OPTIONS", "executable": False}
+        allow_paid = plan_options.get("allow_paid", False)
+        if allow_paid is True:
+            if self.authorization_manager is None:
+                return {"status": "AUTHORIZATION_REQUIRED", "executable": False}
+            authorization = self._authorize_operation(principal_id, "billing.approve")
+            if authorization is not None:
+                return {
+                    "status": "PAID_BENCHMARK_APPROVAL_DENIED",
+                    "executable": False,
+                    "authorization": authorization,
+                }
+            benchmark_id = plan_options.get("benchmark_id")
+            if not isinstance(benchmark_id, str) or not benchmark_id.strip():
+                return {"status": "INVALID_BENCHMARK_ID", "executable": False}
+            # Never trust a caller-supplied approval object; mint the plan token
+            # only after the authorization manager grants billing.approve.
+            plan_options["paid_approval"] = {
+                "approved": True,
+                "benchmark_id": benchmark_id,
+                "approved_by": principal_id,
+            }
+        else:
+            # Prevent a forged approval dict from enabling paid planning.
+            plan_options["paid_approval"] = None
+        try:
+            result = self.ab_benchmark_manager.plan(**plan_options)
+        except Exception as exc:
+            return {
+                "status": "AB_BENCHMARK_PLANNING_FAILED",
+                "executable": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_AB_BENCHMARK_RESPONSE", "executable": False}
+        return result
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
