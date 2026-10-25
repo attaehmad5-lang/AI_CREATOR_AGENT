@@ -237,6 +237,33 @@ class TenantScopedProviderJobTests(unittest.TestCase):
         self.assertNotIn("job", result)
         self.assertNotIn("payload_ref", result)
 
+    def test_per_tenant_queue_and_concurrency_limits_prevent_noisy_neighbor(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=4,
+            max_queued_per_tenant=2, max_concurrent_per_tenant=1,
+            clock=lambda: self.now[0],
+        )
+        def submit(job_id, tenant_id):
+            return manager.submit(
+                job_id=job_id, project_id="film", provider_id="image",
+                payload_ref=f"payload:{job_id}", tenant_id=tenant_id,
+            )
+        self.assertEqual(submit("a1", "tenant-a")["status"], "JOB_QUEUED")
+        self.assertEqual(submit("a2", "tenant-a")["status"], "JOB_QUEUED")
+        self.assertEqual(submit("a3", "tenant-a")["status"], "TENANT_QUEUE_FULL")
+        self.assertEqual(submit("b1", "tenant-b")["status"], "JOB_QUEUED")
+        self.assertEqual(
+            manager.claim_next(worker_id="wa1", tenant_id="tenant-a")["status"],
+            "JOB_CLAIMED",
+        )
+        self.assertEqual(
+            manager.claim_next(worker_id="wa2", tenant_id="tenant-a")["status"],
+            "TENANT_CONCURRENCY_LIMIT",
+        )
+        other_tenant = manager.claim_next(worker_id="wb1", tenant_id="tenant-b")
+        self.assertEqual(other_tenant["status"], "JOB_CLAIMED")
+        self.assertEqual(other_tenant["job"]["tenant_id"], "tenant-b")
+
     def test_invalid_tenant_identifier_is_rejected(self):
         result = self.manager.submit(
             job_id="bad-tenant", project_id="film", provider_id="image",
