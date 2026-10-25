@@ -8,7 +8,8 @@
 - `python -m compileall -q provider_store tests`: **PASS**
 - `python -W error::ResourceWarning -m pytest -q`: **64 passed, 0 failed**
 - Statement coverage: **94%** (979 statements; 58 uncovered)
-- Local package installation with `python -m pip install --no-build-isolation --no-deps .`: **PASS**
+- Local package installation from extracted archive with `python -m pip install --no-build-isolation --no-deps .`: **PASS**
+- Wheel build with `python -m pip wheel --no-build-isolation --no-deps .`: **PASS**
 - SHA-256 manifest verification and ZIP integrity check: **PASS**.
 
 ## Defects fixed
@@ -26,6 +27,6 @@ Still required in network-enabled CI or Termux:
 - `black .` and `black --check .`
 - `flake8 provider_store tests`
 - `mypy provider_store`
-- `./run_checks.sh` clean-room install
+- `./run_checks.sh` clean-room build-isolated install
 
 This is not a claim of 100% release verification until all release gates pass. No PR has been merged.
