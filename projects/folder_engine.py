@@ -115,7 +115,16 @@ class FolderEngine:
             raise UnsafePathError("parent traversal is not allowed")
         for part in candidate.parts:
             self.validate_name(part)
-        target = (self.root / candidate).resolve()
+        lexical_target = self.root / candidate
+        # Reject symlink components even when their resolved target remains inside
+        # the root. Otherwise operations such as delete_folder("alias") could act
+        # on the aliased target instead of the named symlink path.
+        current = self.root
+        for part in candidate.parts:
+            current = current / part
+            if current.is_symlink():
+                raise UnsafePathError("symlink path components are not allowed")
+        target = lexical_target.resolve()
         if target != self.root and self.root not in target.parents:
             raise UnsafePathError("path escapes workspace root")
         return target
