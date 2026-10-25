@@ -55,3 +55,12 @@ A feature is COMPLETE only when its numbered requirement (1–200) maps to repos
 3. Prioritize production-blocking security items; do not present stubs/adapters as full integrations.
 4. Add only verified changes to the feature branch and rerun CI after each batch.
 5. Keep PR open until evidence and security gates are reviewed; never claim 100% from PDF labels alone.
+
+
+## Follow-up code hardening — 2026-10-25
+- Added two focused regression tests in `tests/test_folder_engine.py`:
+  - `test_resolve_rejects_existing_symlink_escape`: confirms existing symlink paths resolving outside the workspace are rejected by both resolve and ensure_folder.
+  - `test_describe_does_not_follow_symlink_escape_as_workspace_child`: confirms describe rejects an external symlink target.
+- Commit: `46dfcfef5e11af022693fc9502eef23ef2c7d1f3`.
+- These tests are committed to the feature branch; **their CI result is pending/not yet returned**, so they are not yet marked PASS.
+- CI run evidence previously verified for the earlier PR commit remains scoped to that earlier commit; it must not be reused as proof for this new test commit.
