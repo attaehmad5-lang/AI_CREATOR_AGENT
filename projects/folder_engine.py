@@ -371,12 +371,14 @@ class FolderEngine:
             raise FolderTypeError("delete requires an existing child directory")
         if target.is_symlink():
             raise UnsafePathError("deleting directory symlinks is not supported")
+        # Validate metadata before deleting anything. A corrupt metadata file
+        # must not turn a failed delete into a partially-applied filesystem change.
+        data = self._read_metadata()
         if recursive:
             shutil.rmtree(target)
         else:
             target.rmdir()
         key = target.relative_to(self.root).as_posix()
-        data = self._read_metadata()
         removed = [item for item in data["folders"] if item == key or item.startswith(key + "/")]
         for item in removed:
             data["folders"].pop(item, None)
