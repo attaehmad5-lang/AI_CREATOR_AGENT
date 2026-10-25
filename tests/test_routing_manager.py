@@ -388,6 +388,45 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "fallback")
 
+    def test_tenant_policy_applies_stricter_cost_and_rejects_region_conflicts(self):
+        project_policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        tenant_policies = ProviderTenantPolicyManager(self.root / "tenant-policies.json")
+        project_policies.set_policy("film", {
+            "allowed_providers": ["primary", "fallback"],
+            "max_estimated_cost": 5.0,
+            "required_region": "EU-WEST-1",
+        })
+        tenant_policies.set_policy("tenant-a", {
+            "allowed_providers": ["primary", "fallback"],
+            "max_estimated_cost": 1.0,
+            "required_region": "SAUDI-ARABIA",
+        })
+        router = ProviderRoutingManager(
+            self.connections, project_policy_manager=project_policies,
+            tenant_policy_manager=tenant_policies,
+        )
+        conflict = router.route(
+            category="image", project_id="film", tenant_id="tenant-a",
+            estimated_cost=0.0,
+        )
+        self.assertFalse(conflict["allowed"])
+        self.assertEqual(conflict["status"], "TENANT_PROJECT_REGION_POLICY_CONFLICT")
+
+        project_policies.set_policy("film", {
+            "allowed_providers": ["primary", "fallback"],
+            "max_estimated_cost": 5.0,
+        })
+        tenant_policies.set_policy("tenant-a", {
+            "allowed_providers": ["primary", "fallback"],
+            "max_estimated_cost": 1.0,
+        })
+        too_expensive = router.route(
+            category="image", project_id="film", tenant_id="tenant-a",
+            estimated_cost=2.0,
+        )
+        self.assertFalse(too_expensive["allowed"])
+        self.assertEqual(too_expensive["status"], "PROJECT_COST_LIMIT_EXCEEDED")
+
     def test_tenant_policy_alone_restricts_providers(self):
         policies = ProviderTenantPolicyManager(self.root / "tenant-policies.json")
         policies.set_policy("tenant-a", {"allowed_providers": ["fallback"]})
