@@ -60,6 +60,43 @@ class ProviderCapabilityGateTests(unittest.TestCase):
         self.assertEqual(result["passed"], 0)
         self.assertEqual(result["blocked"], 3)
 
+
+    def test_missing_input_fails_closed_without_exception(self):
+        self.module.REGISTRY.write_text(json.dumps({
+            "image": {"capabilities": ["text_to_image"]},
+            "video": {"capabilities": ["text_to_video", "image_to_video"]},
+            "voice": {"capabilities": ["text_to_speech"]},
+        }), encoding="utf-8")
+        result = self.module.main()
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertFalse(result["input_valid"])
+        self.assertEqual(result["passed"], 0)
+        self.assertTrue(self.module.OUTPUT.is_file())
+
+    def test_malformed_json_fails_closed_without_exception(self):
+        self.module.CONNECTION.write_text("{bad json", encoding="utf-8")
+        self.module.REGISTRY.write_text(json.dumps({
+            "image": {"capabilities": ["text_to_image"]},
+            "video": {"capabilities": ["text_to_video", "image_to_video"]},
+            "voice": {"capabilities": ["text_to_speech"]},
+        }), encoding="utf-8")
+        result = self.module.main()
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertFalse(result["input_valid"])
+        self.assertEqual(result["blocked"], 3)
+
+    def test_wrong_json_shape_fails_closed(self):
+        self.module.CONNECTION.write_text(json.dumps({"connections": "not-a-list"}), encoding="utf-8")
+        self.module.REGISTRY.write_text(json.dumps({
+            "image": {"capabilities": ["text_to_image"]},
+            "video": {"capabilities": ["text_to_video", "image_to_video"]},
+            "voice": {"capabilities": ["text_to_speech"]},
+        }), encoding="utf-8")
+        result = self.module.main()
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertFalse(result["input_valid"])
+        self.assertEqual(result["passed"], 0)
+
     def test_missing_capability_degrades_when_another_modality_passes(self):
         capabilities = {
             "image": {"capabilities": ["text_to_image"]},
