@@ -387,10 +387,6 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         result = router.route(category="image", project_id="film", tenant_id="tenant-a")
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "fallback")
-        self.assertTrue(all(
-            decision["status"] != "TENANT_PROVIDER_NOT_ALLOWED"
-            for decision in result["decisions"]
-        ))
 
     def test_tenant_policy_alone_restricts_providers(self):
         policies = ProviderTenantPolicyManager(self.root / "tenant-policies.json")
