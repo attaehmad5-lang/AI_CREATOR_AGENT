@@ -1335,5 +1335,43 @@ class ProviderPolicySimulationTests(unittest.TestCase):
         self.assertFalse(result["applied"])
 
 
+    def _build_manager(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        catalog_path = root / "catalog.json"
+        state_path = root / "state.json"
+        catalog_path.write_text(
+            json.dumps({"providers": [dict(p) for p in self.catalog["providers"][:2]]}),
+            encoding="utf-8",
+        )
+        state_path.write_text(
+            json.dumps({"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}),
+            encoding="utf-8",
+        )
+        return ConnectionManager(catalog_path, state_path)
+
+    def test_provider_activation_runs_policy_simulation_before_persisting(self):
+        manager = self._build_manager()
+        result = manager.set_provider_enabled("free_image", True)
+        self.assertEqual(result["status"], "ENABLED")
+        self.assertTrue(manager.is_provider_enabled("free_image"))
+        self.assertFalse(result["policy_simulation"]["applied"])
+        self.assertTrue(result["policy_simulation"]["dry_run"])
+
+    def test_paid_provider_activation_requires_explicit_approval(self):
+        manager = self._build_manager()
+        denied = manager.set_provider_enabled("paid_image", True)
+        self.assertEqual(denied["status"], "POLICY_SIMULATION_BLOCKED")
+        self.assertFalse(denied["saved"])
+        self.assertFalse(manager.is_provider_enabled("paid_image"))
+
+        approved = manager.set_provider_enabled(
+            "paid_image", True, paid_usage_approved=True
+        )
+        self.assertEqual(approved["status"], "ENABLED")
+        self.assertTrue(manager.is_provider_enabled("paid_image"))
+
+
 if __name__ == "__main__":
     unittest.main()
