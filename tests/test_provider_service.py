@@ -1316,6 +1316,34 @@ class ProviderAdminControlTests(unittest.TestCase):
             [("enable", "image", True, True)],
         )
 
+    def test_paid_usage_requires_billing_approval_permission(self):
+        class EnableOnlyAuthorization:
+            def authorize(self, principal_id, operation):
+                allowed = operation == "provider.enable"
+                return {
+                    "allowed": allowed,
+                    "status": "AUTHORIZED" if allowed else "ACCESS_DENIED",
+                    "principal_id": principal_id,
+                    "operation": operation,
+                }
+
+        service = ProviderService(
+            self.connection,
+            authorization_manager=EnableOnlyAuthorization(),
+        )
+        result = service.set_provider_enabled(
+            "image", True, principal_id="limited-admin", paid_usage_approved=True
+        )
+        self.assertEqual(result["status"], "PAID_USAGE_APPROVAL_DENIED")
+        self.assertEqual(self.connection.calls, [])
+
+    def test_paid_usage_approval_flag_must_be_boolean(self):
+        result = self.service.set_provider_enabled(
+            "image", True, principal_id="admin-1", paid_usage_approved="yes"
+        )
+        self.assertEqual(result["status"], "INVALID_PAID_USAGE_APPROVAL")
+        self.assertEqual(self.connection.calls, [])
+
     def test_admin_can_configure_provider(self):
         result = self.service.configure_provider(
             "image", principal_id="admin-1", model="safe-model"
