@@ -240,15 +240,34 @@ class ConnectionManager:
         if not isinstance(catalog, dict):
             errors.append("catalog must be an object")
         else:
+            store_name = catalog.get("store")
+            if "store" in catalog and (
+                not isinstance(store_name, str)
+                or not store_name.strip()
+                or len(store_name) > 100
+                or any(ord(char) < 32 or ord(char) == 127 for char in store_name)
+            ):
+                errors.append("catalog.store must be a safe non-empty string of at most 100 characters")
             if "version" in catalog and (
                 not isinstance(catalog.get("version"), (str, int, float))
                 or isinstance(catalog.get("version"), bool)
                 or not re.fullmatch(r"\d+(?:\.\d+){0,2}", str(catalog.get("version")))
             ):
                 errors.append("catalog.version must be a numeric version such as '2.0' or '3.0'")
+            for root_field in ("status", "subscription_policy"):
+                root_value = catalog.get(root_field)
+                if root_field in catalog and (
+                    not isinstance(root_value, str)
+                    or not re.fullmatch(r"[A-Z][A-Z0-9_-]{0,39}", root_value)
+                ):
+                    errors.append(
+                        f"catalog.{root_field} must be a non-empty uppercase identifier"
+                    )
             providers = catalog.get("providers")
             if not isinstance(providers, list):
                 errors.append("providers must be a list")
+            elif len(providers) > 1000:
+                errors.append("providers must contain at most 1000 records")
             else:
                 # Provider IDs are compared case-insensitively at the catalog
                 # boundary. This prevents ambiguous records such as "OpenAI"
