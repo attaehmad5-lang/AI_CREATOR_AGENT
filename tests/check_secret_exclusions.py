@@ -49,7 +49,7 @@ def main() -> int:
 
     tracked = [
         item.decode("utf-8", errors="surrogateescape")
-        for item in result.stdout.split(b"\\0")
+        for item in result.stdout.split(b"\0")
         if item
     ]
     forbidden = []
@@ -78,7 +78,7 @@ def main() -> int:
             if not file_path.is_file() or file_path.stat().st_size > MAX_SCAN_BYTES:
                 continue
             raw = file_path.read_bytes()
-            if b"\\0" in raw:
+            if b"\0" in raw:
                 continue
             source = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError):
