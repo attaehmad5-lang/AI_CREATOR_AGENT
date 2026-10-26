@@ -1189,6 +1189,16 @@ class ProviderServiceTests(unittest.TestCase):
             worker_id="worker-a", principal_id="tenant-creator", tenant_id="tenant-a"
         )
         self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        denied_renewal = service.renew_job_lease(
+            job_id="tenant-job", worker_id="worker-a", principal_id="tenant-creator",
+            tenant_id="tenant-b",
+        )
+        self.assertEqual(denied_renewal["status"], "TENANT_AUTHORIZATION_DENIED")
+        renewed = service.renew_job_lease(
+            job_id="tenant-job", worker_id="worker-a", principal_id="tenant-creator",
+            tenant_id="tenant-a", lease_seconds=30,
+        )
+        self.assertEqual(renewed["status"], "LEASE_RENEWED")
         denied_completion = service.complete_job(
             job_id="tenant-job", worker_id="worker-a", success=True,
             result_ref="asset:tenant-job", principal_id="tenant-creator",
