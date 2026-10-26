@@ -43,6 +43,8 @@ class ProviderMetricsManagerTests(unittest.TestCase):
     def test_empty_metrics_and_invalid_inputs_are_safe(self):
         self.assertEqual(self.manager.snapshot()["status"], "NO_METRICS")
         self.assertEqual(self.record("image-a", True, float("nan"))["status"], "INVALID_METRIC_TIMING")
+        self.assertEqual(self.record("image-a", True, 1e308)["status"], "INVALID_METRIC_TIMING")
+        self.assertEqual(self.record("image-a", True, 1, wait=1e308)["status"], "INVALID_METRIC_TIMING")
         self.assertEqual(self.manager.record(
             provider_id="image-a", category="image", success="yes",
             latency_ms=1,
