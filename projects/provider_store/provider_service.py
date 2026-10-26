@@ -603,6 +603,10 @@ class ProviderService:
         require_fresh_health_check: bool = False,
         health_stale_after_seconds: float = 300.0,
         health_max_latency_ms: float | None = None,
+        data_categories: list[str] | tuple[str, ...] = ("user_content",),
+        retention_days: float = 0,
+        provider_training_use: bool = False,
+        user_training_consent: bool = False,
     ) -> dict[str, Any]:
         """Generate through an injected loopback-only local adapter with service policy gates."""
         if self.local_model_adapter is None:
@@ -634,6 +638,33 @@ class ProviderService:
                 return {"status": "SENSITIVE_DATA_SCAN_FAILED", "generated": False, "error_type": type(exc).__name__}
             if not isinstance(scan, dict) or scan.get("allowed") is not True:
                 return {"status": "SENSITIVE_DATA_BLOCKED", "generated": False}
+        if (
+            not isinstance(data_categories, (list, tuple))
+            or not data_categories
+            or any(not isinstance(item, str) or not item.strip() for item in data_categories)
+            or len(set(data_categories)) != len(data_categories)
+            or not isinstance(provider_training_use, bool)
+            or not isinstance(user_training_consent, bool)
+            or finite_number(retention_days, minimum=0) is None
+        ):
+            return {"status": "INVALID_DATA_HANDLING_POLICY_INPUT", "generated": False}
+        if self.data_handling_policy is not None:
+            try:
+                data_policy = self.data_handling_policy.evaluate(
+                    provider_id=getattr(self.local_model_adapter, "provider_id", "local-model"),
+                    data_categories=list(data_categories),
+                    retention_days=retention_days,
+                    provider_training_use=provider_training_use,
+                    user_training_consent=user_training_consent,
+                )
+            except Exception as exc:
+                return {
+                    "status": "PROVIDER_DATA_POLICY_CHECK_FAILED",
+                    "generated": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(data_policy, dict) or data_policy.get("allowed") is not True:
+                return {"status": "PROVIDER_DATA_POLICY_REJECTED", "generated": False}
         if not isinstance(require_fresh_health_check, bool):
             return {"status": "INVALID_HEALTH_CHECK_POLICY", "generated": False}
         if require_fresh_health_check:
