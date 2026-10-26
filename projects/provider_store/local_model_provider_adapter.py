@@ -68,14 +68,15 @@ class LocalModelProviderAdapter:
         ):
             raise ValueError("endpoint must be a local /api/generate URL without credentials/query/fragment")
         normalized_host = host.rstrip(".").lower()
-        is_loopback = normalized_host == "localhost"
+        # Accept numeric loopback addresses only. Hostnames such as "localhost"
+        # are resolved later by the HTTP stack and could be redirected by a
+        # hostile hosts/DNS configuration, bypassing this constructor-time check.
+        try:
+            is_loopback = ipaddress.ip_address(normalized_host).is_loopback
+        except ValueError:
+            is_loopback = False
         if not is_loopback:
-            try:
-                is_loopback = ipaddress.ip_address(normalized_host).is_loopback
-            except ValueError:
-                is_loopback = False
-        if not is_loopback:
-            raise ValueError("only localhost/loopback endpoints are allowed")
+            raise ValueError("only numeric loopback IP endpoints are allowed")
         if port is not None and not 1 <= port <= 65535:
             raise ValueError("invalid endpoint port")
         return endpoint.rstrip("/")
