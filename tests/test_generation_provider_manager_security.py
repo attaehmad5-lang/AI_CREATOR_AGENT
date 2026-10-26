@@ -24,6 +24,7 @@ class ProviderManagerSecurityTests(unittest.TestCase):
             return modules[module_name]
 
         manager = ProviderManager()
+        manager.providers["Removed Provider"] = object()
         with patch("projects.generation.providers.provider_manager.importlib.import_module", side_effect=importer):
             result = manager.load_registry({
                 "provider_modules": {
@@ -35,6 +36,7 @@ class ProviderManagerSecurityTests(unittest.TestCase):
         self.assertEqual(result, {"loaded": ["Hugging Face", "Pollinations"], "count": 2})
         self.assertIsInstance(manager.get("Hugging Face"), HuggingFaceProvider)
         self.assertIsInstance(manager.get("Pollinations"), PollinationsProvider)
+        self.assertIsNone(manager.get("Removed Provider"))
 
     def test_registry_rejects_path_traversal_absolute_and_untrusted_modules_before_import(self):
         bad_paths = (
