@@ -54,6 +54,28 @@ jobs:
           set -euo pipefail
           curl --fail --location --retry 3 --retry-delay 2 "$ARCHIVE_URL" --output "$RUNNER_TEMP/provider-store-package.zip"
           printf '%s  %s\n' "$EXPECTED_SHA256" "$RUNNER_TEMP/provider-store-package.zip" | sha256sum --check
+          # Reject unsafe paths, duplicate entries, symlinks, and corrupt ZIPs before extraction.
+          python - "$RUNNER_TEMP/provider-store-package.zip" <<'PY'
+          import stat
+          import sys
+          import zipfile
+          from pathlib import PurePosixPath
+
+          with zipfile.ZipFile(sys.argv[1]) as zf:
+              names = [info.filename for info in zf.infolist()]
+              if len(names) != len(set(names)):
+                  raise SystemExit("ZIP contains duplicate paths")
+              for info in zf.infolist():
+                  path = PurePosixPath(info.filename)
+                  mode = info.external_attr >> 16
+                  if path.is_absolute() or ".." in path.parts or not path.parts:
+                      raise SystemExit(f"Unsafe ZIP path: {info.filename!r}")
+                  if stat.S_ISLNK(mode):
+                      raise SystemExit(f"Symlink entry is not allowed: {info.filename!r}")
+              bad_member = zf.testzip()
+              if bad_member is not None:
+                  raise SystemExit(f"Corrupt ZIP member: {bad_member}")
+          PY
           unzip -q "$RUNNER_TEMP/provider-store-package.zip" -d "$RUNNER_TEMP/provider-store-package"
           test -f "$RUNNER_TEMP/provider-store-package/pyproject.toml"
           test -f "$RUNNER_TEMP/provider-store-package/provider_store/core_catalog.py"
