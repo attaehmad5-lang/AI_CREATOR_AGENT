@@ -91,3 +91,67 @@
 +
 +
  def test_audit_file_and_redaction(tmp_path: Path) -> None:
+
+@@ -790,3 +790,45 @@
+     log = AuditLog(tmp_path)  # a directory: opening it for append raises OSError
+     entry = log.record("x", "p1")
+     assert entry.action == "x" and len(log.entries()) == 1
++
++
++def test_lru_clear_invalidate_missing_and_none_values() -> None:
++    cache: LRUCache[Any] = LRUCache(2)
++    cache.put("none", None)
++    assert cache.get("none") is None
++    assert cache.get("missing") is None
++    cache.invalidate("missing")
++    cache.invalidate("none")
++    cache.put("a", 1)
++    cache.clear()
++    assert len(cache) == 0
++    assert cache.stats() == {"size": 0, "maxsize": 2, "hits": 1, "misses": 1}
++
++
++def test_secret_path_detection_nested_lists_and_tuples() -> None:
++    data = {
++        "items": [
++            {"access_token": "should-not-be-returned"},
++            ("bearer abcdefghijk",),
++        ]
++    }
++    paths = find_secret_paths(data)
++    assert "$.items[0].access_token" in paths
++    assert "$.items[1][0]" in paths
++    assert all("should-not-be-returned" not in path for path in paths)
++
++
++def test_redact_preserves_non_string_values_and_nested_secret_keys() -> None:
++    original = {
++        "safe": 7,
++        "nested": [{"refresh_token": "secret-value", "ok": True}],
++    }
++    cleaned = redact(original)
++    assert cleaned == {
++        "safe": 7,
++        "nested": [{"refresh_token": "[REDACTED]", "ok": True}],
++    }
++    assert original["nested"][0]["refresh_token"] == "secret-value"
++
++
++def test_search_limit_zero_and_unknown_latency_filters(cat: ProviderCatalog) -> None:
++    cat.register(
++        make(
++            "unknown-latency",
++            avg_latency_ms=None,
++            pricing={"input_cost": 0.0, "output_cost": 0.0},
++        )
++    )
++    assert cat.search(limit=0) == []
++    assert cat.search(SearchQuery(max_latency_ms=100)) == []
++    assert cat.search(SearchQuery(text="does-not-exist")) == []
++
++
++def test_metadata_cipher_rejects_truncated_and_wrong_magic() -> None:
++    cipher = MetadataCipher(b"z" * 32)
++    for blob in (b"", b"PSC1short", b"BAD!" + b"x" * 64):
++        with pytest.raises(DecryptionError):
++            cipher.decrypt(blob)
