@@ -2088,6 +2088,18 @@ class ProviderAdminControlTests(unittest.TestCase):
         self.assertNotIn("private policy storage contents", repr(result))
         self.assertNotIn("private prompt", repr(result))
 
+    def test_local_model_request_id_matches_safe_routing_contract(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "safe output"}
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        for value in ("", " bad", "bad id", "bad\\ntrace", "x" * 129, "../secret"):
+            with self.subTest(value=value):
+                result = service.generate_local_text(prompt="hello", request_id=value)
+                self.assertEqual(result["status"], "INVALID_REQUEST_ID")
+                self.assertFalse(result["generated"])
+        self.assertTrue(service.generate_local_text(prompt="hello", request_id="request-01")["generated"])
+
     def test_local_model_service_rejects_malformed_adapter_status(self):
         class Adapter:
             def generate_text(self, prompt, *, system=None):
