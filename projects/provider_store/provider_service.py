@@ -602,7 +602,28 @@ class ProviderService:
             return {"status": "LOCAL_MODEL_REQUEST_FAILED", "generated": False, "error_type": type(exc).__name__}
         if not isinstance(result, dict) or not isinstance(result.get("generated"), bool):
             return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
-        return result
+        status = result.get("status")
+        if not isinstance(status, str) or not status.strip():
+            return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
+        if result["generated"] is True:
+            text = result.get("text")
+            if not isinstance(text, str) or not text.strip():
+                return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
+            # Return a strict public schema; never forward arbitrary adapter fields
+            # that could accidentally expose prompts, credentials, or internals.
+            safe_result = {"status": status, "generated": True, "text": text}
+            for key in ("provider_id", "model_id"):
+                value = result.get(key)
+                if isinstance(value, str) and value.strip():
+                    safe_result[key] = value
+            if result.get("done") is True:
+                safe_result["done"] = True
+            return safe_result
+        safe_failure = {"status": status, "generated": False}
+        error_type = result.get("error_type")
+        if isinstance(error_type, str) and error_type.isidentifier():
+            safe_failure["error_type"] = error_type
+        return safe_failure
 
     def plan_ab_benchmark(self, *, principal_id: str | None = None, **plan_options: Any) -> dict[str, Any]:
         """Create a safe A/B plan and require billing.approve for any paid estimate."""
