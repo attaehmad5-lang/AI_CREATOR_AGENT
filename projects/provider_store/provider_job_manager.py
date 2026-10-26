@@ -349,7 +349,8 @@ class ProviderJobManager:
             not isinstance(error_code, str) or not _ERROR_RE.fullmatch(error_code)
         ):
             return {"status": "INVALID_ERROR_CODE", "saved": False}
-        now = self.clock().astimezone(timezone.utc).isoformat()
+        now_dt = self.clock().astimezone(timezone.utc)
+        now = now_dt.isoformat()
         with self._transaction():
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
@@ -373,12 +374,12 @@ class ProviderJobManager:
                     parsed_lease is None
                     or parsed_lease.tzinfo is None
                     or parsed_lease.utcoffset() is None
-                    or parsed_lease.astimezone(timezone.utc) <= now
+                    or parsed_lease.astimezone(timezone.utc) <= now_dt
                 )
             except (TypeError, ValueError, OverflowError):
                 lease_expired = True
             if lease_expired:
-                self._reap_expired_locked(now)
+                self._reap_expired_locked(now_dt)
                 self._save()
                 return {"status": "JOB_LEASE_EXPIRED", "saved": False}
             if job.get("cancel_requested") is True:
