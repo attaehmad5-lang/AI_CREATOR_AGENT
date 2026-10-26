@@ -41,7 +41,7 @@ class ProviderErrorPolicyTests(unittest.TestCase):
         self.assertEqual(result["retry_after_seconds"], 300.0)
 
     def test_invalid_retry_after_is_ignored(self):
-        for value in ("30", float("nan"), float("inf"), -1, True):
+        for value in ("30", float("nan"), float("inf"), -1, True, 10**1000):
             with self.subTest(value=value):
                 result = classify_provider_error(429, retry_after_seconds=value)
                 self.assertNotIn("retry_after_seconds", result)
