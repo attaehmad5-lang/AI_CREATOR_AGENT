@@ -399,6 +399,36 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(retry["retry"])
         self.assertEqual(retry["reason"], "TRANSIENT_HTTP_FAILURE")
 
+    def test_malformed_retry_policy_response_fails_closed_without_truthy_coercion(self):
+        class MalformedPolicy:
+            def decide(self, **failure):
+                return type("Decision", (), {
+                    "retry": "false",
+                    "attempt": 1,
+                    "delay_seconds": 0.1,
+                    "reason": "MALFORMED",
+                })()
+        self.service.retry_policy = MalformedPolicy()
+        result = self.service.retry_decision(attempt=1, status_code=503)
+        self.assertEqual(result, {"retry": False, "reason": "INVALID_RETRY_RESPONSE"})
+
+    def test_retry_policy_response_rejects_nonfinite_or_excessive_delay(self):
+        class MalformedPolicy:
+            def __init__(self, delay):
+                self.delay = delay
+            def decide(self, **failure):
+                return type("Decision", (), {
+                    "retry": True,
+                    "attempt": 1,
+                    "delay_seconds": self.delay,
+                    "reason": "TEST",
+                })()
+        for delay in (float("inf"), float("nan"), -1, 86401):
+            self.service.retry_policy = MalformedPolicy(delay)
+            result = self.service.retry_decision(attempt=1, status_code=503)
+            self.assertFalse(result["retry"])
+            self.assertEqual(result["reason"], "INVALID_RETRY_RESPONSE")
+
     def test_started_request_reconciles_cost_commits_quota_and_records_health(self):
         self.cost.reserve_usage(
             project_id="film", provider_id="image", estimated_cost=2.0, request_id="job-1"
