@@ -64,6 +64,21 @@ class LocalModelProviderAdapterTests(unittest.TestCase):
         bad_system = adapter.generate_text("valid", system=[])
         self.assertEqual(bad_system["status"], "INVALID_SYSTEM_PROMPT")
 
+    def test_incomplete_or_unmarked_response_is_rejected(self):
+        for response in (
+            {"response": "possibly truncated", "done": False},
+            {"response": "missing completion marker"},
+            {"response": "wrong marker", "done": "true"},
+        ):
+            with self.subTest(response=response):
+                adapter = LocalModelProviderAdapter(
+                    model_id="local-model",
+                    transport=lambda *args, _response=response, **kwargs: _response,
+                )
+                result = adapter.generate_text("valid prompt")
+                self.assertFalse(result["generated"])
+                self.assertEqual(result["status"], "INVALID_LOCAL_MODEL_RESPONSE")
+
     def test_injected_transport_cannot_bypass_response_size_limit(self):
         oversized_text = "x" * (2 * 1024 * 1024 + 1)
         adapter = LocalModelProviderAdapter(
