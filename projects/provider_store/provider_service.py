@@ -739,6 +739,9 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        require_fresh_health_check: bool = False,
+        health_stale_after_seconds: float = 300.0,
+        health_max_latency_ms: float | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
@@ -835,6 +838,66 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+
+        if not isinstance(require_fresh_health_check, bool):
+            release = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            return {
+                "status": "INVALID_HEALTH_CHECK_POLICY", "executed": False,
+                "release": release,
+            }
+        if require_fresh_health_check:
+            stale_limit = finite_number(health_stale_after_seconds, minimum=0)
+            latency_limit = (
+                None if health_max_latency_ms is None
+                else finite_number(health_max_latency_ms, minimum=0)
+            )
+            if stale_limit is None or (
+                health_max_latency_ms is not None and latency_limit is None
+            ):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "INVALID_HEALTH_CHECK_POLICY", "executed": False,
+                    "release": release,
+                }
+            eligibility_fn = getattr(self.health_manager, "is_eligible", None)
+            if not callable(eligibility_fn):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "PROVIDER_HEALTH_CHECK_UNAVAILABLE", "executed": False,
+                    "health": {"eligible": False, "status": "HEALTH_MANAGER_UNAVAILABLE"},
+                    "release": release,
+                }
+            try:
+                health_eligibility = eligibility_fn(
+                    provider_id,
+                    stale_after_seconds=stale_limit,
+                    max_latency_ms=latency_limit,
+                )
+            except Exception as exc:
+                health_eligibility = {
+                    "eligible": False, "status": "HEALTH_CHECK_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if (
+                not isinstance(health_eligibility, dict)
+                or health_eligibility.get("eligible") is not True
+            ):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "PROVIDER_HEALTH_REJECTED", "executed": False,
+                    "health": health_eligibility if isinstance(health_eligibility, dict) else {
+                        "eligible": False, "status": "INVALID_HEALTH_CHECK_RESPONSE"
+                    },
+                    "release": release,
+                }
 
         data_policy_result = None
         if self.data_handling_policy is not None:
