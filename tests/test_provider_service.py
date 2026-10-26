@@ -2154,7 +2154,7 @@ class ProviderAdminControlTests(unittest.TestCase):
             def __init__(self, text): self.text = text
             def generate_text(self, prompt, *, system=None):
                 return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": self.text}
-        for value in ("漢" * 700_000, "\\ud800"):
+        for value in ("漢" * 700_000, chr(0xD800)):
             with self.subTest(size=len(value)):
                 service = ProviderService(self.connection, local_model_adapter=Adapter(value))
                 result = service.generate_local_text(prompt="hello")
