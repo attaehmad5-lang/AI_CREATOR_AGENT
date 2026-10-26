@@ -1297,10 +1297,16 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["avg_latency_ms"], 25.0)
         self.assertEqual(snapshot["avg_queue_wait_ms"], 12.0)
 
-        # Use a service without the deliberately tripped SLO policy so this
-        # assertion tests trace sanitization rather than the independent SLO gate.
+        # Use an isolated route stub so this assertion tests trace
+        # sanitization rather than the SLO gate or prior quota reservations.
+        class TraceRoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True, "provider": "image", "billing_mode": "FREE",
+                }
+
         trace_service = ProviderService(
-            self.connections, routing_manager=RoutingStub(),
+            self.connections, routing_manager=TraceRoutingStub(),
         )
         hidden_trace = trace_service.execute_routed_request(
             category="image", project_id="film", request_id="hidden-trace-job",
