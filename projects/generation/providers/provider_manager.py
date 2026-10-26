@@ -58,6 +58,8 @@ class ProviderManager:
             if not callable(provider_class):
                 raise TypeError("provider factory is not callable")
             instance = provider_class()
+            if not callable(getattr(instance, "generate_image", None)):
+                raise TypeError("provider does not implement generate_image")
         except Exception as exc:
             raise ValueError("provider registration failed") from exc
         self.providers[name] = instance
@@ -91,7 +93,10 @@ class ProviderManager:
                 provider_class = getattr(module, class_name)
                 if not callable(provider_class):
                     raise TypeError("provider factory is not callable")
-                staged[name] = provider_class()
+                instance = provider_class()
+                if not callable(getattr(instance, "generate_image", None)):
+                    raise TypeError("provider does not implement generate_image")
+                staged[name] = instance
         except Exception as exc:
             raise ValueError("provider registry loading failed") from exc
         self.providers = staged
