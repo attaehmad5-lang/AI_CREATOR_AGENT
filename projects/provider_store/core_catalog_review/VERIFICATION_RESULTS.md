@@ -92,3 +92,13 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 - Installed the wheel into a fresh virtual environment and confirmed `import provider_store` resolves to that environment's `site-packages` when the declared Pydantic dependency is available from the existing interpreter environment.
 - A strict isolated import without dependencies correctly failed with `ModuleNotFoundError: pydantic`; this is expected for `pip install --no-deps` and is **not** a product-code failure. A fully isolated dependency-resolving installation still needs the hosted release-gates workflow, which installs the wheel normally and must be observed passing.
 - Black, Flake8, Mypy, and build-isolated sdist/wheel checks remain **NOT YET VERIFIED**. This probe does not replace the hosted release-gate run.
+
+
+## Repeat clean-room verification — 2026-10-26
+
+- Re-extracted the exact release ZIP and re-verified all 24 entries in `SHA256SUMS.txt`: **PASS**.
+- Re-ran `python -m compileall -q provider_store tests`: **PASS**.
+- Re-ran `python -W error::ResourceWarning -m pytest -q`: **82 passed, 0 failed; 98% statement coverage** (981 statements; 20 uncovered).
+- Rebuilt the wheel from the extracted ZIP with the available local setuptools backend: **PASS**. Wheel metadata reports `provider-store-core-catalog 1.0.0`, `Requires-Python: >=3.10`, and `pydantic>=2.5,<3`.
+- A fresh-venv import smoke attempt with `pip install --no-deps` **did not pass** because Pydantic is not installed in this execution environment (`ModuleNotFoundError: pydantic`). Dependency installation could not be verified offline. This is an environment/dependency availability blocker, not evidence that the package's declared dependency is absent; the hosted release gate must install dependencies normally and pass before this gate is closed.
+- Black, Flake8, Mypy, and build-isolated sdist/wheel creation remain **NOT YET VERIFIED**.
