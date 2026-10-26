@@ -95,9 +95,12 @@ class GenerationProviderServiceTests(unittest.TestCase):
             path = Path(directory) / "registry.json"
             path.write_text(json.dumps(payload), encoding="utf-8")
             with patch("projects.generation.providers.provider_service.ProviderManager") as manager_cls:
+                sentinel = object()
+                manager_cls.return_value.providers = {"Existing": sentinel}
                 with self.assertRaisesRegex(ValueError, "runtime provider contract validation failed"):
                     ProviderService(path, connection_manager=catalog)
                 manager_cls.return_value.load_registry.assert_called_once_with(payload["image"])
+                self.assertEqual(manager_cls.return_value.providers, {"Existing": sentinel})
                 self.assertEqual(catalog.args[0], "huggingface")
 
     def test_custom_relative_registry_path_keeps_explicit_caller_semantics(self):
