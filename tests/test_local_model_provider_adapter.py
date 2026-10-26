@@ -92,6 +92,27 @@ class LocalModelProviderAdapterTests(unittest.TestCase):
         self.assertEqual(result["error_type"], "ValueError")
         self.assertNotIn("private prompt", repr(result))
 
+    def test_execute_rejects_unsafe_provider_and_request_ids_before_transport(self):
+        calls = []
+        adapter = LocalModelProviderAdapter(
+            model_id="local-model",
+            transport=lambda *args, **kwargs: calls.append(args) or {"response": "ok", "done": True},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output_path = Path(directory) / "result.txt"
+            invalid_provider = adapter.execute(
+                prompt="hello", provider_id="../provider", request_id="req-1", output_path=output_path,
+            )
+            invalid_request = adapter.execute(
+                prompt="hello", provider_id="local-ollama", request_id="bad id", output_path=output_path,
+            )
+            self.assertEqual(invalid_provider["status"], "INVALID_PROVIDER_ID")
+            self.assertEqual(invalid_request["status"], "INVALID_REQUEST_ID")
+            self.assertFalse(invalid_provider["started"])
+            self.assertFalse(invalid_request["started"])
+            self.assertEqual(calls, [])
+            self.assertFalse(output_path.exists())
+
     def test_execute_matches_provider_service_contract_without_losing_unknown_outcome(self):
         with tempfile.TemporaryDirectory() as directory:
             output_path = Path(directory) / "local-output.txt"
