@@ -600,6 +600,9 @@ class ProviderService:
         principal_id: str | None = None,
         project_id: str = "default",
         request_id: str | None = None,
+        require_fresh_health_check: bool = False,
+        health_stale_after_seconds: float = 300.0,
+        health_max_latency_ms: float | None = None,
     ) -> dict[str, Any]:
         """Generate through an injected loopback-only local adapter with service policy gates."""
         if self.local_model_adapter is None:
@@ -631,6 +634,35 @@ class ProviderService:
                 return {"status": "SENSITIVE_DATA_SCAN_FAILED", "generated": False, "error_type": type(exc).__name__}
             if not isinstance(scan, dict) or scan.get("allowed") is not True:
                 return {"status": "SENSITIVE_DATA_BLOCKED", "generated": False}
+        if not isinstance(require_fresh_health_check, bool):
+            return {"status": "INVALID_HEALTH_CHECK_POLICY", "generated": False}
+        if require_fresh_health_check:
+            stale_limit = finite_number(health_stale_after_seconds, minimum=0)
+            latency_limit = (
+                None if health_max_latency_ms is None
+                else finite_number(health_max_latency_ms, minimum=0)
+            )
+            if stale_limit is None or (
+                health_max_latency_ms is not None and latency_limit is None
+            ):
+                return {"status": "INVALID_HEALTH_CHECK_POLICY", "generated": False}
+            eligibility_fn = getattr(self.health_manager, "is_eligible", None)
+            if not callable(eligibility_fn):
+                return {"status": "PROVIDER_HEALTH_CHECK_UNAVAILABLE", "generated": False}
+            try:
+                eligibility = eligibility_fn(
+                    getattr(self.local_model_adapter, "provider_id", "local-model"),
+                    stale_after_seconds=stale_limit,
+                    max_latency_ms=latency_limit,
+                )
+            except Exception as exc:
+                return {
+                    "status": "PROVIDER_HEALTH_CHECK_FAILED",
+                    "generated": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(eligibility, dict) or eligibility.get("eligible") is not True:
+                return {"status": "PROVIDER_HEALTH_REJECTED", "generated": False}
         try:
             result = self.local_model_adapter.generate_text(prompt, system=system)
         except Exception as exc:
