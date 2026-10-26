@@ -92,9 +92,8 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install black
-          # Normalize only the temporary test copy; the downloaded release asset remains
-          # unchanged and its SHA-256 is recorded by the prior verification step.
-          python -m black provider_store tests
+          # Verify formatting without modifying the downloaded release archive.
+          python -m black --check provider_store tests
           python -m compileall -q provider_store tests
           bash ./run_checks.sh
 
