@@ -1341,7 +1341,7 @@ class ProviderServiceTests(unittest.TestCase):
         # Request IDs are correlation keys used by persistent accounting and
         # diagnostics; reject control characters, whitespace, and oversized IDs
         # before routing can reserve cost/quota or invoke a provider.
-        for invalid_request_id in (" bad-id", "bad id", "bad\\nid", "x" * 129, ""):
+        for invalid_request_id in (" bad-id", "bad id", "bad\nid", "x" * 129, ""):
             invalid_request = service.execute_routed_request(
                 category="image", project_id="film",
                 request_id=invalid_request_id, estimated_cost=0.0,
