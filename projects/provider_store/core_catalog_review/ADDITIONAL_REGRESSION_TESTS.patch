@@ -1,0 +1,251 @@
+--- a/tests/test_catalog.py
++++ b/tests/test_catalog.py
+@@ -5,7 +5,9 @@
+ import io
+ import json
+ import logging
++import sqlite3
+ import threading
++from contextlib import closing
+ import warnings
+ from pathlib import Path
+ from typing import Any, Dict, List
+@@ -364,6 +366,47 @@
+     assert len(ProviderCatalog(SqliteStorage(path))) == 1
+ 
+ 
++def test_encrypted_catalog_requires_cipher(tmp_path: Path) -> None:
++    path = tmp_path / "encrypted.json"
++    cipher = MetadataCipher(b"k" * 32)
++    ProviderCatalog(JsonFileStorage(path, cipher)).register(make("encrypted"))
++    with pytest.raises(DecryptionError):
++        ProviderCatalog(JsonFileStorage(path))
++
++
++def test_corrupt_primary_and_backup_are_both_reported(tmp_path: Path) -> None:
++    path = tmp_path / "broken.json"
++    path.write_text("not-json", encoding="utf-8")
++    path.with_name(path.name + ".bak").write_text("also-not-json", encoding="utf-8")
++    result = JsonFileStorage(path).load()
++    assert result.records == {}
++    assert any("primary file unreadable" in issue for issue in result.issues)
++    assert any("backup unreadable" in issue for issue in result.issues)
++    assert any("corrupt file moved" in issue for issue in result.issues)
++
++
++def test_sqlite_invalid_json_row_is_skipped(tmp_path: Path) -> None:
++    path = tmp_path / "rows.db"
++    with closing(sqlite3.connect(path)) as conn:
++        with conn:
++            conn.execute(
++                "CREATE TABLE providers (provider_id TEXT PRIMARY KEY, data TEXT NOT NULL)"
++            )
++            conn.execute("INSERT INTO providers VALUES (?, ?)", ("broken", "{bad json"))
++            conn.execute(
++                "INSERT INTO providers VALUES (?, ?)",
++                ("valid", json.dumps(make("valid", provider_id="valid"))),
++            )
++    result = SqliteStorage(path).load()
++    assert result.records["valid"]["name"] == "valid"
++    assert any("invalid JSON" in issue for issue in result.issues)
++
++
++def test_storage_fingerprint_is_none_for_missing_file(tmp_path: Path) -> None:
++    assert JsonFileStorage(tmp_path / "missing.json").fingerprint() is None
++    assert SqliteStorage(tmp_path / "missing.db").fingerprint() is None
++
++
+ # --------------------------------------------------------- G. lifecycle
+ def test_deprecation_warning_and_redirect(cat: ProviderCatalog) -> None:
+     rec = cat.register(make("a", models=[{"name": "v1"}, {"name": "v2"}]))
+@@ -707,6 +750,19 @@
+     assert payload["provider_id"] == "p1" and "hunter2" not in payload["exception"]
+ 
+ 
++def test_json_formatter_preserves_json_when_scrubbing_escaped_exception() -> None:
++    fmt = JsonFormatter()
++    try:
++        raise ValueError('password=hunter2hunter2\nquote="and\nnewline')
++    except ValueError:
++        import sys
++
++        rec = logging.LogRecord("n", logging.ERROR, "f", 1, "msg", None, sys.exc_info())
++    payload = json.loads(fmt.format(rec))
++    assert "hunter2" not in payload["exception"]
++    assert "[REDACTED]" in payload["exception"]
++
++
+ # ------------------------------------------------- additional edge cases
+ def test_invalid_provider_id_rejected() -> None:
+     with pytest.raises(ValidationError):
+         ProviderRecord.model_validate(make("a", provider_id="Bad ID!"))
+@@ -722 +722,11 @@
++def test_audit_entries_zero_or_negative_limit_returns_empty() -> None:
++    audit = AuditLog(max_memory=10)
++    audit.record("created", provider_id="p1")
++    audit.record("updated", provider_id="p1")
++
++    assert audit.entries(limit=0) == []
++    assert audit.entries(limit=-1) == []
++    assert len(audit.entries(limit=1)) == 1
++
++
+ def test_audit_file_and_redaction(tmp_path: Path) -> None:
+
+@@ -790,3 +790,45 @@
+     log = AuditLog(tmp_path)  # a directory: opening it for append raises OSError
+     entry = log.record("x", "p1")
+     assert entry.action == "x" and len(log.entries()) == 1
++
++
++def test_lru_clear_invalidate_missing_and_none_values() -> None:
++    cache: LRUCache[Any] = LRUCache(2)
++    cache.put("none", None)
++    assert cache.get("none") is None
++    assert cache.get("missing") is None
++    cache.invalidate("missing")
++    cache.invalidate("none")
++    cache.put("a", 1)
++    cache.clear()
++    assert len(cache) == 0
++    assert cache.stats() == {"size": 0, "maxsize": 2, "hits": 1, "misses": 1}
++
++
++def test_secret_path_detection_nested_lists_and_tuples() -> None:
++    data = {
++        "items": [
++            {"access_token": "should-not-be-returned"},
++            ("bearer abcdefghijk",),
++        ]
++    }
++    paths = find_secret_paths(data)
++    assert "$.items[0].access_token" in paths
++    assert "$.items[1][0]" in paths
++    assert all("should-not-be-returned" not in path for path in paths)
++
++
++def test_redact_preserves_non_string_values_and_nested_secret_keys() -> None:
++    original = {
++        "safe": 7,
++        "nested": [{"refresh_token": "secret-value", "ok": True}],
++    }
++    cleaned = redact(original)
++    assert cleaned == {
++        "safe": 7,
++        "nested": [{"refresh_token": "[REDACTED]", "ok": True}],
++    }
++    assert original["nested"][0]["refresh_token"] == "secret-value"
++
++
++def test_search_limit_zero_and_unknown_latency_filters(cat: ProviderCatalog) -> None:
++    cat.register(
++        make(
++            "unknown-latency",
++            avg_latency_ms=None,
++            pricing={"input_cost": 0.0, "output_cost": 0.0},
++        )
++    )
++    assert cat.search(limit=0) == []
++    assert cat.search(SearchQuery(max_latency_ms=100)) == []
++    assert cat.search(SearchQuery(text="does-not-exist")) == []
++
++
++def test_metadata_cipher_rejects_truncated_and_wrong_magic() -> None:
++    cipher = MetadataCipher(b"z" * 32)
++    for blob in (b"", b"PSC1short", b"BAD!" + b"x" * 64):
++        with pytest.raises(DecryptionError):
++            cipher.decrypt(blob)
+
+
+@@ additional coverage: catalog error paths and storage corruption handling
++def test_remove_alias_missing_raises_provider_not_found(cat: ProviderCatalog) -> None:
++    rec = cat.register(make("alias-target", aliases=["present"]))
++    with pytest.raises(ProviderNotFound):
++        cat.remove_alias(rec.provider_id, "absent")
++
++def test_deprecate_missing_model_raises_model_not_found(cat: ProviderCatalog) -> None:
++    rec = cat.register(make("model-target", models=[{"name": "known-model"}]))
++    with pytest.raises(ModelNotFound):
++        cat.deprecate_model(rec.provider_id, "not-a-model")
++
++def test_execute_with_fallback_without_candidates_raises(cat: ProviderCatalog) -> None:
++    with pytest.raises(NoProviderAvailable):
++        cat.execute_with_fallback(Capability.TEXT, lambda rec: rec)
++
++def test_import_state_skips_invalid_duplicate_and_alias_conflict(cat: ProviderCatalog) -> None:
++    existing = cat.register(make("existing", provider_id="existing1", aliases=["shared"]))
++    imported, issues = cat.import_state({"providers": [
++        {"name": "invalid", "provider_id": "bad id", "capabilities": ["text"]},
++        make("duplicate", provider_id=existing.provider_id),
++        make("conflict", provider_id="conflict1", aliases=["shared"]),
++        make("valid", provider_id="valid1"),
++    ]})
++    assert imported == 1
++    assert len(issues) == 3
++    assert cat.get("valid1").name == "valid"
++    assert cat.get("existing1").name == "existing"
++
++def test_json_storage_rejects_unexpected_layout_and_quarantines(tmp_path: Path) -> None:
++    path = tmp_path / "bad-layout.json"
++    path.write_text(json.dumps({"not_providers": {}}), encoding="utf-8")
++    result = JsonFileStorage(path).load()
++    assert result.records == {}
++    assert any("unexpected catalog layout" in issue for issue in result.issues)
++    assert not path.exists()
++    assert list(tmp_path.glob("bad-layout.json.corrupt-*"))
++
++def test_default_pinger_returns_http_error_status(monkeypatch: pytest.MonkeyPatch) -> None:
++    import urllib.error
++    import provider_store.core_catalog as core_catalog
++    def raise_http_error(*args: Any, **kwargs: Any) -> Any:
++        raise urllib.error.HTTPError("https://example.invalid", 503, "unavailable", {}, None)
++    monkeypatch.setattr(core_catalog.urllib.request, "urlopen", raise_http_error)
++    assert core_catalog.default_pinger("https://example.invalid", 0.1) == 503
+
+
+--- additional coverage: validation, filtering, logging, and pinger success ---
++def test_model_and_provider_validation_reject_bad_labels_and_replacements() -> None:
++    with pytest.raises(ValidationError):
++        ProviderRecord.model_validate(make("provider", aliases=["not a label!"]))
++    with pytest.raises(ValidationError):
++        ProviderRecord.model_validate(make("provider", models=[{"name": "   "}]))
++    with pytest.raises(ValidationError):
++        ProviderRecord.model_validate(make("provider", models=[
++            {"name": "model-a", "replaced_by": "missing-model"}
++        ]))
++    with pytest.raises(ValidationError):
++        ProviderRecord.model_validate(make("provider", models=[
++            {"name": "model-a", "replaced_by": "model-a"}
++        ]))
+
++def test_search_tag_any_and_model_family_negative_filters(cat: ProviderCatalog) -> None:
++    cat.register(make("search-target", tags=["video"], models=[{"name": "m1", "family": "vision"}]))
++    assert cat.search(SearchQuery(tags_any=["audio"])) == []
++    assert cat.search(SearchQuery(model_family="text")) == []
+
++def test_configure_logging_replaces_only_owned_handlers() -> None:
++    import provider_store.observability as observability
++    logger = logging.getLogger(observability.LOGGER_NAME)
++    original = list(logger.handlers)
++    try:
++        logger.handlers.clear()
++        foreign = logging.NullHandler()
++        logger.addHandler(foreign)
++        configure_logging(stream=io.StringIO())
++        configure_logging(stream=io.StringIO())
++        assert foreign in logger.handlers
++        assert sum(bool(getattr(h, "_provider_store", False)) for h in logger.handlers) == 1
++    finally:
++        logger.handlers.clear()
++        logger.handlers.extend(original)
+
++def test_default_pinger_returns_success_status(monkeypatch: pytest.MonkeyPatch) -> None:
++    import provider_store.core_catalog as core_catalog
++    class Response:
++        status = 204
++        def __enter__(self) -> "Response":
++            return self
++        def __exit__(self, *args: Any) -> None:
++            return None
++    monkeypatch.setattr(core_catalog.urllib.request, "urlopen", lambda *a, **k: Response())
++    assert core_catalog.default_pinger("https://example.invalid", 0.1) == 204

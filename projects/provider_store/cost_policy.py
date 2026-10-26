@@ -35,7 +35,15 @@ class ProviderCostPolicy:
             if not isinstance(project_id, str) or not project_id.strip() or not self._valid_amount(budget):
                 raise ValueError("project budgets require non-empty project IDs and finite non-negative amounts")
         self.ledger: dict[str, Any] = {"version": "1.0", "projects": {}}
-        self._reload_ledger()
+        if self.ledger_path is None:
+            self._reload_ledger()
+        else:
+            # Construction reads shared state too. Serialize this initial read
+            # with writers: on Windows an atomic ledger replacement can briefly
+            # deny a concurrent read, and an unlocked read can observe a race.
+            lock_path = self.ledger_path.with_name(self.ledger_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                self._reload_ledger()
 
     def _reload_ledger(self) -> None:
         """Reload persistent usage state after acquiring the interprocess lock."""

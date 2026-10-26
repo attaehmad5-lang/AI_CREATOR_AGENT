@@ -1,0 +1,30 @@
+diff --git a/tests/test_catalog.py b/tests/test_catalog.py
+--- a/tests/test_catalog.py
++++ b/tests/test_catalog.py
+@@
+ import logging
++import sqlite3
+ import threading
+@@
++def test_sqlite_connection_closes_when_initialization_fails(
++    tmp_path: Path, monkeypatch: Any
++) -> None:
++    import provider_store.storage as storage_module
++
++    class BrokenConnection:
++        closed = False
++
++        def execute(self, _sql: str) -> Any:
++            raise sqlite3.DatabaseError("injected schema initialization failure")
++
++        def close(self) -> None:
++            self.closed = True
++
++    connection = BrokenConnection()
++    monkeypatch.setattr(storage_module.sqlite3, "connect", lambda *_a, **_kw: connection)
++    storage = SqliteStorage(tmp_path / "broken.db")
++
++    with pytest.raises(sqlite3.DatabaseError, match="injected schema initialization failure"):
++        storage._connect()
++
++    assert connection.closed is True

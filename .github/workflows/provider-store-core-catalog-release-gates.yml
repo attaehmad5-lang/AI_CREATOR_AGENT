@@ -1,0 +1,116 @@
+name: Provider Store Core Catalog Release Gates
+
+on:
+  workflow_dispatch:
+    inputs:
+      archive_url:
+        description: "Direct HTTPS URL of the clean ZIP uploaded as a GitHub Release asset in this repository"
+        required: true
+        type: string
+      expected_sha256:
+        description: "Expected SHA-256 of the ZIP"
+        required: true
+        default: "5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  standalone-package:
+    name: Verify standalone package (Python 3.13)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Validate archive inputs
+        env:
+          ARCHIVE_URL: ${{ inputs.archive_url }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARCHIVE_URL" =~ ^https://github\.com/attaehmad5-lang/AI_CREATOR_AGENT/releases/download/[^/]+/[^/]+\.zip$ ]] || {
+            echo "archive_url must be a ZIP asset URL from this repository's GitHub Releases."
+            exit 2
+          }
+          [[ "$EXPECTED_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || {
+            echo "expected_sha256 must contain exactly 64 hexadecimal characters."
+            exit 2
+          }
+
+      - name: Download and verify exact archive
+        env:
+          ARCHIVE_URL: ${{ inputs.archive_url }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --retry-delay 2 "$ARCHIVE_URL" --output "$RUNNER_TEMP/provider-store-package.zip"
+          printf '%s  %s\n' "$EXPECTED_SHA256" "$RUNNER_TEMP/provider-store-package.zip" | sha256sum --check
+          # Reject unsafe paths, duplicate entries, symlinks, and corrupt ZIPs before extraction.
+          python - "$RUNNER_TEMP/provider-store-package.zip" <<'PY'
+          import stat
+          import sys
+          import zipfile
+          from pathlib import PurePosixPath
+
+          with zipfile.ZipFile(sys.argv[1]) as zf:
+              names = [info.filename for info in zf.infolist()]
+              if len(names) != len(set(names)):
+                  raise SystemExit("ZIP contains duplicate paths")
+              for info in zf.infolist():
+                  path = PurePosixPath(info.filename)
+                  mode = info.external_attr >> 16
+                  if path.is_absolute() or ".." in path.parts or not path.parts:
+                      raise SystemExit(f"Unsafe ZIP path: {info.filename!r}")
+                  if stat.S_ISLNK(mode):
+                      raise SystemExit(f"Symlink entry is not allowed: {info.filename!r}")
+              bad_member = zf.testzip()
+              if bad_member is not None:
+                  raise SystemExit(f"Corrupt ZIP member: {bad_member}")
+          PY
+          unzip -q "$RUNNER_TEMP/provider-store-package.zip" -d "$RUNNER_TEMP/provider-store-package"
+          test -f "$RUNNER_TEMP/provider-store-package/pyproject.toml"
+          test -f "$RUNNER_TEMP/provider-store-package/provider_store/core_catalog.py"
+          test -f "$RUNNER_TEMP/provider-store-package/tests/test_catalog.py"
+
+      - name: Run full formatting, lint, type and regression gates
+        working-directory: ${{ runner.temp }}/provider-store-package
+        run: |
+          set -euo pipefail
+          python -m compileall -q provider_store tests
+          # The ZIP's file mode may not include the executable bit; invoke via bash.
+          bash ./run_checks.sh
+
+      - name: Build sdist and wheel with build isolation
+        working-directory: ${{ runner.temp }}/provider-store-package
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Smoke-test the built wheel in a clean environment
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          python -m venv wheel-smoke-env
+          wheel-smoke-env/bin/python -m pip install "$RUNNER_TEMP/provider-store-package"/dist/*.whl
+          cd "$RUNNER_TEMP"
+          wheel-smoke-env/bin/python -c "import provider_store; print('Installed provider_store from:', provider_store.__file__)"
+
+      - name: Upload build artifacts and coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-store-core-catalog-release-gates
+          path: |
+            ${{ runner.temp }}/provider-store-package/dist/*
+            ${{ runner.temp }}/provider-store-package/.coverage
+          if-no-files-found: warn
