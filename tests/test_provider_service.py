@@ -1881,6 +1881,7 @@ class ProviderAdminControlTests(unittest.TestCase):
         self.assertFalse(adapter.called)
 
         class Unhealthy:
+            def record_result(self, *args, **kwargs): return {"recorded": True}
             def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
                 return {"eligible": False, "status": "STALE"}
         service = ProviderService(self.connection, local_model_adapter=adapter, health_manager=Unhealthy())
@@ -1894,6 +1895,7 @@ class ProviderAdminControlTests(unittest.TestCase):
             def generate_text(self, prompt, *, system=None):
                 return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "safe output"}
         class Healthy:
+            def record_result(self, *args, **kwargs): return {"recorded": True}
             def __init__(self): self.args = None
             def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
                 self.args = (provider_id, stale_after_seconds, max_latency_ms)
@@ -1914,9 +1916,11 @@ class ProviderAdminControlTests(unittest.TestCase):
                 self.called = True
                 return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
         class BrokenHealth:
+            def record_result(self, *args, **kwargs): return {"recorded": True}
             def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
                 raise RuntimeError("private health backend detail")
         class MalformedHealth:
+            def record_result(self, *args, **kwargs): return {"recorded": True}
             def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
                 return {"eligible": "true", "status": "HEALTHY"}
         for manager, expected in (
@@ -2011,6 +2015,7 @@ class ProviderAdminControlTests(unittest.TestCase):
             def generate_text(self, prompt, *, system=None):
                 return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "safe output"}
         class Health:
+            def record_result(self, *args, **kwargs): return {"recorded": True}
             def __init__(self): self.checked = []
             def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
                 self.checked.append(provider_id)
