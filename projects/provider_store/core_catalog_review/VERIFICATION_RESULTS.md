@@ -160,3 +160,13 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 - Re-ran clean-room `compileall` and `python -W error::ResourceWarning -m pytest -q --cov=provider_store --cov-report=term-missing`: **82 passed, 0 failed; 98% statement coverage** (981 statements, 20 uncovered).
 - Retried installation of Black, Flake8, Mypy, and the build frontend in this execution environment. The package index remains unreachable due to DNS resolution failure. The hosted standalone release gates are still not runnable from this session because the release ZIP has no GitHub Release asset URL and the connected GitHub integration exposes no release-upload or workflow-dispatch action.
 - **Final state remains partially verified, not 100% release-verified.** No PR merge or release publication was performed. Required remaining actions: publish the exact archive as a Release asset, run the standalone hosted workflow, fix any failures, and repeat until all formatting/lint/type/build-isolation/installed-wheel gates pass.
+
+
+## Independent repeat verification — 2026-10-26 (latest session)
+
+- Re-downloaded/reused the exact clean candidate ZIP and independently confirmed SHA-256: `5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7`.
+- Fresh extraction: `python -m compileall -q provider_store tests` passed.
+- Fresh extraction: `python -W error::ResourceWarning -m pytest -q --cov=provider_store --cov-report=term-missing` passed: **82 passed, 0 failed; 98% statement coverage** (981 statements, 20 uncovered).
+- Re-ran `bash ./run_checks.sh`; it failed before executing the complete quality gates because the configured package index could not resolve DNS while installing the declared dependency `pydantic>=2.5,<3`. This is an environment/network blocker, not a passing check.
+- Black, Flake8, Mypy, build-isolated sdist/wheel creation, and clean dependency-resolving wheel smoke test remain **NOT VERIFIED**. Do not report these as passed.
+- The exact ZIP is still not a GitHub Release asset, and the connected GitHub tools available in this session do not provide release-asset upload or workflow-dispatch actions. PR #81 remains draft/unmerged; no merge or release publication was performed.
