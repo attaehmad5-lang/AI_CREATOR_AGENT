@@ -8,9 +8,9 @@
 - `python -W error::ResourceWarning -m pytest -q`: 82 passed, 0 failed
 - Statement coverage: 98% (981 statements; 20 uncovered)
 - Local package installation from the clean-room extraction: PASS
-- Wheel build from the clean-room extraction: PASS (wheel SHA-256: `e0cdea959c073ae02d5a83a82c425e5aa59d75b5192b4e76c6029a206cc099c8`)
+- Wheel build from the clean-room extraction: PASS
 - SHA-256 manifest verification and ZIP integrity: PASS (29 ZIP entries; 28 manifest entries)
-- Archive SHA-256: `487ea39cfa17942a458960b488dac6277c73baf14bd53e6a34a84da6f5471111`
+- Archive SHA-256: `e5f55e92f8e66156f4d6cf59a358bedbce31443068b809a18e6da5f23af6477a`
 
 ## Defects covered by fixes and regressions
 
