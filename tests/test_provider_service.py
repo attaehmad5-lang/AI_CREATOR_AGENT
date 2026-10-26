@@ -1337,6 +1337,18 @@ class ProviderServiceTests(unittest.TestCase):
             adapter=adapter,
         )
         self.assertEqual(invalid_trace["status"], "INVALID_TRACE_ID")
+
+        # Request IDs are correlation keys used by persistent accounting and
+        # diagnostics; reject control characters, whitespace, and oversized IDs
+        # before routing can reserve cost/quota or invoke a provider.
+        for invalid_request_id in (" bad-id", "bad id", "bad\\nid", "x" * 129, ""):
+            invalid_request = service.execute_routed_request(
+                category="image", project_id="film",
+                request_id=invalid_request_id, estimated_cost=0.0,
+                modality="image", adapter=adapter,
+            )
+            self.assertEqual(invalid_request["status"], "INVALID_REQUEST_ID")
+            self.assertFalse(invalid_request["executed"])
         self.assertEqual(len(adapter_calls), 1)
         self.assertEqual(result["metrics"]["status"], "METRIC_RECORDED")
         self.assertEqual(result["slo"]["status"], "SLO_BREACH")
