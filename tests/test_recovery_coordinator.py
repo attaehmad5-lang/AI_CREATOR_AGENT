@@ -99,6 +99,30 @@ class RecoveryCoordinatorTests(unittest.TestCase):
         self.assertEqual(result["results"]["provider-a"]["status"], "NETWORK_ERROR")
         self.assertNotIn("secret prompt", json.dumps(result))
 
+    def test_malformed_probe_result_is_not_passed_through(self):
+        class MalformedHealthManager(FakeHealthManager):
+            def active_probe(self, provider_id, probe, *, timeout_seconds=5.0):
+                return {
+                    "provider": provider_id,
+                    "status": "HEALTHY\\nINJECTED",
+                    "verified": "yes",
+                    "detail": "sensitive diagnostic",
+                }
+
+        manager = MalformedHealthManager(self.path)
+        coordinator = ProviderRecoveryCoordinator(
+            manager,
+            {"provider-a": lambda **kwargs: True},
+            cooldown_seconds=60,
+            clock=lambda: self.now,
+        )
+        result = coordinator.run_due_rechecks()
+        self.assertEqual(
+            result["results"]["provider-a"],
+            {"status": "INVALID_PROBE_RESULT", "verified": False},
+        )
+        self.assertNotIn("sensitive diagnostic", json.dumps(result))
+
     def test_invalid_probe_configuration_rejected(self):
         with self.assertRaises(ValueError):
             self.make({"bad provider id": lambda **kwargs: True})
