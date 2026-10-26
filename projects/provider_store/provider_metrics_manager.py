@@ -11,6 +11,7 @@ from .safe_numbers import finite_number
 
 _PROVIDER_ID_MAX = 128
 _CATEGORY_MAX = 64
+_MAX_METRIC_DURATION_MS = 7 * 24 * 60 * 60 * 1000
 
 
 class ProviderMetricsManager:
@@ -42,8 +43,8 @@ class ProviderMetricsManager:
             return {"status": "INVALID_CATEGORY", "saved": False}
         if not isinstance(success, bool) or not isinstance(timed_out, bool):
             return {"status": "INVALID_METRIC_FLAGS", "saved": False}
-        latency = finite_number(latency_ms, minimum=0)
-        queue_wait = finite_number(queue_wait_ms, minimum=0)
+        latency = finite_number(latency_ms, minimum=0, maximum=_MAX_METRIC_DURATION_MS)
+        queue_wait = finite_number(queue_wait_ms, minimum=0, maximum=_MAX_METRIC_DURATION_MS)
         if latency is None or queue_wait is None:
             return {"status": "INVALID_METRIC_TIMING", "saved": False}
         try:
