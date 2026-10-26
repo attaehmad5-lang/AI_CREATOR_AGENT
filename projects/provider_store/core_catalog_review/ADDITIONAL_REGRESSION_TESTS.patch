@@ -10,11 +10,10 @@
  import warnings
  from pathlib import Path
  from typing import Any, Dict, List
-
-@@ -364,6 +366,41 @@
+@@ -364,6 +366,47 @@
      assert len(ProviderCatalog(SqliteStorage(path))) == 1
-
-
+ 
+ 
 +def test_encrypted_catalog_requires_cipher(tmp_path: Path) -> None:
 +    path = tmp_path / "encrypted.json"
 +    cipher = MetadataCipher(b"k" * 32)
@@ -54,9 +53,32 @@
 +def test_storage_fingerprint_is_none_for_missing_file(tmp_path: Path) -> None:
 +    assert JsonFileStorage(tmp_path / "missing.json").fingerprint() is None
 +    assert SqliteStorage(tmp_path / "missing.db").fingerprint() is None
-
-
-@@ -722,1 +722,12 @@
++
++
+ # --------------------------------------------------------- G. lifecycle
+ def test_deprecation_warning_and_redirect(cat: ProviderCatalog) -> None:
+     rec = cat.register(make("a", models=[{"name": "v1"}, {"name": "v2"}]))
+@@ -707,6 +750,19 @@
+     assert payload["provider_id"] == "p1" and "hunter2" not in payload["exception"]
+ 
+ 
++def test_json_formatter_preserves_json_when_scrubbing_escaped_exception() -> None:
++    fmt = JsonFormatter()
++    try:
++        raise ValueError('password=hunter2hunter2\nquote="and\nnewline')
++    except ValueError:
++        import sys
++
++        rec = logging.LogRecord("n", logging.ERROR, "f", 1, "msg", None, sys.exc_info())
++    payload = json.loads(fmt.format(rec))
++    assert "hunter2" not in payload["exception"]
++    assert "[REDACTED]" in payload["exception"]
++
++
+ # ------------------------------------------------- additional edge cases
+ def test_invalid_provider_id_rejected() -> None:
+     with pytest.raises(ValidationError):
+@@ -722 +722,11 @@
 +def test_audit_entries_zero_or_negative_limit_returns_empty() -> None:
 +    audit = AuditLog(max_memory=10)
 +    audit.record("created", provider_id="p1")
@@ -67,4 +89,4 @@
 +    assert len(audit.entries(limit=1)) == 1
 +
 +
- def test_audit_file_and_redaction(tmp_path: Path) -> None
+ def test_audit_file_and_redaction(tmp_path: Path) -> None:
