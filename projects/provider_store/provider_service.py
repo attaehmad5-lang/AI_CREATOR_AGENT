@@ -240,6 +240,12 @@ class ProviderService:
                 "verified": False,
                 "error_type": type(exc).__name__,
             }
+        if not isinstance(connection, dict):
+            connection = {
+                "status": "INVALID_CONNECTION_RESPONSE",
+                "provider": provider_id,
+                "verified": False,
+            }
         health: dict[str, Any] | None = None
         if self.health_manager is not None and isinstance(provider_id, str) and provider_id.strip():
             try:
@@ -395,6 +401,12 @@ class ProviderService:
                 "provider": provider_id,
                 "verified": False,
                 "error_type": type(exc).__name__,
+            }
+        if not isinstance(connection, dict):
+            connection = {
+                "status": "INVALID_CONNECTION_RESPONSE",
+                "provider": provider_id,
+                "verified": False,
             }
         health: dict[str, Any] | None = None
         if self.health_manager is not None and isinstance(provider_id, str) and provider_id.strip():
