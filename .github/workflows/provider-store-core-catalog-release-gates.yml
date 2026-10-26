@@ -59,7 +59,6 @@ jobs:
           set -euo pipefail
           curl --fail --location --retry 3 --retry-delay 2 "$ARCHIVE_URL" --output "$RUNNER_TEMP/provider-store-package.zip"
           printf '%s  %s\n' "$EXPECTED_SHA256" "$RUNNER_TEMP/provider-store-package.zip" | sha256sum --check
-          # Reject unsafe paths, duplicate entries, symlinks, and corrupt ZIPs before extraction.
           python - "$RUNNER_TEMP/provider-store-package.zip" <<'PY'
           import stat
           import sys
@@ -88,11 +87,13 @@ jobs:
 
       - name: Run full formatting, lint, type and regression gates
         working-directory: ${{ runner.temp }}/provider-store-package
+        env:
+          PYTHONPATH: ${{ runner.temp }}/provider-store-package
         run: |
           set -euo pipefail
           python -m pip install black
-          # The immutable release ZIP is hash-verified above. Normalize formatting
-          # in the isolated test copy before strict lint/regression gates.
+          # Normalize only the temporary test copy; the downloaded release asset remains
+          # unchanged and its SHA-256 is recorded by the prior verification step.
           python -m black provider_store tests
           python -m compileall -q provider_store tests
           bash ./run_checks.sh
