@@ -101,11 +101,24 @@ class ProviderDiagnostics:
                         "remediation": "Review the file safely and reduce it below the configured size limit.",
                     })
                     continue
-                with path.open("r", encoding="utf-8") as handle:
-                    data = json.load(
-                        handle, object_pairs_hook=_reject_duplicate_keys,
-                        parse_constant=_reject_non_finite,
-                    )
+                # Bound the actual read as well as the earlier stat check: the
+                # file may grow between stat() and open(), so json.load() alone
+                # could otherwise consume unbounded memory after a TOCTOU race.
+                with path.open("rb") as handle:
+                    raw = handle.read(max_file_bytes + 1)
+                if len(raw) > max_file_bytes:
+                    base["bytes"] = len(raw)
+                    checks.append({
+                        **base, "status": "TOO_LARGE", "valid": False,
+                        "remediation": "Review the file safely and reduce it below the configured size limit.",
+                    })
+                    continue
+                base["bytes"] = len(raw)
+                data = json.loads(
+                    raw.decode("utf-8"),
+                    object_pairs_hook=_reject_duplicate_keys,
+                    parse_constant=_reject_non_finite,
+                )
                 if not isinstance(data, (dict, list)):
                     checks.append({
                         **base, "status": "INVALID_ROOT", "valid": False,
