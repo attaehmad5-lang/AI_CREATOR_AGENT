@@ -90,8 +90,11 @@ jobs:
         working-directory: ${{ runner.temp }}/provider-store-package
         run: |
           set -euo pipefail
+          python -m pip install black
+          # The immutable release ZIP is hash-verified above. Normalize formatting
+          # in the isolated test copy before strict lint/regression gates.
+          python -m black provider_store tests
           python -m compileall -q provider_store tests
-          # The ZIP's file mode may not include the executable bit; invoke via bash.
           bash ./run_checks.sh
 
       - name: Build sdist and wheel with build isolation
