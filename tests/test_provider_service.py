@@ -2149,6 +2149,17 @@ class ProviderAdminControlTests(unittest.TestCase):
         result = service.generate_local_text(prompt="hello")
         self.assertEqual(result, {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False})
 
+    def test_local_model_service_bounds_utf8_bytes_and_rejects_invalid_unicode(self):
+        class Adapter:
+            def __init__(self, text): self.text = text
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": self.text}
+        for value in ("漢" * 700_000, "\\ud800"):
+            with self.subTest(size=len(value)):
+                service = ProviderService(self.connection, local_model_adapter=Adapter(value))
+                result = service.generate_local_text(prompt="hello")
+                self.assertEqual(result, {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False})
+
     def test_local_model_service_rejects_malformed_adapter_status(self):
         class Adapter:
             def generate_text(self, prompt, *, system=None):
