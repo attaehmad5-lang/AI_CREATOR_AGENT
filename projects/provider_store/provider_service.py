@@ -607,6 +607,7 @@ class ProviderService:
         retention_days: float = 0,
         provider_training_use: bool = False,
         user_training_consent: bool = False,
+        provider_id: str = "local-model",
     ) -> dict[str, Any]:
         """Generate through an injected loopback-only local adapter with service policy gates."""
         if self.local_model_adapter is None:
@@ -617,6 +618,8 @@ class ProviderService:
             return {"status": "INVALID_SYSTEM_PROMPT", "generated": False}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"status": "INVALID_PROJECT_ID", "generated": False}
+        if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", provider_id):
+            return {"status": "INVALID_PROVIDER_ID", "generated": False}
         if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
             return {"status": "INVALID_REQUEST_ID", "generated": False}
         authorization = self._authorize_operation(principal_id, "provider.generate")
@@ -651,7 +654,7 @@ class ProviderService:
         if self.data_handling_policy is not None:
             try:
                 data_policy = self.data_handling_policy.evaluate(
-                    provider_id=getattr(self.local_model_adapter, "provider_id", "local-model"),
+                    provider_id=provider_id,
                     data_categories=list(data_categories),
                     retention_days=retention_days,
                     provider_training_use=provider_training_use,
@@ -682,7 +685,7 @@ class ProviderService:
                 return {"status": "PROVIDER_HEALTH_CHECK_UNAVAILABLE", "generated": False}
             try:
                 eligibility = eligibility_fn(
-                    getattr(self.local_model_adapter, "provider_id", "local-model"),
+                    provider_id,
                     stale_after_seconds=stale_limit,
                     max_latency_ms=latency_limit,
                 )
