@@ -5,12 +5,12 @@
 ## Local verification
 
 - `python -m compileall -q provider_store tests`: PASS
-- `python -W error::ResourceWarning -m pytest -q`: 69 passed, 0 failed
-- Statement coverage: 95% (981 statements; 53 uncovered)
+- `python -W error::ResourceWarning -m pytest -q`: 74 passed, 0 failed
+- Statement coverage: 95% (981 statements, 46 uncovered)
 - Local package installation from the clean-room extraction: PASS
 - Wheel build from the clean-room extraction: PASS
 - SHA-256 manifest verification and ZIP integrity: PASS (25 ZIP entries; 24 manifest entries)
-- Archive SHA-256: `3711a49a73e53067f821df32b0a524f85f41d2bb7e7bac711d2893975e1384ed`
+- Updated archive SHA-256: `586656be1bf65d7abc1629a7dab3d350256076d7f0e461aca783b7f021de7761`
 
 ## Defects covered by fixes and regressions
 
@@ -18,6 +18,7 @@
 - SQLite connections close if schema initialization fails.
 - Audit log zero/negative limits return an empty list.
 - Regression tests cover missing cipher for encrypted catalogs, simultaneous primary/backup corruption, malformed SQLite rows, and missing-file fingerprints.
+- Five added edge-case tests cover LRU cache clearing/counters, nested secret-path detection, safe deep redaction, zero-result search filters, and malformed encrypted blobs.
 
 ## Remaining release gates — NOT PASS
 
@@ -27,7 +28,7 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 
 ## GitHub CI follow-up
 
-- Latest checked commit: `84d33482dd65a53cc69c1843a42fb2599a6ad482`.
+- Latest previously checked commit: `84d33482dd65a53cc69c1843a42fb2599a6ad482`.
 - GitHub Actions run `40259280565` completed successfully on both `ubuntu-latest` and `windows-latest`. Compilation, provider JSON catalog validation, and the repository's configured unit/regression test step all passed in both jobs.
 - This repository workflow does not demonstrate that the standalone archive's formatting, lint, type-check, or build-isolated packaging gates passed. Those release gates remain **NOT PASS** until run directly against the standalone package.
 - No PR has been merged.
