@@ -29,13 +29,14 @@ class LocalModelProviderAdapterTests(unittest.TestCase):
 
     def test_loopback_hosts_allowed_but_remote_hosts_and_other_paths_rejected(self):
         for endpoint in (
-            "http://localhost:11434/api/generate",
+            "http://127.0.0.1:11434/api/generate",
             "http://[::1]:11434/api/generate",
             "https://127.0.0.1/api/generate",
         ):
             adapter = LocalModelProviderAdapter(endpoint=endpoint, model_id="local-model", transport=lambda *a, **k: {"response": "ok"})
             self.assertTrue(adapter.endpoint.startswith(("http://", "https://")))
         for endpoint in (
+            "http://localhost:11434/api/generate",
             "https://example.com/api/generate",
             "http://192.168.1.20:11434/api/generate",
             "http://127.0.0.1/api/chat",
