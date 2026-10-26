@@ -191,9 +191,20 @@ class ProviderHealthManager:
                     "duplicate": False,
                     "history_size": len(history),
                 }
+            try:
+                timestamp = self.clock()
+                if (
+                    not isinstance(timestamp, datetime)
+                    or timestamp.tzinfo is None
+                    or timestamp.utcoffset() is None
+                ):
+                    return {"status": "INVALID_HEALTH_CLOCK", "saved": False}
+                timestamp = timestamp.astimezone(timezone.utc).isoformat()
+            except Exception:
+                return {"status": "INVALID_HEALTH_CLOCK", "saved": False}
             event = {
                 "success": success,
-                "timestamp": self.clock().astimezone(timezone.utc).isoformat(),
+                "timestamp": timestamp,
             }
             if request_id is not None:
                 event["request_id"] = request_id
