@@ -153,10 +153,13 @@ class RetryPolicy:
             return RetryDecision(False, attempt, 0.0, "INVALID_JITTER_SOURCE")
         delay = min(self.max_delay_seconds, exponential + jitter)
         header_delay = self._retry_after_seconds(retry_after)
-        if status_code == 429 and header_delay is not None:
-            # Never let an untrusted Retry-After value bypass the configured backoff cap.
-            delay = min(self.max_delay_seconds, max(delay, header_delay))
-            reason = "RATE_LIMIT_RETRY_AFTER" if header_delay else "RATE_LIMIT_BACKOFF"
+        if status_code == 429:
+            if header_delay is not None:
+                # Never let an untrusted Retry-After value bypass the configured backoff cap.
+                delay = min(self.max_delay_seconds, max(delay, header_delay))
+                reason = "RATE_LIMIT_RETRY_AFTER" if header_delay else "RATE_LIMIT_BACKOFF"
+            else:
+                reason = "RATE_LIMIT_BACKOFF"
         else:
             reason = "TRANSIENT_HTTP_FAILURE" if retryable_status else "TRANSIENT_NETWORK_FAILURE"
         return RetryDecision(True, attempt, delay, reason)
