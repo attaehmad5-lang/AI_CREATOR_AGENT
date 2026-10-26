@@ -61,6 +61,16 @@ class ProviderDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["checks"][0]["status"], "TOO_LARGE")
         self.assertFalse(result["ready"])
 
+    def test_path_resolution_errors_fail_closed_without_leaking_details(self):
+        path = self.root / "state.json"
+        path.write_text("{}", encoding="utf-8")
+        with patch.object(Path, "resolve", side_effect=RuntimeError("private path detail")):
+            result = self.diagnostics.inspect_files({"state": path})
+
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["checks"][0]["status"], "UNREADABLE")
+        self.assertNotIn("private path detail", repr(result))
+
     def test_actual_read_is_bounded_if_file_grows_after_stat(self):
         path = self.root / "state.json"
         path.write_text("{}", encoding="utf-8")
