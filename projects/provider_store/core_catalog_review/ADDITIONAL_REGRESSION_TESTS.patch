@@ -155,3 +155,49 @@
 +    for blob in (b"", b"PSC1short", b"BAD!" + b"x" * 64):
 +        with pytest.raises(DecryptionError):
 +            cipher.decrypt(blob)
+
+
+@@ additional coverage: catalog error paths and storage corruption handling
++def test_remove_alias_missing_raises_provider_not_found(cat: ProviderCatalog) -> None:
++    rec = cat.register(make("alias-target", aliases=["present"]))
++    with pytest.raises(ProviderNotFound):
++        cat.remove_alias(rec.provider_id, "absent")
++
++def test_deprecate_missing_model_raises_model_not_found(cat: ProviderCatalog) -> None:
++    rec = cat.register(make("model-target", models=[{"name": "known-model"}]))
++    with pytest.raises(ModelNotFound):
++        cat.deprecate_model(rec.provider_id, "not-a-model")
++
++def test_execute_with_fallback_without_candidates_raises(cat: ProviderCatalog) -> None:
++    with pytest.raises(NoProviderAvailable):
++        cat.execute_with_fallback(Capability.TEXT, lambda rec: rec)
++
++def test_import_state_skips_invalid_duplicate_and_alias_conflict(cat: ProviderCatalog) -> None:
++    existing = cat.register(make("existing", provider_id="existing1", aliases=["shared"]))
++    imported, issues = cat.import_state({"providers": [
++        {"name": "invalid", "provider_id": "bad id", "capabilities": ["text"]},
++        make("duplicate", provider_id=existing.provider_id),
++        make("conflict", provider_id="conflict1", aliases=["shared"]),
++        make("valid", provider_id="valid1"),
++    ]})
++    assert imported == 1
++    assert len(issues) == 3
++    assert cat.get("valid1").name == "valid"
++    assert cat.get("existing1").name == "existing"
++
++def test_json_storage_rejects_unexpected_layout_and_quarantines(tmp_path: Path) -> None:
++    path = tmp_path / "bad-layout.json"
++    path.write_text(json.dumps({"not_providers": {}}), encoding="utf-8")
++    result = JsonFileStorage(path).load()
++    assert result.records == {}
++    assert any("unexpected catalog layout" in issue for issue in result.issues)
++    assert not path.exists()
++    assert list(tmp_path.glob("bad-layout.json.corrupt-*"))
++
++def test_default_pinger_returns_http_error_status(monkeypatch: pytest.MonkeyPatch) -> None:
++    import urllib.error
++    import provider_store.core_catalog as core_catalog
++    def raise_http_error(*args: Any, **kwargs: Any) -> Any:
++        raise urllib.error.HTTPError("https://example.invalid", 503, "unavailable", {}, None)
++    monkeypatch.setattr(core_catalog.urllib.request, "urlopen", raise_http_error)
++    assert core_catalog.default_pinger("https://example.invalid", 0.1) == 503
