@@ -429,6 +429,18 @@ class ProviderServiceTests(unittest.TestCase):
             self.assertFalse(result["retry"])
             self.assertEqual(result["reason"], "INVALID_RETRY_RESPONSE")
 
+    def test_retry_policy_decision_property_errors_fail_closed(self):
+        class BrokenDecision:
+            @property
+            def retry(self):
+                raise RuntimeError("private policy detail")
+        class MalformedPolicy:
+            def decide(self, **failure):
+                return BrokenDecision()
+        self.service.retry_policy = MalformedPolicy()
+        result = self.service.retry_decision(attempt=1, status_code=503)
+        self.assertEqual(result, {"retry": False, "reason": "INVALID_RETRY_RESPONSE"})
+
     def test_started_request_reconciles_cost_commits_quota_and_records_health(self):
         self.cost.reserve_usage(
             project_id="film", provider_id="image", estimated_cost=2.0, request_id="job-1"
