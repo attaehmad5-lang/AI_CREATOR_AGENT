@@ -9,8 +9,8 @@
 - Statement coverage: 98% (981 statements; 20 uncovered)
 - Local package installation from the clean-room extraction: PASS
 - Wheel build from the clean-room extraction: PASS (wheel SHA-256: `e0cdea959c073ae02d5a83a82c425e5aa59d75b5192b4e76c6029a206cc099c8`)
-- SHA-256 manifest verification and ZIP integrity: PASS (49 ZIP entries; 40 manifest entries)
-- Archive SHA-256: `840409d5ef5fb575a615194904a196fb40ef934924e3592d3f352a6bdf915469`
+- SHA-256 manifest verification and ZIP integrity: PASS (29 ZIP entries; 28 manifest entries)
+- Archive SHA-256: `487ea39cfa17942a458960b488dac6277c73baf14bd53e6a34a84da6f5471111`
 
 ## Defects covered by fixes and regressions
 
@@ -27,7 +27,6 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 
 ## GitHub CI follow-up
 
-- Latest checked commit before this documentation refresh: `5a7ddbfc4875745b50c8e1dbd150cff31270e87c`.
 - GitHub Actions run `40296846258` completed successfully on both `ubuntu-latest` and `windows-latest`. Compilation, provider JSON catalog validation, and the repository's configured unit/regression test step passed in both jobs.
 - This repository workflow does not demonstrate that the standalone archive's formatting, lint, type-check, or build-isolated packaging gates passed. Those release gates remain **NOT PASS** until run directly against the standalone package.
 - No PR has been merged.
