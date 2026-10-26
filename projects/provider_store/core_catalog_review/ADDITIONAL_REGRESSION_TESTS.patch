@@ -78,6 +78,7 @@
  # ------------------------------------------------- additional edge cases
  def test_invalid_provider_id_rejected() -> None:
      with pytest.raises(ValidationError):
+         ProviderRecord.model_validate(make("a", provider_id="Bad ID!"))
 @@ -722 +722,11 @@
 +def test_audit_entries_zero_or_negative_limit_returns_empty() -> None:
 +    audit = AuditLog(max_memory=10)
@@ -89,4 +90,4 @@
 +    assert len(audit.entries(limit=1)) == 1
 +
 +
- def test_audit_file_and_redaction(tmp_path: Path) -> None:
+ def test_audit_file_and_redaction(tmp_path: Path) -> None
