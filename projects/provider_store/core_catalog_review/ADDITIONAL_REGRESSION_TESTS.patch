@@ -201,3 +201,51 @@
 +        raise urllib.error.HTTPError("https://example.invalid", 503, "unavailable", {}, None)
 +    monkeypatch.setattr(core_catalog.urllib.request, "urlopen", raise_http_error)
 +    assert core_catalog.default_pinger("https://example.invalid", 0.1) == 503
+
+
+--- additional coverage: validation, filtering, logging, and pinger success ---
++def test_model_and_provider_validation_reject_bad_labels_and_replacements() -> None:
++    with pytest.raises(ValidationError):
++        ProviderRecord.model_validate(make("provider", aliases=["not a label!"]))
++    with pytest.raises(ValidationError):
++        ProviderRecord.model_validate(make("provider", models=[{"name": "   "}]))
++    with pytest.raises(ValidationError):
++        ProviderRecord.model_validate(make("provider", models=[
++            {"name": "model-a", "replaced_by": "missing-model"}
++        ]))
++    with pytest.raises(ValidationError):
++        ProviderRecord.model_validate(make("provider", models=[
++            {"name": "model-a", "replaced_by": "model-a"}
++        ]))
+
++def test_search_tag_any_and_model_family_negative_filters(cat: ProviderCatalog) -> None:
++    cat.register(make("search-target", tags=["video"], models=[{"name": "m1", "family": "vision"}]))
++    assert cat.search(SearchQuery(tags_any=["audio"])) == []
++    assert cat.search(SearchQuery(model_family="text")) == []
+
++def test_configure_logging_replaces_only_owned_handlers() -> None:
++    import provider_store.observability as observability
++    logger = logging.getLogger(observability.LOGGER_NAME)
++    original = list(logger.handlers)
++    try:
++        logger.handlers.clear()
++        foreign = logging.NullHandler()
++        logger.addHandler(foreign)
++        configure_logging(stream=io.StringIO())
++        configure_logging(stream=io.StringIO())
++        assert foreign in logger.handlers
++        assert sum(bool(getattr(h, "_provider_store", False)) for h in logger.handlers) == 1
++    finally:
++        logger.handlers.clear()
++        logger.handlers.extend(original)
+
++def test_default_pinger_returns_success_status(monkeypatch: pytest.MonkeyPatch) -> None:
++    import provider_store.core_catalog as core_catalog
++    class Response:
++        status = 204
++        def __enter__(self) -> "Response":
++            return self
++        def __exit__(self, *args: Any) -> None:
++            return None
++    monkeypatch.setattr(core_catalog.urllib.request, "urlopen", lambda *a, **k: Response())
++    assert core_catalog.default_pinger("https://example.invalid", 0.1) == 204
