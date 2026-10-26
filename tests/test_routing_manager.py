@@ -996,6 +996,27 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["provider"], "fallback")
         self.assertEqual(result["strategy"], "HEALTHIEST_FIRST")
 
+    def test_malformed_latency_ranks_last_without_crashing(self):
+        class HealthStub:
+            data = {
+                "providers": {
+                    "primary": {"last_latency_ms": None},
+                    "fallback": {"last_latency_ms": 18},
+                }
+            }
+
+            def is_eligible(self, provider_id):
+                return {"eligible": True, "status": "HEALTHY"}
+
+        router = ProviderRoutingManager(
+            self.connections, health_manager=HealthStub(),
+        )
+        result = router.route(
+            category="image", project_id="film", strategy="HEALTHIEST_FIRST",
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+
     def test_invalid_route_inputs_and_missing_health_evidence_fail_closed(self):
         router = ProviderRoutingManager(self.connections)
         self.assertEqual(router.route(category="", project_id="film")["status"], "INVALID_ROUTE_REQUEST")
