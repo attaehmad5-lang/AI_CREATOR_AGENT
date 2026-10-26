@@ -41,6 +41,17 @@ class ProviderDiagnosticsTests(unittest.TestCase):
             ["MISSING", "INVALID_JSON", "INVALID_ROOT"],
         )
 
+    def test_duplicate_keys_and_non_finite_numbers_are_rejected(self):
+        duplicate = self.root / "duplicate.json"
+        non_finite = self.root / "non-finite.json"
+        duplicate.write_text('{"status": "HEALTHY", "status": "BLOCKED"}', encoding="utf-8")
+        non_finite.write_text('{"cost": NaN}', encoding="utf-8")
+        result = self.diagnostics.inspect_files({"duplicate": duplicate, "nonfinite": non_finite})
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["issue_count"], 2)
+        self.assertEqual([item["status"] for item in result["checks"]],
+                         ["INVALID_JSON", "INVALID_JSON"])
+
     def test_oversized_file_is_rejected_before_parsing(self):
         path = self.root / "large.json"
         path.write_text('{"ok": true}', encoding="utf-8")
