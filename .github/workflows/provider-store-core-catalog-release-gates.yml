@@ -10,7 +10,7 @@ on:
       expected_sha256:
         description: "Expected SHA-256 of the ZIP"
         required: true
-        default: "5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7"
+        default: "383da0901eec3335308170c2c84dd1682dac5558dfcd20e67e0aa6be373d2e6d"
         type: string
   push:
     branches:
@@ -38,7 +38,7 @@ jobs:
       - name: Validate archive inputs
         env:
           ARCHIVE_URL: ${{ inputs.archive_url || 'https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/releases/download/provider-store-core-catalog-v1.0.0/provider_store_core_catalog_verified.zip' }}
-          EXPECTED_SHA256: ${{ inputs.expected_sha256 || '5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7' }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 || '383da0901eec3335308170c2c84dd1682dac5558dfcd20e67e0aa6be373d2e6d' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -54,7 +54,7 @@ jobs:
       - name: Download and verify exact archive
         env:
           ARCHIVE_URL: ${{ inputs.archive_url || 'https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/releases/download/provider-store-core-catalog-v1.0.0/provider_store_core_catalog_verified.zip' }}
-          EXPECTED_SHA256: ${{ inputs.expected_sha256 || '5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7' }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 || '383da0901eec3335308170c2c84dd1682dac5558dfcd20e67e0aa6be373d2e6d' }}
         run: |
           set -euo pipefail
           curl --fail --location --retry 3 --retry-delay 2 "$ARCHIVE_URL" --output "$RUNNER_TEMP/provider-store-package.zip"
