@@ -1297,12 +1297,18 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["avg_latency_ms"], 25.0)
         self.assertEqual(snapshot["avg_queue_wait_ms"], 12.0)
 
-        hidden_trace = service.execute_routed_request(
+        # Use a service without the deliberately tripped SLO policy so this
+        # assertion tests trace sanitization rather than the independent SLO gate.
+        trace_service = ProviderService(
+            self.connections, routing_manager=RoutingStub(),
+        )
+        hidden_trace = trace_service.execute_routed_request(
             category="image", project_id="film", request_id="hidden-trace-job",
             estimated_cost=0.0, modality="image", adapter=adapter,
             adapter_options={"trace_id": "unvalidated trace"},
         )
         self.assertNotEqual(hidden_trace.get("status"), "INVALID_TRACE_ID")
+        self.assertEqual(len(adapter_calls), 2)
         self.assertNotIn("trace_id", adapter_calls[1])
 
     def test_low_output_quality_score_prevents_success_status(self):
