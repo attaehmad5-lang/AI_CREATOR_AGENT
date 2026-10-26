@@ -1901,7 +1901,7 @@ class ProviderAdminControlTests(unittest.TestCase):
         health = Healthy()
         service = ProviderService(self.connection, local_model_adapter=Adapter(), health_manager=health)
         result = service.generate_local_text(
-            prompt="hello", require_fresh_health_check=True,
+            prompt="hello", provider_id="local-ollama", require_fresh_health_check=True,
             health_stale_after_seconds=45, health_max_latency_ms=900,
         )
         self.assertTrue(result["generated"])
@@ -1949,7 +1949,7 @@ class ProviderAdminControlTests(unittest.TestCase):
         policy = Policy()
         service = ProviderService(self.connection, local_model_adapter=Adapter(), data_handling_policy=policy)
         result = service.generate_local_text(
-            prompt="hello", data_categories=("user_content",), retention_days=0,
+            prompt="hello", provider_id="local-ollama", data_categories=("user_content",), retention_days=0,
             provider_training_use=False, user_training_consent=False,
         )
         self.assertTrue(result["generated"])
@@ -1974,6 +1974,35 @@ class ProviderAdminControlTests(unittest.TestCase):
             with self.subTest(options=options):
                 result = service.generate_local_text(prompt="hello", **options)
                 self.assertEqual(result["status"], "INVALID_DATA_HANDLING_POLICY_INPUT")
+                self.assertFalse(result["generated"])
+
+    def test_local_model_provider_identity_is_explicit_and_cannot_be_spoofed_by_adapter(self):
+        class Adapter:
+            provider_id = "healthy-but-unrelated-provider"
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "safe output"}
+        class Health:
+            def __init__(self): self.checked = []
+            def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
+                self.checked.append(provider_id)
+                return {"eligible": provider_id == "configured-local-provider"}
+        health = Health()
+        service = ProviderService(self.connection, local_model_adapter=Adapter(), health_manager=health)
+        result = service.generate_local_text(
+            prompt="hello", provider_id="configured-local-provider", require_fresh_health_check=True,
+        )
+        self.assertTrue(result["generated"])
+        self.assertEqual(health.checked, ["configured-local-provider"])
+
+    def test_local_model_provider_id_validation_rejects_injection_like_values(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                raise AssertionError("adapter must not be called")
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        for value in ("", "../other", "provider\nadmin", "x" * 129, None):
+            with self.subTest(value=value):
+                result = service.generate_local_text(prompt="hello", provider_id=value)
+                self.assertEqual(result["status"], "INVALID_PROVIDER_ID")
                 self.assertFalse(result["generated"])
 
     def test_local_model_service_rejects_malformed_adapter_status(self):
