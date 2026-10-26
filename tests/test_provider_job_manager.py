@@ -202,9 +202,19 @@ class ProviderJobManagerTests(unittest.TestCase):
             self.manager.poll(job_id="expired-renew")["job"]["status"],
             "QUEUED",
         )
+        retry = self.manager.claim_next(worker_id="worker-retry")
+        self.assertEqual(retry["job"]["job_id"], "expired-renew")
+        self.assertEqual(
+            self.manager.complete(
+                job_id="expired-renew", worker_id="worker-retry",
+                success=True, result_ref="asset:retry-complete",
+            )["status"],
+            "JOB_COMPLETED",
+        )
 
         self.submit("cancel-renew")
-        self.manager.claim_next(worker_id="worker-cancel")
+        claimed_cancel = self.manager.claim_next(worker_id="worker-cancel")
+        self.assertEqual(claimed_cancel["job"]["job_id"], "cancel-renew")
         self.manager.cancel(job_id="cancel-renew")
         cancelled = self.manager.renew_lease(
             job_id="cancel-renew", worker_id="worker-cancel"
