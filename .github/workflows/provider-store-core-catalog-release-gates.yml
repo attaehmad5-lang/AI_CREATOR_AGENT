@@ -19,7 +19,7 @@ on:
       - ".github/workflows/provider-store-core-catalog-release-gates.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   standalone-package:
@@ -120,6 +120,19 @@ jobs:
           wheel-smoke-env/bin/python -m pip install "$RUNNER_TEMP/provider-store-package"/dist/*.whl
           cd "$RUNNER_TEMP"
           wheel-smoke-env/bin/python -c "import provider_store; print('Installed provider_store from:', provider_store.__file__)"
+
+      - name: Replace the GitHub Release ZIP with the corrected, tested package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -s "$RUNNER_TEMP/provider_store_core_catalog_corrected.zip"
+          test -s "$RUNNER_TEMP/provider_store_core_catalog_corrected.sha256"
+          gh release upload provider-store-core-catalog-v1.0.0 \\
+            "$RUNNER_TEMP/provider_store_core_catalog_corrected.zip#provider_store_core_catalog_verified.zip" \\
+            "$RUNNER_TEMP/provider_store_core_catalog_corrected.sha256#provider_store_core_catalog_verified.sha256" \\
+            --repo attaehmad5-lang/AI_CREATOR_AGENT --clobber
+          gh release view provider-store-core-catalog-v1.0.0 --repo attaehmad5-lang/AI_CREATOR_AGENT --json assets --jq '.assets[] | select(.name == "provider_store_core_catalog_verified.zip" or .name == "provider_store_core_catalog_verified.sha256") | [.name,.size,.url] | @tsv'
 
       - name: Upload build artifacts and coverage report
         if: always()
