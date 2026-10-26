@@ -98,6 +98,13 @@ jobs:
           python -m compileall -q provider_store tests
           bash ./run_checks.sh
 
+      - name: Package the corrected, tested source ZIP
+        working-directory: ${{ runner.temp }}/provider-store-package
+        run: |
+          set -euo pipefail
+          zip -qr "$RUNNER_TEMP/provider_store_core_catalog_corrected.zip" . -x ".coverage" "dist/*" "*.pyc" "__pycache__/*"
+          sha256sum "$RUNNER_TEMP/provider_store_core_catalog_corrected.zip" | tee "$RUNNER_TEMP/provider_store_core_catalog_corrected.sha256"
+
       - name: Build sdist and wheel with build isolation
         working-directory: ${{ runner.temp }}/provider-store-package
         run: |
@@ -122,4 +129,6 @@ jobs:
           path: |
             ${{ runner.temp }}/provider-store-package/dist/*
             ${{ runner.temp }}/provider-store-package/.coverage
+            ${{ runner.temp }}/provider_store_core_catalog_corrected.zip
+            ${{ runner.temp }}/provider_store_core_catalog_corrected.sha256
           if-no-files-found: warn
