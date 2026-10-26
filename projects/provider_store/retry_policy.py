@@ -52,7 +52,9 @@ class RetryPolicy:
 
     @staticmethod
     def _retry_after_seconds(value: str | int | float | None) -> float | None:
-        if value is None:
+        if value is None or isinstance(value, bool):
+            return None
+        if not isinstance(value, (str, int, float)):
             return None
         try:
             seconds = float(value)
