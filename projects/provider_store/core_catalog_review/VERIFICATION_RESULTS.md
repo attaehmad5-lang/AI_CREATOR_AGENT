@@ -17,7 +17,7 @@
 - JSON log redaction preserves valid JSON for escaped exception text.
 - SQLite connections close if schema initialization fails.
 - Audit log zero/negative limits return an empty list.
-- Regression tests cover missing cipher for encrypted catalogs, simultaneous primary/backup corruption, malformed SQLite rows, and missing-file fingerprints.
+- Regression tests cover missing cipher for encrypted catalogs, simultaneous primary/backup corruption, malformed SQLite rows, missing-file fingerprints, cache edge cases, nested secret-path detection, deep-redaction immutability, zero-result search filters, and malformed encrypted blobs.
 - Five added edge-case tests cover LRU cache clearing/counters, nested secret-path detection, safe deep redaction, zero-result search filters, and malformed encrypted blobs.
 
 ## Remaining release gates — NOT PASS
@@ -29,6 +29,6 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 ## GitHub CI follow-up
 
 - Latest previously checked commit: `84d33482dd65a53cc69c1843a42fb2599a6ad482`.
-- GitHub Actions run `40259280565` completed successfully on both `ubuntu-latest` and `windows-latest`. Compilation, provider JSON catalog validation, and the repository's configured unit/regression test step all passed in both jobs.
+- GitHub Actions run `40260458349` completed successfully on both `ubuntu-latest` and `windows-latest`. Compilation, provider JSON catalog validation, and the repository's configured unit/regression test step all passed in both jobs.
 - This repository workflow does not demonstrate that the standalone archive's formatting, lint, type-check, or build-isolated packaging gates passed. Those release gates remain **NOT PASS** until run directly against the standalone package.
 - No PR has been merged.
