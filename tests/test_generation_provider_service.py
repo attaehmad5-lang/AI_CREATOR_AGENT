@@ -35,13 +35,18 @@ class GenerationProviderServiceTests(unittest.TestCase):
                     manager_cls.assert_not_called()
 
     def test_custom_relative_registry_path_keeps_explicit_caller_semantics(self):
+        original = Path.cwd()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "registry.json"
-            path.write_text(json.dumps({"image": {"primary": None, "fallbacks": [], "provider_modules": {}}}), encoding="utf-8")
-            with patch("projects.generation.providers.provider_service.ProviderManager") as manager_cls, \
-                 patch("projects.generation.providers.provider_service.FallbackManager"), \
-                 patch("projects.generation.providers.provider_service.ProviderHealth"):
-                service = ProviderService(path)
+            try:
+                os.chdir(directory)
+                path = Path("registry.json")
+                path.write_text(json.dumps({"image": {"primary": None, "fallbacks": [], "provider_modules": {}}}), encoding="utf-8")
+                with patch("projects.generation.providers.provider_service.ProviderManager") as manager_cls, \
+                     patch("projects.generation.providers.provider_service.FallbackManager"), \
+                     patch("projects.generation.providers.provider_service.ProviderHealth"):
+                    service = ProviderService(path)
+            finally:
+                os.chdir(original)
         self.assertEqual(service.registry["image"]["fallbacks"], [])
         manager_cls.return_value.load_registry.assert_called_once_with(service.registry["image"])
 
