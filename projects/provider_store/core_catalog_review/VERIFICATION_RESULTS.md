@@ -11,6 +11,8 @@
 - Local package installation from extracted archive with `python -m pip install --no-build-isolation --no-deps .`: **PASS**
 - Wheel build with `python -m pip wheel --no-build-isolation --no-deps .`: **PASS**
 - SHA-256 manifest verification and ZIP integrity check: **PASS**.
+- Cleaned release archive: **25 ZIP entries**, no `build/` or cache artifacts; all 24 manifest entries verified. Archive SHA-256: `3fefc579aeb10483c65b525d6261dc76d81ad3d27232d8503862cd333b14f7f0`.
+- Documentation corrected so the setup guide no longer contradicts the executed test evidence; blocked developer-tool gates remain explicitly NOT PASS.
 
 ## Defects fixed
 
