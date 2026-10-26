@@ -753,7 +753,10 @@ class ProviderService:
             return {"status": "INVALID_ADAPTER", "executed": False}
         if not isinstance(adapter_options, (dict, type(None))):
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
-        if not isinstance(request_id, str) or not request_id.strip():
+        if (
+            not isinstance(request_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request_id)
+        ):
             return {"status": "INVALID_REQUEST_ID", "executed": False}
         if trace_id is not None and (
             not isinstance(trace_id, str)
