@@ -102,7 +102,10 @@ class ProviderDiagnostics:
                     })
                     continue
                 with path.open("r", encoding="utf-8") as handle:
-                    data = json.load(\n                        handle, object_pairs_hook=_reject_duplicate_keys,\n                        parse_constant=_reject_non_finite,\n                    )
+                    data = json.load(
+                        handle, object_pairs_hook=_reject_duplicate_keys,
+                        parse_constant=_reject_non_finite,
+                    )
                 if not isinstance(data, (dict, list)):
                     checks.append({
                         **base, "status": "INVALID_ROOT", "valid": False,
