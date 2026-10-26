@@ -219,7 +219,10 @@ class LocalModelProviderAdapter:
                 "error_type": type(exc).__name__,
             }
         text = response.get("response")
-        if not isinstance(text, str) or not text.strip():
+        # Ollama's non-streaming API marks completion with done=true. A response
+        # without that explicit terminal marker may be truncated or incomplete;
+        # never advertise it as a successful generation.
+        if not isinstance(text, str) or not text.strip() or response.get("done") is not True:
             return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
         return {
             "status": "LOCAL_TEXT_GENERATED",
