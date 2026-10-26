@@ -1,42 +1,29 @@
 # Provider Store – Core Catalog Verification
 
-**Date:** 2026-10-26  
-**Scope:** User-provided Provider Store – Core Catalog package, isolated Linux workspace.
+**Date:** 2026-10-26
 
-## Latest verification
+## Local verification
 
-- `python -m compileall -q provider_store tests`: **PASS**
-- `python -W error::ResourceWarning -m pytest -q`: **69 passed, 0 failed**
-- Statement coverage: **95%** (981 statements; 53 uncovered)
-- Local package installation from extracted archive with `python -m pip install --no-build-isolation --no-deps .`: **PASS**
-- Wheel build with `python -m pip wheel --no-build-isolation --no-deps .`: **PASS**
-- SHA-256 manifest verification and ZIP integrity check: **PASS**.
-- Cleaned release archive: **25 ZIP entries**, no `build/` or cache artifacts; all 24 manifest entries verified. Final archive SHA-256: `3711a49a73e53067f821df32b0a524f85f41d2bb7e7bac711d2893975e1384ed`.
-- Documentation corrected so the setup guide no longer contradicts the executed test evidence; the bundled PDF was regenerated to label the older pending-results report as historical and point to current verification results. Blocked developer-tool gates remain explicitly NOT PASS.
-- Final clean-room extraction rerun: compile, all 69 pytest tests, package install, wheel build, reverse patch applicability, ZIP integrity, and manifest verification **PASS**.
+- `python -m compileall -q provider_store tests`: PASS
+- `python -W error::ResourceWarning -m pytest -q`: 69 passed, 0 failed
+- Statement coverage: 95% (981 statements; 53 uncovered)
+- Local package install and wheel build: PASS
+- SHA-256 manifest verification and ZIP integrity: PASS (25 ZIP entries; 24 manifest entries)
+- Archive SHA-256: `3711a49a73e53067f821df32b0a524f85f41d2bb7e7bac711d2893975e1384ed`
 
-## Defects fixed
+## Defects covered by fixes and regressions
 
-1. `JsonFormatter.format()` redacts payload values before JSON serialization, avoiding corrupted escaped exception text.
-2. `SqliteStorage._connect()` closes a connection if schema initialization fails.
-3. `AuditLog.entries(limit=0)` and negative limits now return an empty list.
-4. Regression tests cover escaped exception JSON, non-positive audit limits, and SQLite connection closure when schema initialization fails.
-5. Additional regression tests cover encrypted catalog access without a cipher, simultaneous primary/backup corruption, malformed SQLite rows, and missing-file fingerprints. The test fixture explicitly closes its SQLite connection.
+- JSON log redaction preserves valid JSON for escaped exception text.
+- SQLite connections close if schema initialization fails.
+- Audit log zero/negative limits return an empty list.
+- Regression tests cover missing cipher for encrypted catalogs, simultaneous primary/backup corruption, malformed SQLite rows, and missing-file fingerprints.
 
 ## Remaining release gates — NOT PASS
 
-The execution environment cannot resolve/reach the Python package index. `black`, `flake8`, and `mypy` are unavailable; `./run_checks.sh` cannot install `mypy>=1.8` or the build-isolation dependency `setuptools>=61`.
+The environment cannot reach the Python package index. `black`, `flake8`, and `mypy` are unavailable; `./run_checks.sh` cannot install `mypy>=1.8` or build-isolation dependency `setuptools>=61`.
 
-Still required in network-enabled CI or Termux:
-- `black .` and `black --check .`
-- `flake8 provider_store tests`
-- `mypy provider_store`
-- `./run_checks.sh` clean-room build-isolated install
-
-This is not a claim of 100% release verification until all release gates pass. No PR has been merged.
+Still required in a network-enabled environment: `black .`, `black --check .`, `flake8 provider_store tests`, `mypy provider_store`, and `./run_checks.sh` with build isolation. Do not treat release verification as 100% complete until these pass.
 
 ## GitHub CI follow-up
 
-- This PR's latest head is checked separately from the earlier successful CI run; no PR-triggered workflow run was returned for the newest documentation/test-patch commits at the time of this check.
-- The earlier successful Task 25 workflow run is historical evidence only and is not treated as verification of this updated head.
-- Release status remains **NOT PASS** until the formatting, lint, type-check, and build-isolated checks listed above run successfully.
+GitHub Actions run 40259177921, associated with commit `7f5ca779c7be0a8acc8b8c3cb667c948fcfba8ce`, completed successfully. Both Ubuntu and Windows jobs passed compilation, provider JSON catalog validation, and the repository's configured unit/regression test step. This is not evidence that the standalone archive's formatting, lint, type-check, or build-isolated packaging gates passed. No PR has been merged.
