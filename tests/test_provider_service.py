@@ -2093,6 +2093,17 @@ class ProviderAdminControlTests(unittest.TestCase):
         self.assertNotIn("private policy storage contents", repr(result))
         self.assertNotIn("private prompt", repr(result))
 
+    def test_local_model_project_id_rejects_control_and_oversized_values(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                raise AssertionError("adapter must not be called")
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        for value in ("", " bad", "bad id", "film\\nadmin", "x" * 129, "../private"):
+            with self.subTest(value=value):
+                result = service.generate_local_text(prompt="hello", project_id=value)
+                self.assertEqual(result["status"], "INVALID_PROJECT_ID")
+                self.assertFalse(result["generated"])
+
     def test_local_model_request_id_matches_safe_routing_contract(self):
         class Adapter:
             def generate_text(self, prompt, *, system=None):
