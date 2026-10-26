@@ -5,10 +5,10 @@ import importlib
 import re
 from typing import Any
 
-_PROVIDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ]{0,63}\\Z")
-_MODULE_NAME = re.compile(r"projects\\.generation\\.providers(?:\\.[A-Za-z_][A-Za-z0-9_]*)+\\Z")
-_CLASS_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*Provider\\Z")
-_PATH_PART = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\\Z")
+_PROVIDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ]{0,63}\Z")
+_MODULE_NAME = re.compile(r"projects\.generation\.providers(?:\.[A-Za-z_][A-Za-z0-9_]*)+\Z")
+_CLASS_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*Provider\Z")
+_PATH_PART = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
 class ProviderManager:
@@ -37,7 +37,7 @@ class ProviderManager:
         if (
             not isinstance(module_path, str)
             or not module_path.endswith(".py")
-            or "\\\\" in module_path
+            or "\\" in module_path
             or module_path.startswith("/")
         ):
             raise ValueError("invalid provider module path")
