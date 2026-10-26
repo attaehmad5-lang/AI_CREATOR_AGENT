@@ -1866,6 +1866,62 @@ class ProviderAdminControlTests(unittest.TestCase):
         self.assertNotIn("prompt", result)
         self.assertEqual(result["provider_id"], "local-ollama")
 
+    def test_local_model_health_gate_blocks_generation_when_health_is_stale_or_unavailable(self):
+        class Adapter:
+            provider_id = "local-ollama"
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "should not run"}
+
+        adapter = Adapter()
+        service = ProviderService(self.connection, local_model_adapter=adapter)
+        result = service.generate_local_text(prompt="hello", require_fresh_health_check=True)
+        self.assertEqual(result["status"], "PROVIDER_HEALTH_CHECK_UNAVAILABLE")
+        self.assertFalse(adapter.called)
+
+        class Unhealthy:
+            def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
+                return {"eligible": False, "status": "STALE"}
+        service = ProviderService(self.connection, local_model_adapter=adapter, health_manager=Unhealthy())
+        result = service.generate_local_text(prompt="hello", require_fresh_health_check=True)
+        self.assertEqual(result["status"], "PROVIDER_HEALTH_REJECTED")
+        self.assertFalse(adapter.called)
+
+    def test_local_model_health_gate_allows_generation_only_after_explicit_eligibility(self):
+        class Adapter:
+            provider_id = "local-ollama"
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "safe output"}
+        class Healthy:
+            def __init__(self): self.args = None
+            def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
+                self.args = (provider_id, stale_after_seconds, max_latency_ms)
+                return {"eligible": True, "status": "HEALTHY"}
+        health = Healthy()
+        service = ProviderService(self.connection, local_model_adapter=Adapter(), health_manager=health)
+        result = service.generate_local_text(
+            prompt="hello", require_fresh_health_check=True,
+            health_stale_after_seconds=45, health_max_latency_ms=900,
+        )
+        self.assertTrue(result["generated"])
+        self.assertEqual(health.args, ("local-ollama", 45.0, 900.0))
+
+    def test_local_model_health_gate_rejects_invalid_policy_values(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                raise AssertionError("adapter must not be called")
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        for options in (
+            {"require_fresh_health_check": "yes"},
+            {"require_fresh_health_check": True, "health_stale_after_seconds": -1},
+            {"require_fresh_health_check": True, "health_max_latency_ms": float("inf")},
+        ):
+            with self.subTest(options=options):
+                result = service.generate_local_text(prompt="hello", **options)
+                self.assertEqual(result["status"], "INVALID_HEALTH_CHECK_POLICY")
+                self.assertFalse(result["generated"])
+
     def test_local_model_service_rejects_malformed_adapter_status(self):
         class Adapter:
             def generate_text(self, prompt, *, system=None):
