@@ -7,7 +7,8 @@
 - `python -m compileall -q provider_store tests`: PASS
 - `python -W error::ResourceWarning -m pytest -q`: 69 passed, 0 failed
 - Statement coverage: 95% (981 statements; 53 uncovered)
-- Local package install and wheel build: PASS
+- Local package installation from the clean-room extraction: PASS
+- Wheel build from the clean-room extraction: PASS
 - SHA-256 manifest verification and ZIP integrity: PASS (25 ZIP entries; 24 manifest entries)
 - Archive SHA-256: `3711a49a73e53067f821df32b0a524f85f41d2bb7e7bac711d2893975e1384ed`
 
@@ -26,4 +27,7 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 
 ## GitHub CI follow-up
 
-GitHub Actions run 40259177921, associated with commit `7f5ca779c7be0a8acc8b8c3cb667c948fcfba8ce`, completed successfully. Both Ubuntu and Windows jobs passed compilation, provider JSON catalog validation, and the repository's configured unit/regression test step. This is not evidence that the standalone archive's formatting, lint, type-check, or build-isolated packaging gates passed. No PR has been merged.
+- Latest checked commit: `84d33482dd65a53cc69c1843a42fb2599a6ad482`.
+- GitHub Actions run `40259280565` completed successfully on both `ubuntu-latest` and `windows-latest`. Compilation, provider JSON catalog validation, and the repository's configured unit/regression test step all passed in both jobs.
+- This repository workflow does not demonstrate that the standalone archive's formatting, lint, type-check, or build-isolated packaging gates passed. Those release gates remain **NOT PASS** until run directly against the standalone package.
+- No PR has been merged.
