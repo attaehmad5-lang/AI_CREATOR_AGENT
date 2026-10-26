@@ -82,7 +82,8 @@ class ProviderManager:
             specs.append((name, module_name, class_name))
 
         # Stage every instance first; a bad later entry cannot leave a half-loaded
-        # registry or replace the currently working provider set.
+        # registry or replace the currently working provider set. On success, replace
+        # the active set so removed providers cannot linger as stale runtime entries.
         staged = {}
         try:
             for name, module_name, class_name in specs:
@@ -93,7 +94,7 @@ class ProviderManager:
                 staged[name] = provider_class()
         except Exception as exc:
             raise ValueError("provider registry loading failed") from exc
-        self.providers.update(staged)
+        self.providers = staged
         return {"loaded": sorted(staged), "count": len(staged)}
 
     def get(self, name):
