@@ -1,6 +1,8 @@
+import io
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from projects.provider_store.provider_diagnostics import ProviderDiagnostics
@@ -58,6 +60,23 @@ class ProviderDiagnosticsTests(unittest.TestCase):
         result = self.diagnostics.inspect_files({"state": path}, max_file_bytes=4)
         self.assertEqual(result["checks"][0]["status"], "TOO_LARGE")
         self.assertFalse(result["ready"])
+
+    def test_actual_read_is_bounded_if_file_grows_after_stat(self):
+        path = self.root / "state.json"
+        path.write_text("{}", encoding="utf-8")
+        original_open = Path.open
+
+        def growing_open(target, mode="r", *args, **kwargs):
+            if target == path and mode == "rb":
+                return io.BytesIO(b'{"payload":"' + b"x" * 64 + b'"}')
+            return original_open(target, mode, *args, **kwargs)
+
+        with patch.object(Path, "open", growing_open):
+            result = self.diagnostics.inspect_files({"state": path}, max_file_bytes=16)
+
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["checks"][0]["status"], "TOO_LARGE")
+        self.assertLessEqual(result["checks"][0]["bytes"], 17)
 
     def test_duplicate_paths_are_flagged(self):
         path = self.root / "state.json"
