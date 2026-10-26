@@ -66,7 +66,18 @@ class ProviderDiagnostics:
                 }
 
             path = Path(raw_path)
-            identity = str(path.resolve(strict=False))
+            try:
+                identity = str(path.resolve(strict=False))
+            except (OSError, RuntimeError, ValueError):
+                checks.append({
+                    "component": name,
+                    "file": path.name,
+                    "status": "UNREADABLE",
+                    "valid": False,
+                    "bytes": None,
+                    "remediation": "Check file path, permissions, and storage availability.",
+                })
+                continue
             if identity in seen_paths:
                 checks.append({
                     "component": name,
