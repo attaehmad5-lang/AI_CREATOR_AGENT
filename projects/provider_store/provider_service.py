@@ -752,6 +752,7 @@ class ProviderService:
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
         require_fresh_health_check: bool = False,
+        paid_usage_approved: bool = False,
         health_stale_after_seconds: float = 300.0,
         health_max_latency_ms: float | None = None,
         **route_options: Any,
@@ -781,6 +782,8 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        if not isinstance(paid_usage_approved, bool):
+            return {"status": "INVALID_PAID_USAGE_APPROVAL", "executed": False}
 
         authorization = None
         if self.authorization_manager is not None:
@@ -837,6 +840,30 @@ class ProviderService:
                     "status": "SENSITIVE_DATA_BLOCKED", "executed": False,
                     "sensitive_data_scan": sensitive_data_scan if isinstance(sensitive_data_scan, dict) else {
                         "allowed": False, "status": "INVALID_SENSITIVE_DATA_SCAN_RESPONSE"
+                    },
+                }
+
+        # A caller-provided provider set is not itself proof of paid-use approval.
+        paid_approved_providers = route_options.get("paid_approved_providers")
+        if paid_approved_providers is not None and not isinstance(
+            paid_approved_providers, (set, frozenset)
+        ):
+            return {"status": "INVALID_PAID_APPROVAL_SET", "executed": False}
+        if paid_approved_providers is not None and any(
+            not isinstance(value, str) or not value.strip()
+            for value in paid_approved_providers
+        ):
+            return {"status": "INVALID_PAID_APPROVAL_SET", "executed": False}
+        if paid_approved_providers:
+            if not paid_usage_approved:
+                return {"status": "PAID_USAGE_APPROVAL_REQUIRED", "executed": False}
+            billing_authorization = self._authorize_operation(principal_id, "billing.approve")
+            if self.authorization_manager is None or billing_authorization is not None:
+                return {
+                    "status": "PAID_USAGE_APPROVAL_DENIED",
+                    "executed": False,
+                    "authorization": billing_authorization or {
+                        "allowed": False, "status": "AUTHORIZATION_REQUIRED"
                     },
                 }
 
