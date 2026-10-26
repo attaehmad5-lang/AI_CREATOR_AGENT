@@ -714,7 +714,11 @@ class ProviderService:
             return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
         if result["generated"] is True:
             text = result.get("text")
-            if not isinstance(text, str) or not text.strip():
+            if (
+                not isinstance(text, str)
+                or not text.strip()
+                or len(text) > 2 * 1024 * 1024
+            ):
                 return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
             # Return a strict public schema; never forward arbitrary adapter fields
             # that could accidentally expose prompts, credentials, or internals.
