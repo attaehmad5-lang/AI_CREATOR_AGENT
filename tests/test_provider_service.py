@@ -1618,7 +1618,7 @@ class ProviderAdminControlTests(unittest.TestCase):
             def generate_text(self, prompt, *, system=None):
                 return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": None}
 
-        service = ProviderService(self.connections, local_model_adapter=Adapter())
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
         result = service.generate_local_text(prompt="hello")
         self.assertEqual(result, {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False})
 
@@ -1635,7 +1635,7 @@ class ProviderAdminControlTests(unittest.TestCase):
                     "prompt": prompt,
                 }
 
-        service = ProviderService(self.connections, local_model_adapter=Adapter())
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
         result = service.generate_local_text(prompt="private prompt")
         self.assertEqual(result["text"], "safe output")
         self.assertNotIn("secret", result)
@@ -1647,7 +1647,7 @@ class ProviderAdminControlTests(unittest.TestCase):
             def generate_text(self, prompt, *, system=None):
                 return {"generated": False, "status": []}
 
-        service = ProviderService(self.connections, local_model_adapter=Adapter())
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
         result = service.generate_local_text(prompt="hello")
         self.assertEqual(result, {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False})
 
