@@ -1907,6 +1907,32 @@ class ProviderAdminControlTests(unittest.TestCase):
         self.assertTrue(result["generated"])
         self.assertEqual(health.args, ("local-ollama", 45.0, 900.0))
 
+    def test_local_model_health_gate_fails_closed_on_exception_and_malformed_evidence(self):
+        class Adapter:
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        class BrokenHealth:
+            def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
+                raise RuntimeError("private health backend detail")
+        class MalformedHealth:
+            def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
+                return {"eligible": "true", "status": "HEALTHY"}
+        for manager, expected in (
+            (BrokenHealth(), "PROVIDER_HEALTH_CHECK_FAILED"),
+            (MalformedHealth(), "PROVIDER_HEALTH_REJECTED"),
+        ):
+            with self.subTest(expected=expected):
+                adapter = Adapter()
+                service = ProviderService(self.connection, local_model_adapter=adapter, health_manager=manager)
+                result = service.generate_local_text(
+                    prompt="hello", require_fresh_health_check=True,
+                )
+                self.assertEqual(result["status"], expected)
+                self.assertFalse(adapter.called)
+                self.assertNotIn("private health backend detail", repr(result))
+
     def test_local_model_health_gate_rejects_invalid_policy_values(self):
         class Adapter:
             def generate_text(self, prompt, *, system=None):
