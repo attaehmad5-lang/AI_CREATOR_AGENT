@@ -64,6 +64,55 @@ class ProviderServiceTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_routed_generation_can_require_fresh_health_evidence(self):
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "FREE"}
+
+        calls = []
+        service = ProviderService(
+            self.connections, routing_manager=RoutingStub(), health_manager=self.health,
+        )
+        blocked = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-unknown",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            require_fresh_health_check=True,
+        )
+        self.assertEqual(blocked["status"], "PROVIDER_HEALTH_REJECTED")
+        self.assertFalse(blocked["executed"])
+        self.assertEqual(calls, [])
+
+        self.health.record_result("image", success=True, latency_ms=5.0)
+        allowed = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-fresh",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs) or {
+                "started": False, "success": False,
+            },
+            require_fresh_health_check=True,
+            health_stale_after_seconds=60,
+            health_max_latency_ms=100,
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(allowed["status"], "EXECUTION_NOT_STARTED")
+
+    def test_routed_generation_health_gate_fails_closed_without_manager(self):
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "FREE"}
+
+        calls = []
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-no-manager",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            require_fresh_health_check=True,
+        )
+        self.assertEqual(result["status"], "PROVIDER_HEALTH_CHECK_UNAVAILABLE")
+        self.assertEqual(calls, [])
+
     def test_ab_benchmark_paid_usage_requires_authenticated_billing_approval(self):
         class Authorization:
             def __init__(self, allowed):
