@@ -90,4 +90,4 @@
 +    assert len(audit.entries(limit=1)) == 1
 +
 +
- def test_audit_file_and_redaction(tmp_path: Path) -> None
+ def test_audit_file_and_redaction(tmp_path: Path) -> None:
