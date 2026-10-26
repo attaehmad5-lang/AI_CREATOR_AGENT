@@ -164,6 +164,47 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(exhausted["status"], "QUEUE_EMPTY")
         self.assertEqual(self.manager.poll(job_id="job-1")["job"]["status"], "FAILED")
 
+    def test_invalid_worker_leases_are_reaped_without_crashing(self):
+        # Persisted timestamps can be damaged by old versions, manual edits, or
+        # interrupted external tooling. Invalid leases must not strand RUNNING jobs.
+        for lease_value, omit_lease in (
+            ("2026-10-16T12:00:00", False),  # naive timestamp
+            ("not-a-timestamp", False),
+            (None, True),  # missing lease
+        ):
+            with self.subTest(lease_value=lease_value, omit_lease=omit_lease):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "jobs.json"
+                    manager = ProviderJobManager(
+                        path, max_queue_size=5, max_concurrent=1,
+                        lease_seconds=10, max_attempts=3,
+                        clock=lambda: datetime(2026, 10, 16, 12, tzinfo=timezone.utc),
+                    )
+                    self.assertTrue(manager.submit(
+                        job_id="recover-me", project_id="film",
+                        provider_id="image", payload_ref="payload:recover-me",
+                    )["accepted"])
+                    self.assertEqual(
+                        manager.claim_next(worker_id="worker-old")["status"],
+                        "JOB_CLAIMED",
+                    )
+                    import json
+                    state = json.loads(path.read_text(encoding="utf-8"))
+                    job = state["jobs"]["recover-me"]
+                    if omit_lease:
+                        job.pop("lease_until", None)
+                    else:
+                        job["lease_until"] = lease_value
+                    path.write_text(json.dumps(state), encoding="utf-8")
+
+                    recovered = manager.claim_next(worker_id="worker-new")
+                    self.assertEqual(recovered["status"], "JOB_CLAIMED")
+                    self.assertEqual(recovered["job"]["job_id"], "recover-me")
+                    self.assertEqual(recovered["job"]["attempts"], 2)
+                    self.assertEqual(
+                        recovered["job"]["last_error_code"], "WORKER_LEASE_EXPIRED"
+                    )
+
     def test_state_persists_without_raw_payload_storage(self):
         self.submit("job-1")
         reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
