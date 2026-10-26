@@ -620,7 +620,10 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "generated": False}
         if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", provider_id):
             return {"status": "INVALID_PROVIDER_ID", "generated": False}
-        if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
+        if request_id is not None and (
+            not isinstance(request_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request_id)
+        ):
             return {"status": "INVALID_REQUEST_ID", "generated": False}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
