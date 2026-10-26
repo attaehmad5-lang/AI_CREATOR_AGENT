@@ -976,6 +976,26 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         result = router.route(category="image", project_id="film")
         self.assertEqual(result["status"], "QUOTA_REQUEST_ID_REQUIRED")
 
+    def test_healthiest_first_routing_prefers_lower_recorded_latency(self):
+        health = ProviderHealthManager(self.health_path)
+        self.assertEqual(
+            health.record_result("primary", success=True, latency_ms=140)["status"],
+            "HEALTHY",
+        )
+        self.assertEqual(
+            health.record_result("fallback", success=True, latency_ms=18)["status"],
+            "HEALTHY",
+        )
+        router = ProviderRoutingManager(
+            self.connections, health_manager=health,
+        )
+        result = router.route(
+            category="image", project_id="film", strategy="HEALTHIEST_FIRST",
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["strategy"], "HEALTHIEST_FIRST")
+
     def test_invalid_route_inputs_and_missing_health_evidence_fail_closed(self):
         router = ProviderRoutingManager(self.connections)
         self.assertEqual(router.route(category="", project_id="film")["status"], "INVALID_ROUTE_REQUEST")
