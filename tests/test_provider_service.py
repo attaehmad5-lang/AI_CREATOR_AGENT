@@ -1968,6 +1968,9 @@ class ProviderAdminControlTests(unittest.TestCase):
             {"data_categories": ()},
             {"data_categories": ("user_content", "user_content")},
             {"retention_days": -1},
+            {"retention_days": 1.5},
+            {"retention_days": True},
+            {"retention_days": 3651},
             {"provider_training_use": "false"},
             {"user_training_consent": 1},
         ):
@@ -1999,7 +2002,7 @@ class ProviderAdminControlTests(unittest.TestCase):
             def generate_text(self, prompt, *, system=None):
                 raise AssertionError("adapter must not be called")
         service = ProviderService(self.connection, local_model_adapter=Adapter())
-        for value in ("", "../other", "provider\nadmin", "x" * 129, None):
+        for value in ("", "../other", "provider\nadmin", "provider:admin", "x" * 129, None):
             with self.subTest(value=value):
                 result = service.generate_local_text(prompt="hello", provider_id=value)
                 self.assertEqual(result["status"], "INVALID_PROVIDER_ID")
