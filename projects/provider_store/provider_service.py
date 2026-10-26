@@ -616,7 +616,7 @@ class ProviderService:
             return {"status": "INVALID_PROMPT", "generated": False}
         if system is not None and (not isinstance(system, str) or len(system) > 20_000):
             return {"status": "INVALID_SYSTEM_PROMPT", "generated": False}
-        if not isinstance(project_id, str) or not project_id.strip():
+        if not isinstance(project_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", project_id):
             return {"status": "INVALID_PROJECT_ID", "generated": False}
         if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", provider_id):
             return {"status": "INVALID_PROVIDER_ID", "generated": False}
