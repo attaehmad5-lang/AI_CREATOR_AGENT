@@ -13,6 +13,8 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
+_SAFE_REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+_SAFE_PROVIDER_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
@@ -136,6 +138,14 @@ class LocalModelProviderAdapter:
         output_path: str | os.PathLike[str] | None = None,
     ) -> dict[str, Any]:
         """Adapt local text generation to ProviderService's started/success contract."""
+        if provider_id is not None and (
+            not isinstance(provider_id, str) or not _SAFE_PROVIDER_ID.fullmatch(provider_id)
+        ):
+            return {"started": False, "success": False, "status": "INVALID_PROVIDER_ID"}
+        if request_id is not None and (
+            not isinstance(request_id, str) or not _SAFE_REQUEST_ID.fullmatch(request_id)
+        ):
+            return {"started": False, "success": False, "status": "INVALID_REQUEST_ID"}
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 100_000:
             return {"started": False, "success": False, "status": "INVALID_PROMPT"}
         if system is not None and (not isinstance(system, str) or len(system) > 20_000):
