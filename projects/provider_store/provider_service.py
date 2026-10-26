@@ -730,6 +730,7 @@ class ProviderService:
         estimated_cost: float,
         adapter: Any,
         modality: str,
+        trace_id: str | None = None,
         principal_id: str | None = None,
         data_categories: tuple[str, ...] | list[str] = ("user_content",),
         retention_days: int = 0,
@@ -751,6 +752,11 @@ class ProviderService:
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
         if not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST_ID", "executed": False}
+        if trace_id is not None and (
+            not isinstance(trace_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", trace_id)
+        ):
+            return {"status": "INVALID_TRACE_ID", "executed": False}
         if not isinstance(category, str) or not category.strip():
             return {"status": "INVALID_CATEGORY", "executed": False}
         if not isinstance(project_id, str) or not project_id.strip():
@@ -861,8 +867,13 @@ class ProviderService:
                 }
 
         options = dict(adapter_options or {})
+        # Do not allow an unvalidated trace_id hidden in adapter_options to bypass
+        # the explicit API validation below.
+        options.pop("trace_id", None)
         options["provider_id"] = provider_id
         options["request_id"] = request_id
+        if trace_id is not None:
+            options["trace_id"] = trace_id
         started_at = time.monotonic()
         try:
             adapter_result = adapter(**options)
@@ -874,6 +885,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                "trace_id": trace_id,
                 "reservations_retained": True,
                 "error_type": type(exc).__name__,
             }
@@ -883,6 +895,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                "trace_id": trace_id,
                 "reservations_retained": True,
             }
         if adapter_result["started"] is False:
@@ -904,6 +917,7 @@ class ProviderService:
                     "executed": False,
                     "provider": provider_id,
                     "request_id": request_id,
+                "trace_id": trace_id,
                     "reservations_retained": True,
                 }
             released = self.release_unstarted_request(
@@ -914,6 +928,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                "trace_id": trace_id,
                 "release": released,
             }
 
@@ -1166,6 +1181,7 @@ class ProviderService:
             "executed": True,
             "provider": provider_id,
             "request_id": request_id,
+                "trace_id": trace_id,
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "media_integrity": media_integrity_result,
