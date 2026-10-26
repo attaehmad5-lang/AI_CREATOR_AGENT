@@ -618,7 +618,7 @@ class ProviderService:
             return {"status": "INVALID_SYSTEM_PROMPT", "generated": False}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"status": "INVALID_PROJECT_ID", "generated": False}
-        if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", provider_id):
+        if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", provider_id):
             return {"status": "INVALID_PROVIDER_ID", "generated": False}
         if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
             return {"status": "INVALID_REQUEST_ID", "generated": False}
@@ -649,7 +649,9 @@ class ProviderService:
             or len(set(data_categories)) != len(data_categories)
             or not isinstance(provider_training_use, bool)
             or not isinstance(user_training_consent, bool)
-            or finite_number(retention_days, minimum=0) is None
+            or isinstance(retention_days, bool)
+            or not isinstance(retention_days, int)
+            or not 0 <= retention_days <= 3650
         ):
             return {"status": "INVALID_DATA_HANDLING_POLICY_INPUT", "generated": False}
         if self.data_handling_policy is not None:
