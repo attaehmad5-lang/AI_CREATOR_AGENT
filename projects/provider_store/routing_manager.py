@@ -544,11 +544,18 @@ class ProviderRoutingManager:
             if cost == 0 and provider.get("zero_cost_allowed") is not True:
                 decisions.append({"provider": provider_id, "status": "ZERO_COST_NOT_VERIFIED"})
                 continue
+            recorded_latency = finite_number(
+                health_record.get("last_latency_ms"), minimum=0
+            )
             candidates.append({
                 **provider,
                 "_route_cost": float(cost),
                 "_route_credits": credit_sort,
-                "_route_latency": health_record.get("last_latency_ms", float("inf")),
+                # Malformed/missing latency must rank last, never crash sorting or
+                # accidentally outrank a provider with valid measured latency.
+                "_route_latency": (
+                    recorded_latency if recorded_latency is not None else float("inf")
+                ),
             })
 
         confidence_status = None
