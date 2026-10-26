@@ -134,3 +134,12 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 - Both platform jobs passed compilation, provider JSON catalog validation, and the configured unit/regression tests.
 - Independent clean-room checks were also repeated against the extracted ZIP: all 24 SHA-256 manifest entries passed, `compileall` passed, and pytest reported **82 passed, 0 failed, 98% statement coverage** with ResourceWarnings treated as errors.
 - These results verify the archive integrity, regression suite, and repository CI only. Black, Flake8, Mypy, build-isolated sdist/wheel creation, and a dependency-resolving installed-wheel smoke test remain **NOT YET VERIFIED**. No Release asset was published and no PR merge was performed.
+
+
+## Additional package verification — 2026-10-26
+
+- Revalidated the exact release-candidate ZIP: SHA-256 `5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7`; `unzip -t` passed, 25 archive entries, no duplicate paths, and no absolute or parent-traversal paths detected.
+- Rebuilt a wheel locally with `pip wheel --no-build-isolation --no-deps`: **PASS**. This wheel build does not substitute for the pending isolated build gate.
+- Installed that wheel into a target directory and imported `provider_store` successfully using the host Python's already-installed Pydantic 2.13.5; package version reported `1.0.0`. This confirms importability when the declared runtime dependency is present, but is **not** a clean dependency-resolving install test.
+- A separate virtual-environment smoke attempt failed at import because Pydantic was absent in that environment and network access could not install dependencies. It is recorded as a limitation, not a package test pass.
+- Attempted to install Black, Flake8, Mypy, and build again; pip failed because DNS resolution for the configured package index is unavailable. Those gates remain **NOT VERIFIED**. No release asset or hosted release-gates run is available from the connected GitHub actions in this session.
