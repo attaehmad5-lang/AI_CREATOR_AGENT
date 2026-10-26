@@ -93,6 +93,14 @@ class RetryPolicyTests(unittest.TestCase):
         value = RetryPolicy._retry_after_seconds("Thu, 01 Jan 1970 00:00:00 GMT")
         self.assertEqual(value, 0)
 
+    def test_retry_after_rejects_boolean_and_unsupported_values(self):
+        for value in (True, False, object(), [], {}):
+            self.assertIsNone(RetryPolicy._retry_after_seconds(value))
+        policy = RetryPolicy(max_delay_seconds=10, jitter_fraction=0, random_fn=lambda: 0)
+        result = policy.decide(attempt=1, status_code=429, retry_after=True)
+        self.assertEqual(result.delay_seconds, 0.5)
+        self.assertEqual(result.reason, "RATE_LIMIT_BACKOFF")
+
     def test_circuit_breaker_opens_at_threshold_and_recovers_after_cooldown(self):
         now = [10.0]
         breaker = CircuitBreaker(failure_threshold=2, cooldown_seconds=5, clock=lambda: now[0])
