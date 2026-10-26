@@ -213,9 +213,19 @@ class ProviderJobManager:
             if not isinstance(job, dict) or job.get("status") != "RUNNING":
                 continue
             lease_until = job.get("lease_until")
+            # A missing, malformed, or timezone-naive lease cannot safely prove
+            # that a worker still owns the job. Reap it instead of allowing bad
+            # persisted state to crash claim_next() or strand a RUNNING job.
             try:
-                expired = isinstance(lease_until, str) and datetime.fromisoformat(lease_until) <= now
-            except ValueError:
+                if not isinstance(lease_until, str):
+                    expired = True
+                else:
+                    parsed_lease = datetime.fromisoformat(lease_until)
+                    if parsed_lease.tzinfo is None or parsed_lease.utcoffset() is None:
+                        expired = True
+                    else:
+                        expired = parsed_lease.astimezone(timezone.utc) <= now
+            except (TypeError, ValueError, OverflowError):
                 expired = True
             if not expired:
                 continue
