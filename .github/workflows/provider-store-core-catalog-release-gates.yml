@@ -128,8 +128,12 @@ jobs:
           set -euo pipefail
           test -s "$RUNNER_TEMP/provider_store_core_catalog_corrected.zip"
           test -s "$RUNNER_TEMP/provider_store_core_catalog_corrected.sha256"
-          gh release upload provider-store-core-catalog-v1.0.0 "$RUNNER_TEMP/provider_store_core_catalog_corrected.zip#provider_store_core_catalog_verified.zip" "$RUNNER_TEMP/provider_store_core_catalog_corrected.sha256#provider_store_core_catalog_verified.sha256" --repo attaehmad5-lang/AI_CREATOR_AGENT --clobber
-          gh release view provider-store-core-catalog-v1.0.0 --repo attaehmad5-lang/AI_CREATOR_AGENT --json assets --jq '.assets[] | select(.name == "provider_store_core_catalog_verified.zip" or .name == "provider_store_core_catalog_verified.sha256") | [.name,.size,.url] | @tsv'
+          cp "$RUNNER_TEMP/provider_store_core_catalog_corrected.zip" "$RUNNER_TEMP/provider_store_core_catalog_verified.zip"
+          cp "$RUNNER_TEMP/provider_store_core_catalog_corrected.sha256" "$RUNNER_TEMP/provider_store_core_catalog_verified.sha256"
+          gh release upload provider-store-core-catalog-v1.0.0 "$RUNNER_TEMP/provider_store_core_catalog_verified.zip" "$RUNNER_TEMP/provider_store_core_catalog_verified.sha256" --repo attaehmad5-lang/AI_CREATOR_AGENT --clobber
+          gh release delete-asset provider_store_core_catalog_corrected.zip --repo attaehmad5-lang/AI_CREATOR_AGENT --yes || true
+          gh release delete-asset provider_store_core_catalog_corrected.sha256 --repo attaehmad5-lang/AI_CREATOR_AGENT --yes || true
+          gh release view provider-store-core-catalog-v1.0.0 --repo attaehmad5-lang/AI_CREATOR_AGENT --json assets --jq '.assets[] | select(.name == "provider_store_core_catalog_verified.zip" or .name == "provider_store_core_catalog_verified.sha256") | [.name,.size,.digest,.url] | @tsv'
 
       - name: Upload build artifacts and coverage report
         if: always()
