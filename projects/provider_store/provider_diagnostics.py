@@ -14,6 +14,19 @@ _COMPONENT_ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
 _MAX_FILE_BYTES = 1_048_576
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def _reject_non_finite(value: str) -> None:
+    raise ValueError("non-finite JSON number")
+
+
 class ProviderDiagnostics:
     """Inspect configured state files without mutating them or exposing their contents."""
 
@@ -89,7 +102,7 @@ class ProviderDiagnostics:
                     })
                     continue
                 with path.open("r", encoding="utf-8") as handle:
-                    data = json.load(handle)
+                    data = json.load(\n                        handle, object_pairs_hook=_reject_duplicate_keys,\n                        parse_constant=_reject_non_finite,\n                    )
                 if not isinstance(data, (dict, list)):
                     checks.append({
                         **base, "status": "INVALID_ROOT", "valid": False,
