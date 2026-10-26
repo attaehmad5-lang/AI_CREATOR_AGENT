@@ -1285,11 +1285,30 @@ class ProviderService:
             decision = self.retry_policy.decide(**failure)
         except Exception as exc:
             return {"retry": False, "reason": "RETRY_POLICY_FAILED", "error_type": type(exc).__name__}
+
+        # A malformed third-party policy must never turn a truthy string such as
+        # "false" into permission to retry, or inject an unbounded/non-finite delay.
+        retry = getattr(decision, "retry", None)
+        attempt = getattr(decision, "attempt", None)
+        delay = getattr(decision, "delay_seconds", None)
+        reason = getattr(decision, "reason", None)
+        normalized_delay = finite_number(delay, minimum=0, maximum=86400)
+        if (
+            not isinstance(retry, bool)
+            or not isinstance(attempt, int)
+            or isinstance(attempt, bool)
+            or attempt < 0
+            or normalized_delay is None
+            or not isinstance(reason, str)
+            or not reason.strip()
+            or len(reason) > 128
+        ):
+            return {"retry": False, "reason": "INVALID_RETRY_RESPONSE"}
         return {
-            "retry": bool(getattr(decision, "retry", False)),
-            "attempt": getattr(decision, "attempt", 0),
-            "delay_seconds": getattr(decision, "delay_seconds", 0.0),
-            "reason": getattr(decision, "reason", "INVALID_RETRY_RESPONSE"),
+            "retry": retry,
+            "attempt": attempt,
+            "delay_seconds": normalized_delay,
+            "reason": reason,
         }
 
     @staticmethod
