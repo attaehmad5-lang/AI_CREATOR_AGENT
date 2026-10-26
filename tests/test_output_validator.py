@@ -168,8 +168,6 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
 
     def test_riff_container_subtypes_cannot_be_mislabeled(self):
         # RIFF alone is not enough: WebP, WAV, and AVI have distinct subtype tags.
@@ -196,3 +194,7 @@ if __name__ == "__main__":
         result = self.validator.validate_file(path, modality="video")
         self.assertTrue(result["valid"])
         self.assertEqual(result["mime_type"], "video/mp4")
+
+
+if __name__ == "__main__":
+    unittest.main()
