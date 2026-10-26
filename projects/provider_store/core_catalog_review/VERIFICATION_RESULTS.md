@@ -56,3 +56,10 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 - Both jobs passed the configured compilation, provider JSON catalog validation, and unit/regression test steps.
 - This is a successful repository CI recheck, but it does **not** execute the standalone archive's Black, Flake8, Mypy, isolated sdist/wheel build, or clean-wheel smoke test. Those release gates remain **NOT PASS / NOT YET VERIFIED**.
 - The standalone release-gates workflow is still on PR #81, and no GitHub Release asset URL has been supplied. No merge was performed; the release gate is not marked complete.
+
+
+## Release workflow hardening — 2026-10-26
+
+- Inspected the release-candidate ZIP's Unix mode metadata and found `run_checks.sh` was packaged without the executable bit. The previous workflow's direct `./run_checks.sh` invocation could therefore fail with `Permission denied` before running the quality gates.
+- Updated the release-gates workflow to invoke `bash ./run_checks.sh`, which does not depend on the ZIP preserving an executable bit. This is a workflow robustness fix, not evidence that the release gates have passed.
+- The workflow still requires the PR branch to reach the default branch and the exact ZIP to be uploaded as a GitHub Release asset. Those operations and the final hosted run remain outstanding; release status is **NOT PASS / NOT YET VERIFIED**.
