@@ -164,6 +164,23 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(exhausted["status"], "QUEUE_EMPTY")
         self.assertEqual(self.manager.poll(job_id="job-1")["job"]["status"], "FAILED")
 
+    def test_expired_worker_cannot_complete_before_retry_is_claimed(self):
+        self.submit("stale-worker")
+        claimed = self.manager.claim_next(worker_id="worker-old")
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.now[0] += timedelta(seconds=11)
+
+        stale = self.manager.complete(
+            job_id="stale-worker", worker_id="worker-old",
+            success=True, result_ref="asset:stale-result",
+        )
+        self.assertEqual(stale["status"], "JOB_LEASE_EXPIRED")
+        self.assertFalse(stale["saved"])
+        current = self.manager.poll(job_id="stale-worker")["job"]
+        self.assertEqual(current["status"], "QUEUED")
+        self.assertNotIn("result_ref", current)
+        self.assertEqual(current["last_error_code"], "WORKER_LEASE_EXPIRED")
+
     def test_invalid_worker_leases_are_reaped_without_crashing(self):
         # Persisted timestamps can be damaged by old versions, manual edits, or
         # interrupted external tooling. Invalid leases must not strand RUNNING jobs.
