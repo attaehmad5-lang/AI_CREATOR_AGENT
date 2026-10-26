@@ -64,7 +64,8 @@ jobs:
         run: |
           set -euo pipefail
           python -m compileall -q provider_store tests
-          ./run_checks.sh
+          # The ZIP's file mode may not include the executable bit; invoke via bash.
+          bash ./run_checks.sh
 
       - name: Build sdist and wheel with build isolation
         working-directory: ${{ runner.temp }}/provider-store-package
