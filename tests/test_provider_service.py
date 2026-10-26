@@ -2005,6 +2005,60 @@ class ProviderAdminControlTests(unittest.TestCase):
                 self.assertEqual(result["status"], "INVALID_PROVIDER_ID")
                 self.assertFalse(result["generated"])
 
+    def test_local_model_authorization_denial_blocks_adapter_and_hides_details(self):
+        class Adapter:
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        class Authorization:
+            def authorize(self, principal_id, operation):
+                return {"allowed": False, "status": "DENIED", "detail": "sensitive internal detail"}
+        adapter = Adapter()
+        service = ProviderService(self.connection, local_model_adapter=adapter, authorization_manager=Authorization())
+        result = service.generate_local_text(prompt="hello", principal_id="guest")
+        self.assertEqual(result["status"], "AUTHORIZATION_DENIED")
+        self.assertFalse(adapter.called)
+        self.assertNotIn("sensitive internal detail", repr(result))
+
+    def test_local_model_feature_flag_failure_or_disabled_blocks_adapter(self):
+        class Adapter:
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        class Disabled:
+            def evaluate(self, flag, *, project_id, request_id=None):
+                return {"enabled": False}
+        class Broken:
+            def evaluate(self, flag, *, project_id, request_id=None):
+                raise RuntimeError("secret flag backend detail")
+        for manager, expected in ((Disabled(), "FEATURE_DISABLED"), (Broken(), "FEATURE_FLAG_CHECK_FAILED")):
+            with self.subTest(expected=expected):
+                adapter = Adapter()
+                service = ProviderService(self.connection, local_model_adapter=adapter, feature_flag_manager=manager)
+                result = service.generate_local_text(prompt="hello", project_id="film")
+                self.assertEqual(result["status"], expected)
+                self.assertFalse(adapter.called)
+                self.assertNotIn("secret flag backend detail", repr(result))
+
+    def test_local_model_data_policy_exception_fails_closed_without_leaking_message(self):
+        class Adapter:
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        class BrokenPolicy:
+            def evaluate(self, **kwargs):
+                raise RuntimeError("private policy storage contents")
+        adapter = Adapter()
+        service = ProviderService(self.connection, local_model_adapter=adapter, data_handling_policy=BrokenPolicy())
+        result = service.generate_local_text(prompt="private prompt")
+        self.assertEqual(result["status"], "PROVIDER_DATA_POLICY_CHECK_FAILED")
+        self.assertFalse(adapter.called)
+        self.assertNotIn("private policy storage contents", repr(result))
+        self.assertNotIn("private prompt", repr(result))
+
     def test_local_model_service_rejects_malformed_adapter_status(self):
         class Adapter:
             def generate_text(self, prompt, *, system=None):
