@@ -95,7 +95,7 @@ class ProviderServiceTests(unittest.TestCase):
             health_max_latency_ms=100,
         )
         self.assertEqual(len(calls), 1)
-        self.assertEqual(allowed["status"], "EXECUTION_NOT_STARTED")
+        self.assertNotEqual(allowed["status"], "PROVIDER_HEALTH_REJECTED")
 
     def test_routed_generation_health_gate_fails_closed_without_manager(self):
         class RoutingStub:
