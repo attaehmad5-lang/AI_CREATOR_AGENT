@@ -624,7 +624,8 @@ class ProviderService:
             return {"status": "INVALID_REQUEST_ID", "generated": False}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
-            return {"status": "AUTHORIZATION_DENIED", "generated": False, "authorization": authorization}
+            # Do not forward authorization-manager internals or arbitrary denial details.
+            return {"status": "AUTHORIZATION_DENIED", "generated": False}
         if self.feature_flag_manager is not None:
             try:
                 flag = self.feature_flag_manager.evaluate(
