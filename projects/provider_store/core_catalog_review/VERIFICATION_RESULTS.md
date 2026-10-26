@@ -34,3 +34,9 @@ Still required in network-enabled CI or Termux:
 - `./run_checks.sh` clean-room build-isolated install
 
 This is not a claim of 100% release verification until all release gates pass. No PR has been merged.
+
+## GitHub CI follow-up
+
+- This PR's latest head is checked separately from the earlier successful CI run; no PR-triggered workflow run was returned for the newest documentation/test-patch commits at the time of this check.
+- The earlier successful Task 25 workflow run is historical evidence only and is not treated as verification of this updated head.
+- Release status remains **NOT PASS** until the formatting, lint, type-check, and build-isolated checks listed above run successfully.
