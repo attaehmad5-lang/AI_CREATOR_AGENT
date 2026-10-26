@@ -72,3 +72,14 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 - Fixed initialization to acquire the same persistent interprocess lock before the initial ledger read. This serializes constructors with ledger writers and protects the initial snapshot on Windows.
 - GitHub Actions run [40302040319](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40302040319) passed after the fix: **Ubuntu PASS and Windows PASS**, including the full configured unit/regression test step on both platforms.
 - This resolves the observed cross-platform regression. Standalone-package release gates (Black, Flake8, Mypy, build isolation, clean-wheel smoke test) remain **NOT YET VERIFIED** because the local package index is unavailable and the hosted release-gates workflow still requires default-branch activation plus a Release ZIP asset.
+
+
+## Latest independent ZIP recheck — 2026-10-26
+
+- Re-extracted the exact release-candidate archive in a fresh temporary directory and independently rechecked its SHA-256: `5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7`.
+- Verified all 24 entries in `SHA256SUMS.txt`; all hashes passed. Archive contains 25 files.
+- Re-ran `python -m compileall -q provider_store tests`: PASS.
+- Re-ran `python -W error::ResourceWarning -m pytest -q`: **82 passed, 0 failed; 98% statement coverage** (981 statements; 20 uncovered).
+- GitHub Actions run [40302176661](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40302176661) completed successfully on both Ubuntu and Windows after the verification report update.
+- Black, Flake8, Mypy, isolated sdist/wheel build, and clean installed-wheel smoke test remain **NOT YET VERIFIED**. These tools are absent in the current execution environment and the earlier package-index attempts were unavailable. The GitHub Releases API currently lists no releases for this repository, so the exact ZIP has not yet been published as a Release asset.
+- No merge or release publication was performed. Do not mark the task 100% complete until the hosted release-gates workflow passes.
