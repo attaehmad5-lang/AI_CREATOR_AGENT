@@ -30,3 +30,11 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 - GitHub Actions run `40296846258` completed successfully on both `ubuntu-latest` and `windows-latest`. Compilation, provider JSON catalog validation, and the repository's configured unit/regression test step passed in both jobs.
 - This repository workflow does not demonstrate that the standalone archive's formatting, lint, type-check, or build-isolated packaging gates passed. Those release gates remain **NOT PASS** until run directly against the standalone package.
 - No PR has been merged.
+
+
+## Repeat verification — 2026-10-26 (latest)
+
+- Re-ran compilation and the full test suite from the clean-room extraction: **82 passed, 0 failed**; coverage remains **98%**.
+- Re-ran local package installation and wheel build with `--no-build-isolation --no-deps`: both passed. Wheel SHA-256: `0c3a74ecc46b600627a3448ad91a2501ee659ac603ab3cbf9ff469b54af9f634`.
+- Retried installation of Black, Flake8, and Mypy. The package index returned no available versions, so this environment still cannot run those tools. This is an environment/network blocker, not a passing check.
+- The configured Ubuntu and Windows workflow jobs were inspected individually; both completed successfully for compilation, provider JSON validation, and configured unit/regression tests. They do not include the blocked standalone lint/type/build-isolation gates.
