@@ -2141,6 +2141,14 @@ class ProviderAdminControlTests(unittest.TestCase):
                 self.assertFalse(result["generated"])
         self.assertTrue(service.generate_local_text(prompt="hello", request_id="request-01")["generated"])
 
+    def test_local_model_service_rejects_oversized_custom_adapter_output(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "x" * (2 * 1024 * 1024 + 1)}
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        result = service.generate_local_text(prompt="hello")
+        self.assertEqual(result, {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False})
+
     def test_local_model_service_rejects_malformed_adapter_status(self):
         class Adapter:
             def generate_text(self, prompt, *, system=None):
