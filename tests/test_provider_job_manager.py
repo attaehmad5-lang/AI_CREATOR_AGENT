@@ -164,6 +164,25 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(exhausted["status"], "QUEUE_EMPTY")
         self.assertEqual(self.manager.poll(job_id="job-1")["job"]["status"], "FAILED")
 
+    def test_expired_cancelled_worker_lease_finishes_as_cancelled(self):
+        self.submit("cancel-expired")
+        self.assertEqual(
+            self.manager.claim_next(worker_id="worker-old")["status"],
+            "JOB_CLAIMED",
+        )
+        self.assertEqual(
+            self.manager.cancel(job_id="cancel-expired")["status"],
+            "CANCEL_REQUESTED",
+        )
+        self.now[0] += timedelta(seconds=11)
+
+        next_claim = self.manager.claim_next(worker_id="worker-new")
+        self.assertEqual(next_claim["status"], "QUEUE_EMPTY")
+        current = self.manager.poll(job_id="cancel-expired")["job"]
+        self.assertEqual(current["status"], "CANCELLED")
+        self.assertEqual(current["error_code"] if "error_code" in current else None, None)
+        self.assertIsNone(current["lease_until"])
+
     def test_expired_worker_cannot_complete_before_retry_is_claimed(self):
         self.submit("stale-worker")
         claimed = self.manager.claim_next(worker_id="worker-old")
