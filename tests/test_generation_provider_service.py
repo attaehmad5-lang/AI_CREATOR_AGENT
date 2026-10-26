@@ -42,7 +42,7 @@ class GenerationProviderServiceTests(unittest.TestCase):
                         ProviderService(path)
                     manager_cls.assert_not_called()
 
-    def test_disabled_central_catalog_provider_is_rejected_before_runtime_loading(self):
+    def test_runtime_registry_unloads_provider_when_central_catalog_disables_it(self):
         payload = {
             "image": {
                 "primary": "Hugging Face", "fallbacks": [],
@@ -52,15 +52,28 @@ class GenerationProviderServiceTests(unittest.TestCase):
             }
         }
         class Catalog:
+            enabled = True
             def list_providers(self):
-                return [{"id": "huggingface", "name": "Hugging Face", "category": "image", "enabled": False}]
+                return [{"id": "huggingface", "name": "Hugging Face", "category": "image", "enabled": self.enabled}]
+            def validate_provider_contract(self, provider_id, instance):
+                return {"valid": True}
+        catalog = Catalog()
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "registry.json"
             path.write_text(json.dumps(payload), encoding="utf-8")
-            with patch("projects.generation.providers.provider_service.ProviderManager") as manager_cls:
-                with self.assertRaisesRegex(ValueError, "missing, disabled, or incompatible"):
-                    ProviderService(path, connection_manager=Catalog())
-                manager_cls.assert_not_called()
+            with patch("projects.generation.providers.provider_service.ProviderManager") as manager_cls, \
+                 patch("projects.generation.providers.provider_service.FallbackManager") as fallback_cls, \
+                 patch("projects.generation.providers.provider_service.ProviderHealth"):
+                service = ProviderService(path, connection_manager=catalog)
+                manager_cls.return_value.load_registry.assert_called_once()
+                catalog.enabled = False
+                result = service.generate_image("prompt", "unused.png")
+                self.assertEqual(result, {"status": "NO_ENABLED_PROVIDER", "success": False})
+                self.assertEqual(manager_cls.return_value.load_registry.call_count, 2)
+                last_config = manager_cls.return_value.load_registry.call_args.args[0]
+                self.assertEqual(last_config["provider_modules"], {})
+                self.assertIsNone(last_config["primary"])
+                fallback_cls.return_value.generate_image.assert_not_called()
 
     def test_runtime_adapter_must_pass_central_catalog_contract(self):
         payload = {
