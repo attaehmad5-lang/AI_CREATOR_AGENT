@@ -12,6 +12,11 @@ on:
         required: true
         default: "5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7"
         type: string
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/provider-store-core-catalog-release-gates.yml"
 
 permissions:
   contents: read
@@ -32,8 +37,8 @@ jobs:
 
       - name: Validate archive inputs
         env:
-          ARCHIVE_URL: ${{ inputs.archive_url }}
-          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          ARCHIVE_URL: ${{ inputs.archive_url || 'https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/releases/download/provider-store-core-catalog-v1.0.0/provider_store_core_catalog_verified.zip' }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 || '5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -48,8 +53,8 @@ jobs:
 
       - name: Download and verify exact archive
         env:
-          ARCHIVE_URL: ${{ inputs.archive_url }}
-          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          ARCHIVE_URL: ${{ inputs.archive_url || 'https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/releases/download/provider-store-core-catalog-v1.0.0/provider_store_core_catalog_verified.zip' }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 || '5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7' }}
         run: |
           set -euo pipefail
           curl --fail --location --retry 3 --retry-delay 2 "$ARCHIVE_URL" --output "$RUNNER_TEMP/provider-store-package.zip"
