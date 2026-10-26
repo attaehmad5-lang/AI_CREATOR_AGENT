@@ -1265,15 +1265,30 @@ class ProviderServiceTests(unittest.TestCase):
             metrics_manager=metrics,
             slo_manager=slo,
         )
-        result = service.execute_routed_request(
-            category="image", project_id="film", request_id="metrics-job",
-            estimated_cost=2.0, modality="image",
-            adapter=lambda **kwargs: {
+        adapter_calls = []
+
+        def adapter(**kwargs):
+            adapter_calls.append(kwargs)
+            return {
                 "started": True, "success": False, "actual_cost": 1.0,
                 "charge_outcome": "incurred", "status_code": 503,
                 "latency_ms": 25.0, "queue_wait_ms": 12.0,
-            },
+            }
+
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="metrics-job",
+            trace_id="trace-metrics-01", estimated_cost=2.0, modality="image",
+            adapter=adapter,
         )
+        self.assertEqual(adapter_calls[0]["trace_id"], "trace-metrics-01")
+        self.assertEqual(result["trace_id"], "trace-metrics-01")
+        invalid_trace = service.execute_routed_request(
+            category="image", project_id="film", request_id="invalid-trace-job",
+            trace_id="trace has spaces", estimated_cost=0.0, modality="image",
+            adapter=adapter,
+        )
+        self.assertEqual(invalid_trace["status"], "INVALID_TRACE_ID")
+        self.assertEqual(len(adapter_calls), 1)
         self.assertEqual(result["metrics"]["status"], "METRIC_RECORDED")
         self.assertEqual(result["slo"]["status"], "SLO_BREACH")
         self.assertIn("SUCCESS_RATE_BELOW_TARGET", result["slo"]["breaches"])
