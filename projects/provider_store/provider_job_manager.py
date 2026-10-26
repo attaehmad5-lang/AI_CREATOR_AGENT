@@ -323,6 +323,67 @@ class ProviderJobManager:
             self._save()
             return {"status": "JOB_CLAIMED", "job": dict(job)}
 
+    def renew_lease(
+        self,
+        *,
+        job_id: str,
+        worker_id: str,
+        tenant_id: str | None = None,
+        lease_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        """Extend a live worker lease without allowing stale or cross-tenant renewal."""
+        if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
+            return {"status": "INVALID_JOB_ID", "saved": False}
+        if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
+            return {"status": "INVALID_WORKER_ID", "saved": False}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "saved": False}
+        if lease_seconds is not None and (
+            isinstance(lease_seconds, bool)
+            or not isinstance(lease_seconds, int)
+            or not 1 <= lease_seconds <= 86400
+        ):
+            return {"status": "INVALID_LEASE_SECONDS", "saved": False}
+        duration = self.lease_seconds if lease_seconds is None else lease_seconds
+        now_dt = self.clock().astimezone(timezone.utc)
+        now = now_dt.isoformat()
+        with self._transaction():
+            job = self.data["jobs"].get(job_id)
+            if not isinstance(job, dict):
+                return {"status": "JOB_NOT_FOUND", "saved": False}
+            if "tenant_id" in job and tenant_id is None:
+                return {"status": "TENANT_ID_REQUIRED", "saved": False}
+            if "tenant_id" in job and job.get("tenant_id") != tenant_id:
+                return {"status": "JOB_NOT_FOUND", "saved": False}
+            if job.get("status") != "RUNNING" or job.get("worker_id") != worker_id:
+                return {"status": "JOB_NOT_OWNED_BY_WORKER", "saved": False}
+            if job.get("cancel_requested") is True:
+                return {"status": "CANCEL_REQUESTED", "saved": False}
+            lease_until = job.get("lease_until")
+            try:
+                parsed_lease = (
+                    datetime.fromisoformat(lease_until)
+                    if isinstance(lease_until, str) else None
+                )
+                expired = (
+                    parsed_lease is None
+                    or parsed_lease.tzinfo is None
+                    or parsed_lease.utcoffset() is None
+                    or parsed_lease.astimezone(timezone.utc) <= now_dt
+                )
+            except (TypeError, ValueError, OverflowError):
+                expired = True
+            if expired:
+                self._reap_expired_locked(now_dt)
+                self._save()
+                return {"status": "JOB_LEASE_EXPIRED", "saved": False}
+            job["lease_until"] = (now_dt + timedelta(seconds=duration)).isoformat()
+            job["updated_at"] = now
+            self._save()
+            return {"status": "LEASE_RENEWED", "saved": True, "job": dict(job)}
+
     def complete(
         self,
         *,
