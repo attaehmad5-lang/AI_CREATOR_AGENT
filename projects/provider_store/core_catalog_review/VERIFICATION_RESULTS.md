@@ -83,3 +83,12 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 - GitHub Actions run [40302176661](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40302176661) completed successfully on both Ubuntu and Windows after the verification report update.
 - Black, Flake8, Mypy, isolated sdist/wheel build, and clean installed-wheel smoke test remain **NOT YET VERIFIED**. These tools are absent in the current execution environment and the earlier package-index attempts were unavailable. The GitHub Releases API currently lists no releases for this repository, so the exact ZIP has not yet been published as a Release asset.
 - No merge or release publication was performed. Do not mark the task 100% complete until the hosted release-gates workflow passes.
+
+
+## Additional wheel packaging probe — 2026-10-26
+
+- Re-extracted the verified archive and built `provider_store_core_catalog-1.0.0-py3-none-any.whl` successfully using the locally available setuptools backend with `pip wheel --no-deps --no-build-isolation`.
+- Inspected wheel metadata: project name/version, Python requirement (`>=3.10`), and runtime dependency (`pydantic>=2.5,<3`) are present.
+- Installed the wheel into a fresh virtual environment and confirmed `import provider_store` resolves to that environment's `site-packages` when the declared Pydantic dependency is available from the existing interpreter environment.
+- A strict isolated import without dependencies correctly failed with `ModuleNotFoundError: pydantic`; this is expected for `pip install --no-deps` and is **not** a product-code failure. A fully isolated dependency-resolving installation still needs the hosted release-gates workflow, which installs the wheel normally and must be observed passing.
+- Black, Flake8, Mypy, and build-isolated sdist/wheel checks remain **NOT YET VERIFIED**. This probe does not replace the hosted release-gate run.
