@@ -164,6 +164,54 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(exhausted["status"], "QUEUE_EMPTY")
         self.assertEqual(self.manager.poll(job_id="job-1")["job"]["status"], "FAILED")
 
+    def test_worker_can_renew_only_a_live_owned_lease(self):
+        self.submit("renew-me")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        original_lease = claimed["job"]["lease_until"]
+
+        renewed = self.manager.renew_lease(
+            job_id="renew-me", worker_id="worker-1", lease_seconds=30
+        )
+        self.assertEqual(renewed["status"], "LEASE_RENEWED")
+        self.assertTrue(renewed["saved"])
+        self.assertNotEqual(renewed["job"]["lease_until"], original_lease)
+        self.assertEqual(
+            self.manager.renew_lease(
+                job_id="renew-me", worker_id="wrong-worker"
+            )["status"],
+            "JOB_NOT_OWNED_BY_WORKER",
+        )
+        self.assertEqual(
+            self.manager.renew_lease(
+                job_id="renew-me", worker_id="worker-1", lease_seconds=True
+            )["status"],
+            "INVALID_LEASE_SECONDS",
+        )
+
+    def test_expired_or_cancelled_worker_cannot_renew_lease(self):
+        self.submit("expired-renew")
+        self.manager.claim_next(worker_id="worker-old")
+        self.now[0] += timedelta(seconds=11)
+        result = self.manager.renew_lease(
+            job_id="expired-renew", worker_id="worker-old"
+        )
+        self.assertEqual(result["status"], "JOB_LEASE_EXPIRED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(
+            self.manager.poll(job_id="expired-renew")["job"]["status"],
+            "QUEUED",
+        )
+
+        self.submit("cancel-renew")
+        self.manager.claim_next(worker_id="worker-cancel")
+        self.manager.cancel(job_id="cancel-renew")
+        cancelled = self.manager.renew_lease(
+            job_id="cancel-renew", worker_id="worker-cancel"
+        )
+        self.assertEqual(cancelled["status"], "CANCEL_REQUESTED")
+        self.assertFalse(cancelled["saved"])
+
     def test_expired_cancelled_worker_lease_finishes_as_cancelled(self):
         self.submit("cancel-expired")
         self.assertEqual(
