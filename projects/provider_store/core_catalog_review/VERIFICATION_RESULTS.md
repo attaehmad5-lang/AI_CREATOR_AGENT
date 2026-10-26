@@ -178,3 +178,15 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 - This closes the pending status of that cross-platform CI run only. It does **not** close standalone release gates: Black, Flake8, Mypy, build-isolated sdist/wheel creation, and dependency-resolving installed-wheel smoke test remain **NOT VERIFIED**.
 - The exact release-candidate ZIP remains unpublished as a GitHub Release asset, and the connected GitHub integration provides no release-asset upload or workflow-dispatch action. The hosted release-gates workflow therefore has not been run.
 - PR #81 remains open, draft, and unmerged. No release publication or merge is claimed.
+
+
+## Independent rerun in follow-up session — 2026-10-26
+
+- Re-opened and extracted the exact candidate archive `provider-store-core-catalog-release-candidate.zip` in a fresh temporary directory.
+- Confirmed SHA-256 `5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7`; 25 ZIP entries, no duplicate paths, no absolute/parent-traversal paths, and ZIP integrity check passed.
+- Rechecked all 24 SHA-256 manifest entries: **24 checked, 0 errors**.
+- `python -m compileall -q provider_store tests`: **PASS**.
+- `python -W error::ResourceWarning -m pytest -q --cov=provider_store --cov-report=term-missing`: **82 passed, 0 failed; 98% statement coverage** (981 statements, 20 uncovered).
+- GitHub Actions run [40307264151](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40307264151) was checked again: both Ubuntu and Windows jobs completed successfully.
+- Checked the GitHub Releases API: it currently returns an empty release list. Checked the default branch for `.github/workflows/provider-store-core-catalog-release-gates.yml`: the file is not present on `main`; it remains on the PR branch, so the intended hosted manual release gate cannot yet be dispatched from the default branch.
+- Release gate blockers remain unchanged: package-index DNS failure prevented installation of Black, Flake8, Mypy, and build dependencies; isolated builds and clean dependency-resolving installed-wheel smoke test are **NOT VERIFIED**. No release asset exists and no merge/release publication was performed.
