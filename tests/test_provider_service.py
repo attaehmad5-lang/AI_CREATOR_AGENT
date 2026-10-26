@@ -1989,6 +1989,31 @@ class ProviderAdminControlTests(unittest.TestCase):
             "user_training_consent": False,
         })
 
+    def test_local_model_data_policy_never_allows_credentials_or_unconsented_training(self):
+        class Adapter:
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        policy = ProviderDataHandlingPolicy({
+            "local-model": {
+                "allowed_categories": ["user_content", "credential"],
+                "max_retention_days": 30,
+                "training_use_allowed": True,
+                "source_url": "https://provider.example.com/privacy",
+            }
+        })
+        adapter = Adapter()
+        service = ProviderService(self.connection, local_model_adapter=adapter, data_handling_policy=policy)
+        credential = service.generate_local_text(prompt="token text", data_categories=("credential",))
+        self.assertEqual(credential["status"], "PROVIDER_DATA_POLICY_REJECTED")
+        self.assertFalse(adapter.called)
+        training = service.generate_local_text(
+            prompt="ordinary text", provider_training_use=True, user_training_consent=False,
+        )
+        self.assertEqual(training["status"], "PROVIDER_DATA_POLICY_REJECTED")
+        self.assertFalse(adapter.called)
+
     def test_local_model_data_policy_rejects_invalid_inputs(self):
         class Adapter:
             def generate_text(self, prompt, *, system=None):
