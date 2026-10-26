@@ -1,0 +1,50 @@
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from projects.generation.providers.provider_service import DEFAULT_REGISTRY_PATH, ProviderService
+
+
+class GenerationProviderServiceTests(unittest.TestCase):
+    def test_default_registry_path_is_independent_of_current_working_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("projects.generation.providers.provider_service.ProviderManager") as manager_cls, \
+                 patch("projects.generation.providers.provider_service.FallbackManager"), \
+                 patch("projects.generation.providers.provider_service.ProviderHealth"):
+                original = Path.cwd()
+                try:
+                    os.chdir(directory)
+                    service = ProviderService()
+                finally:
+                    os.chdir(original)
+
+        self.assertEqual(DEFAULT_REGISTRY_PATH, Path(__file__).resolve().parents[1] / "projects" / "generation" / "provider_registry.json")
+        manager_cls.return_value.load_registry.assert_called_once_with(service.registry["image"])
+
+    def test_invalid_registry_root_and_image_section_fail_closed(self):
+        for payload in ([], {"image": []}, {"video": {}}):
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "registry.json"
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                with patch("projects.generation.providers.provider_service.ProviderManager") as manager_cls:
+                    with self.assertRaises(ValueError):
+                        ProviderService(path)
+                    manager_cls.assert_not_called()
+
+    def test_custom_relative_registry_path_keeps_explicit_caller_semantics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "registry.json"
+            path.write_text(json.dumps({"image": {"primary": None, "fallbacks": [], "provider_modules": {}}}), encoding="utf-8")
+            with patch("projects.generation.providers.provider_service.ProviderManager") as manager_cls, \
+                 patch("projects.generation.providers.provider_service.FallbackManager"), \
+                 patch("projects.generation.providers.provider_service.ProviderHealth"):
+                service = ProviderService(path)
+        self.assertEqual(service.registry["image"]["fallbacks"], [])
+        manager_cls.return_value.load_registry.assert_called_once_with(service.registry["image"])
+
+
+if __name__ == "__main__":
+    unittest.main()
