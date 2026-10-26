@@ -59,12 +59,12 @@ This restores catalog metadata only; it does not restore credentials, connection
 
 ## Verification
 
-The GitHub Actions workflow compiles provider modules/tests, parses provider JSON catalogs, and runs all unit/regression tests with Python 3.13:
+The GitHub Actions workflow compiles provider modules/tests, parses provider JSON catalogs, runs all unit/regression tests with Python 3.13, and uploads a separate machine-readable JSON report for each operating system. Reports contain test IDs, outcomes, durations, environment metadata and aggregate counts; they intentionally omit failure messages and tracebacks, which remain in CI logs. Artifacts are retained for 14 days:
 
 ```bash
 python -m compileall -q projects/provider_store tests
 python -c "import json; from pathlib import Path; [json.loads(p.read_text(encoding='utf-8')) for p in Path('projects/provider_store').rglob('*.json')]"
-python -m unittest discover -s tests -p "test_*.py" -v
+python -m projects.provider_store.task25_test_report --output output/task25-test-report.json
 ```
 
 For a local Hugging Face credential check, set `HF_TOKEN` in the process environment (never paste it into source code or print it), then run this from the repository root. It checks the documented authenticated identity endpoint, not generation credits or model availability:
