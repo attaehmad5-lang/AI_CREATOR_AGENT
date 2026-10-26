@@ -101,13 +101,20 @@ class ProviderService:
             return
 
         # ProviderManager stages all instances before replacing its active registry.
+        # Roll back the previous active set if the central catalog's contract gate
+        # rejects any newly staged adapter.
+        previous_providers = self.manager.providers
         self.manager.load_registry(runtime_config)
-        for name, item in provider_records.items():
-            contract = self.connection_manager.validate_provider_contract(
-                item["id"], self.manager.get(name)
-            )
-            if not isinstance(contract, dict) or contract.get("valid") is not True:
-                raise ValueError("runtime provider contract validation failed")
+        try:
+            for name, item in provider_records.items():
+                contract = self.connection_manager.validate_provider_contract(
+                    item["id"], self.manager.get(name)
+                )
+                if not isinstance(contract, dict) or contract.get("valid") is not True:
+                    raise ValueError("runtime provider contract validation failed")
+        except Exception:
+            self.manager.providers = previous_providers
+            raise
         self._runtime_image_config = runtime_config
         self._runtime_signature = signature
 
