@@ -180,7 +180,7 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(next_claim["status"], "QUEUE_EMPTY")
         current = self.manager.poll(job_id="cancel-expired")["job"]
         self.assertEqual(current["status"], "CANCELLED")
-        self.assertEqual(current["error_code"] if "error_code" in current else None, None)
+        self.assertNotIn("error_code", current)
         self.assertIsNone(current["lease_until"])
 
     def test_expired_worker_cannot_complete_before_retry_is_claimed(self):
