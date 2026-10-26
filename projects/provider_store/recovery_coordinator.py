@@ -121,9 +121,21 @@ class ProviderRecoveryCoordinator:
             if not isinstance(result, dict) or result.get("provider") != provider_id:
                 results[provider_id] = {"status": "INVALID_PROBE_RESULT", "verified": False}
                 continue
+            result_status = result.get("status")
+            result_verified = result.get("verified")
+            # Probe status is surfaced to callers and may be persisted by them.
+            # Accept only a bounded machine-readable token and a real bool; do not
+            # pass through arbitrary objects, multiline text, or truthy strings.
+            if (
+                not isinstance(result_status, str)
+                or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", result_status)
+                or not isinstance(result_verified, bool)
+            ):
+                results[provider_id] = {"status": "INVALID_PROBE_RESULT", "verified": False}
+                continue
             results[provider_id] = {
-                "status": result.get("status", "UNKNOWN"),
-                "verified": result.get("verified") is True,
+                "status": result_status,
+                "verified": result_verified,
             }
         return {
             "status": "COMPLETED",
