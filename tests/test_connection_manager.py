@@ -776,6 +776,26 @@ class ConnectionManagerTests(unittest.TestCase):
         }
         self.assertEqual(self.manager.register_provider(provider)["status"], "INVALID_PROVIDER")
 
+    def test_register_provider_rejects_catalog_schema_violations_without_persisting(self):
+        invalid_auth = {
+            "id": "bad_auth", "name": "Bad Auth", "category": "image",
+            "auth_type": "MAGIC", "connection_type": "LOCAL",
+        }
+        result = self.manager.register_provider(invalid_auth)
+        self.assertEqual(result["status"], "INVALID_PROVIDER")
+        self.assertFalse(result["saved"])
+        self.assertFalse(self.manager.provider_exists("bad_auth"))
+        self.assertTrue(any("auth_type is unsupported" in error for error in result["errors"]))
+
+        invalid_capabilities = {
+            "id": "bad_caps", "name": "Bad Capabilities", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+            "capabilities": ["Generate-Image"],
+        }
+        result = self.manager.register_provider(invalid_capabilities)
+        self.assertEqual(result["status"], "INVALID_PROVIDER")
+        self.assertFalse(self.manager.provider_exists("bad_caps"))
+
     def test_discovery_filters_by_category_case_insensitively(self):
         results = self.manager.discover_providers(category="IMAGE")
         self.assertEqual({item["id"] for item in results}, {"public_image", "token_image"})
