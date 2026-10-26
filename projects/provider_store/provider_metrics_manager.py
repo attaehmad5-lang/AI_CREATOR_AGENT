@@ -46,6 +46,20 @@ class ProviderMetricsManager:
         queue_wait = finite_number(queue_wait_ms, minimum=0)
         if latency is None or queue_wait is None:
             return {"status": "INVALID_METRIC_TIMING", "saved": False}
+        try:
+            recorded_at = self.clock()
+        except Exception:
+            return {"status": "METRIC_CLOCK_FAILED", "saved": False}
+        if (
+            not isinstance(recorded_at, datetime)
+            or recorded_at.tzinfo is None
+            or recorded_at.utcoffset() is None
+        ):
+            return {"status": "INVALID_METRIC_CLOCK", "saved": False}
+        try:
+            recorded_at = recorded_at.astimezone(timezone.utc).isoformat()
+        except (OverflowError, TypeError, ValueError):
+            return {"status": "INVALID_METRIC_CLOCK", "saved": False}
         sample = {
             "provider_id": provider_id,
             "category": category,
@@ -53,7 +67,7 @@ class ProviderMetricsManager:
             "latency_ms": latency,
             "queue_wait_ms": queue_wait,
             "timed_out": timed_out,
-            "recorded_at": self.clock().astimezone(timezone.utc).isoformat(),
+            "recorded_at": recorded_at,
         }
         with self._lock:
             self._samples.append(sample)
