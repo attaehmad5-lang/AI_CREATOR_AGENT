@@ -38,3 +38,13 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 - Re-ran local package installation and wheel build with `--no-build-isolation --no-deps`: both passed. Wheel SHA-256: `0c3a74ecc46b600627a3448ad91a2501ee659ac603ab3cbf9ff469b54af9f634`.
 - Retried installation of Black, Flake8, and Mypy. The package index returned no available versions, so this environment still cannot run those tools. This is an environment/network blocker, not a passing check.
 - The configured Ubuntu and Windows workflow jobs were inspected individually; both completed successfully for compilation, provider JSON validation, and configured unit/regression tests. They do not include the blocked standalone lint/type/build-isolation gates.
+
+## CI execution route and clean release candidate — 2026-10-26
+
+- Rebuilt the release-candidate ZIP without `.pytest_cache` or other transient Python cache files; archive integrity and all 24 SHA-256 manifest entries verified.
+- Updated `run_checks.sh` so formatting is checked with `black --check .` rather than auto-formatting the source before the check. This makes the format gate meaningful and non-mutating.
+- Re-extracted the candidate and re-ran `compileall` and the ResourceWarning-as-error pytest suite: **82 passed, 0 failed; 98% statement coverage**.
+- Clean release-candidate archive SHA-256: `5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7` (25 ZIP entries; 24 manifest entries).
+- Added `.github/workflows/provider-store-core-catalog-release-gates.yml`. It downloads a GitHub Release ZIP only after URL and SHA-256 validation, runs formatting/lint/type/regression checks on a network-enabled GitHub-hosted runner, builds sdist/wheel with build isolation, and smoke-tests the installed wheel.
+- **Activation dependency:** GitHub's manual `workflow_dispatch` workflow must exist on the repository default branch to be launched from the Actions UI. The workflow is currently on this PR branch, which remains unmerged. The clean ZIP must also be uploaded as a GitHub Release asset and its direct asset URL supplied to the workflow. These are not represented as completed here.
+- Release gates are still **NOT PASS** until the workflow actually runs and all required steps pass. No merge was performed.
