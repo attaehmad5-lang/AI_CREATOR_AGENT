@@ -64,3 +64,11 @@ Still required in a network-enabled environment: `black .`, `black --check .`, `
 - Inspected the release-candidate ZIP's Unix mode metadata and found `run_checks.sh` was packaged without the executable bit. The previous workflow's direct `./run_checks.sh` invocation could therefore fail with `Permission denied` before running the quality gates.
 - Updated the release-gates workflow to invoke `bash ./run_checks.sh`, which does not depend on the ZIP preserving an executable bit. This is a workflow robustness fix, not evidence that the release gates have passed.
 - The workflow still requires the PR branch to reach the default branch and the exact ZIP to be uploaded as a GitHub Release asset. Those operations and the final hosted run remain outstanding; release status is **NOT PASS / NOT YET VERIFIED**.
+
+
+## Cross-platform concurrency regression and fix — 2026-10-26
+
+- A Windows CI run exposed a race in `ProviderCostPolicy`: its constructor read the shared usage ledger before acquiring the interprocess lock, while another process could be atomically replacing that ledger. Linux passed; Windows failed the multi-process no-charge idempotency test with `PermissionError`.
+- Fixed initialization to acquire the same persistent interprocess lock before the initial ledger read. This serializes constructors with ledger writers and protects the initial snapshot on Windows.
+- GitHub Actions run [40302040319](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40302040319) passed after the fix: **Ubuntu PASS and Windows PASS**, including the full configured unit/regression test step on both platforms.
+- This resolves the observed cross-platform regression. Standalone-package release gates (Black, Flake8, Mypy, build isolation, clean-wheel smoke test) remain **NOT YET VERIFIED** because the local package index is unavailable and the hosted release-gates workflow still requires default-branch activation plus a Release ZIP asset.
