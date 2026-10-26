@@ -15,7 +15,7 @@ GitHub Actions run [#40369663801](https://github.com/attaehmad5-lang/AI_CREATOR_
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
 | 1 | 🟡 | Provider Registry | PARTIAL | `provider_catalog.json`, `connection_manager.py`, catalog/schema tests; registry lifecycle is not fully integrated with runtime adapters. |
-| 2 | 🟡 | Provider Registration | PARTIAL | Registration and concurrent-registration tests exist; onboarding and runtime adapter registration remain incomplete. |
+| 2 | 🟡 | Provider Registration | PARTIAL | Registration now validates the complete candidate catalog before persistence, rejecting unsupported auth types and malformed capability metadata without writing the provider; regression tests cover invalid registration and persistence safety. Onboarding and runtime adapter registration remain incomplete. Evidence: `tests/test_connection_manager.py::test_register_provider_rejects_catalog_schema_violations_without_persisting`. |
 | 3 | 🟡 | Provider Discovery | VERIFIED | Provider discovery by declared catalog metadata is implemented and covered by discovery/capability tests. |
 | 4 | 🟡 | Provider Loading | VERIFIED | Factory-based loading, disabled-provider rejection, contract enforcement and safe failure behavior are tested. |
 | 5 | 🔴 | Provider Unloading | VERIFIED | `unload_provider()` calls close/shutdown, preserves instances if cleanup fails, and has lifecycle regression tests. |
@@ -81,7 +81,7 @@ GitHub Actions run [#40369663801](https://github.com/attaehmad5-lang/AI_CREATOR_
 |---:|:---:|---|---|---|
 | 41 | 🟢 | Provider Health State Tracking | VERIFIED | Persistent provider health states are stored and covered by state/reload tests. |
 | 42 | 🟢 | Basic Success/Failure History | VERIFIED | Success/failure history persistence, bounded history and idempotent request recording are tested. |
-| 43 | 🟡 | Health Check Before Generation | PARTIAL | Health eligibility hooks exist; not every generation path enforces a fresh check. |
+| 43 | 🟡 | Health Check Before Generation | PARTIAL | `ProviderService.execute_routed_request(..., require_fresh_health_check=True)` now checks recorded eligibility before adapter invocation and fails closed on missing/stale/recovering/unhealthy/slow/malformed evidence or an unavailable manager; tests cover blocked unknown health and permitted fresh evidence. This is opt-in, checks stored evidence rather than running a live probe, and is not yet enforced across every generation entry point. Evidence: `tests/test_provider_service.py::test_routed_generation_can_require_fresh_health_evidence`, run [#40379755049](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40379755049). |
 | 44 | 🟡 | Configurable Health-Check Policy | VERIFIED | Staleness and latency health policies are configurable and tested. |
 | 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
