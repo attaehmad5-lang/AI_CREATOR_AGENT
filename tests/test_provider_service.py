@@ -671,17 +671,63 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["finalization"]["finalized"])
         self.assertEqual(result["provider"], "image")
 
-    def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
+    def test_execute_routed_request_cannot_forge_paid_approval_provider_set(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
-            self.connections, routing_manager=router, health_manager=self.health,
+            self.connections, routing_manager=router, cost_policy=self.cost,
+            quota_manager=self.quota,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="forged-paid-approval",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=lambda **kwargs: calls.append(kwargs) or {
+                "started": False, "success": False,
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "PAID_USAGE_APPROVAL_REQUIRED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
+    def test_execute_routed_request_paid_approval_requires_billing_permission(self):
+        auth = ProviderAuthorizationManager(self.root / "paid-approval-auth.json")
+        auth.assign_role("creator-1", "creator")
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, authorization_manager=auth,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="paid-approval-denied",
+            estimated_cost=1.0, principal_id="creator-1",
+            paid_usage_approved=True, paid_approved_providers={"image"},
+            adapter=lambda **kwargs: calls.append(kwargs),
+            modality="image",
+        )
+        self.assertEqual(result["status"], "PAID_USAGE_APPROVAL_DENIED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
+    def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        auth = ProviderAuthorizationManager(self.root / "paid-auth.json")
+        auth.assign_role("billing-admin", "admin")
+        service = ProviderService(
+            self.connections, authorization_manager=auth, routing_manager=router, health_manager=self.health,
             cost_policy=self.cost, quota_manager=self.quota,
         )
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-not-started",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_usage_approved=True, principal_id="billing-admin",
             adapter=lambda **kwargs: {"started": False, "success": False},
             modality="image",
         )
@@ -730,13 +776,16 @@ class ProviderServiceTests(unittest.TestCase):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
         )
+        auth = ProviderAuthorizationManager(self.root / "paid-auth.json")
+        auth.assign_role("billing-admin", "admin")
         service = ProviderService(
-            self.connections, routing_manager=router,
+            self.connections, authorization_manager=auth, routing_manager=router,
             cost_policy=self.cost, quota_manager=self.quota,
         )
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-contradictory-start",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_usage_approved=True, principal_id="billing-admin",
             adapter=lambda **kwargs: {
                 "started": False, "success": True, "actual_cost": 1.0,
                 "charge_outcome": "incurred",
@@ -754,8 +803,10 @@ class ProviderServiceTests(unittest.TestCase):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
         )
+        auth = ProviderAuthorizationManager(self.root / "paid-auth.json")
+        auth.assign_role("billing-admin", "admin")
         service = ProviderService(
-            self.connections, routing_manager=router, health_manager=self.health,
+            self.connections, authorization_manager=auth, routing_manager=router, health_manager=self.health,
             cost_policy=self.cost, quota_manager=self.quota,
         )
         def adapter(**kwargs):
@@ -763,6 +814,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-unknown",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_usage_approved=True, principal_id="billing-admin",
             adapter=adapter, modality="image",
         )
         self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
@@ -775,8 +827,10 @@ class ProviderServiceTests(unittest.TestCase):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
         )
+        auth = ProviderAuthorizationManager(self.root / "paid-auth.json")
+        auth.assign_role("billing-admin", "admin")
         service = ProviderService(
-            self.connections, routing_manager=router, health_manager=self.health,
+            self.connections, authorization_manager=auth, routing_manager=router, health_manager=self.health,
             output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
         )
         output_path = self.root / "cost-report.png"
@@ -784,6 +838,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-invalid-cost",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_usage_approved=True, principal_id="billing-admin",
             adapter=lambda **kwargs: {
                 "started": True, "success": True, "actual_cost": float("nan"),
                 "charge_outcome": "not_incurred", "output_path": str(output_path),
