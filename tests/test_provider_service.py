@@ -1613,5 +1613,44 @@ class ProviderAdminControlTests(unittest.TestCase):
         self.assertEqual(result["probed"], [])
 
 
+    def test_local_model_service_rejects_generated_result_without_text(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": None}
+
+        service = ProviderService(self.connections, local_model_adapter=Adapter())
+        result = service.generate_local_text(prompt="hello")
+        self.assertEqual(result, {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False})
+
+    def test_local_model_service_whitelists_success_fields(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                return {
+                    "status": "LOCAL_TEXT_GENERATED",
+                    "generated": True,
+                    "text": "safe output",
+                    "provider_id": "local-ollama",
+                    "model_id": "qwen-local",
+                    "secret": "must not escape",
+                    "prompt": prompt,
+                }
+
+        service = ProviderService(self.connections, local_model_adapter=Adapter())
+        result = service.generate_local_text(prompt="private prompt")
+        self.assertEqual(result["text"], "safe output")
+        self.assertNotIn("secret", result)
+        self.assertNotIn("prompt", result)
+        self.assertEqual(result["provider_id"], "local-ollama")
+
+    def test_local_model_service_rejects_malformed_adapter_status(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                return {"generated": False, "status": []}
+
+        service = ProviderService(self.connections, local_model_adapter=Adapter())
+        result = service.generate_local_text(prompt="hello")
+        self.assertEqual(result, {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False})
+
+
 if __name__ == "__main__":
     unittest.main()
