@@ -360,6 +360,27 @@ class ProviderJobManager:
                 return {"status": "JOB_NOT_FOUND", "saved": False}
             if job.get("status") != "RUNNING" or job.get("worker_id") != worker_id:
                 return {"status": "JOB_NOT_OWNED_BY_WORKER", "saved": False}
+            # A worker must not commit a result after its lease has expired,
+            # even if no replacement worker has claimed the requeued job yet.
+            # Otherwise a stale worker could race a retry and overwrite its state.
+            lease_until = job.get("lease_until")
+            try:
+                parsed_lease = (
+                    datetime.fromisoformat(lease_until)
+                    if isinstance(lease_until, str) else None
+                )
+                lease_expired = (
+                    parsed_lease is None
+                    or parsed_lease.tzinfo is None
+                    or parsed_lease.utcoffset() is None
+                    or parsed_lease.astimezone(timezone.utc) <= now
+                )
+            except (TypeError, ValueError, OverflowError):
+                lease_expired = True
+            if lease_expired:
+                self._reap_expired_locked(now)
+                self._save()
+                return {"status": "JOB_LEASE_EXPIRED", "saved": False}
             if job.get("cancel_requested") is True:
                 job["status"] = "CANCELLED"
             else:
