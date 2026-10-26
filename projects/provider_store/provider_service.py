@@ -1288,10 +1288,13 @@ class ProviderService:
 
         # A malformed third-party policy must never turn a truthy string such as
         # "false" into permission to retry, or inject an unbounded/non-finite delay.
-        retry = getattr(decision, "retry", None)
-        attempt = getattr(decision, "attempt", None)
-        delay = getattr(decision, "delay_seconds", None)
-        reason = getattr(decision, "reason", None)
+        try:
+            retry = getattr(decision, "retry", None)
+            attempt = getattr(decision, "attempt", None)
+            delay = getattr(decision, "delay_seconds", None)
+            reason = getattr(decision, "reason", None)
+        except Exception:
+            return {"retry": False, "reason": "INVALID_RETRY_RESPONSE"}
         normalized_delay = finite_number(delay, minimum=0, maximum=86400)
         if (
             not isinstance(retry, bool)
