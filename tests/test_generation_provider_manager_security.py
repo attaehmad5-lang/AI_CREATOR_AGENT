@@ -8,9 +8,11 @@ from projects.generation.providers.provider_manager import ProviderManager
 class ProviderManagerSecurityTests(unittest.TestCase):
     def test_registry_loads_only_explicit_provider_package_modules(self):
         class HuggingFaceProvider:
-            pass
+            def generate_image(self, *args, **kwargs):
+                return {"success": True}
         class PollinationsProvider:
-            pass
+            def generate_image(self, *args, **kwargs):
+                return {"success": True}
 
         def importer(module_name):
             modules = {
@@ -78,7 +80,7 @@ class ProviderManagerSecurityTests(unittest.TestCase):
 
         def importer(module_name):
             if module_name.endswith("first_provider"):
-                return SimpleNamespace(FirstProvider=lambda: object())
+                return SimpleNamespace(FirstProvider=lambda: SimpleNamespace(generate_image=lambda *args, **kwargs: {"success": True}))
             raise ImportError("private import detail")
 
         with patch("projects.generation.providers.provider_manager.importlib.import_module", side_effect=importer):
@@ -91,6 +93,23 @@ class ProviderManagerSecurityTests(unittest.TestCase):
                 })
 
         self.assertEqual(manager.providers, {"Existing": sentinel})
+
+    def test_registry_rejects_provider_without_required_generation_method(self):
+        class IncompleteProvider:
+            pass
+        manager = ProviderManager()
+        manager.providers["Existing"] = object()
+        with patch(
+            "projects.generation.providers.provider_manager.importlib.import_module",
+            return_value=SimpleNamespace(IncompleteProvider=IncompleteProvider),
+        ):
+            with self.assertRaisesRegex(ValueError, "provider registry loading failed"):
+                manager.load_registry({
+                    "provider_modules": {
+                        "Incomplete": "projects/generation/providers/incomplete_provider.py",
+                    }
+                })
+        self.assertEqual(list(manager.providers), ["Existing"])
 
     def test_direct_registration_rejects_arbitrary_imports(self):
         manager = ProviderManager()
