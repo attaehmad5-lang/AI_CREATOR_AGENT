@@ -9,8 +9,9 @@
 - Statement coverage: 98% (981 statements; 20 uncovered)
 - Local package installation from the clean-room extraction: PASS
 - Wheel build from the clean-room extraction: PASS
-- SHA-256 manifest verification and ZIP integrity: PASS (29 ZIP entries; 28 manifest entries)
-- Archive SHA-256: `e5f55e92f8e66156f4d6cf59a358bedbce31443068b809a18e6da5f23af6477a`
+- SHA-256 manifest verification and ZIP integrity: PASS for the latest clean candidate (25 ZIP entries; 24 manifest entries)
+- Latest clean-candidate SHA-256: `5227d4dea80c0fae2cac7f3b36552ad8084af4b0490d73e5d325fe39464c46a7`
+- The earlier 29-entry archive hash recorded in the historical verification notes below was superseded by this later clean candidate.
 
 ## Defects covered by fixes and regressions
 
