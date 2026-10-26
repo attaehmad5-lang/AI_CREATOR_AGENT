@@ -194,6 +194,27 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["health"]["status"], "HEALTHY")
         self.assertEqual(self.connections.get_state("image")["status"], "CONNECTED")
 
+    def test_malformed_connection_manager_responses_fail_closed(self):
+        class MalformedConnectionManager:
+            def verify_connectivity(self, *args, **kwargs):
+                return None
+
+            def verify_manual_connection(self, *args, **kwargs):
+                return []
+
+        service = ProviderService(MalformedConnectionManager())
+        result = service.verify_provider("image", lambda **kwargs: True)
+        self.assertEqual(result["status"], "INVALID_CONNECTION_RESPONSE")
+        self.assertFalse(result["verified"])
+        self.assertFalse(result["connection"]["verified"])
+
+        manual = service.verify_manual_provider(
+            "image", object(), lambda **kwargs: True
+        )
+        self.assertEqual(manual["status"], "INVALID_CONNECTION_RESPONSE")
+        self.assertFalse(manual["verified"])
+        self.assertFalse(manual["connection"]["verified"])
+
     def test_builtin_http_provider_verification_updates_connection_and_health(self):
         class Response:
             status = 200
