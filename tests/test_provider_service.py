@@ -1922,6 +1922,60 @@ class ProviderAdminControlTests(unittest.TestCase):
                 self.assertEqual(result["status"], "INVALID_HEALTH_CHECK_POLICY")
                 self.assertFalse(result["generated"])
 
+    def test_local_model_data_policy_blocks_unknown_or_denied_provider_before_generation(self):
+        class Adapter:
+            provider_id = "unlisted-local-provider"
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        adapter = Adapter()
+        policy = ProviderDataHandlingPolicy({})
+        service = ProviderService(self.connection, local_model_adapter=adapter, data_handling_policy=policy)
+        result = service.generate_local_text(prompt="private text")
+        self.assertEqual(result["status"], "PROVIDER_DATA_POLICY_REJECTED")
+        self.assertFalse(adapter.called)
+
+    def test_local_model_data_policy_receives_explicit_consent_and_retention_controls(self):
+        class Adapter:
+            provider_id = "local-ollama"
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "safe output"}
+        class Policy:
+            def __init__(self): self.kwargs = None
+            def evaluate(self, **kwargs):
+                self.kwargs = kwargs
+                return {"allowed": True, "status": "ALLOWED"}
+        policy = Policy()
+        service = ProviderService(self.connection, local_model_adapter=Adapter(), data_handling_policy=policy)
+        result = service.generate_local_text(
+            prompt="hello", data_categories=("user_content",), retention_days=0,
+            provider_training_use=False, user_training_consent=False,
+        )
+        self.assertTrue(result["generated"])
+        self.assertEqual(policy.kwargs, {
+            "provider_id": "local-ollama", "data_categories": ["user_content"],
+            "retention_days": 0, "provider_training_use": False,
+            "user_training_consent": False,
+        })
+
+    def test_local_model_data_policy_rejects_invalid_inputs(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                raise AssertionError("adapter must not be called")
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        for options in (
+            {"data_categories": ()},
+            {"data_categories": ("user_content", "user_content")},
+            {"retention_days": -1},
+            {"provider_training_use": "false"},
+            {"user_training_consent": 1},
+        ):
+            with self.subTest(options=options):
+                result = service.generate_local_text(prompt="hello", **options)
+                self.assertEqual(result["status"], "INVALID_DATA_HANDLING_POLICY_INPUT")
+                self.assertFalse(result["generated"])
+
     def test_local_model_service_rejects_malformed_adapter_status(self):
         class Adapter:
             def generate_text(self, prompt, *, system=None):
