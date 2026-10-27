@@ -6,9 +6,9 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#40547713882](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40547713882) completed successfully on both Ubuntu and Windows for commit `9be3a2178acdde4fc8ff3382826971a7c75f5805`. Both platform jobs passed the secret-file exclusion guard, Python compilation, provider JSON catalog validation, and the unit/regression test step. This run includes the privacy-safe discovery telemetry regression tests, deterministic bounded pagination, priority ranking/validation, and concurrent factory-registration coverage. The workflow reports success on both platforms; this is evidence for the tested provider-manager behavior only, not proof that every one of the 138 canonical items or live external integrations is complete.
+GitHub Actions run [#40549056812](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40549056812) completed successfully for commit `00c4c4f51cda7b750e64b1d460b3b39772ccf8d6`. Both Ubuntu and Windows jobs passed secret-file exclusion, compilation, provider catalog validation, and unit/regression tests. This run includes a new regression test verifying that a provider factory mutating its input metadata cannot mutate the persisted provider catalog.
 
-Earlier verified coverage includes bounded deterministic pagination, priority ranking and invalid-value rejection, and concurrent plugin factory registration.
+Earlier successful cross-platform coverage includes privacy-safe discovery telemetry, deterministic bounded pagination, priority ranking/validation, and concurrent factory registration. This is evidence for these tested behaviors only; it does not establish completion of all 138 canonical items or live external integrations.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 ## A — Basic Provider Management
