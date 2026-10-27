@@ -30,10 +30,10 @@ class CatalogDiffTests(unittest.TestCase):
         first = candidate["providers"][0]
         first["name"] = first.get("name", "provider") + " changed"
         removed_id = candidate["providers"].pop()["id"]
-        candidate["providers"].append(
-            {"id": "new-test-provider", "name": "New Test Provider", "category": "image",
-             "auth_type": "API_KEY", "connection_type": "API", "enabled": False}
-        )
+        new_provider = json.loads(json.dumps(candidate["providers"][0]))
+        new_provider["id"] = "new-test-provider"
+        new_provider["name"] = "New Test Provider"
+        candidate["providers"].append(new_provider)
         self.write_candidate(candidate)
 
         result = diff_catalogs(self.current, self.candidate)
