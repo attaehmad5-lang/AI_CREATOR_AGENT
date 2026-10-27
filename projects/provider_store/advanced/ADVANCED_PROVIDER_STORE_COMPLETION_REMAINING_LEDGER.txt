@@ -13,8 +13,9 @@ BLOCKED = cannot proceed; exact reason must be recorded.
 VERIFICATION FACTS
 - Repository: attaehmad5-lang/AI_CREATOR_AGENT
 - Advanced catalog: 18 entries; canonical catalog: 54 entries; field-by-field metadata and category-capability consistency tests pass.
-- GitHub Actions run #40556234168 passed compilation, JSON catalog validation, and all 431 tests on both Ubuntu and Windows.
-- Runtime catalog-consistency diagnostics and category metadata validation are included in the passing suite.
+- Latest relevant GitHub Actions run #40560954116 passed compilation, catalog JSON validation, and all 445 unit/regression tests on both Ubuntu and Windows at commit 34bcf7709a3759eb4bd2f881abb6c3ad191ffd0c.
+- Passing evidence includes advanced capability/lifecycle/readiness tests, invalid category-catalog rejection, incident lifecycle tests, HMAC webhook/replay tests, ledger/report validation, private-key fail-closed checks, and source ZIP/manifest checksum verification.
+- The report builder generates JSON/Markdown evidence and a source-only ZIP; PDF generation is not implemented. The report correctly stays INCOMPLETE until all 150 points are completed.
 - No provider credentials were supplied or used. No live generation, credit balance, or billing test is claimed.
 - Draft PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/84
 
@@ -161,9 +162,9 @@ Implementation/evidence inspected: No verified implementation located during thi
 Remaining work: Add distributed tracing / incident workflow only after core telemetry contracts are defined.
 
 Feature 029: Incident Management
-Status: NOT STARTED
-Implementation/evidence inspected: No verified implementation located during this source pass
-Remaining work: Add distributed tracing / incident workflow only after core telemetry contracts are defined.
+Status: COMPLETED
+Implementation/evidence inspected: provider_incident_manager.py; tests/test_provider_incident_manager.py; CI #40560954116
+Remaining work: Persistent incident deduplication, severity updates, acknowledge/resolve/reopen, state snapshots and invalid-field rejection pass regression tests.
 
 Feature 030: Outage Detection
 Status: PARTIAL
@@ -546,9 +547,9 @@ Implementation/evidence inspected: provider_benchmark_manager.py; provider_outpu
 Remaining work: Foundational modules exist; controlled benchmark data and full acceptance matrices remain.
 
 Feature 106: Webhook Verification
-Status: UNVERIFIED
-Implementation/evidence inspected: No webhook verification implementation confirmed in this pass
-Remaining work: Search for webhook receiver/signature validation and implement only if required by an actual provider integration.
+Status: COMPLETED
+Implementation/evidence inspected: provider_webhook_verifier.py; tests/test_provider_webhook_verifier.py; CI #40560954116
+Remaining work: HMAC-SHA256 signatures, timestamp windows, replay rejection, payload bounds and secret/payload non-persistence pass regression tests.
 
 Feature 107: Integration Contract Testing
 Status: PARTIAL
@@ -721,29 +722,29 @@ Implementation/evidence inspected: ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md;
 Remaining work: Both 150-row ledgers are present and their IDs/status rows are validated by regression tests.
 
 Feature 141: Test Report Generation
-Status: UNVERIFIED
-Implementation/evidence inspected: No verified report/ZIP generation artifact produced in this pass
-Remaining work: Generate and validate final report/package after code and tests pass.
+Status: PARTIAL
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40560954116
+Remaining work: JSON and Markdown reports are generated from the canonical ledger; final report remains incomplete until all 150 points pass.
 
 Feature 142: PDF Report Generation
 Status: UNVERIFIED
-Implementation/evidence inspected: No verified report/ZIP generation artifact produced in this pass
-Remaining work: Generate and validate final report/package after code and tests pass.
+Implementation/evidence inspected: No PDF generator implemented
+Remaining work: Implement and validate PDF output with an approved dependency and Unicode-safe rendering.
 
 Feature 143: ZIP Package Generation
-Status: UNVERIFIED
-Implementation/evidence inspected: No verified report/ZIP generation artifact produced in this pass
-Remaining work: Generate and validate final report/package after code and tests pass.
+Status: PARTIAL
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40560954116
+Remaining work: Source-only ZIP is generated and integrity-checked; final distributable package and clean extraction gate remain.
 
 Feature 144: Package File Manifest
-Status: UNVERIFIED
-Implementation/evidence inspected: No verified report/ZIP generation artifact produced in this pass
-Remaining work: Generate and validate final report/package after code and tests pass.
+Status: PARTIAL
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40560954116
+Remaining work: SHA-256 manifest is emitted and archive member hashes are verified; reproducible-release verification remains.
 
 Feature 145: Secret-Free Package Verification
 Status: PARTIAL
-Implementation/evidence inspected: task-25-tests.yml; sensitive_data_policy.py
-Remaining work: Secret-tracking checks and redaction tests exist; a final release ZIP scan is still required.
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; sensitive_data_policy.py; CI #40560954116
+Remaining work: Allowlist excludes persisted state, backups, environment/credential files and private-key material; broader secret scan and final release ZIP audit remain.
 
 Feature 146: Backward Compatibility
 Status: PARTIAL
@@ -757,8 +758,8 @@ Remaining work: Compatibility, deprecation, diagnostics and recovery primitives 
 
 Feature 148: Error Diagnostics
 Status: PARTIAL
-Implementation/evidence inspected: provider_store modules; test_provider_store_compat.py; regression tests
-Remaining work: Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains.
+Implementation/evidence inspected: provider_store modules; advanced/advanced_provider_manager.py; tests/test_advanced_provider_manager.py; CI #40560954116
+Remaining work: Secret-free readiness report identifies category-catalog validity, catalog consistency, enablement, credential and verified-connectivity blockers; broader normalized error taxonomy remains.
 
 Feature 149: Recovery Diagnostics
 Status: PARTIAL
