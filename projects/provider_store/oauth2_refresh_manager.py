@@ -7,13 +7,92 @@ external secret manager through an injected sink.
 """
 from __future__ import annotations
 
+import base64
+import json
 import math
 import os
 import re
 import threading
 import time
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
+
+
+
+class SecureOAuthTokenRequester:
+    """Exchange OAuth form data through the reviewed SecureHTTPTransport."""
+
+    def __init__(self, transport: Any, *, max_response_bytes: int = 65536) -> None:
+        if not callable(getattr(transport, "request", None)):
+            raise ValueError("transport must provide request")
+        if (
+            not isinstance(max_response_bytes, int)
+            or isinstance(max_response_bytes, bool)
+            or max_response_bytes < 1
+            or max_response_bytes > 1_048_576
+        ):
+            raise ValueError("max_response_bytes must be between 1 and 1048576")
+        self.transport = transport
+        self.max_response_bytes = max_response_bytes
+
+    def __call__(
+        self,
+        endpoint: str,
+        *,
+        form_data: dict[str, str],
+        client_auth: tuple[str, str] | None,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        parsed = urlsplit(endpoint) if isinstance(endpoint, str) else None
+        if (
+            parsed is None or parsed.scheme != "https" or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.fragment
+        ):
+            raise RuntimeError("OAUTH_ENDPOINT_INVALID")
+        transport_timeout = getattr(self.transport, "timeout", None)
+        if (
+            isinstance(transport_timeout, (int, float))
+            and not isinstance(transport_timeout, bool)
+            and transport_timeout > timeout_seconds
+        ):
+            raise RuntimeError("OAUTH_TRANSPORT_TIMEOUT_POLICY")
+        if not isinstance(form_data, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in form_data.items()
+        ):
+            raise RuntimeError("OAUTH_FORM_INVALID")
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+        }
+        if client_auth is not None:
+            if (
+                not isinstance(client_auth, tuple) or len(client_auth) != 2
+                or not all(isinstance(value, str) and value for value in client_auth)
+            ):
+                raise RuntimeError("OAUTH_CLIENT_AUTH_INVALID")
+            encoded = base64.b64encode(
+                (client_auth[0] + ":" + client_auth[1]).encode("utf-8")
+            ).decode("ascii")
+            headers["Authorization"] = "Basic " + encoded
+        body = urlencode(form_data).encode("utf-8")
+        response = self.transport.request("POST", endpoint, headers=headers, body=body)
+        if not isinstance(response, dict):
+            raise RuntimeError("OAUTH_HTTP_RESPONSE_INVALID")
+        status = response.get("status")
+        response_body = response.get("body")
+        if status != 200:
+            raise RuntimeError("OAUTH_HTTP_STATUS_REJECTED")
+        if not isinstance(response_body, bytes) or len(response_body) > self.max_response_bytes:
+            raise RuntimeError("OAUTH_RESPONSE_SIZE_INVALID")
+        try:
+            parsed_body = json.loads(response_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RuntimeError("OAUTH_RESPONSE_JSON_INVALID") from None
+        if not isinstance(parsed_body, dict):
+            raise RuntimeError("OAUTH_RESPONSE_JSON_INVALID")
+        return parsed_body
 
 
 _ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
