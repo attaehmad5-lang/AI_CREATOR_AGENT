@@ -341,7 +341,7 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         with self.assertRaises(SecurityError):
             transport.request("GET", "https://example.com", body="not bytes")
         with self.assertRaises(SecurityError):
-            transport.request("GET", "https://example.com", headers={"X-Test": "bad\\r\\nvalue"})
+            transport.request("GET", "https://example.com", headers={"X-Test": "bad\r\nvalue"})
         with self.assertRaises(SecurityError):
             transport.request("GET", "https://example.com", headers=["bad"])
         allowlisted = SecureHTTPTransport(allowlist=["allowed.example"], resolver=resolver, connection_factory=lambda *a: None)
