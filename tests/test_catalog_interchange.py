@@ -75,8 +75,12 @@ class CatalogInterchangeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             export_catalog(secret_source, target)
         self.assertFalse(target.exists())
-        self.assertTrue(_contains_credential_material({"nested": {"refresh_token": "x"}}))
-        self.assertFalse(_contains_credential_material({"auth_header_name": "x-api-key"}))
+        self.assertTrue(
+            _contains_credential_material({"nested": {"refresh_token": "x"}})
+        )
+        self.assertFalse(
+            _contains_credential_material({"auth_header_name": "x-api-key"})
+        )
 
     def test_failed_atomic_write_does_not_leave_partial_target(self):
         target = self.root / "new-target.json"
