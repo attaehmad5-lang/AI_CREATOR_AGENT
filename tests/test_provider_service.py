@@ -497,7 +497,7 @@ class ProviderServiceTests(unittest.TestCase):
             require_artifact_scan=True,
         )
         output_path = self.root / "scan-blocked.png"
-        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-signature-test")
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-signature-test")
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="scan-blocked",
             estimated_cost=0.0, output_path=str(output_path),
@@ -521,7 +521,7 @@ class ProviderServiceTests(unittest.TestCase):
             cost_policy=self.cost, quota_manager=self.quota, require_artifact_scan=True,
         )
         output_path = self.root / "scan-missing.png"
-        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-signature-test")
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-signature-test")
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="scan-missing",
             estimated_cost=0.0, output_path=str(output_path),
