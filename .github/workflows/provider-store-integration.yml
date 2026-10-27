@@ -86,6 +86,12 @@ jobs:
         run: |
           python -c "import json; from pathlib import Path; paths=[Path('projects/provider_store/provider_catalog.json'), Path('projects/provider_store/advanced/advanced_provider_catalog.json')]; [json.loads(p.read_text(encoding='utf-8')) for p in paths]; print('Provider catalog JSON: PASS')"
 
+      - name: Build distributable wheel
+        run: python -m pip wheel --no-deps --wheel-dir wheelhouse projects/provider_store/advanced
+
+      - name: Verify wheel artifact
+        run: python -c "from pathlib import Path; wheels=list(Path('wheelhouse').glob('advanced_provider_store-*.whl')); assert wheels, 'Advanced Provider Store wheel was not produced'; print('Wheel packaging: PASS')"
+
       - name: Run ProviderService security and lifecycle tests
         run: python -m unittest discover -s tests -p "test_provider_service.py" -v
 
