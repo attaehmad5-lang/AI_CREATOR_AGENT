@@ -6,9 +6,21 @@ from typing import Any
 
 
 def _pdf_escape(value: str) -> str:
-    safe = value.encode("cp1252", errors="replace").decode("cp1252")
-    safe = safe.encode("ascii", errors="replace").decode("ascii")
-    return safe.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    """Escape PDF literal-string syntax while preserving WinAnsi characters.
+
+    Standard Type 1 fonts cannot represent arbitrary Unicode. Characters outside
+    Windows-1252 are replaced with '?' rather than corrupting the PDF byte stream.
+    """
+    encoded = value.encode("cp1252", errors="replace")
+    escaped: list[str] = []
+    for byte in encoded:
+        if byte in (0x28, 0x29, 0x5C):
+            escaped.append("\\" + chr(byte))
+        elif byte < 0x20 or byte > 0x7E:
+            escaped.append(f"\\{byte:03o}")
+        else:
+            escaped.append(chr(byte))
+    return "".join(escaped)
 
 
 def _make_pdf(pages: list[list[str]]) -> bytes:
@@ -18,7 +30,7 @@ def _make_pdf(pages: list[list[str]]) -> bytes:
     objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
     kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
     objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {len(pages)} >>".encode("ascii"))
-    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
     for page_id, content_id, lines in zip(page_ids, content_ids, pages):
         objects.append(
             f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
