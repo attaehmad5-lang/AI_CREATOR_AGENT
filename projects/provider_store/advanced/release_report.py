@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 LEDGER_NAME = "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md"
-ALLOWED_SUFFIXES = {".py", ".json", ".md"}
+ALLOWED_SUFFIXES = {".py", ".json", ".md", ".toml"}
 DENIED_PARTS = {
     ".git", "__pycache__", ".venv", "venv", "backup", "credential",
     "secret", "token", "state", ".env", "runtime", "cache",
@@ -91,6 +91,9 @@ def _safe_source_files(repo_root: Path) -> list[Path]:
         )) or name.endswith("_state.json") or name == "state.json":
             continue
         files.append(path)
+    build_metadata = repo_root / "pyproject.toml"
+    if build_metadata.is_file() and not build_metadata.is_symlink():
+        files.append(build_metadata)
     return sorted(files, key=lambda path: path.relative_to(repo_root).as_posix())
 
 
