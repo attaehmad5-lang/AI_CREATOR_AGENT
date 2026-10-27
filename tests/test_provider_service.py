@@ -1,4 +1,6 @@
 import json
+import io
+import logging
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import unittest
@@ -21,6 +23,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.provider_structured_logger import ProviderStructuredLogger
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 
@@ -68,6 +71,29 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["connection"]["status"], "CONNECTED")
         self.assertEqual(result["health"]["status"], "HEALTHY")
         self.assertEqual(self.connections.get_state("image")["status"], "CONNECTED")
+
+    def test_provider_verification_emits_secret_safe_structured_event(self):
+        stream = io.StringIO()
+        logger = logging.Logger("provider-service-test", level=logging.DEBUG)
+        logger.addHandler(logging.StreamHandler(stream))
+        service = ProviderService(
+            self.connections,
+            health_manager=self.health,
+            structured_logger=ProviderStructuredLogger(logger),
+        )
+        result = service.verify_provider(
+            "image",
+            lambda provider, timeout_seconds: True,
+            environ={"API_TOKEN": "never-log-this-token"},
+        )
+        self.assertTrue(result["verified"])
+        encoded = stream.getvalue()
+        event = json.loads(encoded)
+        self.assertEqual(event["event"], "provider.verify")
+        self.assertEqual(event["provider_id"], "image")
+        self.assertEqual(event["outcome"], "OK")
+        self.assertNotIn("never-log-this-token", encoded)
+        self.assertNotIn("API_TOKEN", encoded)
 
     def test_builtin_http_provider_verification_updates_connection_and_health(self):
         class Response:
