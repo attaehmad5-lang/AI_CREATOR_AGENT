@@ -46,6 +46,21 @@ class ProviderErrorPolicyTests(unittest.TestCase):
                 result = classify_provider_error(429, retry_after_seconds=value)
                 self.assertNotIn("retry_after_seconds", result)
 
+
+    def test_explicit_rate_limit_codes_are_retryable_without_echoing_code(self):
+        for code in ("rate_limit_exceeded", "rate-limited", "too many requests"):
+            with self.subTest(code=code):
+                result = classify_provider_error(400, provider_code=code)
+                self.assertEqual(result["status"], "RATE_LIMITED")
+                self.assertTrue(result["retryable"])
+                self.assertNotIn("provider_code", result)
+                self.assertNotIn(code, repr(result))
+
+    def test_credit_exhaustion_takes_precedence_over_rate_limit_code(self):
+        result = classify_provider_error(400, provider_code="insufficient_quota")
+        self.assertEqual(result["status"], "CREDITS_EXHAUSTED")
+        self.assertFalse(result["retryable"])
+
     def test_transient_server_errors_can_retry_with_policy(self):
         result = classify_provider_error(503)
         self.assertEqual(result["status"], "PROVIDER_TEMPORARILY_UNAVAILABLE")
