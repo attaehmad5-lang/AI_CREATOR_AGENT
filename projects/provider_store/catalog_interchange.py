@@ -23,13 +23,17 @@ def _read_valid_catalog(path: Path) -> dict[str, Any]:
     return catalog
 
 
-def export_catalog(source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> dict[str, Any]:
+def export_catalog(
+    source: str | os.PathLike[str], destination: str | os.PathLike[str]
+) -> dict[str, Any]:
     """Export only a schema-valid catalog; never copy malformed JSON or credential fields."""
     source_path = Path(source)
     destination_path = Path(destination)
     catalog = _read_valid_catalog(source_path)
     destination_path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=f".{destination_path.name}.", suffix=".tmp", dir=destination_path.parent)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{destination_path.name}.", suffix=".tmp", dir=destination_path.parent
+    )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(catalog, stream, ensure_ascii=False, indent=2, allow_nan=False)
@@ -91,7 +95,9 @@ def import_catalog(
                 except FileNotFoundError:
                     pass
                 return {"status": "CATALOG_BACKUP_FAILED", "imported": False}
-        fd, temp_name = tempfile.mkstemp(prefix=f".{destination_path.name}.", suffix=".tmp", dir=destination_path.parent)
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f".{destination_path.name}.", suffix=".tmp", dir=destination_path.parent
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 json.dump(candidate, stream, ensure_ascii=False, indent=2, allow_nan=False)
