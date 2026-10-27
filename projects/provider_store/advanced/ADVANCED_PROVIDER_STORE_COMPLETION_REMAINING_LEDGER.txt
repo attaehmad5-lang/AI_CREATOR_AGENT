@@ -423,8 +423,8 @@ Remaining work: Security controls and tests exist; dependency scanning, fuzzing,
 
 Feature 081: Provider Configuration Management
 Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
-Remaining work: Configuration/storage/recovery primitives exist; runtime advanced-catalog integrity and metadata-drift diagnostics now exist. Migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+Implementation/evidence inspected: provider_config_lifecycle.py; catalog_interchange.py; tests/test_provider_config_lifecycle.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py
+Remaining work: Versioned config migration/hot reload and validated catalog import/export have focused rollback/failure-injection tests. Repository-wide state reconciliation, migration recovery across all consumers and CLI acceptance remain.
 
 Feature 082: Configuration Validation
 Status: COMPLETED
@@ -578,8 +578,8 @@ Remaining work: Thread/process concurrency tests cover state updates, health his
 
 Feature 112: Failure Injection Testing
 Status: PARTIAL
-Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
-Remaining work: Unit/regression/security/concurrency tests exist; not all integration, failure-injection, fuzzing and performance dimensions are covered.
+Implementation/evidence inspected: tests/test_provider_config_lifecycle.py; tests/test_catalog_interchange.py; .github/workflows/task-25-tests.yml
+Remaining work: Injected atomic-replace failures verify config migration preserves original bytes and cleans temporary files; catalog import failure verifies rollback/no partial target. Network/provider, crash-at-every-write and cross-manager failure matrices remain.
 
 Feature 113: Security Testing
 Status: PARTIAL
