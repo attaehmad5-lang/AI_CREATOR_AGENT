@@ -13,6 +13,34 @@ from .connection_manager import ConnectionManager
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 
+_FORBIDDEN_CREDENTIAL_KEYS = {
+    "apikey",
+    "apitoken",
+    "accesstoken",
+    "refreshtoken",
+    "clientsecret",
+    "password",
+    "credential",
+    "credentials",
+    "privatekey",
+    "authorization",
+    "bearertoken",
+}
+
+
+def _contains_credential_material(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized = "".join(char for char in str(key).casefold() if char.isalnum())
+            if normalized in _FORBIDDEN_CREDENTIAL_KEYS:
+                return True
+            if _contains_credential_material(child):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_credential_material(child) for child in value)
+    return False
+
+
 def _read_valid_catalog(path: Path) -> dict[str, Any]:
     try:
         with path.open("r", encoding="utf-8") as stream:
@@ -22,6 +50,8 @@ def _read_valid_catalog(path: Path) -> dict[str, Any]:
     result = ConnectionManager.validate_catalog_schema(catalog)
     if result.get("valid") is not True:
         raise ValueError("catalog schema validation failed")
+    if _contains_credential_material(catalog):
+        raise ValueError("catalog contains credential material and cannot be exported or imported")
     return catalog
 
 
