@@ -6,6 +6,7 @@ from pathlib import Path
 from projects.provider_store.advanced.advps.accounting import Accounting, estimate_cost
 from projects.provider_store.advanced.advps.audit import AuditLog
 from projects.provider_store.advanced.advps.catalog import Catalog
+from projects.provider_store.advanced.advps.cli import main as cli_main
 from projects.provider_store.advanced.advps.errors import (
     AmbiguousOutcomeError, BudgetExceededError, PaidUsageNotApprovedError,
     PriceUnknownError, SecurityError, ValidationError,
@@ -153,6 +154,28 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         breaker.allow()
         breaker.record_success()
         self.assertEqual(breaker.state, CircuitBreaker.CLOSED)
+
+    def test_cli_add_list_simulate_backup_verify_and_diagnose(self):
+        import contextlib
+        import io
+        home = self.root / "cli-home"
+        provider_file = self.root / "provider.json"
+        provider_file.write_text(json.dumps({
+            "id": "cli-provider", "version": "1.0.0", "enabled": True,
+            "capabilities": ["text_to_image"], "priority": 1,
+            "models": {"m": {"capabilities": ["text_to_image"], "price_per_unit": 0.01}},
+        }), encoding="utf-8")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(cli_main(["--home", str(home), "add", str(provider_file)]), 0)
+            self.assertEqual(cli_main(["--home", str(home), "list", "--enabled-only"]), 0)
+            self.assertEqual(cli_main(["--home", str(home), "simulate", "text_to_image"]), 0)
+            self.assertEqual(cli_main(["--home", str(home), "backup"]), 0)
+            self.assertEqual(cli_main(["--home", str(home), "verify"]), 0)
+            self.assertEqual(cli_main(["--home", str(home), "diagnose"]), 0)
+        self.assertIn("cli-provider", output.getvalue())
+        self.assertIn('"cli-provider"', output.getvalue())
+        self.assertIn("audit entries verified", output.getvalue())
 
     def test_router_never_fails_over_after_ambiguous_paid_outcome(self):
         catalog = Catalog(AtomicJsonStore(self.root / "ambiguous-route.json"))
