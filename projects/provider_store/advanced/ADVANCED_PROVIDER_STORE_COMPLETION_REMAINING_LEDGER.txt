@@ -457,9 +457,9 @@ Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; 
 Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
 
 Feature 088: Catalog Integrity Verification
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; advanced_provider_manager.py; tests/test_advanced_provider_manager.py
-Remaining work: Runtime catalog-consistency checks compare advanced metadata and category capability declarations; backup/rollback integrity still needs broader acceptance coverage.
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; provider catalog JSON/schema files; tests/test_provider_catalogs.py; tests/test_provider_store_compat.py; tests/test_advanced_provider_manager.py; CI #40560954116
+Remaining work: Catalog synchronization, schema/version validation, safe provider identity, required host allowlists, capability contracts and advanced-vs-canonical metadata consistency pass tests.
 
 Feature 089: Catalog Diff Management
 Status: PARTIAL
