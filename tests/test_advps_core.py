@@ -9,6 +9,7 @@ from projects.provider_store.advanced.advps.audit import AuditLog
 from projects.provider_store.advanced.advps.catalog import Catalog
 from projects.provider_store.advanced.advps.credentials import CredentialManager
 from projects.provider_store.advanced.advps.jobs import JobManager
+from projects.provider_store.advanced.advps.health import HealthRegistry
 from projects.provider_store.advanced.advps.cli import main as cli_main
 from projects.provider_store.advanced.advps.errors import (
     AmbiguousOutcomeError, BudgetExceededError, CredentialExpiredError, CredentialUnavailableError, PaidUsageNotApprovedError,
@@ -231,6 +232,41 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
             router.execute("text_to_image", ambiguous, idempotent=False)
         self.assertIn("ambiguous outcome", str(caught.exception))
         self.assertEqual(calls, ["provider-a"])
+
+    def test_health_registry_claims_probes_and_records_success(self):
+        now = [100.0]
+        health = HealthRegistry(
+            AtomicJsonStore(self.root / "health.json"), clock=lambda: now[0],
+            probe_interval=60, failure_threshold=3, base_backoff=5, max_backoff=30,
+        )
+        self.assertEqual(health.due(["p1", "p2"]), ["p1", "p2"])
+        self.assertEqual(health.claim_due(["p1", "p2"], "worker-a", lease_seconds=10, limit=1), ["p1"])
+        self.assertEqual(health.claim_due(["p1"], "worker-b", lease_seconds=10), [])
+        with self.assertRaises(ValidationError):
+            health.finish_probe("p1", "worker-b", success=True, latency_ms=10)
+        result = health.finish_probe("p1", "worker-a", success=True, latency_ms=120)
+        self.assertEqual(result["status"], "HEALTHY")
+        self.assertEqual(result["latency_ewma_ms"], 120)
+        self.assertEqual(health.due(["p1"]), [])
+        now[0] = 161.0
+        self.assertEqual(health.due(["p1"]), ["p1"])
+
+    def test_health_registry_failure_backoff_and_expired_probe_lease(self):
+        now = [0.0]
+        health = HealthRegistry(
+            AtomicJsonStore(self.root / "health-fail.json"), clock=lambda: now[0],
+            probe_interval=60, failure_threshold=2, base_backoff=5, max_backoff=20,
+        )
+        self.assertEqual(health.claim_due(["p"], "worker", lease_seconds=2), ["p"])
+        now[0] = 3.0
+        self.assertEqual(health.claim_due(["p"], "worker-2", lease_seconds=2), ["p"])
+        failed = health.finish_probe("p", "worker-2", success=False, error_code="timeout", retry_after=12)
+        self.assertEqual(failed["status"], "DEGRADED")
+        self.assertEqual(failed["next_probe_at"], 15.0)
+        failed = health.record_failure("p", "network_error")
+        self.assertEqual(failed["status"], "UNHEALTHY")
+        with self.assertRaises(ValidationError):
+            health.record_failure("p", "raw error with secret")
 
     def test_credential_resolution_missing_expired_and_in_memory_refresh(self):
         now = [100.0]
