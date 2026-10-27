@@ -22,8 +22,6 @@ class ProviderRuntime:
     def register_factory(self, provider_id: str, factory: Callable[[dict], Any]) -> None:
         if not isinstance(provider_id, str) or not provider_id.strip() or not callable(factory):
             raise ValidationError("provider_id and factory are required")
-        if not isinstance(provider_id, str) or not provider_id.strip():
-            raise ValidationError("provider_id must be non-empty")
         with self._condition:
             if provider_id in self._draining:
                 raise ValidationError("provider is currently draining")
@@ -38,6 +36,8 @@ class ProviderRuntime:
         if not isinstance(config, dict):
             raise ValidationError("provider config must be an object")
         with self._condition:
+            if provider_id in self._draining:
+                raise ValidationError("provider is currently draining")
             if provider_id in self._instances:
                 return {"provider_id": provider_id, "loaded": True, "already_loaded": True}
             factory = self._factories.get(provider_id)
@@ -58,7 +58,8 @@ class ProviderRuntime:
         with self._condition:
             instance = self._instances.get(provider_id)
             if instance is None:
-                return {"provider_id": provider_id, "loaded": False, "inflight": 0, "draining": False}
+                return {"provider_id": provider_id, "loaded": False, "inflight": 0,
+                        "draining": provider_id in self._draining}
             return {
                 "provider_id": provider_id, "loaded": True,
                 "inflight": self._inflight.get(provider_id, 0),
