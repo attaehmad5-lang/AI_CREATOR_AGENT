@@ -1741,5 +1741,39 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("configuration", self.manager.get_state("public_image"))
 
 
+    def test_discovery_metrics_count_calls_results_and_invalid_inputs_without_query_values(self):
+        self.assertEqual(
+            self.manager.discovery_metrics(),
+            {"calls": 0, "invalid_inputs": 0, "catalog_errors": 0, "providers_returned": 0},
+        )
+        results = self.manager.discover_providers(category=" image ", limit=1)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(
+            self.manager.discover_providers(category="PRIVATE-USER-QUERY", limit=0),
+            [],
+        )
+        metrics = self.manager.discovery_metrics()
+        self.assertEqual(metrics["calls"], 2)
+        self.assertEqual(metrics["invalid_inputs"], 1)
+        self.assertEqual(metrics["providers_returned"], 1)
+        self.assertNotIn("PRIVATE-USER-QUERY", repr(metrics))
+        self.assertNotIn("public_image", repr(metrics))
+
+    def test_discovery_metrics_are_thread_safe_under_concurrent_calls(self):
+        workers = 40
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda _: self.manager.discover_providers(limit=1), range(workers)))
+        metrics = self.manager.discovery_metrics()
+        self.assertEqual(len(results), workers)
+        self.assertEqual(metrics["calls"], workers)
+        self.assertEqual(metrics["invalid_inputs"], 0)
+        self.assertEqual(metrics["providers_returned"], workers)
+
+    def test_discovery_metrics_snapshot_is_defensive_copy(self):
+        metrics = self.manager.discovery_metrics()
+        metrics["calls"] = 999
+        self.assertEqual(self.manager.discovery_metrics()["calls"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
