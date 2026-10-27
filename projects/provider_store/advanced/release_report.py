@@ -127,7 +127,13 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
     manifest_json = output_dir / "advanced_provider_store_manifest.json"
     archive = output_dir / "advanced_provider_store_source.zip"
     archive_checksum = output_dir / "advanced_provider_store_source.zip.sha256"
+    pdf_report = output_dir / "advanced_provider_store_report.pdf"
     report_json.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    try:
+        from .pdf_report import write_pdf_report
+    except ImportError:  # Supports direct script execution as well as module execution.
+        from pdf_report import write_pdf_report
+    write_pdf_report(pdf_report, report)
     lines = [
         "# Advanced Provider Store Release Report",
         "",
@@ -157,12 +163,13 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
             zf.writestr(relative, data)
         zf.writestr("RELEASE_REPORT.json", report_json.read_bytes())
         zf.writestr("SOURCE_MANIFEST.json", manifest_json.read_bytes())
+        zf.write(pdf_report, "ADVANCED_PROVIDER_STORE_REPORT.pdf")
     with zipfile.ZipFile(archive, "r") as zf:
         bad_member = zf.testzip()
         if bad_member is not None:
             raise ValueError(f"ZIP integrity check failed at {bad_member}")
         archived = set(zf.namelist())
-        expected = {name for name, _ in payloads} | {"RELEASE_REPORT.json", "SOURCE_MANIFEST.json"}
+        expected = {name for name, _ in payloads} | {"RELEASE_REPORT.json", "SOURCE_MANIFEST.json", "ADVANCED_PROVIDER_STORE_REPORT.pdf"}
         if archived != expected:
             raise ValueError("ZIP file list does not match the verified manifest")
         for entry in manifest_entries:
@@ -181,6 +188,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
         "archive": str(archive),
         "report_json": str(report_json),
         "report_markdown": str(report_md),
+        "report_pdf": str(pdf_report),
         "manifest": str(manifest_json),
         "archive_sha256": archive_digest,
         "archive_checksum": str(archive_checksum),
