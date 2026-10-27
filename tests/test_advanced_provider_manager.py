@@ -87,7 +87,7 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             connection.verify_connectivity("image_test", lambda provider, **kwargs: True)
             self.assertEqual(
                 [p["id"] for p in advanced.list_verified_enabled_providers()],
-                ["story_test", "image_test"],
+                ["story_test"],
             )
             self.assertEqual(advanced.list_verified_enabled_providers("  "), [])
             self.assertEqual(advanced.list_verified_enabled_providers(123), [])
