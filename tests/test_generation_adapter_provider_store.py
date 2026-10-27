@@ -70,6 +70,32 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.assertIsNone(service.request)
 
+    def test_invalid_estimated_cost_fails_before_service_call(self):
+        service = CanonicalServiceStub()
+        adapter = GenerationAdapter(
+            provider_store_service=service,
+            provider_store_adapter=lambda **kwargs: {},
+        )
+        for invalid in (-1, float("nan"), float("inf"), True, "0"):
+            with self.subTest(estimated_cost=invalid):
+                result = adapter.generate_image(
+                    "prompt", "/tmp/output.png", estimated_cost=invalid
+                )
+                self.assertEqual(result["status"], "INVALID_ESTIMATED_COST")
+                self.assertIsNone(service.request)
+
+    def test_invalid_output_path_fails_before_service_call(self):
+        service = CanonicalServiceStub()
+        adapter = GenerationAdapter(
+            provider_store_service=service,
+            provider_store_adapter=lambda **kwargs: {},
+        )
+        for invalid in ("", "   ", "bad\\x00path", None):
+            with self.subTest(output_path=repr(invalid)):
+                result = adapter.generate_image("prompt", invalid)
+                self.assertEqual(result["status"], "INVALID_OUTPUT_PATH")
+                self.assertIsNone(service.request)
+
     def test_invalid_canonical_service_fails_closed(self):
         adapter = GenerationAdapter(provider_store_service=object(), provider_store_adapter=lambda **kwargs: {})
         result = adapter.generate_image("prompt", "/tmp/output.png")
