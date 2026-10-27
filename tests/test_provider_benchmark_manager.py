@@ -31,6 +31,14 @@ class ProviderBenchmarkManagerTests(unittest.TestCase):
         self.assertEqual(a["avg_quality_score"], 0.9)
         self.assertEqual(result["results"][0]["provider_id"], "provider-b")
 
+    def test_quality_score_breaks_ties_after_success_rate(self):
+        self.add("low-quality", "model-1", True, 100, 0.1, 0.4)
+        self.add("high-quality", "model-2", True, 100, 0.1, 0.95)
+        result = self.manager.compare()
+        self.assertEqual(result["status"], "BENCHMARKS_AVAILABLE")
+        self.assertEqual(result["results"][0]["provider_id"], "high-quality")
+        self.assertEqual(result["results"][0]["avg_quality_score"], 0.95)
+
     def test_invalid_samples_fail_closed(self):
         self.assertEqual(self.manager.record(
             provider_id="image", model_id="m", modality="image", run_id="r",
