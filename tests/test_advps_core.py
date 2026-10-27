@@ -154,6 +154,24 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         breaker.record_success()
         self.assertEqual(breaker.state, CircuitBreaker.CLOSED)
 
+    def test_router_never_fails_over_after_ambiguous_paid_outcome(self):
+        catalog = Catalog(AtomicJsonStore(self.root / "ambiguous-route.json"))
+        for pid, priority in (("provider-a", 1), ("provider-b", 2)):
+            catalog.register({
+                "id": pid, "version": "1.0.0", "enabled": True,
+                "capabilities": ["text_to_image"], "priority": priority,
+                "models": {"m": {"capabilities": ["text_to_image"], "price_per_unit": 0.01}},
+            })
+        calls = []
+        def ambiguous(provider, model):
+            calls.append(provider["id"])
+            raise AmbiguousOutcomeError("provider may have charged")
+        router = Router(catalog, sleep=lambda _: None)
+        with self.assertRaises(Exception) as caught:
+            router.execute("text_to_image", ambiguous, idempotent=False)
+        self.assertIn("ambiguous outcome", str(caught.exception))
+        self.assertEqual(calls, ["provider-a"])
+
     def test_router_simulates_and_executes_with_provider_callback(self):
         catalog = Catalog(AtomicJsonStore(self.root / "route.json"))
         catalog.register({
