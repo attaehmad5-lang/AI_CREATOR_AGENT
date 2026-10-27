@@ -12,6 +12,11 @@ from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.provider_onboarding import ProviderOnboardingWorkflow
 
 
+class FakeAuthorizationManager:
+    def authorize(self, principal_id, operation):
+        return {"allowed": principal_id == "admin" and operation == "provider.configure"}
+
+
 class FakeConnectionManager:
     def __init__(self):
         self.catalog = {"version": "1.0", "providers": []}
@@ -34,7 +39,7 @@ class FakeConnectionManager:
 class ProviderOnboardingTests(unittest.TestCase):
     def setUp(self):
         self.manager = FakeConnectionManager()
-        self.workflow = ProviderOnboardingWorkflow(self.manager)
+        self.workflow = ProviderOnboardingWorkflow(self.manager, FakeAuthorizationManager())
         self.provider = {
             "id": "sample_api",
             "name": "Sample API",
@@ -88,7 +93,7 @@ class ProviderOnboardingTests(unittest.TestCase):
         self.assertEqual(self.manager.registered, [])
 
     def test_registration_is_disabled_by_default_and_does_not_claim_connectivity(self):
-        result = self.workflow.register_candidate(self.provider)
+        result = self.workflow.register_candidate(self.provider, principal_id='admin')
         self.assertTrue(result["saved"])
         self.assertFalse(result["enabled"])
         self.assertEqual(result["status"], "REGISTERED_DISABLED")
@@ -107,13 +112,13 @@ class ProviderOnboardingTests(unittest.TestCase):
                 state_path=base / "state.json",
                 audit_path=base / "audit.jsonl",
             )
-            workflow = ProviderOnboardingWorkflow(manager)
+            workflow = ProviderOnboardingWorkflow(manager, FakeAuthorizationManager())
             candidate = dict(
                 self.provider,
                 id="onboarding_test_provider",
                 name="Onboarding Test Provider",
             )
-            result = workflow.register_candidate(candidate)
+            result = workflow.register_candidate(candidate, principal_id='admin')
             self.assertEqual(result["status"], "REGISTERED_DISABLED")
             self.assertTrue(result["saved"])
             stored = manager.get_provider("onboarding_test_provider")
@@ -124,6 +129,18 @@ class ProviderOnboardingTests(unittest.TestCase):
                 if item.get("id") == "onboarding_test_provider"
             )
             self.assertEqual(catalog_record["status"], "LOCKED")
+
+    def test_registration_requires_authorized_principal(self):
+        no_auth = ProviderOnboardingWorkflow(self.manager)
+        self.assertEqual(
+            no_auth.register_candidate(self.provider, principal_id="admin")["status"],
+            "AUTHORIZATION_MANAGER_REQUIRED",
+        )
+        self.assertEqual(
+            self.workflow.register_candidate(self.provider, principal_id="viewer")["status"],
+            "ACCESS_DENIED",
+        )
+        self.assertEqual(self.manager.registered, [])
 
     def test_invalid_candidate_and_existing_provider_are_not_persisted(self):
         self.assertFalse(self.workflow.register_candidate(dict(self.provider, official_api_url="http://bad.test"))["saved"])
