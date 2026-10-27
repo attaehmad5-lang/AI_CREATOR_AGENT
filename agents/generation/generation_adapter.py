@@ -21,14 +21,15 @@ class GenerationAdapter:
             "voice": "NOT_CONNECTED"
         }
 
-        try:
-            from projects.generation.providers.provider_service import ProviderService
-            service = ProviderService()
-            image_config = service.registry.get("image", {})
-            if image_config.get("status") == "CONNECTED":
-                self.providers["image"] = image_config.get("primary", "NOT_CONNECTED")
-        except Exception:
-            pass
+        if self.provider_store_service is None:
+            try:
+                from projects.generation.providers.provider_service import ProviderService
+                service = ProviderService()
+                image_config = service.registry.get("image", {})
+                if image_config.get("status") == "CONNECTED":
+                    self.providers["image"] = image_config.get("primary", "NOT_CONNECTED")
+            except Exception:
+                pass
 
     def status(self):
         return {
