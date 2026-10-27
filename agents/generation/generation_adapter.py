@@ -125,6 +125,17 @@ class GenerationAdapter:
             return {"status": "INVALID_REQUEST_ID", "executed": False}
 
         options = dict(adapter_options or {})
+        reserved_adapter_keys = {
+            "provider_id", "request_id", "project_id", "principal_id",
+            "data_categories", "retention_days", "provider_training_use",
+            "user_training_consent", "estimated_cost", "estimated_cost_unit",
+            "actual_cost", "charge_outcome", "reservation_state",
+            "authorization", "authorization_context", "credentials",
+            "api_key", "token", "access_token", "refresh_token",
+            "endpoint", "base_url", "url", "output_path", "prompt",
+        }
+        if any(key in reserved_adapter_keys for key in options):
+            return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
         options.update({"prompt": prompt, "output_path": output_path})
 
         def invoke_provider(**routed):
