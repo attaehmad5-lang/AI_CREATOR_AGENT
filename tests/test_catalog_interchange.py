@@ -29,7 +29,9 @@ class CatalogInterchangeTests(unittest.TestCase):
 
         target = self.root / "active" / "catalog.json"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps({"version": "3.0", "providers": []}), encoding="utf-8")
+        target.write_text(
+            json.dumps({"version": "3.0", "providers": []}), encoding="utf-8"
+        )
         imported = import_catalog(exported, target)
         self.assertTrue(imported["imported"])
         self.assertEqual(
@@ -38,7 +40,9 @@ class CatalogInterchangeTests(unittest.TestCase):
         )
         self.assertTrue(Path(str(target) + ".bak").is_file())
         self.assertEqual(
-            json.loads(Path(str(target) + ".bak").read_text(encoding="utf-8"))["providers"],
+            json.loads(Path(str(target) + ".bak").read_text(encoding="utf-8"))[
+                "providers"
+            ],
             [],
         )
 
@@ -46,7 +50,10 @@ class CatalogInterchangeTests(unittest.TestCase):
         invalid = self.root / "invalid.json"
         invalid.write_text(
             json.dumps(
-                {"version": "3.0", "providers": [{"id": "x", "api_key": "never-export"}]}
+                {
+                    "version": "3.0",
+                    "providers": [{"id": "x", "api_key": "never-export"}],
+                }
             ),
             encoding="utf-8",
         )
