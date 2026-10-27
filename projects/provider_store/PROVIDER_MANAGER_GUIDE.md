@@ -153,3 +153,9 @@ python -m projects.provider_store.advanced.verify_wheel
 ```
 
 A successful result includes `"reproducible": true`, `"installed_import": true`, and `"catalog_data_included": true`. Build verification requires access to the pinned build tools when they are not cached.
+
+## Health scheduling and outage detection
+
+`ProviderHealthScheduler` is a bounded poll-driven scheduler. Register an injected probe with `register(provider_id, probe, interval_seconds=...)`, call `run_due(max_checks=...)` from the application's own lifecycle loop, and call `unregister(provider_id)` to remove it. The scheduler enforces provider-count, batch-size, interval, timeout-value and clock bounds; each probe receives `timeout_seconds`. A probe must enforce that timeout at its network boundary—the scheduler does not kill arbitrary Python callbacks. Schedules are in memory and are not a background daemon.
+
+`ProviderOutageDetector` converts verified `ProviderHealthManager` evidence into deduplicated `ProviderIncidentManager` incidents for unhealthy or stale providers. Once fresh healthy evidence is recorded, it resolves matching open health incidents. No evidence, recovering state, slow response, or invalid health policy does not get mislabeled as a confirmed outage. Both components are tested with injected clocks and local state files; these tests do not claim live provider uptime.
