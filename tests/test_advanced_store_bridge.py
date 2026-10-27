@@ -5,6 +5,7 @@ from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.advanced.advanced_store_bridge import AdvancedStoreBridge
+from projects.provider_store.advanced.advanced_provider_manager import AdvancedProviderManager
 
 
 class AdvancedStoreBridgeTests(unittest.TestCase):
@@ -90,6 +91,21 @@ class AdvancedStoreBridgeTests(unittest.TestCase):
         self.assertNotIn("DO_NOT_LEAK", json.dumps(providers))
         providers[0]["name"] = "mutated"
         self.assertNotEqual(self.manager.get_provider("image-cheap")["name"], "mutated")
+
+    def test_advanced_manager_exposes_bridge_without_duplicate_state(self):
+        # The advanced facade and bridge must share the exact same manager.
+        self.manager.register_provider({
+            "id": "story-advanced", "name": "Story", "category": "script_story",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "capabilities": ["story_generation"], "priority": 2,
+            "regions": ["eu"], "price_per_unit": 0.03,
+        })
+        advanced = AdvancedProviderManager(connection_manager=self.manager)
+        self.assertIs(advanced.bridge.manager, advanced.store.manager)
+        self.assertIs(advanced.store.manager, self.manager)
+        self.assertEqual(advanced.simulate_route("story_generation"), [])
+        self._verify("story-advanced")
+        self.assertEqual(advanced.simulate_route("story_generation"), ["story-advanced"])
 
     def test_invalid_routing_options_rejected(self):
         with self.assertRaises(ValueError):
