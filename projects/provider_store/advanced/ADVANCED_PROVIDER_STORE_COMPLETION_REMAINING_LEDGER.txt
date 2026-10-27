@@ -157,9 +157,9 @@ Implementation/evidence inspected: health_manager.py; provider_status_manager.py
 Remaining work: Health/status foundations and tests exist; production monitoring/metrics completeness is not established.
 
 Feature 028: Distributed Tracing
-Status: NOT STARTED
-Implementation/evidence inspected: No verified implementation located during this source pass
-Remaining work: Add distributed tracing / incident workflow only after core telemetry contracts are defined.
+Status: PARTIAL
+Implementation/evidence inspected: provider_trace_manager.py; tests/test_provider_trace_manager.py; CI #40564559062
+Remaining work: W3C traceparent validation/propagation, parent linkage, bounded span history and secret-safe attributes are tested; provider-service instrumentation and external trace export remain.
 
 Feature 029: Incident Management
 Status: COMPLETED
