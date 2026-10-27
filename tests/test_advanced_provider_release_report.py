@@ -57,6 +57,7 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
     def test_source_zip_has_manifest_hashes_and_excludes_runtime_secret_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            (root / "pyproject.toml").write_text("[build-system]\nrequires = []\n", encoding="utf-8")
             provider_root = root / "projects" / "provider_store"
             advanced = provider_root / "advanced"
             advanced.mkdir(parents=True)
@@ -86,6 +87,7 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             self.assertTrue(all(entry["checksums"][0]["algorithm"] == "SHA256" for entry in sbom["files"]))
             paths = {entry["path"] for entry in manifest["files"]}
             self.assertIn("projects/provider_store/provider_status_manager.py", paths)
+            self.assertIn("pyproject.toml", paths)
             self.assertNotIn("projects/provider_store/advanced_provider_catalog_backup.json", paths)
             self.assertNotIn("projects/provider_store/connection_state.json", paths)
             self.assertNotIn("projects/provider_store/.env", paths)
@@ -97,6 +99,7 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                 self.assertNotIn("projects/provider_store/connection_state.json", names)
                 self.assertIn("RELEASE_REPORT.json", names)
                 self.assertIn("SOURCE_MANIFEST.json", names)
+                self.assertIn("pyproject.toml", names)
                 self.assertIn("SBOM.spdx.json", names)
                 self.assertEqual(json.loads(archive.read("SBOM.spdx.json"))["spdxVersion"], "SPDX-2.3")
                 self.assertIn("ADVANCED_PROVIDER_STORE_REPORT.pdf", names)
