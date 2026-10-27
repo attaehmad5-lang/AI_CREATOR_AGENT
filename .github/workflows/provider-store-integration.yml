@@ -13,6 +13,8 @@ on:
       - "projects/provider_store/provider_service.py"
       - "agents/generation/generation_adapter.py"
       - "tests/test_generation_adapter_provider_store.py"
+      - "agents/generation/generation_adapter.py"
+      - "tests/test_generation_adapter_provider_store.py"
       - "projects/provider_store/provider_store_manager.py"
       - "projects/provider_store/provider_catalog.json"
       - "projects/provider_store/advanced/advanced_provider_catalog.json"
