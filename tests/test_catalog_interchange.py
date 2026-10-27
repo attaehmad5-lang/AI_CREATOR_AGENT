@@ -4,7 +4,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from projects.provider_store.catalog_interchange import export_catalog, import_catalog
+from projects.provider_store.catalog_interchange import (
+    create_catalog_snapshot,
+    export_catalog,
+    import_catalog,
+    list_catalog_snapshots,
+    restore_catalog_snapshot,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +80,33 @@ class CatalogInterchangeTests(unittest.TestCase):
         self.assertFalse(result["imported"])
         self.assertFalse(target.exists())
         self.assertEqual(result["status"], "CATALOG_IMPORT_FAILED_ROLLED_BACK")
+
+    def test_versioned_snapshot_listing_and_restore(self):
+        history = self.root / "history"
+        snapshot_result = create_catalog_snapshot(self.source, history)
+        self.assertTrue(snapshot_result["created"])
+        snapshot_path = history / snapshot_result["snapshot"]
+
+        listing = list_catalog_snapshots(history)
+        self.assertEqual(listing["status"], "CATALOG_HISTORY_LISTED")
+        self.assertEqual(listing["snapshots"][0]["name"], snapshot_path.name)
+
+        target = self.root / "active.json"
+        target.write_text(json.dumps({"version": "3.0", "providers": []}), encoding="utf-8")
+        restored = restore_catalog_snapshot(snapshot_path, target)
+        self.assertTrue(restored["restored"])
+        self.assertEqual(
+            json.loads(target.read_text(encoding="utf-8")),
+            json.loads(self.source.read_text(encoding="utf-8")),
+        )
+        self.assertTrue(Path(str(target) + ".bak").is_file())
+
+    def test_snapshot_listing_ignores_invalid_files_and_empty_history_is_safe(self):
+        history = self.root / "history"
+        self.assertEqual(list_catalog_snapshots(history)["status"], "CATALOG_HISTORY_EMPTY")
+        history.mkdir()
+        (history / "catalog-broken.json").write_text("{bad", encoding="utf-8")
+        self.assertEqual(list_catalog_snapshots(history)["snapshots"], [])
 
     def test_export_refuses_malformed_json(self):
         invalid = self.root / "broken.json"
