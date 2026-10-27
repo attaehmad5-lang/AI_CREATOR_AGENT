@@ -77,7 +77,7 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             self.assertTrue(result["verified"])
             self.assertEqual(
                 [p["id"] for p in advanced.list_verified_enabled_providers()],
-                ["story_test"],
+                ["image_test", "story_test"],
             )
             self.assertEqual(
                 [p["id"] for p in advanced.list_verified_enabled_providers("story_generation")],
@@ -87,7 +87,10 @@ class AdvancedProviderManagerTests(unittest.TestCase):
                 [p["id"] for p in advanced.list_verified_enabled_providers("dialogue_writing")],
                 ["story_test"],
             )
-            self.assertEqual(advanced.list_verified_enabled_providers("image_generation"), [])
+            self.assertEqual(
+                [p["id"] for p in advanced.list_verified_enabled_providers("image_generation")],
+                ["image_test"],
+            )
             self.assertEqual(advanced.status()["connected_verified"], 1)
 
     def test_verified_filter_excludes_disabled_and_rejects_invalid_capability(self):
