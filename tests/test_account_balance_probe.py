@@ -115,6 +115,17 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertEqual(opener.calls, [])
 
+    def test_unicode_control_characters_in_credentials_fail_before_network(self):
+        for token in ("private\u0085token", "private\u009ftoken", "private\u001ftoken"):
+            with self.subTest(token=repr(token)):
+                opener = _Opener()
+                probe = self.make_probe(opener, environ={"PROVIDER_TOKEN": token})
+                result = probe("provider")
+                self.assertEqual(result["status"], "CREDENTIAL_MISSING_OR_INVALID")
+                self.assertFalse(result["verified"])
+                self.assertEqual(opener.calls, [])
+                self.assertNotIn(token, repr(result))
+
     def test_invalid_balance_shapes_fail_closed(self):
         cases = [
             ({}, "BALANCE_FIELD_MISSING"),
