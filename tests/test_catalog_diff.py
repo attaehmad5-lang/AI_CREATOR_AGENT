@@ -60,12 +60,8 @@ class CatalogDiffTests(unittest.TestCase):
         self.write_candidate(candidate)
         original = self.current.read_bytes()
 
-        blocked = apply_catalog_candidate(
-            self.current, self.candidate, dry_run=False
-        )
-        self.assertEqual(
-            blocked["status"], "CATALOG_DIFF_REMOVAL_APPROVAL_REQUIRED"
-        )
+        blocked = apply_catalog_candidate(self.current, self.candidate, dry_run=False)
+        self.assertEqual(blocked["status"], "CATALOG_DIFF_REMOVAL_APPROVAL_REQUIRED")
         self.assertEqual(self.current.read_bytes(), original)
 
         applied = apply_catalog_candidate(
