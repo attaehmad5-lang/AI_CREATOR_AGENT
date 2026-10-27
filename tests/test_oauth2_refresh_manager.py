@@ -1,5 +1,7 @@
 import unittest
 
+from projects.provider_store.advanced.advps.transport import SecureHTTPTransport
+from projects.provider_store.advanced.advps.errors import SecurityError
 from projects.provider_store.oauth2_refresh_manager import OAuth2RefreshTokenManager, SecureOAuthTokenRequester
 
 
@@ -92,6 +94,50 @@ class SecureOAuthTokenRequesterTests(unittest.TestCase):
                 "https://auth.example.com/token", form_data={}, client_auth=None, timeout_seconds=10
             )
 
+
+    def test_requester_integrates_with_allowlisted_secure_transport(self):
+        class Response:
+            status = 200
+            def read(self, limit):
+                return b'{"access_token":"integrated-token","token_type":"Bearer","expires_in":300}'
+            def getheaders(self):
+                return [("Content-Type", "application/json")]
+
+        class Connection:
+            def __init__(self, *args):
+                self.response = Response()
+            def request(self, *args, **kwargs):
+                pass
+            def getresponse(self):
+                return self.response
+            def close(self):
+                pass
+
+        def resolver(host, port, type=None):
+            return [(2, 1, 6, "", ("93.184.216.34", port))]
+
+        transport = SecureHTTPTransport(
+            allowlist=["auth.example.com"],
+            resolver=resolver,
+            connection_factory=lambda *args: Connection(),
+            timeout=2.0,
+        )
+        requester = SecureOAuthTokenRequester(transport)
+        result = requester(
+            "https://auth.example.com/oauth/token",
+            form_data={"grant_type": "refresh_token", "refresh_token": "sensitive-refresh"},
+            client_auth=None,
+            timeout_seconds=2.0,
+        )
+        self.assertEqual(result["access_token"], "integrated-token")
+
+        with self.assertRaises(SecurityError):
+            requester(
+                "https://attacker.example.net/oauth/token",
+                form_data={"grant_type": "refresh_token", "refresh_token": "sensitive-refresh"},
+                client_auth=None,
+                timeout_seconds=2.0,
+            )
 
 class OAuth2RefreshTokenManagerTests(unittest.TestCase):
     def test_refresh_uses_injected_transport_and_caches_token_in_memory(self):
