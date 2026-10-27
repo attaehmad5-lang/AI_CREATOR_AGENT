@@ -70,6 +70,9 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             result = write_release_artifacts(output, repo_root=root)
             self.assertEqual(result["zip_integrity"], "PASS")
             self.assertEqual(result["completion_status"], "INCOMPLETE")
+            pdf_path = Path(result["report_pdf"])
+            self.assertTrue(pdf_path.is_file())
+            self.assertTrue(pdf_path.read_bytes().startswith(b"%PDF-1.4"))
             self.assertGreaterEqual(result["files_packaged"], 3)
             checksum_text = Path(result["archive_checksum"]).read_text(encoding="ascii").split()
             self.assertEqual(checksum_text[0], hashlib.sha256(Path(result["archive"]).read_bytes()).hexdigest())
@@ -88,6 +91,8 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                 self.assertNotIn("projects/provider_store/connection_state.json", names)
                 self.assertIn("RELEASE_REPORT.json", names)
                 self.assertIn("SOURCE_MANIFEST.json", names)
+                self.assertIn("ADVANCED_PROVIDER_STORE_REPORT.pdf", names)
+                self.assertTrue(archive.read("ADVANCED_PROVIDER_STORE_REPORT.pdf").startswith(b"%PDF-1.4"))
                 for entry in manifest["files"]:
                     digest = hashlib.sha256(archive.read(entry["path"])).hexdigest()
                     self.assertEqual(digest, entry["sha256"])
