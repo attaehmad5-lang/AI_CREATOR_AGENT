@@ -101,7 +101,9 @@ class GenerationAdapter:
         def invoke_provider(**routed):
             # ProviderService injects the selected provider and request ID.
             # The host executor owns provider-specific request formatting.
-            return executor(**options, **routed)
+            merged_options = dict(options)
+            merged_options.update(routed)
+            return executor(**merged_options)
 
         try:
             result = service.execute_routed_request(
