@@ -611,6 +611,31 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         self.assertEqual(context.hostname, "api.example.com")
         connection.close()
 
+    def test_router_filters_and_ranks_by_media_type_and_quality(self):
+        catalog = Catalog(AtomicJsonStore(self.root / "quality-route.json"))
+        for pid, quality, price in (("low", 70, 0.01), ("high", 95, 0.04), ("unknown", None, 0.02)):
+            catalog.register({
+                "id": pid, "version": "1.0.0", "enabled": True,
+                "capabilities": ["generation"], "priority": 1,
+                "models": {"m": {
+                    "capabilities": ["generation"], "price_per_unit": price,
+                    "quality_score": quality, "media_types": ["image"],
+                }},
+            })
+        router = Router(catalog, sleep=lambda _: None)
+        self.assertEqual(router.simulate("generation", strategy="quality", media_type="image"), [
+            "high", "low", "unknown"
+        ])
+        self.assertEqual(router.simulate("generation", media_type="image", min_quality_score=90), ["high"])
+        self.assertEqual(router.simulate("generation", media_type="video"), [])
+        self.assertEqual(router.simulate("generation", min_quality_score=101), []) if False else None
+        with self.assertRaises(ValidationError):
+            router.simulate("generation", min_quality_score=101)
+        with self.assertRaises(ValidationError):
+            catalog.register({
+                "id": "invalid-quality", "models": {"m": {"quality_score": 101}},
+            })
+
     def test_router_simulates_and_executes_with_provider_callback(self):
         catalog = Catalog(AtomicJsonStore(self.root / "route.json"))
         catalog.register({
