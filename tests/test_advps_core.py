@@ -17,7 +17,9 @@ from projects.provider_store.advanced.advps.resilience import RetryPolicy, retry
 from projects.provider_store.advanced.advps.router import Router
 from projects.provider_store.advanced.advps.security import check_redirect, enforce_size, validate_endpoint
 from projects.provider_store.advanced.advps.storage import AtomicJsonStore, StoreCorruptError
-from projects.provider_store.advanced.advps.transport import SecureHTTPTransport
+from projects.provider_store.advanced.advps.transport import SecureHTTPTransport, _PinnedHTTPSConnection
+from unittest.mock import patch
+import ssl
 
 
 class _FakeResponse:
@@ -297,6 +299,73 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
             transport.request("GET", "https://example.com")
         with self.assertRaises(SecurityError):
             transport.request("GET", "https://example.com", headers={"Host": "attacker.example"})
+
+    def test_secure_transport_redirect_limit_and_post_to_get_semantics(self):
+        calls = []
+        responses = [
+            _FakeResponse(303, {"Location": "/result"}, b""),
+            _FakeResponse(200, {}, b"ok"),
+        ]
+        resolver = lambda host, port, type=None: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))
+        ]
+        def factory(host, port, pinned_ip, timeout, context):
+            return _FakeConnection(responses.pop(0), calls, host, port, pinned_ip)
+        transport = SecureHTTPTransport(resolver=resolver, connection_factory=factory)
+        result = transport.request("POST", "https://example.com/start", body=b"payload")
+        self.assertEqual(result["body"], b"ok")
+        self.assertEqual(calls[0][3], "POST")
+        self.assertEqual(calls[1][3], "GET")
+        self.assertIsNone(calls[1][5])
+
+        loop_responses = [_FakeResponse(302, {"Location": "/again"}, b"") for _ in range(3)]
+        loop = SecureHTTPTransport(
+            resolver=resolver, max_redirects=1,
+            connection_factory=lambda host, port, ip, timeout, context:
+                _FakeConnection(loop_responses.pop(0), [], host, port, ip),
+        )
+        with self.assertRaises(SecurityError):
+            loop.request("GET", "https://example.com/start")
+
+    def test_secure_transport_rejects_invalid_configuration_inputs_and_headers(self):
+        with self.assertRaises(ValueError):
+            SecureHTTPTransport(timeout=0)
+        with self.assertRaises(ValueError):
+            SecureHTTPTransport(max_redirects=11)
+        resolver = lambda host, port, type=None: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))
+        ]
+        transport = SecureHTTPTransport(resolver=resolver, connection_factory=lambda *a: None)
+        with self.assertRaises(SecurityError):
+            transport.request("TRACE", "https://example.com")
+        with self.assertRaises(SecurityError):
+            transport.request("GET", "https://example.com", body="not bytes")
+        with self.assertRaises(SecurityError):
+            transport.request("GET", "https://example.com", headers={"X-Test": "bad\\r\\nvalue"})
+        with self.assertRaises(SecurityError):
+            transport.request("GET", "https://example.com", headers=["bad"])
+        allowlisted = SecureHTTPTransport(allowlist=["allowed.example"], resolver=resolver, connection_factory=lambda *a: None)
+        with self.assertRaises(SecurityError):
+            allowlisted.request("GET", "https://other.example")
+
+    def test_pinned_https_connection_uses_ip_for_socket_and_hostname_for_tls(self):
+        class FakeSocket:
+            def close(self):
+                pass
+        class FakeContext:
+            def __init__(self):
+                self.hostname = None
+            def wrap_socket(self, raw, server_hostname):
+                self.hostname = server_hostname
+                return FakeSocket()
+        context = FakeContext()
+        connection = _PinnedHTTPSConnection("api.example.com", 443, "93.184.216.34", 1, ssl.create_default_context())
+        connection._context = context
+        with patch("projects.provider_store.advanced.advps.transport.socket.create_connection", return_value=FakeSocket()) as create:
+            connection.connect()
+        create.assert_called_once_with(("93.184.216.34", 443), 1, None)
+        self.assertEqual(context.hostname, "api.example.com")
+        connection.close()
 
     def test_router_simulates_and_executes_with_provider_callback(self):
         catalog = Catalog(AtomicJsonStore(self.root / "route.json"))
