@@ -137,7 +137,11 @@ class AdvancedProviderManager:
                     differences.append({"provider": provider_id, "field": field, "issue": "metadata_mismatch"})
             old_caps = old.get("capabilities", [])
             current_caps = current.get("capabilities", [])
-            if not isinstance(old_caps, list) or not isinstance(current_caps, list):
+            if (
+                not isinstance(old_caps, list) or not isinstance(current_caps, list)
+                or any(not isinstance(item, str) for item in old_caps)
+                or any(not isinstance(item, str) for item in current_caps)
+            ):
                 differences.append({"provider": provider_id, "field": "capabilities", "issue": "invalid_capability_list"})
             elif sorted(old_caps) != sorted(current_caps):
                 differences.append({"provider": provider_id, "field": "capabilities", "issue": "metadata_mismatch"})
@@ -151,7 +155,12 @@ class AdvancedProviderManager:
                 capabilities = record.get("capabilities", [])
                 if category is None:
                     differences.append({"provider": provider_id, "field": "category", "issue": "unknown_category"})
-                elif isinstance(capabilities, list) and not set(capabilities).issubset(set(category["capabilities"])):
+                elif (
+                    not isinstance(capabilities, list)
+                    or any(not isinstance(item, str) for item in capabilities)
+                ):
+                    differences.append({"provider": provider_id, "field": "capabilities", "issue": "invalid_capability_list"})
+                elif not set(capabilities).issubset(set(category["capabilities"])):
                     differences.append({"provider": provider_id, "field": "capabilities", "issue": "capability_not_declared_by_category"})
         return {
             "status": "MATCH" if not differences else "MISMATCH",
