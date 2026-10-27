@@ -37,8 +37,11 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Compile provider-store and compatibility test
-        run: python -m compileall -q projects/provider_store tests/test_provider_store_compat.py
+      - name: Compile provider-store modules and integration tests
+        run: python -m compileall -q projects/provider_store tests/test_provider_store_compat.py tests/test_provider_service.py
+
+      - name: Run ProviderService security and lifecycle tests
+        run: python -m unittest discover -s tests -p "test_provider_service.py" -v
 
       - name: Run provider-store compatibility regression tests
         run: python -m unittest discover -s tests -p "test_provider_store_compat.py" -v
