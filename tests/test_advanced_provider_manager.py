@@ -103,6 +103,36 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             self.assertEqual(advanced.list_verified_enabled_providers("  "), [])
             self.assertEqual(advanced.list_verified_enabled_providers(123), [])
 
+    def test_production_catalog_consistency_reports_match(self):
+        result = AdvancedProviderManager().catalog_consistency()
+        self.assertEqual(result["status"], "MATCH", result)
+        self.assertEqual(result["providers"], 18)
+        self.assertEqual(result["canonical_advanced_providers"], 18)
+        self.assertEqual(result["differences"], [])
+
+    def test_catalog_consistency_reports_metadata_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = root / "catalog.json"
+            state = root / "state.json"
+            categories = root / "categories.json"
+            advanced_catalog = root / "advanced.json"
+            provider = {
+                "id": "story_test", "name": "Story Test", "category": "script_story",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "subscription_required": False, "capabilities": ["story_generation"],
+            }
+            catalog.write_text(json.dumps({"version": "2.0", "providers": [provider]}), encoding="utf-8")
+            state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            categories.write_text(json.dumps({"categories": {"script_story": {"name": "Script & Story", "capabilities": ["story_generation"]}}}), encoding="utf-8")
+            legacy = dict(provider, auth_type="API_KEY")
+            advanced_catalog.write_text(json.dumps({"providers": [legacy]}), encoding="utf-8")
+            connection = ConnectionManager(catalog, state)
+            manager = AdvancedProviderManager(connection_manager=connection, categories_path=str(categories), advanced_catalog_path=str(advanced_catalog))
+            result = manager.catalog_consistency()
+            self.assertEqual(result["status"], "MISMATCH")
+            self.assertIn({"provider": "story_test", "field": "auth_type", "issue": "metadata_mismatch"}, result["differences"])
+
     def test_category_catalog_is_validated_and_returns_detached_records(self):
         advanced = AdvancedProviderManager()
         categories = advanced.list_categories()
