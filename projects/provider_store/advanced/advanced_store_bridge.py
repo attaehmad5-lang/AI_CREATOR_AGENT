@@ -6,6 +6,7 @@ remains responsible for live execution and usage finalization.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 try:
@@ -27,6 +28,14 @@ class AdvancedStoreBridge:
             return set()
         return {value for value in raw if isinstance(value, str) and value.strip()}
 
+    @staticmethod
+    def _safe_price(provider: dict[str, Any]) -> float | None:
+        value = provider.get("price_per_unit")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        value = float(value)
+        return value if math.isfinite(value) and value >= 0 else None
+
     def list_providers(
         self,
         *,
@@ -46,14 +55,14 @@ class AdvancedStoreBridge:
             if capability and capability not in self._capabilities(original):
                 continue
             regions = original.get("regions")
-            if region and isinstance(regions, list) and region not in regions:
+            if region and (not isinstance(regions, list) or region not in regions):
                 continue
             state = self.manager.get_state(provider_id)
             verified = state.get("verified") is True and state.get("status") in {"CONNECTED", "READY"}
             if verified_only and not verified:
                 continue
-            # Only publish allow-listed metadata. Never copy arbitrary provider
-            # fields (which could accidentally include credentials or headers).
+            # Publish an allow-listed metadata view only. Arbitrary provider
+            # fields are never copied, avoiding accidental credential exposure.
             results.append({
                 "id": provider_id,
                 "name": original.get("name", provider_id),
@@ -62,6 +71,7 @@ class AdvancedStoreBridge:
                 "capabilities": sorted(self._capabilities(original)),
                 "priority": original.get("priority", 100),
                 "regions": list(regions) if isinstance(regions, list) else [],
+                "price_per_unit": self._safe_price(original),
                 "status": state.get("status", "UNKNOWN"),
                 "verified": verified,
                 "auth_type": original.get("auth_type"),
@@ -80,18 +90,19 @@ class AdvancedStoreBridge:
         """Return verified, enabled candidates; cost routing fails closed on unknown prices."""
         if strategy not in {"priority", "cost"}:
             raise ValueError("strategy must be 'priority' or 'cost'")
+        if max_price is not None and (
+            isinstance(max_price, bool) or not isinstance(max_price, (int, float))
+            or not math.isfinite(max_price) or max_price < 0
+        ):
+            raise ValueError("max_price must be a finite non-negative number")
         providers = self.list_providers(
             capability=capability, region=region, enabled_only=True, verified_only=True
         )
         eligible: list[dict[str, Any]] = []
         for provider in providers:
-            # Price metadata is intentionally optional in the central catalog.
-            # Unknown prices are excluded when a budget ceiling is requested.
-            price = provider.get("price_per_unit")
-            if max_price is not None:
-                if not isinstance(price, (int, float)) or isinstance(price, bool) or price < 0 or price > max_price:
-                    continue
-            provider["price_per_unit"] = price
+            price = provider["price_per_unit"]
+            if max_price is not None and (price is None or price > max_price):
+                continue
             eligible.append(provider)
         if strategy == "cost":
             eligible.sort(key=lambda p: (
