@@ -878,6 +878,8 @@ class ConnectionManager:
             # Discovery is advisory, but must fail closed when the on-disk
             # catalog cannot be reloaded or validated; never expose stale,
             # partially parsed, or schema-invalid provider metadata.
+            with self._discovery_metrics_lock:
+                self._discovery_metrics["catalog_errors"] += 1
             return []
         for provider in providers:
             if provider.get("deprecated") is True and not include_deprecated:
