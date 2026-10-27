@@ -86,6 +86,27 @@ class RecoveryCoordinatorTests(unittest.TestCase):
         self.assertEqual(result["skipped"]["provider-a"], "FUTURE_FAILURE_TIMESTAMP")
         self.assertEqual(self.manager.calls, [])
 
+    def test_duplicate_keys_and_nonfinite_snapshot_values_block_probes(self):
+        for raw in (
+            '{"version":"1","providers":{"provider-a":{"status":"UNHEALTHY","status":"HEALTHY"}}}',
+            '{"version":"1","providers":{},"value":NaN}',
+        ):
+            with self.subTest(raw=raw):
+                self.path.write_text(raw, encoding="utf-8")
+                result = self.make().run_due_rechecks()
+                self.assertEqual(result["status"], "BLOCKED_INVALID_HEALTH_STATE")
+                self.assertEqual(self.manager.calls, [])
+
+    def test_oversized_snapshot_blocks_probes(self):
+        self.path.write_bytes(b'{"version":"1","providers":{}}' + b" " * (2 * 1024 * 1024))
+        result = self.make().run_due_rechecks()
+        self.assertEqual(result["status"], "BLOCKED_INVALID_HEALTH_STATE")
+        self.assertEqual(self.manager.calls, [])
+
+    def test_huge_cooldown_is_rejected_without_overflow(self):
+        with self.assertRaises(ValueError):
+            self.make(cooldown=10**1000)
+
     def test_malformed_snapshot_blocks_all_probes(self):
         self.path.write_text("{", encoding="utf-8")
         result = self.make().run_due_rechecks()
