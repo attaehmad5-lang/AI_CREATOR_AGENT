@@ -71,6 +71,30 @@ class RetryPolicyTests(unittest.TestCase):
         self.assertEqual(limited.reason, "RATE_LIMIT_RETRY_AFTER")
         self.assertGreaterEqual(limited.delay_seconds, 5.0)
 
+    def test_provider_credit_exhaustion_overrides_http_429(self):
+        result = RetryPolicy().decide(
+            attempt=1, status_code=429, provider_code="insufficient_quota"
+        )
+        self.assertFalse(result.retry)
+        self.assertEqual(result.reason, "PROVIDER_ERROR_NON_RETRYABLE")
+
+    def test_provider_rate_limit_code_retries_even_without_http_429(self):
+        result = RetryPolicy(
+            max_attempts=3, base_delay_seconds=1, max_delay_seconds=10,
+            jitter_fraction=0, random_fn=lambda: 0,
+        ).decide(attempt=1, status_code=400, provider_code="rate_limit_exceeded")
+        self.assertTrue(result.retry)
+        self.assertEqual(result.reason, "RATE_LIMIT_BACKOFF")
+        self.assertEqual(result.delay_seconds, 1)
+
+    def test_provider_billing_and_auth_codes_never_retry(self):
+        policy = RetryPolicy()
+        for code in ("payment_required", "invalid_api_key", "permission_denied"):
+            with self.subTest(code=code):
+                result = policy.decide(attempt=1, status_code=429, provider_code=code)
+                self.assertFalse(result.retry)
+                self.assertEqual(result.reason, "PROVIDER_ERROR_NON_RETRYABLE")
+
     def test_non_idempotent_request_is_not_retried(self):
         result = RetryPolicy().decide(attempt=1, status_code=503, idempotent=False)
         self.assertFalse(result.retry)
