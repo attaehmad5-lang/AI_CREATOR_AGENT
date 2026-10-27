@@ -340,6 +340,16 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(non_string["status"], "CREDENTIALS_MISSING")
         self.assertFalse(non_string["credential_present"])
 
+    def test_unicode_control_credentials_are_invalid_and_block_connectivity(self):
+        for token in ("private\\u0085token", "private\\u009ftoken"):
+            with self.subTest(token=token):
+                result = self.manager.credential_status(
+                    "token_image", {"TEST_PROVIDER_TOKEN": token}
+                )
+                self.assertEqual(result["status"], "CREDENTIAL_VALUE_INVALID")
+                self.assertFalse(result["credential_present"])
+                self.assertNotIn(token, repr(result))
+
     def test_public_provider_needs_no_credential(self):
         result = self.manager.credential_status("public_image", {})
         self.assertEqual(result["status"], "NO_CREDENTIAL_REQUIRED")
