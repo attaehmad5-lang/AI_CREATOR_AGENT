@@ -10,6 +10,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
 from .safe_numbers import finite_number
+from .provider_error_policy import classify_provider_error
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ class RetryPolicy:
         exception: BaseException | None = None,
         retry_after: str | int | float | None = None,
         idempotent: bool = True,
+        provider_code: str | None = None,
     ) -> RetryDecision:
         if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
             return RetryDecision(False, attempt if isinstance(attempt, int) else 0, 0.0, "INVALID_ATTEMPT")
@@ -111,9 +113,21 @@ class RetryPolicy:
             return RetryDecision(False, attempt, 0.0, "INVALID_STATUS_CODE")
         if not idempotent:
             return RetryDecision(False, attempt, 0.0, "NON_IDEMPOTENT_REQUEST")
-        if status_code in {401, 403}:
+        # Explicit provider error codes override generic HTTP retry rules. In
+        # particular, HTTP 429 can mean exhausted credits, not transient throttling.
+        effective_status = status_code if status_code is not None else 500
+        error_classification = classify_provider_error(
+            effective_status, provider_code=provider_code
+        )
+        if error_classification.get("category") in {
+            "billing", "credits_exhausted", "authentication", "permission", "request",
+            "invalid_input",
+        }:
+            return RetryDecision(False, attempt, 0.0, "PROVIDER_ERROR_NON_RETRYABLE")
+        if error_classification.get("category") in {"authentication", "permission"} or status_code in {401, 403}:
             return RetryDecision(False, attempt, 0.0, "AUTHORIZATION_FAILURE")
-        retryable_status = status_code == 429 or (status_code is not None and 500 <= status_code <= 599)
+        explicit_rate_limit = error_classification.get("category") == "rate_limit"
+        retryable_status = status_code == 429 or explicit_rate_limit or (status_code is not None and 500 <= status_code <= 599)
         retryable_exception = isinstance(exception, (TimeoutError, ConnectionError, OSError))
         if not retryable_status and not retryable_exception:
             return RetryDecision(False, attempt, 0.0, "NON_RETRYABLE_FAILURE")
