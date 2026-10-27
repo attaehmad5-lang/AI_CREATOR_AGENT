@@ -393,6 +393,42 @@ class ProviderRoutingManager:
                 ):
                     decisions.append({"provider": provider_id, "status": "CONNECTION_NOT_VERIFIED"})
                     continue
+                # A persisted successful connection must not outlive its credentials.
+                # Re-check credential presence/expiry immediately before routing.
+                try:
+                    credential = self.connection_manager.credential_status(provider_id)
+                except Exception as exc:
+                    decisions.append({
+                        "provider": provider_id,
+                        "status": "CREDENTIAL_STATUS_LOOKUP_FAILED",
+                        "error_type": type(exc).__name__,
+                    })
+                    continue
+                if not isinstance(credential, dict):
+                    decisions.append({"provider": provider_id, "status": "CREDENTIAL_STATUS_LOOKUP_FAILED"})
+                    continue
+                credential_state = credential.get("status")
+                auth_type = str(provider.get("auth_type", "NONE")).strip().upper()
+                manual_auth_types = {
+                    "ACCOUNT", "MANUAL", "MANUAL_CONNECT", "OAUTH_BROWSER",
+                    "ACCOUNT_OR_API", "API_KEY_OR_ACCOUNT", "API_KEY_OR_SERVICE_ACCOUNT",
+                    "ACCOUNT_OR_LOCAL",
+                }
+                blocked_credential_states = {
+                    "CREDENTIALS_MISSING", "CREDENTIALS_EXPIRED", "CREDENTIAL_EXPIRY_INVALID",
+                    "CREDENTIAL_EXPIRY_UNKNOWN", "CREDENTIAL_VALUE_INVALID", "INVALID_ENVIRONMENT",
+                    "NOT_FOUND",
+                }
+                if credential_state in blocked_credential_states or (
+                    credential_state == "MANUAL_CONNECTION_REQUIRED"
+                    and auth_type not in manual_auth_types
+                ):
+                    decisions.append({
+                        "provider": provider_id,
+                        "status": credential_state if credential_state in blocked_credential_states
+                        else "CREDENTIAL_VERIFICATION_REQUIRED",
+                    })
+                    continue
             health_record: dict[str, Any] = {}
             if self.health_manager is not None:
                 try:
