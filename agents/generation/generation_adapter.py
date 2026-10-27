@@ -2,13 +2,18 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 
 class GenerationAdapter:
 
-    def __init__(self):
+    def __init__(self, *, provider_store_service=None, provider_store_adapter=None):
         self.name = "AI Generation Adapter"
-        self.version = "1.0"
+        self.version = "1.1"
+        # Opt-in canonical execution boundary. If configured, failures never
+        # silently fall back to the legacy generation service.
+        self.provider_store_service = provider_store_service
+        self.provider_store_adapter = provider_store_adapter
 
         self.providers = {
             "image": "NOT_CONNECTED",
@@ -44,16 +49,93 @@ class GenerationAdapter:
             "status": "QUEUED"
         }
 
-    def generate_image(self, prompt, output_path):
+    def generate_image(
+        self, prompt, output_path, *, request_id=None, project_id="default",
+        estimated_cost=0.0, route_options=None, adapter_options=None,
+    ):
+        if self.provider_store_service is not None:
+            return self._generate_image_via_provider_store(
+                prompt, output_path, request_id=request_id, project_id=project_id,
+                estimated_cost=estimated_cost, route_options=route_options,
+                adapter_options=adapter_options,
+            )
+
+        # Preserve legacy behavior until a host explicitly injects the canonical
+        # ProviderService and a provider executor. This keeps old deployments
+        # working while preventing a configured canonical path from bypassing
+        # its safety/accounting boundary.
         from projects.generation.providers.provider_service import ProviderService
 
         service = ProviderService()
         result = service.generate_image(prompt, output_path)
-
-        if result.get("status") == "COMPLETED":
+        if isinstance(result, dict) and result.get("status") == "COMPLETED":
             self.providers["image"] = result.get("provider", "UNKNOWN")
-
         return result
+
+    def _generate_image_via_provider_store(
+        self, prompt, output_path, *, request_id=None, project_id="default",
+        estimated_cost=0.0, route_options=None, adapter_options=None,
+    ):
+        service = self.provider_store_service
+        executor = self.provider_store_adapter
+        if not callable(getattr(service, "execute_routed_request", None)):
+            return {"status": "PROVIDER_STORE_SERVICE_INVALID", "executed": False}
+        if not callable(executor):
+            return {"status": "PROVIDER_EXECUTOR_UNAVAILABLE", "executed": False}
+        if not isinstance(prompt, str) or not prompt.strip():
+            return {"status": "INVALID_PROMPT", "executed": False}
+        if not isinstance(project_id, str) or not project_id.strip():
+            return {"status": "INVALID_PROJECT_ID", "executed": False}
+        if not isinstance(route_options, (dict, type(None))):
+            return {"status": "INVALID_ROUTE_OPTIONS", "executed": False}
+        if not isinstance(adapter_options, (dict, type(None))):
+            return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
+        if request_id is None:
+            request_id = "generation-" + uuid4().hex
+        if not isinstance(request_id, str) or not request_id.strip():
+            return {"status": "INVALID_REQUEST_ID", "executed": False}
+
+        options = dict(adapter_options or {})
+        options.update({"prompt": prompt, "output_path": output_path})
+
+        def invoke_provider(**routed):
+            # ProviderService injects the selected provider and request ID.
+            # The host executor owns provider-specific request formatting.
+            return executor(**options, **routed)
+
+        try:
+            result = service.execute_routed_request(
+                category="image",
+                project_id=project_id,
+                request_id=request_id,
+                estimated_cost=estimated_cost,
+                adapter=invoke_provider,
+                modality="image",
+                output_path=output_path,
+                adapter_options=options,
+                **dict(route_options or {}),
+            )
+        except Exception as exc:
+            # The service call itself may have crossed the network boundary.
+            return {
+                "status": "EXECUTION_OUTCOME_UNKNOWN",
+                "executed": False,
+                "reservation_state": "UNKNOWN",
+                "manual_reconciliation_required": True,
+                "request_id": request_id,
+                "error_type": type(exc).__name__,
+            }
+        if isinstance(result, dict) and result.get("status") in {
+            "COMPLETED", "EXECUTION_SUCCEEDED", "PROVIDER_EXECUTION_SUCCEEDED"
+        }:
+            self.providers["image"] = result.get("provider", "UNKNOWN")
+        return result if isinstance(result, dict) else {
+            "status": "EXECUTION_OUTCOME_UNKNOWN",
+            "executed": False,
+            "reservation_state": "UNKNOWN",
+            "manual_reconciliation_required": True,
+            "request_id": request_id,
+        }
 
     def prepare_video_job(self, scene):
         return {
