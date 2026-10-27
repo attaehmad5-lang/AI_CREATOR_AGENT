@@ -137,9 +137,9 @@ Implementation/evidence inspected: health_manager.py; tests/test_health_manager.
 Remaining work: Persistent bounded health history, active probes, failure thresholds, recovery/readmission, stale-evidence exclusion and secret-safe diagnostics pass focused tests.
 
 Feature 024: Health Check Scheduling
-Status: PARTIAL
-Implementation/evidence inspected: health_scheduler.py; tests/test_provider_health_scheduler.py; CI #40582600249
-Remaining work: Bounded poll-driven due scheduling and injected probe timeout propagation pass cross-platform tests; persisted schedules and a managed background worker/daemon remain out of scope.
+Status: COMPLETED
+Implementation/evidence inspected: health_scheduler.py; tests/test_provider_health_scheduler.py; .github/workflows/task-25-tests.yml; CI #40582600249
+Completion evidence: Deterministic poll-driven due scheduling, per-provider intervals, bounded provider/batch limits, registration/unregistration, timeout propagation, and invalid-clock/config fail-closed behavior pass cross-platform tests. The caller owns the polling loop by design; no hidden background thread is created.
 
 Feature 025: Provider Status Management
 Status: COMPLETED
