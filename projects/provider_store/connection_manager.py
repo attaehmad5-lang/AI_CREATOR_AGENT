@@ -11,6 +11,7 @@ import os
 import re
 import tempfile
 import threading
+import unicodedata
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -1169,7 +1170,8 @@ class ConnectionManager:
         credentials = self.credential_status(provider_id, environ)
         blocked_credential_states = {
             "CREDENTIALS_MISSING", "CREDENTIALS_EXPIRED", "CREDENTIAL_EXPIRY_INVALID",
-            "CREDENTIAL_EXPIRY_UNKNOWN", "INVALID_ENVIRONMENT", "MANUAL_CONNECTION_REQUIRED",
+            "CREDENTIAL_EXPIRY_UNKNOWN", "CREDENTIAL_VALUE_INVALID", "INVALID_ENVIRONMENT",
+            "MANUAL_CONNECTION_REQUIRED",
         }
         if credentials["status"] in blocked_credential_states:
             if not save_state("ERROR"):
@@ -1426,6 +1428,19 @@ class ConnectionManager:
         env = os.environ if environ is None else environ
         raw_token = env.get(token_env)
         present = isinstance(raw_token, str) and bool(raw_token.strip())
+        if present and (
+            len(raw_token) > 16384
+            or any(
+                unicodedata.category(char) == "Cc" or char in "\u2028\u2029"
+                for char in raw_token
+            )
+        ):
+            return {
+                "provider": provider_id,
+                "status": "CREDENTIAL_VALUE_INVALID",
+                "credential_present": False,
+                "credential_name": token_env,
+            }
         if not present:
             return {
                 "provider": provider_id,
