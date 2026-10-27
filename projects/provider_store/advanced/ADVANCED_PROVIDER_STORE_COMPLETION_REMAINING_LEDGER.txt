@@ -13,9 +13,9 @@ BLOCKED = cannot proceed; exact reason must be recorded.
 VERIFICATION FACTS
 - Repository: attaehmad5-lang/AI_CREATOR_AGENT
 - Advanced catalog: 18 entries; canonical catalog: 54 entries; field-by-field metadata and category-capability consistency tests pass.
-- Latest verified GitHub Actions run #40573699626 passed compilation, catalog JSON validation, all 463 unit/regression tests on Ubuntu and Windows, the bounded concurrent catalog benchmark, and release artifact generation.
+- Latest verified GitHub Actions run #40580523121 passed compilation, catalog JSON validation, all 480 unit/regression tests on Ubuntu and Windows, Ruff lint/format gates, the catalog maintenance CLI tests, SPDX 2.3 source SBOM generation, the bounded concurrent catalog benchmark, and release artifact generation.
 - Passing evidence includes advanced capability/lifecycle/readiness tests, invalid category-catalog rejection, incident lifecycle, HMAC webhook/replay, provider authorization, OAuth/API-key safeguards, routing/quotas/budgets, media integrity, trace-context primitives, ledger/report validation, private-key fail-closed checks, clean ZIP extraction, per-file hashes and ZIP checksum sidecar verification.
-- CI generated and uploaded Linux and Windows report/package artifacts (source ZIP, JSON/Markdown/PDF report, manifest and ZIP checksum sidecar); PDF rendering and ZIP inclusion are covered by focused tests. The report correctly stays INCOMPLETE until all 150 points are completed.
+- CI generated and uploaded Linux and Windows report/package artifacts (source ZIP, JSON/Markdown/PDF report, source manifest, SPDX 2.3 source-file SBOM and ZIP checksum sidecar); PDF/SBOM rendering and ZIP inclusion are covered by focused tests. The report correctly stays INCOMPLETE until all 150 points are completed.
 - No provider credentials were supplied or used. No live generation, credit balance, or billing test is claimed.
 - Draft PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/84
 
@@ -658,8 +658,8 @@ Remaining work: Run and record formatting, lint, type, coverage, build, wheel, c
 
 Feature 128: Software Bill of Materials (SBOM)
 Status: PARTIAL
-Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; .github/workflows/task-25-tests.yml
-Remaining work: SPDX 2.3 JSON with SHA-256 hashes for packaged source files is generated and included in the source ZIP; cross-platform verification is pending. Third-party dependency inventory and license conclusions are not inferred.
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; .github/workflows/task-25-tests.yml; CI #40580523121
+Remaining work: Cross-platform CI verifies SPDX 2.3 JSON with SHA-256 hashes for all packaged source files and confirms ZIP inclusion. Third-party dependency inventory and license conclusions are not inferred.
 
 Feature 129: CI/CD Pipeline
 Status: PARTIAL
