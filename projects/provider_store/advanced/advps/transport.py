@@ -169,6 +169,16 @@ class SecureHTTPTransport:
                 raise SecurityError("redirect limit exceeded")
             target = urljoin(current_url, location)
             check_redirect(current_url, target, allowlist=self.allowlist, resolve=False)
+            old_parts, new_parts = urlsplit(current_url), urlsplit(target)
+            old_origin = (old_parts.scheme, old_parts.hostname, old_parts.port or 443)
+            new_origin = (new_parts.scheme, new_parts.hostname, new_parts.port or 443)
+            if old_origin != new_origin:
+                # Never forward provider credentials to a different origin.
+                sensitive_markers = ("authorization", "cookie", "token", "api_key", "apikey", "secret", "credential")
+                for header_name in list(safe_headers):
+                    normalized = header_name.casefold().replace("-", "_")
+                    if any(marker in normalized for marker in sensitive_markers):
+                        safe_headers.pop(header_name, None)
             redirects += 1
             if status == 303 or (status in {301, 302} and current_method == "POST"):
                 current_method, current_body = "GET", b""
