@@ -136,9 +136,13 @@ class AdvancedProviderManager:
     def catalog_consistency(self) -> dict[str, Any]:
         """Compare the legacy advanced catalog with the canonical runtime catalog."""
         try:
-            data = json.loads(self.advanced_catalog_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
+            raw_catalog = self.advanced_catalog_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
             return {"status": "ADVANCED_CATALOG_UNAVAILABLE", "providers": 0, "differences": []}
+        try:
+            data = json.loads(raw_catalog)
+        except json.JSONDecodeError:
+            return {"status": "INVALID_ADVANCED_CATALOG", "providers": 0, "differences": []}
         records = data.get("providers") if isinstance(data, dict) else None
         if not isinstance(records, list):
             return {"status": "INVALID_ADVANCED_CATALOG", "providers": 0, "differences": []}
