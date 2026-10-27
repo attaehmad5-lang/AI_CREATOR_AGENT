@@ -129,7 +129,12 @@ class AdvancedProviderManager:
             differences.append({"provider": provider_id, "field": "id", "issue": "missing_from_canonical_catalog"})
         for provider_id in sorted(set(canonical) - set(legacy)):
             differences.append({"provider": provider_id, "field": "id", "issue": "missing_from_advanced_catalog"})
-        fields = ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required")
+        fields = (
+            "name", "category", "auth_type", "connection_type", "enabled",
+            "subscription_required", "allowed_hosts", "token_env", "api_key_env",
+            "credential_env", "official_api_url", "subscription_url",
+            "zero_cost_allowed", "priority", "supported_models",
+        )
         for provider_id in sorted(set(legacy) & set(canonical)):
             old, current = legacy[provider_id], canonical[provider_id]
             for field in fields:
