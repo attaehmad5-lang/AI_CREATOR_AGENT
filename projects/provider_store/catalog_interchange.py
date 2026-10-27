@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -151,4 +152,77 @@ def import_catalog(
         "status": "CATALOG_IMPORTED",
         "imported": True,
         "provider_count": len(candidate["providers"]),
+    }
+
+
+def create_catalog_snapshot(
+    source: str | os.PathLike[str],
+    history_directory: str | os.PathLike[str],
+) -> dict[str, Any]:
+    """Create an immutable, validated JSON snapshot in a history directory."""
+    catalog = _read_valid_catalog(Path(source))
+    history_path = Path(history_directory)
+    history_path.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    for sequence in range(1000):
+        suffix = f"-{sequence:03d}" if sequence else ""
+        snapshot = history_path / f"catalog-{timestamp}{suffix}.json"
+        try:
+            with snapshot.open("x", encoding="utf-8") as stream:
+                json.dump(catalog, stream, ensure_ascii=False, indent=2, allow_nan=False)
+                stream.write("\\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+        except FileExistsError:
+            continue
+        except Exception:
+            snapshot.unlink(missing_ok=True)
+            raise
+        return {
+            "status": "CATALOG_SNAPSHOT_CREATED",
+            "created": True,
+            "snapshot": snapshot.name,
+            "provider_count": len(catalog["providers"]),
+        }
+    raise FileExistsError("could not allocate a unique catalog snapshot filename")
+
+
+def list_catalog_snapshots(
+    history_directory: str | os.PathLike[str],
+) -> dict[str, Any]:
+    """List valid snapshots without returning provider configuration or credentials."""
+    history_path = Path(history_directory)
+    if not history_path.exists():
+        return {"status": "CATALOG_HISTORY_EMPTY", "snapshots": []}
+    snapshots = []
+    for path in sorted(history_path.glob("catalog-*.json"), reverse=True):
+        try:
+            catalog = _read_valid_catalog(path)
+        except (OSError, ValueError):
+            continue
+        snapshots.append(
+            {"name": path.name, "provider_count": len(catalog["providers"])}
+        )
+    return {
+        "status": "CATALOG_HISTORY_LISTED" if snapshots else "CATALOG_HISTORY_EMPTY",
+        "snapshots": snapshots,
+    }
+
+
+def restore_catalog_snapshot(
+    snapshot: str | os.PathLike[str],
+    destination: str | os.PathLike[str],
+) -> dict[str, Any]:
+    """Restore a validated snapshot through the atomic import/backup path."""
+    snapshot_path = Path(snapshot)
+    if not snapshot_path.is_file() or not snapshot_path.name.startswith("catalog-"):
+        raise ValueError("snapshot must be an existing catalog-*.json file")
+    _read_valid_catalog(snapshot_path)
+    result = import_catalog(snapshot_path, destination, backup=True)
+    if not result.get("imported"):
+        return {"status": "CATALOG_SNAPSHOT_RESTORE_FAILED", "restored": False}
+    return {
+        "status": "CATALOG_SNAPSHOT_RESTORED",
+        "restored": True,
+        "provider_count": result["provider_count"],
     }
