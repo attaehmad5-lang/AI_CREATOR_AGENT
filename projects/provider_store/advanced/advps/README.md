@@ -31,8 +31,8 @@ lifecycle/leases/recovery, allowlisted provider runtime load/unload, and backup/
   checks the `generate` interface, tracks in-flight calls and drains before unload.
   It never imports a module path from untrusted catalog data.
 - `JobManager` persists job metadata, hashed idempotency keys, leases, attempts,
-  cancellation state and stale-lease recovery. It does not store payloads or
-  credentials, and it does not itself interrupt an executing worker process.
+  cancellation state, cooperative cancellation checkpoints and stale-lease recovery. It does not store payloads or
+  credentials. Workers must call `check_cancelled(job_id)` at safe checkpoints; the manager cannot forcibly interrupt arbitrary executing code.
 - The core's JSON catalog is separate from AI_CREATOR_AGENT's canonical
   ConnectionManager. In this repository, the integrated bridge is the canonical
   read-only selection path; do not create duplicate production catalog/state.
