@@ -377,24 +377,24 @@ Implementation/evidence inspected: http_probe.py; connection_manager.py; sensiti
 Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
 
 Feature 072: Sensitive Data Protection
-Status: PARTIAL
-Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; related tests
-Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
+Status: COMPLETED
+Implementation/evidence inspected: sensitive_data_policy.py; tests/test_sensitive_data_policy.py; CI #40560954116
+Remaining work: Credential/token detection, fail-closed oversized/deep payload checks and configurable sensitive-data policy pass focused tests.
 
 Feature 073: Secret Redaction
-Status: PARTIAL
-Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; related tests
-Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; tests/test_http_probe.py; tests/test_sensitive_data_policy.py; CI #40560954116
+Remaining work: Probe failures and diagnostics avoid returning credentials or raw response details; common token and labeled-secret detection is tested.
 
 Feature 074: Privacy Policy Enforcement
-Status: PARTIAL
-Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; related tests
-Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
+Status: COMPLETED
+Implementation/evidence inspected: provider_data_policy.py; tests/test_provider_data_policy.py; CI #40560954116
+Remaining work: Provider/category restrictions, credential policy, retention limits and training-use consent gates are covered by focused tests.
 
 Feature 075: Endpoint Allowlisting
-Status: PARTIAL
-Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; related tests
-Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; tests/test_http_probe.py; CI #40560954116
+Remaining work: Missing or unallowlisted hosts fail before network access; public HTTPS hosts still require explicit allowlisting.
 
 Feature 076: SSRF Protection
 Status: PARTIAL
@@ -402,19 +402,19 @@ Implementation/evidence inspected: http_probe.py; connection_manager.py; sensiti
 Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
 
 Feature 077: Redirect Security
-Status: PARTIAL
-Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; related tests
-Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; tests/test_http_probe.py; CI #40560954116
+Remaining work: Redirects are rejected and response resources are closed; redirect/rate-limit failures do not leak details.
 
 Feature 078: Request Size Limits
-Status: PARTIAL
-Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; related tests
-Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
+Status: COMPLETED
+Implementation/evidence inspected: provider_data_policy.py; sensitive_data_policy.py; tests/test_provider_data_policy.py; tests/test_sensitive_data_policy.py; CI #40560954116
+Remaining work: Oversized/deep payloads fail closed and provider data-policy retention/input constraints are tested.
 
 Feature 079: Response Size Limits
-Status: PARTIAL
-Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; related tests
-Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; output_validator.py; tests/test_http_probe.py; tests/test_output_validator.py; CI #40560954116
+Remaining work: HTTP response reads are bounded and output validation rejects missing, empty, oversized or changing files.
 
 Feature 080: Dependency Security Scanning
 Status: PARTIAL
