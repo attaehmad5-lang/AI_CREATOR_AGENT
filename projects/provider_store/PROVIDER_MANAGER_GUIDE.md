@@ -58,6 +58,28 @@ print(result)
 
 This restores catalog metadata only; it does not restore credentials, connection sessions, quota ledgers, or credit/cost history.
 
+## Validated catalog import and export
+
+Use `projects.provider_store.catalog_interchange` to move catalog metadata between files. Both paths reject malformed JSON, invalid catalog schemas, duplicate/unsafe provider records, and credential-bearing fields. Export writes through a same-directory temporary file and atomic replacement. Import validates before mutation, takes an OS-level lock for the destination, saves the prior bytes to `.bak` by default, validates the written file, and restores the original bytes if replacement/verification fails.
+
+```python
+from projects.provider_store.catalog_interchange import export_catalog, import_catalog
+
+export_result = export_catalog(
+    "projects/provider_store/provider_catalog.json",
+    "build/provider_catalog.export.json",
+)
+print(export_result["status"], export_result["provider_count"])
+
+import_result = import_catalog(
+    "build/provider_catalog.export.json",
+    "build/provider_catalog.staging.json",
+)
+print(import_result["status"], import_result.get("provider_count"))
+```
+
+Import/export only changes the destination path supplied by the caller; it does not silently update every runtime catalog consumer. For production rollout, use a staging destination, inspect the exported diff, and separately coordinate runtime reloads. A failed import returns a safe status and leaves the prior destination intact where rollback succeeds. If rollback itself fails, stop and restore from the preserved `.bak` before retrying.
+
 ## Verification
 
 The GitHub Actions workflow compiles provider modules/tests, parses provider JSON catalogs, and runs all unit/regression tests with Python 3.13:
