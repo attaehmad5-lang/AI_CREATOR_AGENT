@@ -28,6 +28,7 @@ class CatalogInterchangeTests(unittest.TestCase):
         self.assertGreater(result["provider_count"], 0)
 
         target = self.root / "active" / "catalog.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps({"version": "3.0", "providers": []}), encoding="utf-8")
         imported = import_catalog(exported, target)
         self.assertTrue(imported["imported"])
@@ -41,8 +42,8 @@ class CatalogInterchangeTests(unittest.TestCase):
         target = self.root / "target.json"
         original = b'{"version":"3.0","providers":[]}\n'
         target.write_bytes(original)
-        result = import_catalog(invalid, target)
-        self.assertFalse(result["imported"])
+        with self.assertRaises(ValueError):
+            import_catalog(invalid, target)
         self.assertEqual(target.read_bytes(), original)
 
     def test_failed_atomic_write_does_not_leave_partial_target(self):
