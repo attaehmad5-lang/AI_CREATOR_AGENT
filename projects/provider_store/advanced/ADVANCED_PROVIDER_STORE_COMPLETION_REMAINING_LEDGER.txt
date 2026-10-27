@@ -612,9 +612,9 @@ Implementation/evidence inspected: .github/workflows/task-25-tests.yml; PROVIDER
 Remaining work: Python 3.13 CI on Ubuntu and Windows is configured; other Python versions and mobile/Pydroid are not verified.
 
 Feature 119: Code Formatting Checks
-Status: UNVERIFIED
-Implementation/evidence inspected: No passing evidence located for the complete repository-wide gate
-Remaining work: Run and record formatting, lint, type, coverage, build, wheel, clean extraction, dependency lock and SBOM checks.
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; Ruff 0.14.2; catalog_interchange.py; advanced/performance_benchmark.py; focused tests; CI #40575388557
+Remaining work: Ruff format --check covers the new catalog-interchange and benchmark modules/tests; Ubuntu passed. Repository-wide formatting remains unverified.
 
 Feature 120: Linting
 Status: PARTIAL
