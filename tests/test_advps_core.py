@@ -103,6 +103,17 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
             accounting.reserve_and_record("p", "m", 1, 0.5, key="k2")
         self.assertEqual(accounting.total_spend("p"), 0.6)
 
+    def test_accounting_rejects_nonfinite_and_noninteger_limits(self):
+        accounting = Accounting(AtomicJsonStore(self.root / "invalid-limits.json"))
+        with self.assertRaises(ValidationError):
+            accounting.set_budget(float("nan"))
+        with self.assertRaises(ValidationError):
+            accounting.set_quota("p", 1.5)
+        with self.assertRaises(ValidationError):
+            accounting.approve_paid("p", float("inf"))
+        with self.assertRaises(ValidationError):
+            accounting.reserve_and_record("p", "m", float("nan"), 0.0)
+
     def test_unknown_price_is_never_guessed(self):
         with self.assertRaises(PriceUnknownError):
             estimate_cost({"price_per_unit": None}, 1)
