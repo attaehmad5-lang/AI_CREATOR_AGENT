@@ -88,7 +88,7 @@ def _safe_source_files(repo_root: Path) -> list[Path]:
         if any(part in name for part in (
             "backup", ".env", "secrets.json", "credentials.json", "token_store",
             "runtime_state", "provider_state.json",
-        )):
+        )) or name.endswith("_state.json") or name == "state.json":
             continue
         files.append(path)
     return sorted(files, key=lambda path: path.relative_to(repo_root).as_posix())
