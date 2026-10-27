@@ -23,7 +23,11 @@
         "scene_breakdown",
         "character_development",
         "dialogue_writing"
-      ]
+      ],
+      "allowed_hosts": [
+        "api.openai.com"
+      ],
+      "token_env": "OPENAI_API_KEY"
     },
     {
       "id": "google_gemini_script",
@@ -40,7 +44,14 @@
         "character_development",
         "dialogue_writing",
         "storyboard_planning"
-      ]
+      ],
+      "allowed_hosts": [
+        "generativelanguage.googleapis.com",
+        "aiplatform.googleapis.com"
+      ],
+      "token_env": "GOOGLE_API_KEY",
+      "auth_header_name": "x-goog-api-key",
+      "auth_scheme": ""
     },
     {
       "id": "anthropic_claude_script",
@@ -57,7 +68,13 @@
         "scene_breakdown",
         "character_development",
         "dialogue_writing"
-      ]
+      ],
+      "allowed_hosts": [
+        "api.anthropic.com"
+      ],
+      "token_env": "ANTHROPIC_API_KEY",
+      "auth_header_name": "x-api-key",
+      "auth_scheme": ""
     },
     {
       "id": "adobe_firefly_advanced",
@@ -76,7 +93,11 @@
         "background_replacement",
         "relighting",
         "image_restoration"
-      ]
+      ],
+      "allowed_hosts": [
+        "firefly-api.adobe.io"
+      ],
+      "token_env": "ADOBE_FIREFLY_API_KEY"
     },
     {
       "id": "replicate_image_editing",
@@ -93,7 +114,11 @@
         "object_removal",
         "background_removal",
         "image_restoration"
-      ]
+      ],
+      "allowed_hosts": [
+        "api.replicate.com"
+      ],
+      "token_env": "REPLICATE_API_TOKEN"
     },
     {
       "id": "runway_image_editing",
@@ -109,7 +134,11 @@
         "background_replacement",
         "image_editing",
         "image_restoration"
-      ]
+      ],
+      "allowed_hosts": [
+        "api.dev.runwayml.com"
+      ],
+      "token_env": "RUNWAY_API_KEY"
     },
     {
       "id": "topaz_advanced",
@@ -143,7 +172,11 @@
         "face_restoration",
         "detail_enhancement",
         "old_photo_restoration"
-      ]
+      ],
+      "allowed_hosts": [
+        "api.magnific.ai"
+      ],
+      "token_env": "MAGNIFIC_API_KEY"
     },
     {
       "id": "krea_upscaling",
@@ -175,7 +208,11 @@
         "subtitle_generation",
         "caption_timing",
         "transcript_cleanup"
-      ]
+      ],
+      "allowed_hosts": [
+        "api.assemblyai.com"
+      ],
+      "token_env": "ASSEMBLYAI_API_KEY"
     },
     {
       "id": "deepgram_transcription",
@@ -191,7 +228,11 @@
         "speaker_detection",
         "transcript_cleanup",
         "caption_timing"
-      ]
+      ],
+      "allowed_hosts": [
+        "api.deepgram.com"
+      ],
+      "token_env": "DEEPGRAM_API_KEY"
     },
     {
       "id": "google_cloud_speech",
@@ -208,7 +249,14 @@
         "subtitle_generation",
         "caption_timing",
         "transcript_cleanup"
-      ]
+      ],
+      "allowed_hosts": [
+        "speech.googleapis.com",
+        "texttospeech.googleapis.com"
+      ],
+      "token_env": "GOOGLE_API_KEY",
+      "auth_header_name": "x-goog-api-key",
+      "auth_scheme": ""
     },
     {
       "id": "elevenlabs_advanced_audio",
@@ -225,7 +273,13 @@
         "voice_dubbing",
         "audio_enhancement",
         "noise_removal"
-      ]
+      ],
+      "allowed_hosts": [
+        "api.elevenlabs.io"
+      ],
+      "token_env": "ELEVENLABS_API_KEY",
+      "auth_header_name": "xi-api-key",
+      "auth_scheme": ""
     },
     {
       "id": "playht_advanced_audio",
@@ -241,7 +295,11 @@
         "voice_cloning",
         "voice_dubbing",
         "audio_enhancement"
-      ]
+      ],
+      "allowed_hosts": [
+        "api.play.ht"
+      ],
+      "token_env": "PLAYHT_API_KEY"
     },
     {
       "id": "suno_advanced_audio",
@@ -274,7 +332,11 @@
         "background_replacement",
         "color_grading",
         "video_restoration"
-      ]
+      ],
+      "allowed_hosts": [
+        "api.dev.runwayml.com"
+      ],
+      "token_env": "RUNWAY_API_KEY"
     },
     {
       "id": "adobe_premiere_advanced",
