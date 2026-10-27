@@ -7,6 +7,7 @@ from pathlib import Path
 from projects.provider_store.advanced.advps.accounting import Accounting, estimate_cost
 from projects.provider_store.advanced.advps.audit import AuditLog
 from projects.provider_store.advanced.advps.catalog import Catalog
+from projects.provider_store.advanced.advps.jobs import JobManager
 from projects.provider_store.advanced.advps.cli import main as cli_main
 from projects.provider_store.advanced.advps.errors import (
     AmbiguousOutcomeError, BudgetExceededError, PaidUsageNotApprovedError,
@@ -229,6 +230,42 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
             router.execute("text_to_image", ambiguous, idempotent=False)
         self.assertIn("ambiguous outcome", str(caught.exception))
         self.assertEqual(calls, ["provider-a"])
+
+    def test_job_idempotency_leases_completion_and_secret_safe_storage(self):
+        now = [100.0]
+        path = self.root / "jobs.json"
+        manager = JobManager(AtomicJsonStore(path), clock=lambda: now[0])
+        job = manager.create("provider-a", "text_to_image", {"prompt": "sunrise"}, idempotency_key="private-idem-key")
+        duplicate = manager.create("provider-a", "text_to_image", {"prompt": "sunrise"}, idempotency_key="private-idem-key")
+        self.assertEqual(duplicate["id"], job["id"])
+        self.assertTrue(duplicate["duplicate"])
+        self.assertNotIn("private-idem-key", path.read_text(encoding="utf-8"))
+        with self.assertRaises(ValidationError):
+            manager.create("provider-a", "text_to_image", {"prompt": "different"}, idempotency_key="private-idem-key")
+        with self.assertRaises(ValidationError):
+            manager.create("provider-a", "text_to_image", {"prompt": "x"}, metadata={"nested": {"api_key": "secret"}})
+        claimed = manager.claim(job["id"], "worker-1", lease_seconds=10)
+        with self.assertRaises(ValidationError):
+            manager.claim(job["id"], "worker-2", lease_seconds=10)
+        completed = manager.complete(job["id"], "worker-1", "asset://result/123")
+        self.assertEqual(completed["status"], "SUCCEEDED")
+        self.assertEqual(manager.list("SUCCEEDED")[0]["id"], job["id"])
+
+    def test_job_crash_recovery_retry_exhaustion_and_cancellation(self):
+        now = [0.0]
+        manager = JobManager(AtomicJsonStore(self.root / "jobs-recovery.json"), clock=lambda: now[0])
+        job = manager.create("p", "video_generation", {"prompt": "x"}, max_attempts=2)
+        manager.claim(job["id"], "worker-a", lease_seconds=5)
+        now[0] = 6.0
+        self.assertEqual(manager.recover_stale(), {"requeued": 1, "failed": 0})
+        manager.claim(job["id"], "worker-b", lease_seconds=5)
+        now[0] = 12.0
+        self.assertEqual(manager.recover_stale(), {"requeued": 0, "failed": 1})
+        self.assertEqual(manager.get(job["id"])["status"], "FAILED")
+        other = manager.create("p", "text_to_image", {"prompt": "cancel"})
+        self.assertEqual(manager.cancel(other["id"])["status"], "CANCELLED")
+        with self.assertRaises(ValidationError):
+            manager.fail(other["id"], "worker", "error message with secret")
 
     def test_secure_transport_pins_validated_ip_and_returns_bounded_response(self):
         calls = []
