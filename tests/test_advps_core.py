@@ -15,7 +15,7 @@ from projects.provider_store.advanced.advps.runtime import ProviderRuntime
 from projects.provider_store.advanced.advps.media import validate_media_payload, validate_media_metadata
 from projects.provider_store.advanced.advps.cli import main as cli_main
 from projects.provider_store.advanced.advps.errors import (
-    AmbiguousOutcomeError, BudgetExceededError, CredentialExpiredError, CredentialUnavailableError, NotFoundError, PaidUsageNotApprovedError,
+    AmbiguousOutcomeError, BudgetExceededError, CredentialExpiredError, CredentialUnavailableError, JobCancelledError, NotFoundError, PaidUsageNotApprovedError,
     PriceUnknownError, SecurityError, ValidationError,
 )
 from projects.provider_store.advanced.advps.redact import redact, redact_text
@@ -447,7 +447,11 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         self.assertEqual(manager.recover_stale(), {"requeued": 0, "failed": 1})
         self.assertEqual(manager.get(job["id"])["status"], "FAILED")
         other = manager.create("p", "text_to_image", {"prompt": "cancel"})
+        self.assertFalse(manager.is_cancelled(other["id"]))
         self.assertEqual(manager.cancel(other["id"])["status"], "CANCELLED")
+        self.assertTrue(manager.is_cancelled(other["id"]))
+        with self.assertRaises(JobCancelledError):
+            manager.check_cancelled(other["id"])
         with self.assertRaises(ValidationError):
             manager.fail(other["id"], "worker", "error message with secret")
 
