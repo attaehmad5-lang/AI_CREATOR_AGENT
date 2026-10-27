@@ -119,3 +119,25 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+
+## Catalog maintenance CLI
+
+Run catalog maintenance from the repository root with Python module mode:
+
+```bash
+python -m projects.provider_store.catalog_cli diff projects/provider_store/provider_catalog.json /path/to/candidate.json
+python -m projects.provider_store.catalog_cli apply projects/provider_store/provider_catalog.json /path/to/candidate.json
+python -m projects.provider_store.catalog_cli apply projects/provider_store/provider_catalog.json /path/to/candidate.json --apply
+python -m projects.provider_store.catalog_cli export projects/provider_store/provider_catalog.json /path/to/export.json
+python -m projects.provider_store.catalog_cli import /path/to/export.json projects/provider_store/provider_catalog.json
+python -m projects.provider_store.catalog_cli snapshot projects/provider_store/provider_catalog.json /path/to/catalog-history
+python -m projects.provider_store.catalog_cli history /path/to/catalog-history
+python -m projects.provider_store.catalog_cli restore /path/to/catalog-history/catalog-TIMESTAMP.json projects/provider_store/provider_catalog.json
+```
+
+The `apply` command is a dry run unless `--apply` is supplied. Removing providers additionally requires `--allow-removals`; the CLI never prints provider field values in a diff. Import and restore validate schema, use an interprocess lock, keep a backup by default, verify the written catalog, and attempt rollback on failure. Snapshots are immutable timestamped JSON files; history output contains filenames and provider counts only. Catalog export/import rejects embedded credential material. Review the diff and preserve a separate backup before any intentional destructive change.
+
+## Release evidence and SBOM
+
+The release-report command creates JSON, Markdown and PDF status reports, a source-only ZIP, a SHA-256 source manifest/checksum sidecar, and an SPDX 2.3 JSON SBOM containing source-file SHA-256 hashes. License and copyright conclusions are recorded as `NOASSERTION`, not guessed. The report remains `INCOMPLETE` until all 150 acceptance points are completed. These offline checks do not prove live provider connectivity, real account credits, or billable generation.
