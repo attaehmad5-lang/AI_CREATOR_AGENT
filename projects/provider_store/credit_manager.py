@@ -389,6 +389,11 @@ class ProviderCreditManager:
                 return {"status": "RESERVATION_NOT_FOUND", "marked": False}
             if provider_id is not None and reservation.get("provider_id") != provider_id:
                 return {"status": "REQUEST_PROVIDER_MISMATCH", "marked": False}
+            if reservation.get("outcome_uncertain") is True:
+                return {
+                    "status": "ALREADY_UNCERTAIN", "marked": False,
+                    "request_id": request_id,
+                }
             reservation["outcome_uncertain"] = True
             reservation["uncertainty_reason"] = reason
             reservation["uncertain_at"] = self.clock().astimezone(timezone.utc).isoformat()
