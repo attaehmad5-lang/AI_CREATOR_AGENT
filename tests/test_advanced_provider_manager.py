@@ -37,6 +37,16 @@ class AdvancedProviderManagerTests(unittest.TestCase):
                     "capabilities": ["image_generation"],
                 },
                 {
+                    "id": "story_locked",
+                    "name": "Locked Story",
+                    "category": "script_story",
+                    "auth_type": "NONE",
+                    "connection_type": "API",
+                    "enabled": True,
+                    "status": "LOCKED",
+                    "capabilities": ["story_generation"],
+                },
+                {
                     "id": "story_disabled",
                     "name": "Disabled Story",
                     "category": "script_story",
@@ -85,6 +95,7 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             connection, advanced = self._manager(Path(tmp))
             connection.verify_connectivity("story_test", lambda provider, **kwargs: True)
             connection.verify_connectivity("image_test", lambda provider, **kwargs: True)
+            connection.verify_connectivity("story_locked", lambda provider, **kwargs: True)
             self.assertEqual(
                 [p["id"] for p in advanced.list_verified_enabled_providers()],
                 ["story_test"],
