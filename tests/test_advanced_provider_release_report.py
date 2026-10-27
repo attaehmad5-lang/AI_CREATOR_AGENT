@@ -88,6 +88,14 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                 for entry in manifest["files"]:
                     digest = hashlib.sha256(archive.read(entry["path"])).hexdigest()
                     self.assertEqual(digest, entry["sha256"])
+                with tempfile.TemporaryDirectory() as extracted:
+                    archive.extractall(extracted)
+                    extracted_root = Path(extracted)
+                    self.assertTrue((extracted_root / "RELEASE_REPORT.json").is_file())
+                    self.assertEqual(
+                        (extracted_root / "projects/provider_store/example.py").read_text(encoding="utf-8"),
+                        "VALUE = 1\\n",
+                    )
 
 
 if __name__ == "__main__":
