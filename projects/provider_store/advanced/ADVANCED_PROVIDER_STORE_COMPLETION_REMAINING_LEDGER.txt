@@ -27,9 +27,9 @@ Implementation/evidence inspected: connection_manager.py; provider_store_manager
 Remaining work: Catalog/lifecycle foundations exist; active advanced catalog has 18 records and is a subset of the 54-provider registry. Field-by-field metadata drift and category-capability consistency tests pass. Runtime adapter completeness remains.
 
 Feature 002: Provider Registration
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py
-Remaining work: Catalog/lifecycle foundations exist; capability-to-category consistency is tested, and runtime catalog-consistency diagnostics compare all 18 advanced records against the 54-provider registry. Runtime adapter completeness remains.
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; tests/test_connection_manager.py; CI #40560954116
+Remaining work: Valid metadata registration persists, duplicate/invalid records and embedded secrets are rejected, and cross-process concurrent registration preserves records.
 
 Feature 003: Provider Discovery
 Status: COMPLETED
