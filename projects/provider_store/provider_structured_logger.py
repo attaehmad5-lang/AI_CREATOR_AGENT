@@ -41,7 +41,7 @@ class ProviderStructuredLogger:
             return {"status": "INVALID_LOG_EVENT", "logged": False}
         if not isinstance(status, str) or not _CODE.fullmatch(status):
             return {"status": "INVALID_LOG_STATUS", "logged": False}
-        if outcome not in {"OK", "ERROR", "CANCELLED"}:
+        if not isinstance(outcome, str) or outcome not in {"OK", "ERROR", "CANCELLED"}:
             return {"status": "INVALID_LOG_OUTCOME", "logged": False}
         timestamp = self.clock()
         if not isinstance(timestamp, datetime) or timestamp.tzinfo is None:
