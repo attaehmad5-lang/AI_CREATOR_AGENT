@@ -32,10 +32,12 @@ jobs:
         run: >-
           python -m ruff check
           projects/provider_store/catalog_interchange.py
+          projects/provider_store/catalog_diff.py
           projects/provider_store/provider_config_lifecycle.py
           projects/provider_store/advanced/performance_benchmark.py
           projects/provider_store/advanced/pdf_report.py
           tests/test_catalog_interchange.py
+          tests/test_catalog_diff.py
           tests/test_provider_config_lifecycle.py
           tests/test_provider_store_performance_benchmark.py
           tests/test_advanced_provider_pdf_report.py
@@ -43,8 +45,10 @@ jobs:
         run: >-
           python -m ruff format --check
           projects/provider_store/catalog_interchange.py
+          projects/provider_store/catalog_diff.py
           projects/provider_store/advanced/performance_benchmark.py
           tests/test_catalog_interchange.py
+          tests/test_catalog_diff.py
           tests/test_provider_store_performance_benchmark.py
       - name: Compile provider modules and tests
         run: python -m compileall -q projects/provider_store tests
