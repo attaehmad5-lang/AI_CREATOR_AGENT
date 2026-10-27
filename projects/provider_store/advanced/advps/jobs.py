@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 import time
 import uuid
 from typing import Any, Callable, Optional
@@ -18,8 +20,27 @@ def _empty() -> dict:
 
 
 def _payload_hash(payload: Any) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    try:
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("payload must be finite JSON data") from exc
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _key_hash(key: Optional[str]) -> Optional[str]:
+    if key is None:
+        return None
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _has_sensitive_metadata(value: Any) -> bool:
+    forbidden = ("token", "secret", "password", "credential", "authorization", "api_key", "cookie", "private_key")
+    if isinstance(value, dict):
+        return any(any(marker in str(key).casefold().replace("-", "_") for marker in forbidden)
+                   or _has_sensitive_metadata(item) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(_has_sensitive_metadata(item) for item in value)
+    return False
 
 
 class JobManager:
@@ -52,15 +73,15 @@ class JobManager:
             raise ValidationError("metadata must be an object")
         # Metadata is intentionally restricted to non-sensitive primitive fields.
         metadata = metadata or {}
-        forbidden = ("token", "secret", "password", "credential", "authorization", "api_key", "cookie")
-        if any(any(marker in str(key).casefold().replace("-", "_") for marker in forbidden) for key in metadata):
+        if _has_sensitive_metadata(metadata):
             raise ValidationError("secret-bearing job metadata is forbidden")
         digest = _payload_hash(payload)
+        key_hash = _key_hash(idempotency_key)
         result = {}
 
         def op(state):
-            if idempotency_key and idempotency_key in state["idempotency"]:
-                existing = state["jobs"][state["idempotency"][idempotency_key]]
+            if key_hash and key_hash in state["idempotency"]:
+                existing = state["jobs"][state["idempotency"][key_hash]]
                 if existing["payload_hash"] != digest or existing["provider_id"] != provider_id:
                     raise ValidationError("idempotency key reused with different request")
                 result.update(existing)
@@ -73,11 +94,11 @@ class JobManager:
                 "payload_hash": digest, "status": "PENDING", "created_at": now, "updated_at": now,
                 "attempts": 0, "max_attempts": max_attempts, "lease_owner": None,
                 "lease_expires_at": None, "result_ref": None, "error_code": None,
-                "idempotency_key": idempotency_key, "metadata": dict(metadata),
+                "idempotency_key_hash": key_hash, "metadata": dict(metadata),
             }
             state["jobs"][job_id] = job
-            if idempotency_key:
-                state["idempotency"][idempotency_key] = job_id
+            if key_hash:
+                state["idempotency"][key_hash] = job_id
             result.update(job)
             result["duplicate"] = False
             return None
@@ -101,8 +122,9 @@ class JobManager:
     def claim(self, job_id: str, worker_id: str, lease_seconds: float = 60.0) -> dict:
         if not isinstance(worker_id, str) or not worker_id.strip():
             raise ValidationError("worker_id must be non-empty")
-        if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, (int, float)) or lease_seconds <= 0:
-            raise ValidationError("lease_seconds must be > 0")
+        if (isinstance(lease_seconds, bool) or not isinstance(lease_seconds, (int, float))
+                or not math.isfinite(lease_seconds) or lease_seconds <= 0):
+            raise ValidationError("lease_seconds must be finite and > 0")
         result = {}
 
         def op(state):
@@ -118,7 +140,8 @@ class JobManager:
                 job["status"] = "FAILED"
                 job["error_code"] = "max_attempts_exhausted"
                 job["updated_at"] = now
-                raise ValidationError("job has exhausted max attempts")
+                result.update(job)
+                return None
             job["status"] = "RUNNING"
             job["attempts"] += 1
             job["lease_owner"] = worker_id
@@ -149,8 +172,8 @@ class JobManager:
         return result
 
     def fail(self, job_id: str, worker_id: str, error_code: str, retryable: bool = False) -> dict:
-        if not isinstance(error_code, str) or not error_code.strip():
-            raise ValidationError("error_code must be non-empty")
+        if not isinstance(error_code, str) or not re.fullmatch(r"[a-zA-Z0-9_.-]{1,80}", error_code):
+            raise ValidationError("error_code must be a short identifier, not an error message")
         # Persist a code, never provider exception text that may contain secrets.
         result = {}
 
