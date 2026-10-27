@@ -7,6 +7,7 @@ from pathlib import Path
 from projects.provider_store.advanced.advps.accounting import Accounting, estimate_cost
 from projects.provider_store.advanced.advps.audit import AuditLog
 from projects.provider_store.advanced.advps.catalog import Catalog
+from projects.provider_store.advanced.advps.credentials import CredentialManager
 from projects.provider_store.advanced.advps.jobs import JobManager
 from projects.provider_store.advanced.advps.cli import main as cli_main
 from projects.provider_store.advanced.advps.errors import (
@@ -230,6 +231,40 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
             router.execute("text_to_image", ambiguous, idempotent=False)
         self.assertIn("ambiguous outcome", str(caught.exception))
         self.assertEqual(calls, ["provider-a"])
+
+    def test_credential_resolution_missing_expired_and_in_memory_refresh(self):
+        now = [100.0]
+        env = {"PROVIDER_TOKEN": "old-token", "PROVIDER_TOKEN_EXPIRY": "110"}
+        manager = CredentialManager(environ=env, clock=lambda: now[0], refresh_before_seconds=60)
+        with self.assertRaises(Exception) as missing:
+            manager.resolve("missing-provider", "MISSING_TOKEN")
+        self.assertIn("credential_unavailable", getattr(missing.exception, "code", ""))
+        with self.assertRaises(Exception) as expired:
+            manager.resolve("provider-a", "PROVIDER_TOKEN", expires_at_env="PROVIDER_TOKEN_EXPIRY")
+        self.assertIn("credential_expired", getattr(expired.exception, "code", ""))
+
+        calls = []
+        manager.register_refresher(
+            "provider-a",
+            lambda provider, token: calls.append((provider, token)) or {"token": "new-token", "expires_at": 500.0},
+        )
+        self.assertEqual(manager.resolve("provider-a", "PROVIDER_TOKEN", expires_at_env="PROVIDER_TOKEN_EXPIRY"), "new-token")
+        self.assertEqual(manager.resolve("provider-a", "PROVIDER_TOKEN", expires_at_env="PROVIDER_TOKEN_EXPIRY"), "new-token")
+        self.assertEqual(calls, [("provider-a", "old-token")])
+        self.assertEqual(env["PROVIDER_TOKEN"], "old-token")
+        manager.clear_cache("provider-a")
+        with self.assertRaises(Exception):
+            manager.resolve("provider-a", "MISSING_TOKEN")
+
+    def test_credential_expiry_validation_and_bad_refresh_response(self):
+        manager = CredentialManager(environ={"TOKEN": "old", "EXPIRY": "not-a-number"}, clock=lambda: 100.0)
+        with self.assertRaises(ValidationError):
+            manager.resolve("provider-a", "TOKEN", expires_at_env="EXPIRY")
+        manager = CredentialManager(environ={"TOKEN": "old", "EXPIRY": "110"}, clock=lambda: 100.0, refresh_before_seconds=60)
+        manager.register_refresher("provider-a", lambda provider, token: {"token": "new", "expires_at": float("nan")})
+        with self.assertRaises(Exception) as error:
+            manager.resolve("provider-a", "TOKEN", expires_at_env="EXPIRY")
+        self.assertIn("credential_expired", getattr(error.exception, "code", ""))
 
     def test_job_idempotency_leases_completion_and_secret_safe_storage(self):
         now = [100.0]
