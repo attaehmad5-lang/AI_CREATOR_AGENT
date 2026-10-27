@@ -64,6 +64,7 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             (provider_root / "provider_status_manager.py").write_text("class StatusManager: pass\n", encoding="utf-8")
             (provider_root / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
             (provider_root / "advanced_provider_catalog_backup.json").write_text('{"api_key":"never-package"}', encoding="utf-8")
+            (provider_root / "connection_state.json").write_text('{"providers":{}}', encoding="utf-8")
             (provider_root / ".env").write_text("API_KEY=never-package", encoding="utf-8")
             output = root / "build"
             result = write_release_artifacts(output, repo_root=root)
@@ -74,12 +75,14 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             paths = {entry["path"] for entry in manifest["files"]}
             self.assertIn("projects/provider_store/provider_status_manager.py", paths)
             self.assertNotIn("projects/provider_store/advanced_provider_catalog_backup.json", paths)
+            self.assertNotIn("projects/provider_store/connection_state.json", paths)
             self.assertNotIn("projects/provider_store/.env", paths)
             with zipfile.ZipFile(result["archive"]) as archive:
                 self.assertIsNone(archive.testzip())
                 names = set(archive.namelist())
                 self.assertNotIn("projects/provider_store/.env", names)
                 self.assertNotIn("projects/provider_store/advanced_provider_catalog_backup.json", names)
+                self.assertNotIn("projects/provider_store/connection_state.json", names)
                 self.assertIn("RELEASE_REPORT.json", names)
                 self.assertIn("SOURCE_MANIFEST.json", names)
                 for entry in manifest["files"]:
