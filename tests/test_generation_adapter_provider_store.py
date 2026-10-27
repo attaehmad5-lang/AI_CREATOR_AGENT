@@ -244,5 +244,40 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
         self.assertNotIn("token", repr(result).lower())
 
 
+    def test_status_reports_legacy_mode_without_claiming_canonical_readiness(self):
+        adapter = GenerationAdapter()
+        status = adapter.status()
+
+        self.assertEqual(status["status"], "READY")
+        self.assertEqual(status["execution_mode"], "LEGACY")
+        self.assertEqual(status["execution_readiness"], "LEGACY_MODE")
+        self.assertFalse(status["canonical_execution_ready"])
+        self.assertFalse(status["canonical_service_ready"])
+        self.assertFalse(status["canonical_executor_ready"])
+
+    def test_status_reports_blocked_when_canonical_service_has_no_executor(self):
+        adapter = GenerationAdapter(provider_store_service=CanonicalServiceStub())
+        status = adapter.status()
+
+        self.assertEqual(status["execution_mode"], "CANONICAL")
+        self.assertEqual(status["execution_readiness"], "BLOCKED")
+        self.assertFalse(status["canonical_execution_ready"])
+        self.assertTrue(status["canonical_service_ready"])
+        self.assertFalse(status["canonical_executor_ready"])
+
+    def test_status_reports_canonical_readiness_only_when_service_and_executor_exist(self):
+        adapter = GenerationAdapter(
+            provider_store_service=CanonicalServiceStub(),
+            provider_store_adapter=lambda **kwargs: {"started": False},
+        )
+        status = adapter.status()
+
+        self.assertEqual(status["execution_mode"], "CANONICAL")
+        self.assertEqual(status["execution_readiness"], "READY")
+        self.assertTrue(status["canonical_execution_ready"])
+        self.assertTrue(status["canonical_service_ready"])
+        self.assertTrue(status["canonical_executor_ready"])
+
+
 if __name__ == "__main__":
     unittest.main()
