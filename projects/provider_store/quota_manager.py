@@ -166,6 +166,31 @@ class ProviderQuotaManager:
             self._save()
             return {"status": "COMMITTED", "request_id": request_id, "committed": True}
 
+    def mark_uncertain(self, *, request_id: str, provider_id: str | None = None, reason: str = "UNKNOWN") -> dict[str, Any]:
+        """Retain quota usage if a timed-out/failed request may have reached the provider."""
+        allowed_reasons = {"TIMEOUT", "CONNECTION_LOST", "PROVIDER_ERROR", "UNKNOWN"}
+        if not isinstance(request_id, str) or not request_id.strip():
+            return {"status": "INVALID_REQUEST", "marked": False}
+        if reason not in allowed_reasons:
+            return {"status": "INVALID_UNCERTAINTY_REASON", "marked": False}
+        with self._transaction():
+            record = self.data["requests"].get(request_id)
+            if not isinstance(record, dict):
+                return {"status": "RESERVATION_NOT_FOUND", "marked": False}
+            if provider_id is not None and record.get("provider_id") != provider_id:
+                return {"status": "REQUEST_PROVIDER_MISMATCH", "marked": False}
+            if record.get("status") == "RELEASED":
+                return {"status": "ALREADY_RELEASED", "marked": False}
+            if record.get("status") == "COMMITTED":
+                return {"status": "ALREADY_COMMITTED", "marked": False}
+            if record.get("status") != "RESERVED":
+                return {"status": "INVALID_RESERVATION_STATE", "marked": False}
+            record["outcome_uncertain"] = True
+            record["uncertainty_reason"] = reason
+            record["uncertain_at"] = self.clock().astimezone(timezone.utc).isoformat()
+            self._save()
+            return {"status": "OUTCOME_UNCERTAIN", "marked": True, "request_id": request_id}
+
     def release(self, *, request_id: str, provider_id: str | None = None) -> dict[str, Any]:
         if not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST", "released": False}
@@ -177,6 +202,8 @@ class ProviderQuotaManager:
                 return {"status": "REQUEST_PROVIDER_MISMATCH", "released": False}
             if record.get("status") == "COMMITTED":
                 return {"status": "ALREADY_COMMITTED", "released": False}
+            if record.get("status") == "RESERVED" and record.get("outcome_uncertain") is True:
+                return {"status": "OUTCOME_UNCERTAIN_RELEASE_BLOCKED", "released": False}
             if record.get("status") == "RELEASED":
                 return {"status": "RELEASED", "request_id": request_id, "released": True, "already_released": True}
             if record.get("status") != "RESERVED":
