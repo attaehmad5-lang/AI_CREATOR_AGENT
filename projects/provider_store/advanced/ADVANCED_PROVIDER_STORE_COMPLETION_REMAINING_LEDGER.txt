@@ -672,9 +672,9 @@ Implementation/evidence inspected: .github/workflows/task-25-tests.yml; .github/
 Remaining work: CI/release-gate/checksum/version primitives exist; the full Advanced Provider Store release package has not been verified.
 
 Feature 131: Release Asset Management
-Status: UNVERIFIED
-Implementation/evidence inspected: Release assets not verified for this component
-Remaining work: Verify exact package assets and checksums before claiming release readiness.
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; advanced/release_report.py; CI #40564854208
+Remaining work: CI generates and uploads the report, source ZIP, manifest and ZIP checksum sidecar as workflow artifacts; a versioned GitHub Release asset workflow remains.
 
 Feature 132: SHA-256 Checksum Verification
 Status: COMPLETED
