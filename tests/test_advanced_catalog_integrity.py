@@ -1,0 +1,44 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from projects.provider_store.advanced.catalog_integrity import validate_advanced_catalogs
+
+ROOT = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+ADV = ROOT / "advanced"
+
+
+class AdvancedCatalogIntegrityTests(unittest.TestCase):
+    def test_real_catalogs_are_consistent(self):
+        result = validate_advanced_catalogs(
+            ROOT / "provider_catalog.json",
+            ADV / "advanced_provider_catalog.json",
+            ADV / "advanced_categories.json",
+        )
+        self.assertTrue(result["valid"], result["errors"])
+        self.assertEqual(result["central_provider_count"], 54)
+        self.assertEqual(result["central_advanced_provider_count"], 18)
+        self.assertEqual(result["advanced_provider_count"], 18)
+        self.assertEqual(result["category_count"], 6)
+
+    def test_duplicate_ids_and_unsafe_policy_are_rejected(self):
+        central = {"providers": [{"id": "a", "category": "advanced_audio"}]}
+        advanced = {"policy": {"auto_purchase": True, "subscription_bypass": False, "api_key_logging": False},
+                    "providers": [{"id": "a"}, {"id": "a"}]}
+        categories = {"categories": {key: {} for key in (
+            "script_story", "advanced_image_editing", "advanced_upscaling",
+            "advanced_transcription", "advanced_audio", "advanced_video_editing")}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = [root / name for name in ("central.json", "advanced.json", "categories.json")]
+            for path, value in zip(paths, (central, advanced, categories)):
+                path.write_text(json.dumps(value), encoding="utf-8")
+            result = validate_advanced_catalogs(*paths)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("duplicate id" in error for error in result["errors"]))
+        self.assertIn("policy auto_purchase must be false", result["errors"])
+
+
+if __name__ == "__main__":
+    unittest.main()
