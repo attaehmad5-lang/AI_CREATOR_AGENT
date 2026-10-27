@@ -68,6 +68,21 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
                 "id": "bad", "version": "latest",
             })
 
+    def test_catalog_rejects_secret_values_and_nonfinite_prices(self):
+        catalog = Catalog(AtomicJsonStore(self.root / "secret-catalog.json"))
+        with self.assertRaises(ValidationError):
+            catalog.register({
+                "id": "secret-provider", "metadata": {"api_key": "plain-secret"},
+            })
+        with self.assertRaises(ValidationError):
+            catalog.register({
+                "id": "nan-price", "models": {"m": {"price_per_unit": float("nan")}},
+            })
+        safe = catalog.register({
+            "id": "env-provider", "metadata": {"api_key_env": "PROVIDER_TOKEN"},
+        })
+        self.assertEqual(safe["metadata"]["api_key_env"], "PROVIDER_TOKEN")
+
     def test_security_redirect_and_size_guards(self):
         with self.assertRaises(SecurityError):
             validate_endpoint("http://example.com")
