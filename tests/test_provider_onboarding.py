@@ -41,6 +41,7 @@ class ProviderOnboardingTests(unittest.TestCase):
             "category": "image",
             "auth_type": "API_KEY",
             "connection_type": "API",
+            "subscription_required": False,
             "official_api_url": "https://docs.example.test/api",
             "allowed_hosts": ["api.example.test"],
             "capabilities": ["image_generation"],
