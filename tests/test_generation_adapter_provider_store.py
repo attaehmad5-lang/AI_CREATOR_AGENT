@@ -96,6 +96,20 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
                 self.assertEqual(result["status"], "INVALID_OUTPUT_PATH")
                 self.assertIsNone(service.request)
 
+    def test_pathlike_returning_bytes_is_rejected(self):
+        class BytesPath:
+            def __fspath__(self):
+                return b"/tmp/output.png"
+
+        service = CanonicalServiceStub()
+        adapter = GenerationAdapter(
+            provider_store_service=service,
+            provider_store_adapter=lambda **kwargs: {},
+        )
+        result = adapter.generate_image("prompt", BytesPath())
+        self.assertEqual(result["status"], "INVALID_OUTPUT_PATH")
+        self.assertIsNone(service.request)
+
     def test_invalid_canonical_service_fails_closed(self):
         adapter = GenerationAdapter(provider_store_service=object(), provider_store_adapter=lambda **kwargs: {})
         result = adapter.generate_image("prompt", "/tmp/output.png")
