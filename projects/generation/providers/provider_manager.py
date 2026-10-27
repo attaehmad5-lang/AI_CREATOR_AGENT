@@ -9,6 +9,8 @@ _PROVIDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ]{0,63}\Z")
 _MODULE_NAME = re.compile(r"projects\.generation\.providers(?:\.[A-Za-z_][A-Za-z0-9_]*)+\Z")
 _CLASS_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*Provider\Z")
 _PATH_PART = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_INTERFACE_VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
+SUPPORTED_PROVIDER_INTERFACE_VERSION = "1.0"
 
 
 class ProviderManager:
@@ -20,6 +22,27 @@ class ProviderManager:
 
     def __init__(self):
         self.providers: dict[str, Any] = {}
+
+    @staticmethod
+    def _validate_instance(instance: Any) -> None:
+        """Negotiate the supported adapter contract before activation.
+
+        Missing version metadata is treated as the documented legacy 1.0
+        contract; an explicitly declared unsupported/malformed version fails closed.
+        """
+        try:
+            version = getattr(instance, "PROVIDER_INTERFACE_VERSION", "1.0")
+            generate_image = getattr(instance, "generate_image", None)
+        except Exception as exc:
+            raise ValueError("provider contract metadata could not be read") from exc
+        if (
+            not isinstance(version, str)
+            or not _INTERFACE_VERSION.fullmatch(version)
+            or version != SUPPORTED_PROVIDER_INTERFACE_VERSION
+        ):
+            raise ValueError("unsupported provider interface version")
+        if not callable(generate_image):
+            raise ValueError("provider does not implement generate_image")
 
     @staticmethod
     def _validate_spec(name: Any, module_name: Any, class_name: Any) -> None:
@@ -58,8 +81,7 @@ class ProviderManager:
             if not callable(provider_class):
                 raise TypeError("provider factory is not callable")
             instance = provider_class()
-            if not callable(getattr(instance, "generate_image", None)):
-                raise TypeError("provider does not implement generate_image")
+            self._validate_instance(instance)
         except Exception as exc:
             raise ValueError("provider registration failed") from exc
         self.providers[name] = instance
@@ -94,8 +116,7 @@ class ProviderManager:
                 if not callable(provider_class):
                     raise TypeError("provider factory is not callable")
                 instance = provider_class()
-                if not callable(getattr(instance, "generate_image", None)):
-                    raise TypeError("provider does not implement generate_image")
+                self._validate_instance(instance)
                 staged[name] = instance
         except Exception as exc:
             raise ValueError("provider registry loading failed") from exc
