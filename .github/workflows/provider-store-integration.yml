@@ -5,6 +5,7 @@ on:
     paths:
       - "projects/provider_store/**"
       - "tests/test_provider_store_compat.py"
+      - "tests/test_provider_service.py"
       - ".github/workflows/provider-store-integration.yml"
   push:
     branches:
@@ -13,6 +14,7 @@ on:
     paths:
       - "projects/provider_store/**"
       - "tests/test_provider_store_compat.py"
+      - "tests/test_provider_service.py"
       - ".github/workflows/provider-store-integration.yml"
   workflow_dispatch:
 
@@ -25,9 +27,14 @@ concurrency:
 
 jobs:
   compatibility:
-    name: Python 3.13 compatibility and syntax checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    name: Provider Store / Python ${{ matrix.python-version }} / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -35,10 +42,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
 
       - name: Compile provider-store modules and integration tests
         run: python -m compileall -q projects/provider_store tests/test_provider_store_compat.py tests/test_provider_service.py
+
+      - name: Validate provider catalogs
+        run: |
+          python -c "import json; from pathlib import Path; paths=[Path('projects/provider_store/provider_catalog.json'), Path('projects/provider_store/advanced/advanced_provider_catalog.json')]; [json.loads(p.read_text(encoding='utf-8')) for p in paths]; print('Provider catalog JSON: PASS')"
 
       - name: Run ProviderService security and lifecycle tests
         run: python -m unittest discover -s tests -p "test_provider_service.py" -v
