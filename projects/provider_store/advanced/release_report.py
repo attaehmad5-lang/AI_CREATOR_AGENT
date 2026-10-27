@@ -85,7 +85,10 @@ def _safe_source_files(repo_root: Path) -> list[Path]:
         name = path.name.casefold()
         if any(part in DENIED_PARTS for part in relative_parts):
             continue
-        if any(part in name for part in ("backup", ".env", "secret", "credential", "token", "state")):
+        if any(part in name for part in (
+            "backup", ".env", "secrets.json", "credentials.json", "token_store",
+            "runtime_state", "provider_state.json",
+        )):
             continue
         files.append(path)
     return sorted(files, key=lambda path: path.relative_to(repo_root).as_posix())
