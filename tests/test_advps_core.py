@@ -1,6 +1,7 @@
 import json
 import socket
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from projects.provider_store.advanced.advps.catalog import Catalog
 from projects.provider_store.advanced.advps.credentials import CredentialManager
 from projects.provider_store.advanced.advps.jobs import JobManager
 from projects.provider_store.advanced.advps.health import HealthRegistry
+from projects.provider_store.advanced.advps.runtime import ProviderRuntime
 from projects.provider_store.advanced.advps.cli import main as cli_main
 from projects.provider_store.advanced.advps.errors import (
     AmbiguousOutcomeError, BudgetExceededError, CredentialExpiredError, CredentialUnavailableError, PaidUsageNotApprovedError,
@@ -232,6 +234,65 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
             router.execute("text_to_image", ambiguous, idempotent=False)
         self.assertIn("ambiguous outcome", str(caught.exception))
         self.assertEqual(calls, ["provider-a"])
+
+    def test_provider_runtime_allowlisted_load_invoke_and_unload(self):
+        class Provider:
+            def __init__(self):
+                self.closed = False
+            def generate(self, prompt):
+                return prompt.upper()
+            def health_check(self):
+                return {"ok": True}
+            def close(self):
+                self.closed = True
+        instance = Provider()
+        runtime = ProviderRuntime()
+        with self.assertRaises(Exception):
+            runtime.load("unregistered")
+        runtime.register_factory("p", lambda config: instance)
+        self.assertTrue(runtime.load("p")["loaded"])
+        self.assertTrue(runtime.load("p")["already_loaded"])
+        self.assertEqual(runtime.invoke("p", "generate", "hello"), "HELLO")
+        self.assertEqual(runtime.invoke("p", "health_check"), {"ok": True})
+        self.assertTrue(runtime.status("p")["health_check_supported"])
+        self.assertTrue(runtime.unload("p")["already_unloaded"] is False)
+        self.assertTrue(instance.closed)
+        self.assertFalse(runtime.status("p")["loaded"])
+        with self.assertRaises(Exception):
+            runtime.invoke("p", "generate", "nope")
+
+    def test_provider_runtime_does_not_unload_active_call(self):
+        entered, release = threading.Event(), threading.Event()
+        class SlowProvider:
+            def generate(self):
+                entered.set()
+                release.wait(2)
+                return "done"
+        runtime = ProviderRuntime()
+        runtime.register_factory("slow", lambda config: SlowProvider())
+        runtime.load("slow")
+        result = []
+        worker = threading.Thread(target=lambda: result.append(runtime.invoke("slow", "generate")))
+        worker.start()
+        self.assertTrue(entered.wait(1))
+        with self.assertRaises(TimeoutError):
+            runtime.unload("slow", timeout=0)
+        self.assertTrue(runtime.status("slow")["loaded"])
+        release.set()
+        worker.join(2)
+        self.assertEqual(result, ["done"])
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(runtime.unload("slow")["loaded"])
+
+    def test_provider_runtime_rejects_invalid_interface_and_private_operations(self):
+        runtime = ProviderRuntime()
+        runtime.register_factory("bad", lambda config: object())
+        with self.assertRaises(ValidationError):
+            runtime.load("bad")
+        runtime.register_factory("good", lambda config: type("P", (), {"generate": lambda self: "ok"})())
+        runtime.load("good")
+        with self.assertRaises(ValidationError):
+            runtime.invoke("good", "close")
 
     def test_health_registry_claims_probes_and_records_success(self):
         now = [100.0]
