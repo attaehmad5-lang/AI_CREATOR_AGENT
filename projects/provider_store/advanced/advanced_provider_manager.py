@@ -296,6 +296,8 @@ class AdvancedProviderManager:
         """Return actionable readiness blockers for every advanced provider, without secrets."""
         providers = self.list_providers()
         consistency = self.catalog_consistency()
+        categories = self.category_catalog()
+        category_status = categories.get("status", "UNKNOWN")
         entries: list[dict[str, Any]] = []
         for provider in providers:
             provider_id = provider.get("id")
@@ -328,10 +330,16 @@ class AdvancedProviderManager:
             })
         ready_count = sum(1 for item in entries if item["ready"])
         return {
-            "status": "READY" if entries and ready_count == len(entries) and consistency["status"] == "MATCH" else "DEGRADED",
+            "status": "READY" if (
+                entries
+                and ready_count == len(entries)
+                and consistency["status"] == "MATCH"
+                and category_status == "READY"
+            ) else "DEGRADED",
             "providers_total": len(entries),
             "providers_ready": ready_count,
             "catalog_consistency": consistency["status"],
+            "category_catalog_status": category_status,
             "catalog_differences": consistency["differences"],
             "providers": entries,
         }
