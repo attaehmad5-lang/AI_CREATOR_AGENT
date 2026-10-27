@@ -1321,6 +1321,7 @@ class ProviderService:
                     status_code=adapter_result.get("status_code"),
                     retry_after=adapter_result.get("retry_after"),
                     idempotent=adapter_result.get("idempotent", False),
+                    provider_code=provider_code,
                 )
         incident_result = None
         if self.incident_manager is not None and not final_success:
