@@ -1824,6 +1824,54 @@ class ProviderAdminControlTests(unittest.TestCase):
         self.assertEqual(result["status"], "RECOVERY_COORDINATOR_UNAVAILABLE")
         self.assertEqual(result["probed"], [])
 
+    def test_provider_rechecks_require_provider_verify_authorization_when_configured(self):
+        class Coordinator:
+            def __init__(self):
+                self.calls = 0
+
+            def run_due_rechecks(self):
+                self.calls += 1
+                return {"status": "COMPLETED", "probed": [], "results": {}}
+
+        class Authorization:
+            def __init__(self, allowed):
+                self.allowed = allowed
+                self.calls = []
+
+            def authorize(self, principal_id, operation):
+                self.calls.append((principal_id, operation))
+                return {
+                    "allowed": self.allowed,
+                    "status": "OK" if self.allowed else "DENIED",
+                    "detail": "private authorization internals",
+                }
+
+        denied_coordinator = Coordinator()
+        denied_auth = Authorization(False)
+        denied_service = ProviderService(
+            self.connection,
+            authorization_manager=denied_auth,
+            recovery_coordinator=denied_coordinator,
+        )
+        denied = denied_service.run_due_provider_rechecks(principal_id="guest")
+        self.assertEqual(denied["status"], "PROVIDER_RECHECK_AUTHORIZATION_DENIED")
+        self.assertEqual(denied["probed"], [])
+        self.assertEqual(denied_coordinator.calls, 0)
+        self.assertEqual(denied_auth.calls, [("guest", "provider.verify")])
+        self.assertNotIn("private authorization internals", repr(denied))
+
+        allowed_coordinator = Coordinator()
+        allowed_auth = Authorization(True)
+        allowed_service = ProviderService(
+            self.connection,
+            authorization_manager=allowed_auth,
+            recovery_coordinator=allowed_coordinator,
+        )
+        allowed = allowed_service.run_due_provider_rechecks(principal_id="operator")
+        self.assertEqual(allowed["status"], "COMPLETED")
+        self.assertEqual(allowed_coordinator.calls, 1)
+        self.assertEqual(allowed_auth.calls, [("operator", "provider.verify")])
+
     def test_provider_recheck_coordinator_exception_does_not_leak_details(self):
         class BrokenCoordinator:
             def run_due_rechecks(self):
