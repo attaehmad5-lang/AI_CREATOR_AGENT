@@ -372,9 +372,9 @@ Implementation/evidence inspected: cost_policy.py; tests/test_cost_policy.py; CI
 Remaining work: Paid use fails closed without explicit approval and configured budget; boolean validation and budget hard-stop cases pass focused tests. Live provider billing remains unverified.
 
 Feature 071: Provider Data Policy
-Status: PARTIAL
-Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; related tests
-Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
+Status: COMPLETED
+Implementation/evidence inspected: provider_data_policy.py; tests/test_provider_data_policy.py; CI #40560954116
+Remaining work: Provider/category restrictions, credential policy, retention limits and training-use consent gates are covered by focused tests. Broader privacy review remains a release activity.
 
 Feature 072: Sensitive Data Protection
 Status: COMPLETED
