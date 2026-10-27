@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 import json
+import math
 import re
 
 _PROVIDER_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
@@ -31,7 +32,11 @@ class ProviderRecoveryCoordinator:
             raise ValueError("probes must be a provider-to-callable mapping")
         if isinstance(cooldown_seconds, bool) or not isinstance(cooldown_seconds, (int, float)):
             raise ValueError("cooldown_seconds must be a non-negative finite number")
-        if cooldown_seconds < 0 or cooldown_seconds == float("inf") or cooldown_seconds != cooldown_seconds:
+        try:
+            normalized_cooldown = float(cooldown_seconds)
+        except (OverflowError, TypeError, ValueError):
+            raise ValueError("cooldown_seconds must be a non-negative finite number") from None
+        if not math.isfinite(normalized_cooldown) or normalized_cooldown < 0:
             raise ValueError("cooldown_seconds must be a non-negative finite number")
         normalized: dict[str, Callable[..., Any]] = {}
         for provider_id, probe in probes.items():
@@ -42,7 +47,7 @@ class ProviderRecoveryCoordinator:
             normalized[provider_id] = probe
         self.health_manager = health_manager
         self.probes = normalized
-        self.cooldown_seconds = float(cooldown_seconds)
+        self.cooldown_seconds = normalized_cooldown
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         if not callable(self.clock):
             raise ValueError("clock must be callable")
@@ -51,10 +56,30 @@ class ProviderRecoveryCoordinator:
         path = getattr(self.health_manager, "state_path", None)
         if not isinstance(path, (str, Path)):
             raise ValueError("health manager state_path is unavailable")
+        def unique_object(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate key in provider health snapshot")
+                result[key] = value
+            return result
+
+        def reject_constant(_value):
+            raise ValueError("non-finite number in provider health snapshot")
+
         try:
-            with Path(path).open("r", encoding="utf-8") as stream:
-                payload = json.load(stream)
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            # Bound the actual read to avoid memory exhaustion if the file grows
+            # after any external size check.
+            with Path(path).open("rb") as stream:
+                raw = stream.read(2 * 1024 * 1024 + 1)
+            if len(raw) > 2 * 1024 * 1024:
+                raise ValueError("provider health snapshot exceeds size limit")
+            payload = json.loads(
+                raw.decode("utf-8"),
+                object_pairs_hook=unique_object,
+                parse_constant=reject_constant,
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             raise ValueError("provider health snapshot is unavailable or invalid") from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("providers"), dict):
             raise ValueError("provider health snapshot has invalid shape")
@@ -77,7 +102,7 @@ class ProviderRecoveryCoordinator:
         try:
             providers = self._snapshot()
             now = self.clock()
-            if not isinstance(now, datetime) or now.tzinfo is None:
+            if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
                 raise ValueError("clock must return timezone-aware datetime")
             now = now.astimezone(timezone.utc)
             due: list[str] = []
