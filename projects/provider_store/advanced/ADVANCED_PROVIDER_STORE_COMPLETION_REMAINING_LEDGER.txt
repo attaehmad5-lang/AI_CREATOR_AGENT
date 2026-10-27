@@ -453,8 +453,8 @@ Remaining work: Configuration/storage/recovery primitives exist; migration, cras
 
 Feature 087: Catalog Import/Export
 Status: COMPLETED
-Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py; CI #40574722254
-Remaining work: Validated JSON export and import use atomic replacement, an interprocess lock, backup, post-write validation and rollback. Round-trip, malformed/secret-bearing input and injected-write-failure tests pass on Ubuntu and Windows (469-test suite).
+Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py; CI #40576766499
+Completion evidence: Validated JSON export/import uses atomic replacement, schema validation, interprocess locking, backup and post-write verification. Injected write failure restores prior bytes or preserves an absent target. Cross-platform CI passed 471 tests on Ubuntu and Windows.
 
 Feature 088: Catalog Integrity Verification
 Status: COMPLETED
@@ -467,9 +467,9 @@ Implementation/evidence inspected: advanced_provider_manager.py; advanced catalo
 Remaining work: Metadata drift is detected and reported; safe automated diff application/rollback workflow remains incomplete.
 
 Feature 090: Catalog Rollback
-Status: PARTIAL
-Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py
-Remaining work: Failed catalog import restores prior bytes atomically; failure-injection coverage is awaiting CI. A user-facing versioned catalog history/rollback command remains.
+Status: COMPLETED
+Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py; CI #40576766499
+Completion evidence: Added immutable timestamped catalog snapshots, safe history listing without configuration contents, schema-validated snapshot restore through atomic import/backup, and invalid snapshot filtering. Cross-platform CI passed 471 tests on Ubuntu and Windows.
 
 Feature 091: Backup Management
 Status: PARTIAL
