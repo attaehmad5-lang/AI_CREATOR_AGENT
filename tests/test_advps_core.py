@@ -243,6 +243,8 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             manager.create("provider-a", "text_to_image", {"prompt": "different"}, idempotency_key="private-idem-key")
         with self.assertRaises(ValidationError):
+            manager.create("provider-a", "video_generation", {"prompt": "sunrise"}, idempotency_key="private-idem-key")
+        with self.assertRaises(ValidationError):
             manager.create("provider-a", "text_to_image", {"prompt": "x"}, metadata={"nested": {"api_key": "secret"}})
         claimed = manager.claim(job["id"], "worker-1", lease_seconds=10)
         with self.assertRaises(ValidationError):
