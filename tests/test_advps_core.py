@@ -628,7 +628,6 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         ])
         self.assertEqual(router.simulate("generation", media_type="image", min_quality_score=90), ["high"])
         self.assertEqual(router.simulate("generation", media_type="video"), [])
-        self.assertEqual(router.simulate("generation", min_quality_score=101), []) if False else None
         with self.assertRaises(ValidationError):
             router.simulate("generation", min_quality_score=101)
         with self.assertRaises(ValidationError):
