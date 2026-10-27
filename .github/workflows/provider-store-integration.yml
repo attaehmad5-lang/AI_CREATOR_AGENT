@@ -15,6 +15,7 @@ on:
       - "agents/execution/execution_gateway.py"
       - "tests/test_execution_gateway_provider_store.py"
       - "tests/test_provider_store_adversarial_input_smoke.py"
+      - "tests/test_provider_store_adversarial_input_smoke.py"
       - "agents/execution/execution_gateway.py"
       - "tests/test_execution_gateway_provider_store.py"
       - "tests/test_generation_adapter_provider_store.py"
