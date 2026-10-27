@@ -39,6 +39,7 @@ on:
       - "tests/test_provider_store_compat.py"
       - "tests/test_provider_service.py"
       - "tests/test_advanced_store_bridge.py"
+      - "tests/test_advps_core.py"
       - ".github/workflows/provider-store-integration.yml"
   workflow_dispatch:
 
@@ -90,3 +91,22 @@ jobs:
       - name: Run repository coverage gate for provider-store core (Linux only)
         if: runner.os == 'Linux'
         run: python projects/provider_store/advanced/tools_coverage.py 80
+
+  full-repository-regression:
+    name: Full Repository Regression / Python 3.13 / Ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Compile all repository Python sources
+        run: python -m compileall -q .
+
+      - name: Run full repository unit test suite
+        run: python -m unittest discover -s tests -v
