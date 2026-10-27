@@ -13,6 +13,7 @@ Changes are recorded here by release intent. This file does not imply a publishe
 - Focused Ruff, mypy, and coverage gates for provider-store maintenance/release modules.
 - Bounded poll-driven health scheduler with injected probes and explicit timeout propagation.
 - Outage detector that opens/deduplicates incidents for unhealthy or stale health evidence and resolves them after verified recovery.
+- Secret-safe structured JSON event logging integrated into provider connection and manual verification paths.
 
 ### Fixed
 - Preserve original configuration bytes and temporary-file cleanup when config migration replacement fails.
