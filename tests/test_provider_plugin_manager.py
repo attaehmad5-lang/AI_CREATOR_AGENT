@@ -100,6 +100,33 @@ class ProviderPluginManagerTests(unittest.TestCase):
         self.assertTrue(persisted["enabled"])
         self.assertNotIn("capabilities", persisted)
 
+    def test_factory_mutating_nested_provider_metadata_cannot_change_catalog(self):
+        # Nested metadata is part of the public provider view and must be detached too.
+        provider_data = json.loads(self.catalog.read_text(encoding="utf-8"))
+        provider_data["providers"][0]["metadata"] = {
+            "capabilities": ["image.generate"],
+            "limits": {"max_pixels": 1024},
+        }
+        self.catalog.write_text(json.dumps(provider_data), encoding="utf-8")
+        self.connection_manager = ConnectionManager(self.catalog, self.state)
+        self.plugins = ProviderPluginManager(
+            self.connection_manager, approved_plugin_ids={"public_image"}
+        )
+
+        def mutating_factory(provider):
+            provider["metadata"]["capabilities"].append("admin.override")
+            provider["metadata"]["limits"]["max_pixels"] = -1
+            return ImagePlugin()
+
+        self.assertEqual(
+            self.plugins.register_factory("public_image", mutating_factory)["status"],
+            "FACTORY_REGISTERED",
+        )
+        self.assertEqual(self.plugins.load("public_image")["status"], "LOADED")
+        persisted = self.connection_manager.get_provider("public_image")
+        self.assertEqual(persisted["metadata"]["capabilities"], ["image.generate"])
+        self.assertEqual(persisted["metadata"]["limits"]["max_pixels"], 1024)
+
     def test_disabled_provider_is_rejected_before_factory_execution(self):
         disabled_catalog = self.root / "disabled-catalog.json"
         disabled_catalog.write_text(json.dumps({
