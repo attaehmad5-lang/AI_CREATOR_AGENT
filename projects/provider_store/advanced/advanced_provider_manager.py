@@ -237,7 +237,7 @@ class AdvancedProviderManager:
         """Return the in-memory adapter only when the provider belongs to this advanced store."""
         if self.get_provider(provider_id) is None:
             return None
-        return self.store.manager.loaded_provider(provider_id)
+        return self.store.manager.get_loaded_provider(provider_id)
 
     def provider_diagnostics(self, provider_id: str) -> dict[str, Any]:
         """Report catalog and live state separately without exposing credential values."""
