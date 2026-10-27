@@ -1,6 +1,7 @@
 """Event-driven outage detection and incident recovery using verified health evidence."""
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -32,12 +33,17 @@ class ProviderOutageDetector:
         if (
             isinstance(stale_after_seconds, bool)
             or not isinstance(stale_after_seconds, (int, float))
-            or stale_after_seconds < 0
         ):
-            raise ValueError("stale_after_seconds must be a non-negative number")
+            raise ValueError("stale_after_seconds must be a non-negative finite number")
+        try:
+            stale_limit = float(stale_after_seconds)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError("stale_after_seconds must be a non-negative finite number") from exc
+        if not math.isfinite(stale_limit) or stale_limit < 0:
+            raise ValueError("stale_after_seconds must be a non-negative finite number")
         self.health_manager = health_manager
         self.incident_manager = incident_manager
-        self.stale_after_seconds = float(stale_after_seconds)
+        self.stale_after_seconds = stale_limit
 
     def evaluate(self, provider_id: str) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not _PROVIDER_ID.fullmatch(provider_id):
