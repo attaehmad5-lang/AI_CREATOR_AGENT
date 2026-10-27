@@ -125,6 +125,14 @@ class ProviderQuotaManagerTests(unittest.TestCase):
             request_id="timeout-job", provider_id="image", reason="TIMEOUT"
         )
         self.assertEqual(marked["status"], "OUTCOME_UNCERTAIN")
+        repeated = self.manager.mark_uncertain(
+            request_id="timeout-job", provider_id="image", reason="UNKNOWN"
+        )
+        self.assertEqual(repeated["status"], "ALREADY_UNCERTAIN")
+        self.assertEqual(
+            self.manager.data["requests"]["timeout-job"]["uncertainty_reason"],
+            "TIMEOUT",
+        )
         released = self.manager.release(request_id="timeout-job", provider_id="image")
         self.assertEqual(released["status"], "OUTCOME_UNCERTAIN_RELEASE_BLOCKED")
         self.assertEqual(self.manager.usage(provider_id="image")["hourly"], 1)
