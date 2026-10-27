@@ -63,6 +63,20 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         bad.write_bytes(b"\x1a\x45\xdf\xa3")
         self.assertEqual(self.validator.validate(bad, modality="video")["status"], "WEBM_SEGMENT_MISSING")
 
+    def test_bounded_media_read_rejects_growth_and_size_mismatch(self):
+        path = self.root / "changing.mp4"
+        path.write_bytes(b"123456789")
+        data, error = self.validator._read_bounded(path, expected_size=8)
+        self.assertIsNone(data)
+        self.assertEqual(error, "MEDIA_FILE_CHANGED_DURING_VALIDATION")
+
+    def test_bounded_media_read_enforces_limit_even_if_file_grows_after_stat(self):
+        path = self.root / "grown.webm"
+        path.write_bytes(b"x" * (self.validator.max_bytes + 1))
+        data, error = self.validator._read_bounded(path, expected_size=100)
+        self.assertIsNone(data)
+        self.assertEqual(error, "MEDIA_FILE_TOO_LARGE")
+
     def test_malformed_arguments_fail_closed_without_raising(self):
         for modality in (None, [], {}, 1):
             with self.subTest(modality=modality):
