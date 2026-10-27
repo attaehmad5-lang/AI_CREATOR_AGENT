@@ -1,6 +1,6 @@
 import unittest
 
-from projects.provider_store.oauth2_refresh_manager import OAuth2RefreshTokenManager
+from projects.provider_store.oauth2_refresh_manager import OAuth2RefreshTokenManager, SecureOAuthTokenRequester
 
 
 def config(**overrides):
@@ -23,6 +23,74 @@ def environment():
         "TEST_CLIENT_SECRET": "client-secret",
         "TEST_REFRESH_TOKEN": "refresh-token-old",
     }
+
+
+class SecureOAuthTokenRequesterTests(unittest.TestCase):
+    def test_form_exchange_uses_secure_transport_and_basic_auth(self):
+        class Transport:
+            timeout = 5.0
+
+            def __init__(self):
+                self.calls = []
+
+            def request(self, method, url, *, headers, body):
+                self.calls.append((method, url, headers, body))
+                return {"status": 200, "body": b'{"access_token":"safe","token_type":"Bearer","expires_in":300}'}
+
+        transport = Transport()
+        requester = SecureOAuthTokenRequester(transport)
+        result = requester(
+            "https://auth.example.com/token",
+            form_data={"grant_type": "refresh_token", "refresh_token": "rotate-me"},
+            client_auth=("client", "secret"),
+            timeout_seconds=10.0,
+        )
+        self.assertEqual(result["access_token"], "safe")
+        method, url, headers, body = transport.calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(url, "https://auth.example.com/token")
+        self.assertEqual(headers["Content-Type"], "application/x-www-form-urlencoded")
+        self.assertEqual(headers["Authorization"], "Basic Y2xpZW50OnNlY3JldA==")
+        self.assertIn(b"refresh_token=rotate-me", body)
+
+    def test_secure_requester_rejects_non_https_status_bad_json_and_oversize(self):
+        class Transport:
+            timeout = 5.0
+
+            def __init__(self, response):
+                self.response = response
+
+            def request(self, *args, **kwargs):
+                return self.response
+
+        with self.assertRaisesRegex(RuntimeError, "OAUTH_ENDPOINT_INVALID"):
+            SecureOAuthTokenRequester(Transport({"status": 200, "body": b"{}"}))(
+                "http://auth.example.com/token", form_data={}, client_auth=None, timeout_seconds=10
+            )
+        with self.assertRaisesRegex(RuntimeError, "OAUTH_HTTP_STATUS_REJECTED"):
+            SecureOAuthTokenRequester(Transport({"status": 401, "body": b"secret"}))(
+                "https://auth.example.com/token", form_data={}, client_auth=None, timeout_seconds=10
+            )
+        with self.assertRaisesRegex(RuntimeError, "OAUTH_RESPONSE_JSON_INVALID"):
+            SecureOAuthTokenRequester(Transport({"status": 200, "body": b"not-json"}))(
+                "https://auth.example.com/token", form_data={}, client_auth=None, timeout_seconds=10
+            )
+        with self.assertRaisesRegex(RuntimeError, "OAUTH_RESPONSE_SIZE_INVALID"):
+            SecureOAuthTokenRequester(Transport({"status": 200, "body": b"12345"}), max_response_bytes=4)(
+                "https://auth.example.com/token", form_data={}, client_auth=None, timeout_seconds=10
+            )
+
+    def test_secure_requester_enforces_transport_timeout_ceiling(self):
+        class Transport:
+            timeout = 30.0
+
+            def request(self, *args, **kwargs):
+                raise AssertionError("transport must not be called")
+
+        with self.assertRaisesRegex(RuntimeError, "OAUTH_TRANSPORT_TIMEOUT_POLICY"):
+            SecureOAuthTokenRequester(Transport())(
+                "https://auth.example.com/token", form_data={}, client_auth=None, timeout_seconds=10
+            )
 
 
 class OAuth2RefreshTokenManagerTests(unittest.TestCase):
