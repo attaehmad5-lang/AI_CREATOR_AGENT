@@ -352,9 +352,14 @@ class AdvancedProviderManager:
 
 if __name__ == "__main__":
     manager = AdvancedProviderManager()
+    report = manager.readiness_report()
     print("===================================")
     print("   ADVANCED PROVIDER MANAGER")
     print("===================================")
-    print("Providers:", len(manager.list_providers()))
-    print("Status:", manager.status()["status"])
-    print("READY")
+    print("Providers:", report["providers_total"])
+    print("Providers ready:", report["providers_ready"])
+    print("Catalog consistency:", report["catalog_consistency"])
+    print("Runtime readiness:", report["status"])
+    for provider in report["providers"]:
+        if not provider["ready"]:
+            print(provider["provider"] + ":", ", ".join(provider["blockers"]))
