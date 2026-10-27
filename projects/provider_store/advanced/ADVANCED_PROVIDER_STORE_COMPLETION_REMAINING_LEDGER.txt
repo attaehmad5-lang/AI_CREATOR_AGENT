@@ -82,19 +82,19 @@ Implementation/evidence inspected: connection_manager.py; provider_store_manager
 Remaining work: Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain.
 
 Feature 013: API Key Authentication
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py
-Remaining work: Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are rejected before any probe; full 429-test suite passed on Ubuntu and Windows at run #40555608773.
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; http_probe.py; tests/test_connection_manager.py; tests/test_http_probe.py; CI #40560954116
+Remaining work: Environment-referenced credentials, provider-specific auth headers, auth-protected endpoint requirements, malformed secret rejection and secret-free diagnostics pass tests; live provider credentials remain unverified.
 
 Feature 014: OAuth Authentication
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py
-Remaining work: Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are rejected before any probe; full 429-test suite passed on Ubuntu and Windows at run #40555608773.
+Status: COMPLETED
+Implementation/evidence inspected: oauth_pkce_manager.py; tests/test_oauth_pkce_manager.py; tests/test_provider_service.py; CI #40560954116
+Remaining work: PKCE S256/state binding, one-time exchange, expiry, token refresh/rotation, invalid response rejection and token non-disclosure pass focused tests; live OAuth-provider integration remains unverified.
 
 Feature 015: Credential Management
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py
-Remaining work: Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are rejected before any probe; full 429-test suite passed on Ubuntu and Windows at run #40555608773.
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_pkce_manager.py; tests/test_connection_manager.py; tests/test_http_probe.py; tests/test_oauth_pkce_manager.py; CI #40560954116
+Remaining work: Credential presence is separated from verified connectivity; secrets remain environment/in-memory only and are excluded from status/errors.
 
 Feature 016: Credential Rotation
 Status: PARTIAL
@@ -117,9 +117,9 @@ Implementation/evidence inspected: connection_manager.py; tests/test_connection_
 Remaining work: Endpoint/model configuration persistence and safe endpoint validation are covered by tests.
 
 Feature 020: Network Timeout Management
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py
-Remaining work: Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are rejected before any probe; full 429-test suite passed on Ubuntu and Windows at run #40555608773.
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; connection_manager.py; tests/test_http_probe.py; tests/test_connection_manager.py; CI #40560954116
+Remaining work: Positive bounded timeouts, bounded response reads and safe timeout classification are covered by focused tests.
 
 Feature 021: Live Connectivity Verification
 Status: PARTIAL
