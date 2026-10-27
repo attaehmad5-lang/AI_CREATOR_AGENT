@@ -60,7 +60,7 @@ class OAuth2RefreshTokenManagerTests(unittest.TestCase):
                     "access_token": "access-1", "token_type": "Bearer",
                     "expires_in": 120, "refresh_token": "refresh-token-new",
                 }
-            return {"access_token": "access-2", "token_type": "Bearer", "expires_in": 600}
+            return {"access_token": "access-2", "token_type": "Bearer", "expires_in": 600, "refresh_token": "refresh-token-new-2"}
 
         manager = OAuth2RefreshTokenManager(
             {"provider-a": config(refresh_token_rotation_required=True)},
