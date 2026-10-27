@@ -180,7 +180,7 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             locked = next(item for item in report["providers"] if item["provider"] == "story_locked")
             self.assertIn("CATALOG_LOCKED", locked["blockers"])
             self.assertFalse(locked["ready"])
-            self.assertEqual(report["catalog_consistency"], "MATCH")
+            self.assertEqual(report["catalog_consistency"], "MISMATCH")
 
     def test_readiness_report_never_contains_raw_credentials(self):
         with tempfile.TemporaryDirectory() as tmp:
