@@ -136,12 +136,14 @@ class AdvancedStoreBridge:
         try:
             result = executor(**request)
         except Exception:
-            # Once delegated, an exception cannot prove that no paid request
-            # reached a provider. Fail closed and retain any reservations.
+            # The service may have reserved resources or transmitted a paid
+            # request before raising. This bridge cannot inspect or create those
+            # reservations, so report their state as unknown and require review.
             response: dict[str, Any] = {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
-                "reservations_retained": True,
+                "reservation_state": "UNKNOWN",
+                "manual_reconciliation_required": True,
             }
             request_id = request.get("request_id")
             if isinstance(request_id, str) and request_id.strip():
@@ -151,7 +153,8 @@ class AdvancedStoreBridge:
             response = {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
-                "reservations_retained": True,
+                "reservation_state": "UNKNOWN",
+                "manual_reconciliation_required": True,
             }
             request_id = request.get("request_id")
             if isinstance(request_id, str) and request_id.strip():
