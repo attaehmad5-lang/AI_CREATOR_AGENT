@@ -35,8 +35,8 @@ The full original 37-entry archive's documentation/tooling/test set has not been
 
 - Original archive: 99 tests passed; fixed local coverage runner 825/828 = 99.6%; 37-entry ZIP integrity passed.
 - Repository CI [40500716692](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40500716692): all four matrix jobs passed (Ubuntu/Windows × Python 3.12/3.13); core, bridge, ProviderService and compatibility suites passed.
-- Core coverage: 79 tests, 0 failures/errors; 1039/1256 executable lines = 82.7%, above the enforced 80% minimum.
-- Task 25 CI [40501390063](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40501390063): Ubuntu and Windows passed.
+- Core coverage: 81 tests, 0 failures/errors; 1114/1342 executable lines = 83.0%, above the enforced 80% minimum.
+- Task 25 CI [40501721314](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40501721314): Ubuntu and Windows passed.
 - Live paid/provider requests were not made.
 
 ## Remaining release blockers
