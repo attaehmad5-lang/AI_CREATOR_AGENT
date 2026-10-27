@@ -144,7 +144,7 @@ def import_catalog(
                     os.unlink(temp_backup)
                 except FileNotFoundError:
                     pass
-                        return {
+                return {
                     "status": "CATALOG_BACKUP_FAILED",
                     "imported": False,
                 }
