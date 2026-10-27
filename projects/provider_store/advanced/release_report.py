@@ -160,6 +160,10 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
         expected = {name for name, _ in payloads} | {"RELEASE_REPORT.json", "SOURCE_MANIFEST.json"}
         if archived != expected:
             raise ValueError("ZIP file list does not match the verified manifest")
+        for entry in manifest_entries:
+            archived_data = zf.read(entry["path"])
+            if _sha256(archived_data) != entry["sha256"]:
+                raise ValueError(f"ZIP checksum mismatch for {entry['path']}")
     return {
         "completion_status": report["completion_status"],
         "points_completed": report["points_completed"],
