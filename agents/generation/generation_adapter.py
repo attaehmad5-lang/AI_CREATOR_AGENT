@@ -149,7 +149,10 @@ class GenerationAdapter:
 
         options = dict(adapter_options or {})
         reserved_adapter_keys = {
-            "project_id", "principal_id",
+            # Identity, accounting, policy, and execution destination are owned
+            # by the canonical router; adapter options may not override them.
+            "provider_id", "request_id", "project_id", "principal_id",
+            "prompt", "output_path",
             "data_categories", "retention_days", "provider_training_use",
             "user_training_consent", "estimated_cost", "estimated_cost_unit",
             "actual_cost", "charge_outcome", "reservation_state",
