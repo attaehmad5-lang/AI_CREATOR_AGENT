@@ -82,7 +82,8 @@ class JobManager:
         def op(state):
             if key_hash and key_hash in state["idempotency"]:
                 existing = state["jobs"][state["idempotency"][key_hash]]
-                if existing["payload_hash"] != digest or existing["provider_id"] != provider_id:
+                if (existing["payload_hash"] != digest or existing["provider_id"] != provider_id
+                        or existing["capability"] != capability):
                     raise ValidationError("idempotency key reused with different request")
                 result.update(existing)
                 result["duplicate"] = True
