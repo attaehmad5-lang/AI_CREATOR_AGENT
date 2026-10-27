@@ -75,6 +75,28 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
         self.assertEqual(calls[0]["prompt"], "trusted prompt")
         self.assertEqual(calls[0]["output_path"], "/tmp/output.png")
 
+    def test_provider_executor_exception_is_ambiguous_and_secret_safe(self):
+        service = CanonicalServiceStub()
+
+        def failing_executor(**kwargs):
+            raise RuntimeError("private token=super-secret endpoint=https://internal.example")
+
+        adapter = GenerationAdapter(
+            provider_store_service=service,
+            provider_store_adapter=failing_executor,
+        )
+
+        result = adapter.generate_image(
+            "prompt", "/tmp/output.png", request_id="executor-failure"
+        )
+
+        self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
+        self.assertEqual(result["reservation_state"], "UNKNOWN")
+        self.assertTrue(result["manual_reconciliation_required"])
+        self.assertEqual(result["request_id"], "executor-failure")
+        self.assertNotIn("super-secret", repr(result))
+        self.assertNotIn("internal.example", repr(result))
+
     def test_non_mapping_service_result_is_marked_ambiguous(self):
         class NonMappingService(CanonicalServiceStub):
             def execute_routed_request(self, **request):
