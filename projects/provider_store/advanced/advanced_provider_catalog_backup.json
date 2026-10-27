@@ -27,7 +27,8 @@
       "allowed_hosts": [
         "api.openai.com"
       ],
-      "token_env": "OPENAI_API_KEY"
+      "token_env": "OPENAI_API_KEY",
+      "official_api_url": "https://platform.openai.com/docs/overview"
     },
     {
       "id": "google_gemini_script",
@@ -51,7 +52,8 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://ai.google.dev/gemini-api/docs"
     },
     {
       "id": "anthropic_claude_script",
@@ -74,7 +76,8 @@
       ],
       "token_env": "ANTHROPIC_API_KEY",
       "auth_header_name": "x-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://docs.anthropic.com/en/api/getting-started"
     },
     {
       "id": "adobe_firefly_advanced",
@@ -97,7 +100,8 @@
       "allowed_hosts": [
         "firefly-api.adobe.io"
       ],
-      "token_env": "ADOBE_FIREFLY_API_KEY"
+      "token_env": "ADOBE_FIREFLY_API_KEY",
+      "official_api_url": "https://developer.adobe.com/firefly-services/docs/firefly-api/"
     },
     {
       "id": "replicate_image_editing",
@@ -118,7 +122,8 @@
       "allowed_hosts": [
         "api.replicate.com"
       ],
-      "token_env": "REPLICATE_API_TOKEN"
+      "token_env": "REPLICATE_API_TOKEN",
+      "official_api_url": "https://replicate.com/docs"
     },
     {
       "id": "runway_image_editing",
@@ -138,7 +143,8 @@
       "allowed_hosts": [
         "api.dev.runwayml.com"
       ],
-      "token_env": "RUNWAY_API_KEY"
+      "token_env": "RUNWAY_API_KEY",
+      "official_api_url": "https://docs.dev.runwayml.com/api/"
     },
     {
       "id": "topaz_advanced",
@@ -212,7 +218,8 @@
       "allowed_hosts": [
         "api.assemblyai.com"
       ],
-      "token_env": "ASSEMBLYAI_API_KEY"
+      "token_env": "ASSEMBLYAI_API_KEY",
+      "official_api_url": "https://www.assemblyai.com/docs/"
     },
     {
       "id": "deepgram_transcription",
@@ -232,7 +239,8 @@
       "allowed_hosts": [
         "api.deepgram.com"
       ],
-      "token_env": "DEEPGRAM_API_KEY"
+      "token_env": "DEEPGRAM_API_KEY",
+      "official_api_url": "https://developers.deepgram.com/reference/deepgram-api-overview"
     },
     {
       "id": "google_cloud_speech",
@@ -256,7 +264,8 @@
       ],
       "token_env": "GOOGLE_API_KEY",
       "auth_header_name": "x-goog-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://docs.cloud.google.com/speech-to-text/docs"
     },
     {
       "id": "elevenlabs_advanced_audio",
@@ -279,7 +288,8 @@
       ],
       "token_env": "ELEVENLABS_API_KEY",
       "auth_header_name": "xi-api-key",
-      "auth_scheme": ""
+      "auth_scheme": "",
+      "official_api_url": "https://elevenlabs.io/docs/api-reference/introduction"
     },
     {
       "id": "playht_advanced_audio",
@@ -299,7 +309,8 @@
       "allowed_hosts": [
         "api.play.ht"
       ],
-      "token_env": "PLAYHT_API_KEY"
+      "token_env": "PLAYHT_API_KEY",
+      "official_api_url": "https://docs.play.ht/reference/api-getting-started"
     },
     {
       "id": "suno_advanced_audio",
@@ -336,7 +347,8 @@
       "allowed_hosts": [
         "api.dev.runwayml.com"
       ],
-      "token_env": "RUNWAY_API_KEY"
+      "token_env": "RUNWAY_API_KEY",
+      "official_api_url": "https://docs.dev.runwayml.com/api/"
     },
     {
       "id": "adobe_premiere_advanced",
