@@ -789,13 +789,19 @@ class ConnectionManager:
         capability: str | None = None,
         enabled_only: bool = False,
         include_deprecated: bool = False,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Discover validated provider metadata without probing or exposing retired providers by default."""
+        """Discover providers with bounded pagination; invalid inputs fail closed."""
         if category is not None and (not isinstance(category, str) or not category.strip()):
             return []
         if capability is not None and (not isinstance(capability, str) or not capability.strip()):
             return []
         if not isinstance(enabled_only, bool) or not isinstance(include_deprecated, bool):
+            return []
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            return []
+        if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 1_000_000:
             return []
         def normalize_filter(value: str) -> str:
             return value.strip().casefold().replace("-", "_").replace(" ", "_")
@@ -832,7 +838,10 @@ class ConnectionManager:
                 if wanted_capability not in supported:
                     continue
             discovered.append(dict(provider))
-        return discovered
+        # Stable ordering makes page boundaries deterministic across calls for
+        # an unchanged catalog; never return more than the validated page limit.
+        discovered.sort(key=lambda item: str(item.get("id", "")))
+        return discovered[offset:offset + limit]
 
     def register_provider(
         self, provider: dict[str, Any], *, overwrite: bool = False
