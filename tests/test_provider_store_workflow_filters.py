@@ -57,6 +57,10 @@ class ProviderStoreWorkflowFilterTests(unittest.TestCase):
             "tests/test_artifact_scanner.py",
             "tests/test_oauth2_refresh_manager.py",
             "tests/test_provider_store_workflow_filters.py",
+            "agents/jobs/job_engine.py",
+            "agents/orchestrator/master_orchestrator.py",
+            "tests/test_job_engine_provider_store_injection.py",
+            "tests/test_orchestrator_provider_store_injection.py",
         }
         self.assertTrue(required.issubset(set(self.pull_request_paths)))
         self.assertTrue(required.issubset(set(self.push_paths)))
