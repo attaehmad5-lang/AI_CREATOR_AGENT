@@ -6,11 +6,16 @@ from agents.execution.execution_gateway import ExecutionGateway
 
 class MasterJobEngine:
 
-    def __init__(self):
-        self.version = "1.0"
+    def __init__(self, *, provider_store_service=None, provider_store_adapter=None, storage_path=None):
+        self.version = "1.1"
         self.status = "READY"
-        self.storage_path = "agents/jobs/jobs.json"
-        self.gateway = ExecutionGateway()
+        self.storage_path = storage_path or "agents/jobs/jobs.json"
+        # Production hosts can explicitly inject the canonical provider service
+        # and trusted executor. No provider executor is loaded from catalog data.
+        self.gateway = ExecutionGateway(
+            provider_store_service=provider_store_service,
+            provider_store_adapter=provider_store_adapter,
+        )
         self.stage_handlers = {"CREATED": self.handle_created, "PLANNING": self.handle_planning, "SCRIPT": self.handle_script, "SCENES": self.handle_scenes, "GENERATION": self.handle_generation, "AUDIO": self.handle_audio, "SUBTITLES": self.handle_subtitles, "EDITING": self.handle_editing, "QUALITY_CONTROL": self.handle_quality_control, "COMPLETED": self.handle_completed}
 
         self.stages = ["CREATED", "PLANNING", "SCRIPT", "SCENES", "GENERATION", "AUDIO", "SUBTITLES", "EDITING", "QUALITY_CONTROL", "COMPLETED"]
