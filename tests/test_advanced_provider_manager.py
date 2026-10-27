@@ -30,7 +30,7 @@ class AdvancedProviderManagerTests(unittest.TestCase):
                 {
                     "id": "image_test",
                     "name": "Image Test",
-                    "category": "image_generation",
+                    "category": "advanced_image_editing",
                     "auth_type": "NONE",
                     "connection_type": "API",
                     "enabled": True,
