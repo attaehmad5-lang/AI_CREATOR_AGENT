@@ -6,12 +6,12 @@
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#40155406445](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40155406445) completed successfully on Python 3.13:
+GitHub Actions code-verification run [#40544916250](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40544916250) completed successfully on Python 3.13:
 
-- Ubuntu: 472 tests passed, 0 failures.
-- Windows: 472 tests passed, 0 failures.
+- Ubuntu: 475 tests passed, 0 failures.
+- Windows: 475 tests passed, 0 failures.
 - Provider module/test compilation, provider JSON catalog validation, and the local-secret exclusion guard passed on both platforms.
-- Current code includes explicit certificate and hostname verification for the default provider-balance HTTPS transport, safe TLS failure reporting, rejection of ASCII/Unicode control characters in endpoints, catalog URLs, and model configuration before provider probes, and CI enforcement that known local credential/setup files are not tracked. The active follow-up is draft PR #77; this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
+- Current code includes explicit certificate and hostname verification for the default provider-balance HTTPS transport, safe TLS failure reporting, rejection of ASCII/Unicode control characters in endpoints, catalog URLs, and model configuration before provider probes, and CI enforcement that known local credential/setup files are not tracked. The active follow-up is draft PR #77; this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete. The latest regression additions cover deterministic bounded provider discovery pagination and concurrent plugin factory registration.
 
 Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
 
