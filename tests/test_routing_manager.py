@@ -90,6 +90,25 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["confidence_routing_status"], "CONFIDENCE_AWARE_ROUTING")
         self.assertEqual(result["benchmark_evidence"]["sample_count"], 50)
 
+    def test_confidence_routing_enforces_maximum_p95_latency(self):
+        results = [
+            {"provider_id": "primary", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 50, "success_rate": 0.95, "p95_latency_ms": 450,
+             "avg_cost_per_success": 0.1, "avg_quality_score": 0.85},
+            {"provider_id": "fallback", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 50, "success_rate": 0.95, "p95_latency_ms": 120,
+             "avg_cost_per_success": 0.1, "avg_quality_score": 0.85},
+        ]
+        router = self._confidence_router(results)
+        result = router.route(
+            category="image", project_id="film", model="stable-diffusion-xl",
+            confidence_aware=True, min_benchmark_samples=20,
+            min_benchmark_success_rate=0.8, max_benchmark_p95_latency_ms=250,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["benchmark_evidence"]["p95_latency_ms"], 120)
+
     def test_benchmark_evidence_matches_provider_selected_after_quota_rejection(self):
         results = [
             {"provider_id": "primary", "model_id": "stable-diffusion-xl", "modality": "image",
