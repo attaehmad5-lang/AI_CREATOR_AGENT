@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional
 
 from .errors import NotFoundError, ValidationError
 from .storage import AtomicJsonStore
+from .redact import redact_text
 
 STATUSES = {"PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"}
 
@@ -40,6 +41,8 @@ def _has_sensitive_metadata(value: Any) -> bool:
                    or _has_sensitive_metadata(item) for key, item in value.items())
     if isinstance(value, (list, tuple)):
         return any(_has_sensitive_metadata(item) for item in value)
+    if isinstance(value, str):
+        return redact_text(value) != value
     return False
 
 
