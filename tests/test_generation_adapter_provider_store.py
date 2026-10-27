@@ -46,7 +46,7 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
         self.assertEqual(calls[0]["prompt"], "cinematic landscape")
         self.assertEqual(calls[0]["output_path"], "/tmp/output.png")
 
-    def test_routed_provider_identity_overrides_untrusted_adapter_options(self):
+    def test_reserved_identity_options_are_rejected_before_routing(self):
         calls = []
         service = CanonicalServiceStub()
         adapter = GenerationAdapter(
@@ -68,12 +68,10 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result["status"], "PROVIDER_EXECUTION_SUCCEEDED")
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["provider_id"], "provider-a")
-        self.assertEqual(calls[0]["request_id"], "trusted-request")
-        self.assertEqual(calls[0]["prompt"], "trusted prompt")
-        self.assertEqual(calls[0]["output_path"], "/tmp/output.png")
+        self.assertEqual(result["status"], "INVALID_ADAPTER_OPTIONS")
+        self.assertFalse(result["executed"])
+        self.assertIsNone(service.request)
+        self.assertEqual(calls, [])
 
     def test_provider_executor_exception_is_ambiguous_and_secret_safe(self):
         service = CanonicalServiceStub()
