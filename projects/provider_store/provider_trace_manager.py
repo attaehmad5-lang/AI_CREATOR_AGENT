@@ -1,6 +1,7 @@
 """Bounded W3C trace-context propagation and secret-safe provider spans."""
 from __future__ import annotations
 
+import math
 import re
 import secrets
 import threading
@@ -43,7 +44,9 @@ def _safe_attributes(attributes: Any) -> dict[str, Any]:
         lowered = key.casefold()
         if any(token in lowered for token in _SENSITIVE_KEYS):
             safe[key[:80]] = "[REDACTED]"
-        elif isinstance(value, bool) or value is None or isinstance(value, (int, float)):
+        elif isinstance(value, bool) or value is None or isinstance(value, int):
+            safe[key] = value
+        elif isinstance(value, float) and math.isfinite(value):
             safe[key] = value
         elif isinstance(value, str):
             safe[key] = value[:_MAX_VALUE]
@@ -88,7 +91,7 @@ class ProviderTraceManager:
         span_id = secrets.token_hex(8)
         flags = parent["flags"] if parent else "01"
         started = self.clock()
-        if isinstance(started, bool) or not isinstance(started, (int, float)):
+        if isinstance(started, bool) or not isinstance(started, (int, float)) or not math.isfinite(float(started)):
             return {"status": "INVALID_CLOCK"}
         return {
             "status": "SPAN_STARTED",
@@ -108,11 +111,17 @@ class ProviderTraceManager:
             return {"status": "INVALID_SPAN_OUTCOME"}
         if duration_ms is None:
             ended = self.clock()
-            if isinstance(ended, bool) or not isinstance(ended, (int, float)) or ended < span["started_at"]:
+            if (
+                isinstance(ended, bool) or not isinstance(ended, (int, float))
+                or not math.isfinite(float(ended)) or ended < span["started_at"]
+            ):
                 return {"status": "INVALID_CLOCK"}
             duration = (float(ended) - span["started_at"]) * 1000.0
         else:
-            if isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)) or duration_ms < 0:
+            if (
+                isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float))
+                or not math.isfinite(float(duration_ms)) or duration_ms < 0
+            ):
                 return {"status": "INVALID_DURATION"}
             duration = float(duration_ms)
         record = {
