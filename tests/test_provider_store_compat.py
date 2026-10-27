@@ -119,7 +119,15 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
 
         main_by_id = {p["id"]: p for p in json.loads(main_catalog.read_text(encoding="utf-8"))["providers"]}
         advanced_records = json.loads(advanced_catalog.read_text(encoding="utf-8"))["providers"]
+        backup_catalog = root / "advanced" / "advanced_provider_catalog_backup.json"
+        backup_records = json.loads(backup_catalog.read_text(encoding="utf-8"))["providers"]
+        self.assertEqual(len(backup_records), len(advanced_records))
+        backup_by_id = {p["id"]: p for p in backup_records}
         for advanced_record in advanced_records:
+            backup_record = backup_by_id[advanced_record["id"]]
+            for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required"):
+                self.assertEqual(advanced_record.get(field), backup_record.get(field), "advanced backup drift for " + advanced_record["id"] + " field " + field)
+            self.assertEqual(sorted(advanced_record.get("capabilities", [])), sorted(backup_record.get("capabilities", [])))
             canonical = main_by_id[advanced_record["id"]]
             for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required"):
                 self.assertEqual(
