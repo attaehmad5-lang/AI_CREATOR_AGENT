@@ -99,6 +99,12 @@ This probe does not display the account response body or token. Do not run it in
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
 
 
+## Generation provider interface versioning
+
+The trusted generation-provider loader negotiates the adapter interface before registering an instance or replacing the active registry. Declare `PROVIDER_INTERFACE_VERSION = "1.0"` on adapters that explicitly implement the current interface. A missing declaration is treated as the legacy 1.0 contract to preserve existing adapters; malformed values and unsupported versions are rejected. Registry loading stages all candidates and leaves the prior active provider set unchanged if any candidate fails validation.
+
+Version negotiation currently supports only 1.0. A future major/minor interface change requires an explicit compatibility policy, migration tests, and provider-store catalog integration before it can be enabled. This version gate does not sandbox imported Python code or make an untrusted plugin safe; only trusted modules within `projects.generation.providers` are eligible for import.
+
 ## Cooldown-aware provider recovery rechecks
 
 `recovery_coordinator.py` provides an explicit, caller-driven recheck coordinator around `ProviderHealthManager.active_probe`. It considers only registered probe callbacks and providers whose persisted state is `UNHEALTHY` or `DEGRADED`; it enforces a configurable cooldown from the last failure, rejects future timestamps, and blocks all probing if the persisted snapshot is malformed. Probe exceptions are represented by compact status/error-type metadata rather than exception text. The coordinator only records health evidence through the supplied health manager: it does not trigger generation, alter routing, run a background scheduler, or claim live-provider availability. Call `ProviderService.run_due_provider_rechecks()` from an explicitly managed scheduler/maintenance action after configuring trusted probe callbacks; the service wrapper fails closed on missing coordinators, exceptions, and blocked coordinator outcomes.
