@@ -352,6 +352,98 @@ class ProviderHealthManager:
             return {"eligible": False, "status": "SLOW", "reason": "LATENCY_LIMIT_EXCEEDED"}
         return {"eligible": True, "status": record.get("status", "UNKNOWN"), "age_seconds": age}
 
+    def audit_consistency(self) -> dict[str, Any]:
+        """Read-only audit of persisted health state invariants.
+
+        This is a diagnostic check, not a repair operation. It never upgrades a
+        provider's health status or rewrites evidence to make an inconsistent
+        record appear healthy.
+        """
+        issues: list[dict[str, str]] = []
+        try:
+            with self._transaction():
+                snapshot = json.loads(json.dumps(self.data))
+        except Exception as exc:
+            return {
+                "status": "HEALTH_STATE_UNREADABLE",
+                "consistent": False,
+                "providers_checked": 0,
+                "issues": [{"provider": "*", "code": "STATE_READ_FAILED", "error_type": type(exc).__name__}],
+            }
+
+        providers = snapshot.get("providers")
+        if not isinstance(providers, dict):
+            return {
+                "status": "HEALTH_STATE_INVALID",
+                "consistent": False,
+                "providers_checked": 0,
+                "issues": [{"provider": "*", "code": "PROVIDER_MAP_INVALID"}],
+            }
+
+        try:
+            now = self.clock()
+            if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+                raise ValueError("invalid clock")
+            now = now.astimezone(timezone.utc)
+        except Exception:
+            return {
+                "status": "HEALTH_AUDIT_CLOCK_INVALID",
+                "consistent": False,
+                "providers_checked": 0,
+                "issues": [{"provider": "*", "code": "CLOCK_INVALID"}],
+            }
+
+        for provider_id, record in providers.items():
+            if not isinstance(provider_id, str) or not isinstance(record, dict):
+                issues.append({"provider": "*", "code": "PROVIDER_RECORD_INVALID"})
+                continue
+            status = record.get("status", "UNKNOWN")
+            failures = record.get("consecutive_failures", 0)
+            successes = record.get("consecutive_successes", 0)
+            pending = record.get("recovery_pending", False)
+            if status == "HEALTHY" and (failures != 0 or pending is True):
+                issues.append({"provider": provider_id, "code": "HEALTHY_COUNTERS_CONFLICT"})
+            if status == "UNHEALTHY" and failures < self.failure_threshold:
+                issues.append({"provider": provider_id, "code": "UNHEALTHY_BELOW_FAILURE_THRESHOLD"})
+            if pending is True and (
+                status != "DEGRADED" or successes >= self.recovery_success_threshold
+            ):
+                issues.append({"provider": provider_id, "code": "RECOVERY_STATE_CONFLICT"})
+
+            checked_raw = record.get("last_checked_at")
+            if checked_raw is not None:
+                try:
+                    checked = self._parse_timestamp(checked_raw)
+                    if checked > now:
+                        issues.append({"provider": provider_id, "code": "FUTURE_HEALTH_TIMESTAMP"})
+                except (TypeError, ValueError):
+                    issues.append({"provider": provider_id, "code": "INVALID_HEALTH_TIMESTAMP"})
+
+            latency = record.get("last_latency_ms")
+            if latency is not None and finite_number(latency, minimum=0) is None:
+                issues.append({"provider": provider_id, "code": "INVALID_LAST_LATENCY"})
+
+            history = record.get("history", [])
+            previous = None
+            for event in history:
+                try:
+                    current = self._parse_timestamp(event.get("timestamp"))
+                except (AttributeError, TypeError, ValueError):
+                    issues.append({"provider": provider_id, "code": "INVALID_HISTORY_TIMESTAMP"})
+                    continue
+                if current > now:
+                    issues.append({"provider": provider_id, "code": "FUTURE_HISTORY_TIMESTAMP"})
+                if previous is not None and current < previous:
+                    issues.append({"provider": provider_id, "code": "HISTORY_NOT_CHRONOLOGICAL"})
+                previous = current
+
+        return {
+            "status": "HEALTH_STATE_CONSISTENT" if not issues else "HEALTH_STATE_INCONSISTENT",
+            "consistent": not issues,
+            "providers_checked": len(providers),
+            "issues": issues,
+        }
+
     def _save(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(
