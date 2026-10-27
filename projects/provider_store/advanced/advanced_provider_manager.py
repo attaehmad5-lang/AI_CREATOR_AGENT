@@ -42,12 +42,75 @@ class AdvancedProviderManager:
             if provider.get("category") == category
         ]
 
+    def list_verified_enabled_providers(
+        self, capability: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return advanced providers whose catalog is enabled and runtime connection is verified.
+
+        This is an eligibility filter, not a guarantee that paid-usage, quota,
+        credit, or output-quality policies will authorize a particular request.
+        """
+        if capability is not None and (
+            not isinstance(capability, str) or not capability.strip()
+        ):
+            return []
+        wanted_capability = capability.casefold().strip() if capability else None
+        verified: list[dict[str, Any]] = []
+        for provider in self.list_providers():
+            provider_id = provider.get("id")
+            if not isinstance(provider_id, str) or provider.get("enabled") is not True:
+                continue
+            state = self.store.manager.get_state(provider_id)
+            if state.get("status") != "CONNECTED" or state.get("verified") is not True:
+                continue
+            if wanted_capability is not None:
+                raw_capabilities = provider.get("capabilities", [])
+                capabilities = (
+                    {item.casefold() for item in raw_capabilities if isinstance(item, str)}
+                    if isinstance(raw_capabilities, list) else set()
+                )
+                category = provider.get("category")
+                if isinstance(category, str):
+                    capabilities.add(category.casefold())
+                if wanted_capability not in capabilities:
+                    continue
+            verified.append(provider)
+        return verified
+
+    def provider_diagnostics(self, provider_id: str) -> dict[str, Any]:
+        """Report catalog and live state separately without exposing credential values."""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"status": "NOT_FOUND", "provider": provider_id}
+        state = self.store.manager.get_state(provider_id)
+        credentials = self.store.manager.credential_status(provider_id)
+        return {
+            "status": "OK",
+            "provider": provider_id,
+            "category": provider.get("category"),
+            "catalog_enabled": provider.get("enabled") is True,
+            "catalog_status": provider.get("catalog_status", provider.get("status")),
+            "runtime_status": state.get("status", "UNKNOWN"),
+            "verified": state.get("verified") is True and state.get("status") == "CONNECTED",
+            "credential_status": credentials.get("status", "UNKNOWN"),
+            "credential_present": credentials.get("credential_present") is True,
+        }
+
     def status(self) -> dict[str, Any]:
         providers = self.list_providers()
+        enabled = sum(1 for provider in providers if provider.get("enabled") is True)
+        verified_enabled = self.list_verified_enabled_providers()
+        categories = sorted({
+            provider["category"] for provider in providers
+            if isinstance(provider.get("category"), str) and provider["category"]
+        })
         return {
             "version": "1.0",
             "status": "READY",
             "providers": len(providers),
+            "enabled": enabled,
+            "connected_verified": len(verified_enabled),
+            "categories": categories,
             "ready": True,
         }
 
