@@ -1,0 +1,180 @@
+name: Provider Store Integration Verification
+
+on:
+  pull_request:
+    paths:
+      - "projects/provider_store/advanced/advps/**"
+      - "projects/provider_store/advanced/advanced_store_bridge.py"
+      - "projects/provider_store/advanced/advanced_provider_manager.py"
+      - "projects/provider_store/advanced/tools_coverage.py"
+      - "projects/provider_store/advanced/pyproject.toml"
+      - "projects/provider_store/advanced/run_tests.sh"
+      - "projects/provider_store/connection_manager.py"
+      - "projects/provider_store/provider_service.py"
+      - "projects/provider_store/artifact_scanner.py"
+      - "projects/provider_store/oauth2_refresh_manager.py"
+      - "projects/provider_store/provider_store_manager.py"
+      - "projects/provider_store/provider_catalog.json"
+      - "projects/provider_store/advanced/advanced_provider_catalog.json"
+      - "agents/generation/generation_adapter.py"
+      - "agents/execution/execution_gateway.py"
+      - "agents/jobs/job_engine.py"
+      - "agents/orchestrator/master_orchestrator.py"
+      - "tests/test_job_engine_provider_store_injection.py"
+      - "tests/test_orchestrator_provider_store_injection.py"
+      - "tests/test_provider_store_compat.py"
+      - "tests/test_provider_service.py"
+      - "tests/test_advanced_store_bridge.py"
+      - "tests/test_advanced_store_execution_bridge.py"
+      - "tests/test_generation_adapter_provider_store.py"
+      - "tests/test_execution_gateway_provider_store.py"
+      - "tests/test_provider_store_adversarial_input_smoke.py"
+      - "tests/test_artifact_scanner.py"
+      - "tests/test_oauth2_refresh_manager.py"
+      - "tests/test_advps_core.py"
+      - ".github/workflows/provider-store-integration.yml"
+      - "tests/test_provider_store_workflow_filters.py"
+  push:
+    branches:
+      - main
+      - task-advanced-provider-store-review
+    paths:
+      - "projects/provider_store/advanced/advps/**"
+      - "projects/provider_store/advanced/advanced_store_bridge.py"
+      - "projects/provider_store/advanced/advanced_provider_manager.py"
+      - "projects/provider_store/advanced/tools_coverage.py"
+      - "projects/provider_store/advanced/pyproject.toml"
+      - "projects/provider_store/advanced/run_tests.sh"
+      - "projects/provider_store/connection_manager.py"
+      - "projects/provider_store/provider_service.py"
+      - "projects/provider_store/provider_store_manager.py"
+      - "projects/provider_store/provider_catalog.json"
+      - "projects/provider_store/advanced/advanced_provider_catalog.json"
+      - "agents/generation/generation_adapter.py"
+      - "agents/execution/execution_gateway.py"
+      - "tests/test_provider_store_compat.py"
+      - "tests/test_provider_service.py"
+      - "tests/test_advanced_store_bridge.py"
+      - "tests/test_advanced_store_execution_bridge.py"
+      - "tests/test_generation_adapter_provider_store.py"
+      - "tests/test_execution_gateway_provider_store.py"
+      - "tests/test_provider_store_adversarial_input_smoke.py"
+      - "tests/test_advps_core.py"
+      - ".github/workflows/provider-store-integration.yml"
+      - "projects/provider_store/artifact_scanner.py"
+      - "projects/provider_store/oauth2_refresh_manager.py"
+      - "tests/test_orchestrator_provider_store_injection.py"
+      - "tests/test_job_engine_provider_store_injection.py"
+      - "agents/orchestrator/master_orchestrator.py"
+      - "agents/jobs/job_engine.py"
+      - "tests/test_artifact_scanner.py"
+      - "tests/test_oauth2_refresh_manager.py"
+      - "tests/test_provider_store_workflow_filters.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-store-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    name: Provider Store / Python ${{ matrix.python-version }} / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies required by integration tests
+        run: python -m pip install requests beautifulsoup4
+
+      - name: Compile provider-store modules and integration tests
+        run: python -m compileall -q projects/provider_store tests/test_provider_store_workflow_filters.py tests/test_provider_store_compat.py tests/test_provider_service.py tests/test_artifact_scanner.py tests/test_oauth2_refresh_manager.py tests/test_advanced_store_bridge.py tests/test_advanced_store_execution_bridge.py tests/test_generation_adapter_provider_store.py tests/test_execution_gateway_provider_store.py tests/test_job_engine_provider_store_injection.py tests/test_orchestrator_provider_store_injection.py agents/jobs/job_engine.py agents/orchestrator/master_orchestrator.py tests/test_provider_store_adversarial_input_smoke.py tests/test_advps_core.py projects/provider_store/advanced/tools_coverage.py
+
+      - name: Verify workflow path filter consistency
+        run: python -m unittest discover -s tests -p "test_provider_store_workflow_filters.py" -v
+
+      - name: Validate provider catalogs
+        run: |
+          python -c "import json; from pathlib import Path; paths=[Path('projects/provider_store/provider_catalog.json'), Path('projects/provider_store/advanced/advanced_provider_catalog.json')]; [json.loads(p.read_text(encoding='utf-8')) for p in paths]; print('Provider catalog JSON: PASS')"
+
+      - name: Build distributable wheel
+        run: python -m pip wheel --no-deps --wheel-dir wheelhouse projects/provider_store/advanced
+
+      - name: Verify wheel artifact
+        run: python -c "from pathlib import Path; wheels=list(Path('wheelhouse').glob('advanced_provider_store-*.whl')); assert wheels, 'Advanced Provider Store wheel was not produced'; print('Wheel packaging PASS')"
+
+      - name: Run ProviderService security and lifecycle tests
+        run: python -m unittest discover -s tests -p "test_provider_service.py" -v
+
+      - name: Run artifact scanner safety tests
+        run: python -m unittest discover -s tests -p "test_artifact_scanner.py" -v
+
+      - name: Run OAuth2 refresh manager tests
+        run: python -m unittest discover -s tests -p "test_oauth2_refresh_manager.py" -v
+
+      - name: Run provider-store compatibility regression tests
+        run: python -m unittest discover -s tests -p "test_provider_store_compat.py" -v
+
+      - name: Run advanced bridge contract tests
+        run: python -m unittest discover -s tests -p "test_advanced_store_bridge.py" -v
+
+      - name: Run canonical execution delegation tests
+        run: python -m unittest discover -s tests -p "test_advanced_store_execution_bridge.py" -v
+
+      - name: Run generation adapter integration tests
+        run: python -m unittest discover -s tests -p "test_generation_adapter_provider_store.py" -v
+
+      - name: Run execution gateway integration tests
+        run: python -m unittest discover -s tests -p "test_execution_gateway_provider_store.py" -v
+
+      - name: Run job engine provider-store injection tests
+        run: python -m unittest discover -s tests -p "test_job_engine_provider_store_injection.py" -v
+
+      - name: Run orchestrator provider-store injection tests
+        run: python -m unittest discover -s tests -p "test_orchestrator_provider_store_injection.py" -v
+
+      - name: Run adversarial input smoke tests
+        run: python -m unittest discover -s tests -p "test_provider_store_adversarial_input_smoke.py" -v
+
+      - name: Run Advanced Provider Store core tests
+        run: python -m unittest discover -s tests -p "test_advps_core.py" -v
+
+      - name: Run repository coverage gate for provider-store core (Linux only)
+        if: runner.os == 'Linux'
+        run: python projects/provider_store/advanced/tools_coverage.py 80
+
+  full-repository-regression:
+    name: Full Repository Regression / Python 3.13 / Ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Compile all repository Python sources
+        run: python -m compileall -q .
+
+      - name: Install dependencies needed by full repository tests
+        run: python -m pip install requests beautifulsoup4
+
+      - name: Run full repository unit test suite
+        run: python -m unittest discover -s tests -v

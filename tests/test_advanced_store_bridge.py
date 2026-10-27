@@ -1,0 +1,180 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.cost_policy import ProviderCostPolicy
+from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.quota_manager import ProviderQuotaManager
+from projects.provider_store.routing_manager import ProviderRoutingManager
+from projects.provider_store.advanced.advanced_store_bridge import AdvancedStoreBridge
+from projects.provider_store.advanced.advanced_provider_manager import AdvancedProviderManager
+
+
+class AdvancedStoreBridgeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        root = Path(self.temp.name)
+        self.catalog = root / "catalog.json"
+        self.state = root / "state.json"
+        providers = [
+            {
+                "id": "image-cheap", "name": "Cheap", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "capabilities": ["text_to_image"], "priority": 20,
+                "regions": ["eu"], "price_per_unit": 0.02,
+                "internal_private_note": "DO_NOT_LEAK",
+            },
+            {
+                "id": "image-fast", "name": "Fast", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "capabilities": ["text_to_image"], "priority": 1,
+                "regions": ["eu"], "price_per_unit": 0.08,
+            },
+            {
+                "id": "image-disabled", "name": "Disabled", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": False,
+                "capabilities": ["text_to_image"], "priority": 0,
+                "regions": ["eu"], "price_per_unit": 0.001,
+            },
+            {
+                "id": "image-unknown-price", "name": "Unknown", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "capabilities": ["text_to_image"], "priority": 5,
+                "regions": ["eu"],
+            },
+        ]
+        self.catalog.write_text(json.dumps({"version": "1.0", "providers": providers}), encoding="utf-8")
+        self.state.write_text(json.dumps({"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}), encoding="utf-8")
+        self.manager = ConnectionManager(self.catalog, self.state)
+        self.bridge = AdvancedStoreBridge(self.manager)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _verify(self, provider_id):
+        return self.manager.verify_connectivity(provider_id, lambda provider, **kwargs: {"ok": True})
+
+    def test_never_routes_unverified_or_disabled_provider(self):
+        self.assertEqual(self.bridge.simulate("text_to_image"), [])
+        self._verify("image-cheap")
+        self._verify("image-disabled")
+        ids = self.bridge.simulate("text_to_image")
+        self.assertEqual(ids, ["image-cheap"])
+        self.assertNotIn("image-disabled", ids)
+
+    def test_priority_and_cost_routing_use_verified_shared_catalog(self):
+        for pid in ("image-cheap", "image-fast", "image-unknown-price"):
+            self._verify(pid)
+        self.assertEqual(self.bridge.simulate("text_to_image"), [
+            "image-fast", "image-unknown-price", "image-cheap"
+        ])
+        self.assertEqual(self.bridge.simulate("text_to_image", strategy="cost"), [
+            "image-cheap", "image-fast", "image-unknown-price"
+        ])
+        self.assertEqual(
+            self.bridge.simulate("text_to_image", strategy="cost", max_price=0.05),
+            ["image-cheap"],
+        )
+
+    def test_unknown_prices_are_excluded_under_budget_ceiling(self):
+        self._verify("image-unknown-price")
+        self.assertEqual(
+            self.bridge.simulate("text_to_image", max_price=1.0), []
+        )
+
+    def test_region_and_capability_filters_fail_closed(self):
+        self._verify("image-cheap")
+        self.assertEqual(self.bridge.simulate("text_to_image", region="us"), [])
+        self.assertEqual(self.bridge.simulate("video_generation"), [])
+
+    def test_metadata_is_allowlisted_and_secrets_do_not_escape(self):
+        providers = self.bridge.list_providers()
+        self.assertNotIn("api_key", providers[0])
+        self.assertNotIn("DO_NOT_LEAK", json.dumps(providers))
+        providers[0]["name"] = "mutated"
+        self.assertNotEqual(self.manager.get_provider("image-cheap")["name"], "mutated")
+
+    def test_advanced_manager_exposes_bridge_without_duplicate_state(self):
+        # The advanced facade and bridge must share the exact same manager.
+        self.manager.register_provider({
+            "id": "story-advanced", "name": "Story", "category": "script_story",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "capabilities": ["story_generation"], "priority": 2,
+            "regions": ["eu"], "price_per_unit": 0.03,
+        })
+        advanced = AdvancedProviderManager(connection_manager=self.manager)
+        self.assertIs(advanced.bridge.manager, advanced.store.manager)
+        self.assertIs(advanced.store.manager, self.manager)
+        self.assertEqual(advanced.simulate_route("story_generation"), [])
+        self._verify("story-advanced")
+        self.assertEqual(advanced.simulate_route("story_generation"), ["story-advanced"])
+
+
+    def test_advanced_manager_execution_delegates_to_canonical_service(self):
+        class Service:
+            def execute_routed_request(self, **request):
+                self.request = request
+                return {"status": "COMPLETED", "executed": True}
+
+        service = Service()
+        advanced = AdvancedProviderManager(connection_manager=self.manager, provider_service=service)
+        request = {
+            "category": "image", "project_id": "film", "request_id": "manager-req-1",
+            "estimated_cost": 0.02, "adapter": lambda **kwargs: {"started": True},
+            "modality": "image",
+        }
+        result = advanced.execute_request(**request)
+        self.assertEqual(result, {"status": "COMPLETED", "executed": True})
+        self.assertEqual(service.request, request)
+
+    def test_manager_handoff_uses_real_service_and_retains_ambiguous_reservations(self):
+        self._verify("image-cheap")
+        cost = ProviderCostPolicy(
+            self.temp.name + "/cost.json", project_budgets={"film": 10.0}
+        )
+        quota = ProviderQuotaManager(
+            self.temp.name + "/quota.json", limits={"image-cheap": {"daily": 10}}
+        )
+        router = ProviderRoutingManager(
+            self.manager, cost_policy=cost, quota_manager=quota
+        )
+        service = ProviderService(
+            self.manager, routing_manager=router,
+            cost_policy=cost, quota_manager=quota,
+        )
+        advanced = AdvancedProviderManager(
+            connection_manager=self.manager, provider_service=service
+        )
+
+        def uncertain_adapter(**kwargs):
+            raise TimeoutError("private provider endpoint")
+
+        result = advanced.execute_request(
+            category="image", project_id="film", request_id="bridge-ambiguous-1",
+            estimated_cost=1.0, paid_approved_providers={"image-cheap"},
+            adapter=uncertain_adapter, modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
+        self.assertTrue(result["reservations_retained"])
+        self.assertIn("bridge-ambiguous-1", cost.ledger["projects"]["film"]["reservations"])
+        self.assertEqual(quota.data["requests"]["bridge-ambiguous-1"]["status"], "RESERVED")
+        self.assertNotIn("private provider endpoint", repr(result))
+
+    def test_advanced_manager_execution_fails_closed_without_service(self):
+        advanced = AdvancedProviderManager(connection_manager=self.manager)
+        self.assertEqual(
+            advanced.execute_request(request_id="no-service"),
+            {"status": "PROVIDER_SERVICE_UNAVAILABLE", "executed": False},
+        )
+
+    def test_invalid_routing_options_rejected(self):
+        with self.assertRaises(ValueError):
+            self.bridge.candidates("text_to_image", strategy="random")
+        with self.assertRaises(ValueError):
+            self.bridge.candidates("text_to_image", max_price=float("nan"))
+
+
+if __name__ == "__main__":
+    unittest.main()
