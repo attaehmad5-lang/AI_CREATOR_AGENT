@@ -2,9 +2,10 @@
 
 A standard-library-first core for provider metadata, model capabilities,
 routing simulation/execution through injected callbacks, bounded HTTPS
-transport, retry/circuit-breaker policy, atomic local JSON storage,
-tamper-evident audit logs, explicit paid-usage approval, quotas, budgets,
-idempotency, job lifecycle/leases/recovery, and backup/recovery.
+transport, environment-backed credential references, retry/circuit-breaker
+policy, atomic local JSON storage, tamper-evident audit logs, explicit
+paid-usage approval, quotas, budgets, idempotency, job lifecycle/leases/recovery,
+and backup/recovery.
 
 ## Safety boundaries
 
@@ -18,16 +19,17 @@ idempotency, job lifecycle/leases/recovery, and backup/recovery.
   public-address validation, connect-time DNS/IP pinning, TLS hostname checking,
   and request/response size limits. Cross-origin redirects strip credential-like
   headers. Unit tests use fake connections/resolvers; no live provider calls were made.
-- The transport is not yet wired into ProviderService execution or credential
-  lifecycle. It needs controlled TLS/DNS-rebinding/adversarial network tests before
-  production use.
-- `JobManager` persists job metadata, idempotency hashes, leases, attempts,
+- The transport is not yet wired into ProviderService execution and needs
+  controlled TLS/DNS-rebinding/adversarial network tests before production use.
+- `CredentialManager` resolves environment references and supports an injected
+  refresh callback; raw credentials are held only in process memory and are never
+  persisted by this module. OAuth/network policy remains the host's responsibility.
+- `JobManager` persists job metadata, hashed idempotency keys, leases, attempts,
   cancellation state and stale-lease recovery. It does not store payloads or
   credentials, and it does not itself interrupt an executing worker process.
 - The core's JSON catalog is separate from AI_CREATOR_AGENT's canonical
   ConnectionManager. In this repository, the integrated bridge is the canonical
   read-only selection path; do not create duplicate production catalog/state.
-- Credential/OAuth storage and token rotation are not implemented here.
 
 ## Development checks
 
