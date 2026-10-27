@@ -296,5 +296,21 @@ class ProviderCreditManagerTests(unittest.TestCase):
         self.assertTrue(reservation["outcome_uncertain"])
         self.assertEqual(reservation["uncertainty_reason"], "TIMEOUT")
 
+    def test_corrupt_uncertain_reservation_metadata_is_rejected_on_reload(self):
+        self.path.write_text(json.dumps({
+            "providers": {},
+            "reservations": {
+                "job": {
+                    "provider_id": "provider", "amount": 1.0, "unit": "USD",
+                    "created_at": self.now[0].isoformat(),
+                    "outcome_uncertain": True, "uncertainty_reason": "UNTRUSTED",
+                    "uncertain_at": self.now[0].isoformat(),
+                }
+            },
+            "usage": {},
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ProviderCreditManager(self.path, clock=lambda: self.now[0])
+
 if __name__ == "__main__":
     unittest.main()
