@@ -107,6 +107,31 @@ class AdvancedStoreBridgeTests(unittest.TestCase):
         self._verify("story-advanced")
         self.assertEqual(advanced.simulate_route("story_generation"), ["story-advanced"])
 
+
+    def test_advanced_manager_execution_delegates_to_canonical_service(self):
+        class Service:
+            def execute_routed_request(self, **request):
+                self.request = request
+                return {"status": "COMPLETED", "executed": True}
+
+        service = Service()
+        advanced = AdvancedProviderManager(connection_manager=self.manager, provider_service=service)
+        request = {
+            "category": "image", "project_id": "film", "request_id": "manager-req-1",
+            "estimated_cost": 0.02, "adapter": lambda **kwargs: {"started": True},
+            "modality": "image",
+        }
+        result = advanced.execute_request(**request)
+        self.assertEqual(result, {"status": "COMPLETED", "executed": True})
+        self.assertEqual(service.request, request)
+
+    def test_advanced_manager_execution_fails_closed_without_service(self):
+        advanced = AdvancedProviderManager(connection_manager=self.manager)
+        self.assertEqual(
+            advanced.execute_request(request_id="no-service"),
+            {"status": "PROVIDER_SERVICE_UNAVAILABLE", "executed": False},
+        )
+
     def test_invalid_routing_options_rejected(self):
         with self.assertRaises(ValueError):
             self.bridge.candidates("text_to_image", strategy="random")
