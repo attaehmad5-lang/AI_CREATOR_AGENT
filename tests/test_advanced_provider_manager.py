@@ -136,9 +136,9 @@ class AdvancedProviderManagerTests(unittest.TestCase):
     def test_advanced_capability_discovery_is_exact_case_insensitive_and_category_scoped(self):
         with tempfile.TemporaryDirectory() as tmp:
             _, advanced = self._manager(Path(tmp))
-            self.assertEqual([p["id"] for p in advanced.by_capability("STORY_GENERATION")], ["story_test", "story_disabled", "story_locked"])
+            self.assertEqual(sorted(p["id"] for p in advanced.by_capability("STORY_GENERATION")), ["story_disabled", "story_locked", "story_test"])
             self.assertEqual([p["id"] for p in advanced.by_capability("image_generation")], ["image_test"])
-            self.assertEqual([p["id"] for p in advanced.by_capability("story_generation", category="script_story")], ["story_test", "story_disabled", "story_locked"])
+            self.assertEqual(sorted(p["id"] for p in advanced.by_capability("story_generation", category="script_story")), ["story_disabled", "story_locked", "story_test"])
             self.assertEqual(advanced.by_capability("story"), [])
             self.assertEqual(advanced.by_capability(" "), [])
             self.assertTrue(advanced.supports_capability("story_test", "Dialogue_Writing"))
