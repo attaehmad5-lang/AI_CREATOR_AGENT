@@ -122,6 +122,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
     report_md = output_dir / "advanced_provider_store_report.md"
     manifest_json = output_dir / "advanced_provider_store_manifest.json"
     archive = output_dir / "advanced_provider_store_source.zip"
+    archive_checksum = output_dir / "advanced_provider_store_source.zip.sha256"
     report_json.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     lines = [
         "# Advanced Provider Store Release Report",
@@ -164,6 +165,10 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
             archived_data = zf.read(entry["path"])
             if _sha256(archived_data) != entry["sha256"]:
                 raise ValueError(f"ZIP checksum mismatch for {entry['path']}")
+    archive_digest = _sha256(archive.read_bytes())
+    archive_checksum.write_text(f"{archive_digest}  {archive.name}\\n", encoding="ascii")
+    if archive_checksum.read_text(encoding="ascii").split()[0] != _sha256(archive.read_bytes()):
+        raise ValueError("release ZIP SHA-256 sidecar verification failed")
     return {
         "completion_status": report["completion_status"],
         "points_completed": report["points_completed"],
@@ -173,6 +178,8 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
         "report_json": str(report_json),
         "report_markdown": str(report_md),
         "manifest": str(manifest_json),
+        "archive_sha256": archive_digest,
+        "archive_checksum": str(archive_checksum),
         "zip_integrity": "PASS",
     }
 
