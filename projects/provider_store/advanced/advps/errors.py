@@ -15,6 +15,14 @@ class SecurityError(AdvpsError):
     code = "security_error"
 
 
+class CredentialUnavailableError(AdvpsError):
+    code = "credential_unavailable"
+
+
+class CredentialExpiredError(AdvpsError):
+    code = "credential_expired"
+
+
 class StoreCorruptError(AdvpsError):
     code = "store_corrupt"
 
