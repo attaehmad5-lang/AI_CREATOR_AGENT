@@ -38,7 +38,6 @@ jobs:
           projects/provider_store/advanced/performance_benchmark.py
           projects/provider_store/advanced/release_report.py
           projects/provider_store/advanced/pdf_report.py
-          projects/provider_store/advanced/release_report.py
           tests/test_catalog_interchange.py
           tests/test_catalog_diff.py
           tests/test_catalog_cli.py
@@ -46,16 +45,19 @@ jobs:
           tests/test_provider_store_performance_benchmark.py
           tests/test_advanced_provider_release_report.py
           tests/test_advanced_provider_pdf_report.py
-          tests/test_advanced_provider_release_report.py
       - name: Check formatting of new catalog and benchmark code
         run: >-
           python -m ruff format --check
           projects/provider_store/catalog_interchange.py
           projects/provider_store/catalog_diff.py
+          projects/provider_store/catalog_cli.py
           projects/provider_store/advanced/performance_benchmark.py
+          projects/provider_store/advanced/release_report.py
           tests/test_catalog_interchange.py
           tests/test_catalog_diff.py
+          tests/test_catalog_cli.py
           tests/test_provider_store_performance_benchmark.py
+          tests/test_advanced_provider_release_report.py
       - name: Compile provider modules and tests
         run: python -m compileall -q projects/provider_store tests
       - name: Validate provider JSON catalogs
