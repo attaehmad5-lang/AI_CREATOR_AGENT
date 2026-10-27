@@ -1,6 +1,9 @@
 """Compatibility facade for advanced providers in the central provider catalog."""
 from __future__ import annotations
 
+import copy
+import json
+from pathlib import Path
 from typing import Any
 
 from ..connection_manager import ConnectionManager
@@ -15,11 +18,17 @@ class AdvancedProviderManager:
         *,
         catalog_path: str | None = None,
         state_path: str | None = None,
+        categories_path: str | None = None,
     ) -> None:
         if connection_manager is not None and (catalog_path is not None or state_path is not None):
             raise ValueError("pass either connection_manager or explicit paths, not both")
         self.store = ProviderStoreManager(
             catalog_path, state_path, connection_manager=connection_manager
+        )
+        self.categories_path = (
+            Path(categories_path)
+            if categories_path is not None
+            else Path(__file__).with_name("advanced_categories.json")
         )
 
     @property
@@ -35,6 +44,52 @@ class AdvancedProviderManager:
     def get_provider(self, provider_id: str) -> dict[str, Any] | None:
         provider = self.store.get_provider(provider_id)
         return provider if provider and provider.get("category") in ADVANCED_CATEGORIES else None
+
+    def category_catalog(self) -> dict[str, Any]:
+        """Load and validate category metadata without exposing mutable internal data."""
+        try:
+            data = json.loads(self.categories_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return {"version": "1.0", "status": "CATEGORY_CATALOG_UNAVAILABLE", "categories": {}}
+        categories = data.get("categories") if isinstance(data, dict) else None
+        if not isinstance(categories, dict):
+            return {"version": "1.0", "status": "INVALID_CATEGORY_CATALOG", "categories": {}}
+        validated: dict[str, dict[str, Any]] = {}
+        for category_id, record in categories.items():
+            if not isinstance(category_id, str) or not category_id.strip() or not isinstance(record, dict):
+                return {"version": "1.0", "status": "INVALID_CATEGORY_CATALOG", "categories": {}}
+            name = record.get("name")
+            capabilities = record.get("capabilities")
+            if (
+                not isinstance(name, str) or not name.strip()
+                or not isinstance(capabilities, list)
+                or any(not isinstance(item, str) or not item.strip() for item in capabilities)
+                or len(capabilities) != len(set(capabilities))
+            ):
+                return {"version": "1.0", "status": "INVALID_CATEGORY_CATALOG", "categories": {}}
+            validated[category_id] = copy.deepcopy(record)
+        return {
+            "version": str(data.get("version", "1.0")),
+            "status": "READY",
+            "categories": validated,
+        }
+
+    def list_categories(self) -> list[dict[str, Any]]:
+        """Return detached category records in stable ID order."""
+        catalog = self.category_catalog()
+        if catalog["status"] != "READY":
+            return []
+        return [
+            {"id": category_id, **copy.deepcopy(record)}
+            for category_id, record in sorted(catalog["categories"].items())
+        ]
+
+    def get_category(self, category: str) -> dict[str, Any] | None:
+        if not isinstance(category, str) or not category.strip():
+            return None
+        catalog = self.category_catalog()
+        record = catalog["categories"].get(category.strip()) if catalog["status"] == "READY" else None
+        return {"id": category.strip(), **copy.deepcopy(record)} if record is not None else None
 
     def by_category(self, category: str) -> list[dict[str, Any]]:
         return [
