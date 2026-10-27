@@ -12,6 +12,7 @@ from projects.provider_store.advanced.advps.credentials import CredentialManager
 from projects.provider_store.advanced.advps.jobs import JobManager
 from projects.provider_store.advanced.advps.health import HealthRegistry
 from projects.provider_store.advanced.advps.runtime import ProviderRuntime
+from projects.provider_store.advanced.advps.media import validate_media_payload, validate_media_metadata
 from projects.provider_store.advanced.advps.cli import main as cli_main
 from projects.provider_store.advanced.advps.errors import (
     AmbiguousOutcomeError, BudgetExceededError, CredentialExpiredError, CredentialUnavailableError, NotFoundError, PaidUsageNotApprovedError,
@@ -234,6 +235,49 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
             router.execute("text_to_image", ambiguous, idempotent=False)
         self.assertIn("ambiguous outcome", str(caught.exception))
         self.assertEqual(calls, ["provider-a"])
+
+    def test_media_payload_signature_size_and_checksum_validation(self):
+        import hashlib
+        png = b"\x89PNG\r\n\x1a\n" + b"fake-png-payload"
+        digest = hashlib.sha256(png).hexdigest()
+        result = validate_media_payload(
+            png, media_type="image", mime_type="image/png", max_bytes=100, expected_sha256=digest,
+        )
+        self.assertEqual(result["sha256"], digest)
+        self.assertEqual(result["size_bytes"], len(png))
+        with self.assertRaises(SecurityError):
+            validate_media_payload(png, media_type="image", mime_type="image/jpeg", max_bytes=100)
+        with self.assertRaises(SecurityError):
+            validate_media_payload(png, media_type="image", mime_type="image/png", max_bytes=2)
+        with self.assertRaises(SecurityError):
+            validate_media_payload(png, media_type="image", mime_type="image/png", max_bytes=100, expected_sha256="0" * 64)
+        with self.assertRaises(SecurityError):
+            validate_media_payload(b"not png", media_type="image", mime_type="image/png", max_bytes=100)
+
+    def test_media_metadata_enforces_duration_dimensions_and_quality(self):
+        metadata = {
+            "mime_type": "image/webp", "size_bytes": 2048, "width": 1920, "height": 1080,
+            "quality_score": 92.5, "sha256": "a" * 64,
+        }
+        normalized = validate_media_metadata(
+            metadata, media_type="image", max_bytes=4096, min_quality_score=90, require_dimensions=True,
+        )
+        self.assertEqual(normalized["width"], 1920)
+        with self.assertRaises(ValidationError):
+            validate_media_metadata(metadata, media_type="image", max_bytes=4096, min_quality_score=95)
+        with self.assertRaises(SecurityError):
+            validate_media_metadata(metadata, media_type="image", max_bytes=1000)
+        with self.assertRaises(ValidationError):
+            validate_media_metadata({"mime_type": "video/mp4", "size_bytes": 20, "duration_seconds": float("nan")},
+                                    media_type="video", max_bytes=100, max_duration_seconds=60)
+        with self.assertRaises(ValidationError):
+            validate_media_metadata({"mime_type": "image/png", "size_bytes": 20},
+                                    media_type="image", max_bytes=100, require_dimensions=True)
+        video = validate_media_metadata(
+            {"mime_type": "video/mp4", "size_bytes": 500, "duration_seconds": 30, "quality_score": 80},
+            media_type="video", max_bytes=1000, max_duration_seconds=60, min_quality_score=70,
+        )
+        self.assertEqual(video["duration_seconds"], 30)
 
     def test_provider_runtime_allowlisted_load_invoke_and_unload(self):
         class Provider:
