@@ -632,9 +632,9 @@ Implementation/evidence inspected: .github/workflows/task-25-tests.yml; coverage
 Remaining work: Coverage gate passed with 80% combined statement coverage across seven catalog/config/release/benchmark modules while all 480 tests passed; repository-wide coverage threshold remains undefined.
 
 Feature 123: Build Verification
-Status: UNVERIFIED
-Implementation/evidence inspected: No passing evidence located for the complete repository-wide gate
-Remaining work: Run and record formatting, lint, type, coverage, build, wheel, clean extraction, dependency lock and SBOM checks.
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; advanced/release_report.py; CI #40580523121
+Remaining work: Python compilation, catalog JSON validation and integrity-checked source ZIP/report/SBOM generation pass cross-platform CI. A standard distributable package build remains unavailable because the repository has no package build metadata.
 
 Feature 124: Wheel Installation Testing
 Status: UNVERIFIED
