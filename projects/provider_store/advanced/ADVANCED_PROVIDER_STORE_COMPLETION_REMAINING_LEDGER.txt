@@ -132,9 +132,9 @@ Implementation/evidence inspected: provider_authorization.py; tests/test_provide
 Remaining work: Unknown principals/operations fail closed, roles receive only explicit permissions, disabled principals are denied, and malformed persistent assignments are rejected.
 
 Feature 023: Provider Health Monitoring
-Status: PARTIAL
-Implementation/evidence inspected: health_manager.py; provider_status_manager.py; provider tests
-Remaining work: Health/status foundations and tests exist; production monitoring/metrics completeness is not established.
+Status: COMPLETED
+Implementation/evidence inspected: health_manager.py; tests/test_health_manager.py; CI #40560954116
+Remaining work: Persistent bounded health history, active probes, failure thresholds, recovery/readmission, stale-evidence exclusion and secret-safe diagnostics pass focused tests.
 
 Feature 024: Health Check Scheduling
 Status: PARTIAL
@@ -147,9 +147,9 @@ Implementation/evidence inspected: health_manager.py; provider_status_manager.py
 Remaining work: Persistent health/status states, reload behavior and availability checks are tested.
 
 Feature 026: Provider Metrics
-Status: PARTIAL
-Implementation/evidence inspected: health_manager.py; provider_status_manager.py; provider tests
-Remaining work: Health/status foundations and tests exist; production monitoring/metrics completeness is not established.
+Status: COMPLETED
+Implementation/evidence inspected: provider_metrics_manager.py; tests/test_provider_metrics_manager.py; CI #40560954116
+Remaining work: Bounded success/failure/timeout, latency and queue-wait aggregation plus concurrent sample-bound tests pass; external metrics export remains out of scope.
 
 Feature 027: Structured Logging
 Status: PARTIAL
@@ -532,14 +532,14 @@ Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; 
 Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
 
 Feature 103: Provider Benchmarking
-Status: PARTIAL
-Implementation/evidence inspected: provider_benchmark_manager.py; provider_output_quality_policy.py; provider_unlock_manager.py; related tests
-Remaining work: Foundational modules exist; controlled benchmark data and full acceptance matrices remain.
+Status: COMPLETED
+Implementation/evidence inspected: provider_benchmark_manager.py; tests/test_provider_benchmark_manager.py; CI #40560954116
+Remaining work: Bounded benchmark samples compare success rate, p50/p95 latency, cost and quality; invalid samples fail closed.
 
 Feature 104: Provider Quality Policies
-Status: PARTIAL
-Implementation/evidence inspected: provider_benchmark_manager.py; provider_output_quality_policy.py; provider_unlock_manager.py; related tests
-Remaining work: Foundational modules exist; controlled benchmark data and full acceptance matrices remain.
+Status: COMPLETED
+Implementation/evidence inspected: provider_quality_policy.py; tests/test_provider_quality_policy.py; CI #40560954116
+Remaining work: Task-specific score thresholds, invalid scorer results/errors and invalid configuration are covered by focused tests.
 
 Feature 105: Provider Unlock Management
 Status: PARTIAL
