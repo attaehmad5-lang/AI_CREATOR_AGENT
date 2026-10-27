@@ -18,11 +18,20 @@ _CREDIT_EXHAUSTED_CODES = {
     "credit_balance_exhausted",
     "billing_hard_limit_reached",
     "quota_exhausted",
+    "insufficient_balance",
+    "no_credits_remaining",
+    "credit_limit_exceeded",
+    "monthly_budget_exceeded",
+    "billing_limit_exceeded",
 }
 _BILLING_ACTION_CODES = {
     "payment_required",
     "billing_required",
     "account_payment_required",
+    "billing_not_active",
+    "payment_method_required",
+    "payment_failed",
+    "subscription_inactive",
 }
 _AUTH_CODES = {"invalid_api_key", "invalid_token", "unauthorized"}
 _PERMISSION_CODES = {"permission_denied", "insufficient_scope", "forbidden"}
