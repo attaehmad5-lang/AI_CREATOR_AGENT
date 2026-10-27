@@ -1595,6 +1595,18 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(probe_calls, [])
         self.assertNotEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
 
+    def test_connectivity_does_not_probe_with_unicode_control_credentials(self):
+        calls = []
+        result = self.manager.verify_connectivity(
+            "token_image",
+            lambda *args, **kwargs: calls.append(True) or True,
+            environ={"TEST_PROVIDER_TOKEN": "private\\u0085token"},
+        )
+        self.assertEqual(result["status"], "CREDENTIAL_VALUE_INVALID")
+        self.assertFalse(result["verified"])
+        self.assertEqual(calls, [])
+        self.assertNotEqual(self.manager.get_state("token_image")["status"], "CONNECTED")
+
     def test_connectivity_probe_requires_credentials_and_never_probes_without_them(self):
         called = []
         result = self.manager.verify_connectivity(
