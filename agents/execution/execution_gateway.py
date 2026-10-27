@@ -1,5 +1,10 @@
+from pathlib import Path
 import sys
-sys.path.insert(0, '/storage/emulated/0/AI_CREATOR_AGENT')
+
+# Resolve the repository root from this file instead of hard-coding one device path.
+_REPOSITORY_ROOT = str(Path(__file__).resolve().parents[2])
+if _REPOSITORY_ROOT not in sys.path:
+    sys.path.insert(0, _REPOSITORY_ROOT)
 from projects.provider_store.unified_provider_router import UnifiedProviderRouter
 from agents.generation.generation_adapter import GenerationAdapter
 
