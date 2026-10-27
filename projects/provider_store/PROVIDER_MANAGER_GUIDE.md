@@ -141,3 +141,15 @@ The `apply` command is a dry run unless `--apply` is supplied. Removing provider
 ## Release evidence and SBOM
 
 The release-report command creates JSON, Markdown and PDF status reports, a source-only ZIP, a SHA-256 source manifest/checksum sidecar, and an SPDX 2.3 JSON SBOM containing source-file SHA-256 hashes. License and copyright conclusions are recorded as `NOASSERTION`, not guessed. The report remains `INCOMPLETE` until all 150 acceptance points are completed. These offline checks do not prove live provider connectivity, real account credits, or billable generation.
+
+## Wheel build and installation verification
+
+The repository-root `pyproject.toml` builds the provider-store namespace as the `ai-creator-agent-provider-store` distribution. Runtime dependencies are declared empty; the build backend is pinned to `setuptools==80.9.0` and `wheel==0.45.1`. CI runs `python -m projects.provider_store.advanced.verify_wheel`, which performs two isolated wheel builds with a fixed `SOURCE_DATE_EPOCH`, compares their SHA-256 hashes, installs one wheel into a temporary target, then checks the installed CLI import and bundled provider catalog JSON from outside the repository. This verifies the declared package scope, not the entire AI_CREATOR_AGENT application.
+
+For a local build from the repository root:
+
+```bash
+python -m projects.provider_store.advanced.verify_wheel
+```
+
+A successful result includes `"reproducible": true`, `"installed_import": true`, and `"catalog_data_included": true`. Build verification requires access to the pinned build tools when they are not cached.
