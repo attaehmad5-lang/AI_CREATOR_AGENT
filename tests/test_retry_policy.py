@@ -93,7 +93,12 @@ class RetryPolicyTests(unittest.TestCase):
             with self.subTest(code=code):
                 result = policy.decide(attempt=1, status_code=429, provider_code=code)
                 self.assertFalse(result.retry)
-                self.assertEqual(result.reason, "PROVIDER_ERROR_NON_RETRYABLE")
+                expected = (
+                    "AUTHORIZATION_FAILURE"
+                    if code in {"invalid_api_key", "permission_denied"}
+                    else "PROVIDER_ERROR_NON_RETRYABLE"
+                )
+                self.assertEqual(result.reason, expected)
 
     def test_non_idempotent_request_is_not_retried(self):
         result = RetryPolicy().decide(attempt=1, status_code=503, idempotent=False)
