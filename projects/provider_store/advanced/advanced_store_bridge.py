@@ -1,4 +1,4 @@
-"""Bridge advanced provider selection to the central ConnectionManager.
+""""Bridge advanced provider selection to the central ConnectionManager.
 
 This adapter deliberately owns no catalog, credentials, connection state, or
 billing ledger. ConnectionManager remains the source of truth; ProviderService
@@ -121,3 +121,40 @@ class AdvancedStoreBridge:
     def simulate(self, capability: str, **kwargs: Any) -> list[str]:
         """Dry-run selection: no provider calls, credentials, billing, or state changes."""
         return [provider["id"] for provider in self.candidates(capability, **kwargs)]
+
+    def execute_via_service(self, provider_service: Any, **request: Any) -> dict[str, Any]:
+        """Delegate live work to the canonical ProviderService safety/accounting path.
+
+        This method does not execute a provider itself. ProviderService owns
+        authorization, canonical routing, reservations, output validation,
+        billing/quota reconciliation, and ambiguous-outcome handling. Never
+        substitute the dry-run candidates above for this production boundary.
+        """
+        executor = getattr(provider_service, "execute_routed_request", None)
+        if not callable(executor):
+            return {"status": "PROVIDER_SERVICE_UNAVAILABLE", "executed": False}
+        try:
+            result = executor(**request)
+        except Exception:
+            # Once delegated, an exception cannot prove that no paid request
+            # reached a provider. Fail closed and retain any reservations.
+            response: dict[str, Any] = {
+                "status": "EXECUTION_OUTCOME_UNKNOWN",
+                "executed": False,
+                "reservations_retained": True,
+            }
+            request_id = request.get("request_id")
+            if isinstance(request_id, str) and request_id.strip():
+                response["request_id"] = request_id
+            return response
+        if not isinstance(result, dict):
+            response = {
+                "status": "EXECUTION_OUTCOME_UNKNOWN",
+                "executed": False,
+                "reservations_retained": True,
+            }
+            request_id = request.get("request_id")
+            if isinstance(request_id, str) and request_id.strip():
+                response["request_id"] = request_id
+            return response
+        return result
