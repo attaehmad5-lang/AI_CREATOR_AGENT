@@ -195,6 +195,26 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             self.assertFalse(locked["ready"])
             self.assertEqual(report["catalog_consistency"], "MISMATCH")
 
+    def test_advanced_facade_blocks_disabled_and_locked_provider_loads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, advanced = self._manager(Path(tmp))
+            called = []
+            result = advanced.load_provider("story_disabled", lambda provider: called.append(provider))
+            self.assertEqual(result["status"], "DISABLED")
+            self.assertFalse(result["loaded"])
+            self.assertEqual(called, [])
+            locked = advanced.load_provider("story_locked", lambda provider: called.append(provider))
+            self.assertEqual(locked["status"], "LOCKED")
+            self.assertEqual(called, [])
+            missing = advanced.load_provider("core_only", lambda provider: object())
+            self.assertEqual(missing["status"], "NOT_FOUND")
+
+    def test_advanced_facade_rejects_core_provider_unload_and_lookup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, advanced = self._manager(Path(tmp))
+            self.assertEqual(advanced.unload_provider("core_only")["status"], "NOT_FOUND")
+            self.assertIsNone(advanced.loaded_provider("core_only"))
+
     def test_readiness_report_never_contains_raw_credentials(self):
         with tempfile.TemporaryDirectory() as tmp:
             _, advanced = self._manager(Path(tmp))
