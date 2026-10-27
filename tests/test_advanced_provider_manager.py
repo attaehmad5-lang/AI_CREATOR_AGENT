@@ -103,6 +103,24 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             self.assertEqual(advanced.list_verified_enabled_providers("  "), [])
             self.assertEqual(advanced.list_verified_enabled_providers(123), [])
 
+    def test_category_catalog_is_validated_and_returns_detached_records(self):
+        advanced = AdvancedProviderManager()
+        categories = advanced.list_categories()
+        self.assertEqual(len(categories), 6)
+        audio = advanced.get_category("advanced_audio")
+        self.assertIn("audio_generation", audio["capabilities"])
+        audio["capabilities"].append("caller_mutation")
+        self.assertNotIn("caller_mutation", advanced.get_category("advanced_audio")["capabilities"])
+        self.assertIsNone(advanced.get_category("../invalid"))
+
+    def test_invalid_category_catalog_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad_path = Path(tmp) / "categories.json"
+            bad_path.write_text("{invalid", encoding="utf-8")
+            advanced = AdvancedProviderManager(categories_path=str(bad_path))
+            self.assertEqual(advanced.category_catalog()["status"], "CATEGORY_CATALOG_UNAVAILABLE")
+            self.assertEqual(advanced.list_categories(), [])
+
     def test_completion_ledger_contains_150_unique_feature_rows(self):
         ledger = (
             Path(__file__).resolve().parents[1]
