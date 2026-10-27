@@ -327,9 +327,9 @@ Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_mana
 Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
 
 Feature 062: Usage Tracking
-Status: PARTIAL
-Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
-Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+Status: COMPLETED
+Implementation/evidence inspected: cost_policy.py; provider_service.py; tests/test_cost_policy.py; tests/test_provider_service.py; CI #40560954116
+Remaining work: Started requests reserve usage, actual charges reconcile idempotently, ambiguous charges retain reservations, and usage state persists safely. Live billing remains integration-only.
 
 Feature 063: Credit Management
 Status: COMPLETED
@@ -502,9 +502,9 @@ Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; 
 Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
 
 Feature 097: Stale Job Detection
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
-Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Expired worker leases are detected, requeued, and bounded by configured attempt limits in focused regression tests.
 
 Feature 098: Audit Logging
 Status: PARTIAL
