@@ -67,9 +67,9 @@ Implementation/evidence inspected: connection_manager.py; provider_store_manager
 Remaining work: Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain.
 
 Feature 010: Capability Management
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py
-Remaining work: Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain.
+Status: COMPLETED
+Implementation/evidence inspected: unified_provider_registry.py; advanced/advanced_provider_manager.py; tests/test_provider_catalogs.py; tests/test_advanced_provider_manager.py; CI #40565486477
+Remaining work: Capability identifiers are validated and normalized; exact capability discovery, category scoping, catalog consistency and modality contracts pass tests.
 
 Feature 011: Provider Version Management
 Status: PARTIAL
@@ -107,9 +107,9 @@ Implementation/evidence inspected: connection_manager.py; provider_service.py; t
 Remaining work: Persistent connection state, configure/enable/disable, verified-state transitions, manual-auth separation, concurrent lifecycle operations and failure-safe cleanup pass tests. Live provider connectivity remains separately tracked in point 021.
 
 Feature 018: TLS/HTTPS Security
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py
-Remaining work: Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are rejected before any probe; full 429-test suite passed on Ubuntu and Windows at run #40555608773.
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; http_probe.py; tests/test_connection_manager.py; tests/test_http_probe.py; CI #40565486477
+Remaining work: HTTPS is required for non-loopback endpoints, TLS verification is retained, embedded credentials and unallowlisted hosts are rejected, and redirects are blocked. Live provider certificate checks remain part of live integration verification.
 
 Feature 019: Endpoint Configuration
 Status: COMPLETED
