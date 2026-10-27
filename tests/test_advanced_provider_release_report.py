@@ -78,6 +78,12 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             self.assertEqual(checksum_text[0], hashlib.sha256(Path(result["archive"]).read_bytes()).hexdigest())
             self.assertEqual(checksum_text[1], Path(result["archive"]).name)
             manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
+            sbom = json.loads(Path(result["sbom"]).read_text(encoding="utf-8"))
+            self.assertEqual(sbom["spdxVersion"], "SPDX-2.3")
+            self.assertEqual(len(sbom["files"]), manifest["file_count"])
+            sbom_paths = {entry["fileName"] for entry in sbom["files"]}
+            self.assertEqual(sbom_paths, {entry["path"] for entry in manifest["files"]})
+            self.assertTrue(all(entry["checksums"][0]["algorithm"] == "SHA256" for entry in sbom["files"]))
             paths = {entry["path"] for entry in manifest["files"]}
             self.assertIn("projects/provider_store/provider_status_manager.py", paths)
             self.assertNotIn("projects/provider_store/advanced_provider_catalog_backup.json", paths)
@@ -91,6 +97,8 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                 self.assertNotIn("projects/provider_store/connection_state.json", names)
                 self.assertIn("RELEASE_REPORT.json", names)
                 self.assertIn("SOURCE_MANIFEST.json", names)
+                self.assertIn("SBOM.spdx.json", names)
+                self.assertEqual(json.loads(archive.read("SBOM.spdx.json"))["spdxVersion"], "SPDX-2.3")
                 self.assertIn("ADVANCED_PROVIDER_STORE_REPORT.pdf", names)
                 self.assertTrue(archive.read("ADVANCED_PROVIDER_STORE_REPORT.pdf").startswith(b"%PDF-1.4"))
                 for entry in manifest["files"]:
