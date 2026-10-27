@@ -128,6 +128,12 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required", "allowed_hosts", "token_env", "api_key_env", "credential_env", "official_api_url", "subscription_url", "zero_cost_allowed", "priority", "supported_models"):
                 self.assertEqual(advanced_record.get(field), backup_record.get(field), "advanced backup drift for " + advanced_record["id"] + " field " + field)
             self.assertEqual(sorted(advanced_record.get("capabilities", [])), sorted(backup_record.get("capabilities", [])))
+            if advanced_record.get("connection_type") == "API":
+                self.assertTrue(
+                    isinstance(advanced_record.get("official_api_url"), str)
+                    and advanced_record["official_api_url"].startswith("https://"),
+                    "API provider lacks official docs URL: " + advanced_record["id"],
+                )
             canonical = main_by_id[advanced_record["id"]]
             for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required", "allowed_hosts", "token_env", "api_key_env", "credential_env", "official_api_url", "subscription_url", "zero_cost_allowed", "priority", "supported_models"):
                 self.assertEqual(
