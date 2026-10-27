@@ -46,6 +46,10 @@ The original uploaded standalone archive was tested from a clean extraction at P
 - Run the full repository suite plus mutation/build/security/fuzz/load checks.
 - Review the exact diff and merge only when all applicable checks pass.
 
+## Full repository regression
+
+- Latest full repository gate [40503135494](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40503135494): compileall and all 464 unit tests passed on Ubuntu/Python 3.13.
+
 ## Status
 
-**Repository core/bridge/transport/job CI: PASS (4/4 matrix jobs); Task 25 CI: PASS (2/2 OS jobs); coverage: PASS (83.4%, 80% minimum). Original standalone archive: PASS (99/99 tests, 99.6% local coverage). Full production release: NOT COMPLETE / NOT VERIFIED.**
+**Repository core/bridge/transport/job CI: PASS (4/4 matrix jobs); Task 25 CI: PASS (2/2 OS jobs); coverage: PASS (82.4%, 80% minimum). Original standalone archive: PASS (99/99 tests, 99.6% local coverage). Full production release: NOT COMPLETE / NOT VERIFIED.**
