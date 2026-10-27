@@ -567,14 +567,14 @@ Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
 Remaining work: Unit/regression/security/concurrency tests exist; not all integration, failure-injection, fuzzing and performance dimensions are covered.
 
 Feature 110: Regression Testing
-Status: PARTIAL
-Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
-Remaining work: Full current regression suite passes; feature-by-feature failure injection and all-modality integration tests remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml; CI #40560954116
+Remaining work: Cross-module provider regression suite runs on Ubuntu and Windows and includes catalog, auth, routing, quota/cost, security, output, incident and release-package checks.
 
 Feature 111: Concurrency Testing
-Status: PARTIAL
-Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
-Remaining work: Unit/regression/security/concurrency tests exist; not all integration, failure-injection, fuzzing and performance dimensions are covered.
+Status: COMPLETED
+Implementation/evidence inspected: tests/test_connection_manager.py; tests/test_health_manager.py; tests/test_credit_manager.py; tests/test_quota_manager.py; tests/test_cost_policy.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Thread/process concurrency tests cover state updates, health history, credit/quota/budget reservations, job limits and idempotent finalization.
 
 Feature 112: Failure Injection Testing
 Status: PARTIAL
