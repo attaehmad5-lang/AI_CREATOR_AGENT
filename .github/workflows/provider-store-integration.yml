@@ -36,7 +36,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-          cache: "pip"
 
       - name: Compile provider-store and compatibility test
         run: python -m compileall -q projects/provider_store tests/test_provider_store_compat.py
