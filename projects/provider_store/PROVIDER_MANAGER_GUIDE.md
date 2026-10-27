@@ -20,6 +20,15 @@ This guide describes the current implementation in this branch. It is not a clai
 - `provider_catalog.json` and `provider_catalog_master.json` — one synchronized 54-provider registry, including the 18 advanced-provider records. Catalog v3 requires complete provider identity fields and explicit `enabled` / `subscription_required` booleans; provider IDs and documentation/subscription links are validated before acceptance. The master catalog is the fallback copy, and the older v2 backup remains archival.
 - Legacy store, category, advanced, unlock, status, and unified-registry/router facades now read the central catalog. Discovery facades distinguish catalog labels from live verified state; actual policy-aware execution still belongs to `ProviderRoutingManager`.
 
+## Advanced Provider Store operations
+
+- `advanced/advanced_provider_manager.py` is a compatibility facade over the canonical provider registry. Use `list_categories()`, `get_category()`, `by_capability()`, and `supports_capability()` for validated category/capability discovery.
+- Use `load_provider(provider_id, factory)` only for explicitly enabled advanced providers. The canonical connection manager validates the callable contract before retaining an adapter; `unload_provider()` runs adapter cleanup and `loaded_provider()` returns only the process-local instance. Never serialize adapter instances.
+- `catalog_consistency()` compares the legacy advanced catalog against canonical provider metadata and category capability declarations. A mismatch is a configuration error, not a live-connection failure.
+- `readiness_report()` separates catalog consistency, enabled state, credential presence, and verified runtime connectivity. It never returns credential values. A provider is not ready just because its catalog says `CONNECTED` or a credential exists.
+- Run `python -m projects.provider_store.advanced.advanced_provider_manager` from the repository root to print a secret-free readiness report and actionable blockers. `DEGRADED` is expected until provider-specific credentials, enablement, and live verification are intentionally configured.
+- Live generation, billing, credit-balance, and subscription tests require the user to configure provider credentials and approve any potentially billable operation. No provider is automatically enabled, purchased, or unlocked.
+
 ## Safety contracts
 
 1. **No automatic purchases.** These modules do not purchase credits, start subscriptions, or infer paid approval.
