@@ -88,7 +88,10 @@ class GenerationAdapter:
             return {"status": "INVALID_PROMPT", "executed": False}
         if not isinstance(output_path, (str, os.PathLike)):
             return {"status": "INVALID_OUTPUT_PATH", "executed": False}
-        output_path = os.fspath(output_path)
+        try:
+            output_path = os.fspath(output_path)
+        except (TypeError, ValueError, OSError):
+            return {"status": "INVALID_OUTPUT_PATH", "executed": False}
         if (
             not isinstance(output_path, str)
             or not output_path.strip()
