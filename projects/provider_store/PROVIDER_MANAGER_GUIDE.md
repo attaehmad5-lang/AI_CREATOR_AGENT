@@ -27,6 +27,7 @@ This guide describes the current implementation in this branch. It is not a clai
 - `catalog_consistency()` compares the legacy advanced catalog against canonical provider metadata and category capability declarations. A mismatch is a configuration error, not a live-connection failure.
 - `readiness_report()` separates catalog consistency, enabled state, credential presence, and verified runtime connectivity. It never returns credential values. A provider is not ready just because its catalog says `CONNECTED` or a credential exists.
 - Run `python -m projects.provider_store.advanced.advanced_provider_manager` from the repository root to print a secret-free readiness report and actionable blockers. `DEGRADED` is expected until provider-specific credentials, enablement, and live verification are intentionally configured.
+- Run `python -m projects.provider_store.advanced.release_report --output-dir build/advanced-provider-store-release` to generate a JSON/Markdown ledger report, source SHA-256 manifest, and integrity-checked source ZIP. The report intentionally remains `INCOMPLETE` until all 150 ledger points are completed; the ZIP excludes runtime state, backups, environment files, and credential/secret files.
 - Live generation, billing, credit-balance, and subscription tests require the user to configure provider credentials and approve any potentially billable operation. No provider is automatically enabled, purchased, or unlocked.
 
 ## Safety contracts
