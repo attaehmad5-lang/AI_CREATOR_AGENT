@@ -2,10 +2,10 @@
 
 A standard-library-first core for provider metadata, model capabilities,
 routing simulation/execution through injected callbacks, bounded HTTPS
-transport, environment-backed credential references, retry/circuit-breaker
-policy, atomic local JSON storage, tamper-evident audit logs, explicit
-paid-usage approval, quotas, budgets, idempotency, job lifecycle/leases/recovery,
-and backup/recovery.
+transport, environment-backed credential references, provider health/probe
+leases, retry/circuit-breaker policy, atomic local JSON storage, tamper-evident
+audit logs, explicit paid-usage approval, quotas, budgets, idempotency, job
+lifecycle/leases/recovery, and backup/recovery.
 
 ## Safety boundaries
 
@@ -24,6 +24,9 @@ and backup/recovery.
 - `CredentialManager` resolves environment references and supports an injected
   refresh callback; raw credentials are held only in process memory and are never
   persisted by this module. OAuth/network policy remains the host's responsibility.
+- `HealthRegistry` records sanitized outcomes, schedules due probes, manages
+  probe leases, failure thresholds, backoff and latency EWMA. The host must supply
+  actual probe callbacks and worker execution.
 - `JobManager` persists job metadata, hashed idempotency keys, leases, attempts,
   cancellation state and stale-lease recovery. It does not store payloads or
   credentials, and it does not itself interrupt an executing worker process.
