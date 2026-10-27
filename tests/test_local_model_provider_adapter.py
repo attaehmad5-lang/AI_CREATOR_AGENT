@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -152,6 +153,41 @@ class LocalModelProviderAdapterTests(unittest.TestCase):
         self.assertEqual(result["status"], "LOCAL_MODEL_REQUEST_FAILED")
         self.assertEqual(result["error_type"], "TimeoutError")
         self.assertNotIn("private prompt", str(result))
+
+
+    @unittest.skipUnless(
+        os.environ.get("AI_CREATOR_AGENT_OLLAMA_E2E") == "1"
+        and bool(os.environ.get("AI_CREATOR_AGENT_OLLAMA_MODEL", "").strip()),
+        "set AI_CREATOR_AGENT_OLLAMA_E2E=1 and AI_CREATOR_AGENT_OLLAMA_MODEL to run against a real local Ollama model",
+    )
+    def test_real_local_ollama_end_to_end_when_explicitly_enabled(self):
+        """Opt-in real HTTP/model test; never silently substitutes a mocked transport."""
+        endpoint = os.environ.get(
+            "AI_CREATOR_AGENT_OLLAMA_ENDPOINT",
+            "http://127.0.0.1:11434/api/generate",
+        )
+        model_id = os.environ["AI_CREATOR_AGENT_OLLAMA_MODEL"].strip()
+        with tempfile.TemporaryDirectory() as directory:
+            output_path = Path(directory) / "ollama-e2e.txt"
+            adapter = LocalModelProviderAdapter(
+                endpoint=endpoint,
+                model_id=model_id,
+                timeout_seconds=60,
+            )
+            result = adapter.execute(
+                prompt="Reply with exactly the word READY.",
+                system="Follow the user instruction concisely.",
+                provider_id="local-ollama",
+                request_id="ollama-e2e-1",
+                output_path=output_path,
+            )
+            self.assertTrue(result.get("started"), msg=repr(result))
+            self.assertTrue(result.get("success"), msg=repr(result))
+            self.assertEqual(result.get("status"), "LOCAL_TEXT_GENERATED")
+            self.assertTrue(output_path.is_file())
+            self.assertTrue(output_path.read_text(encoding="utf-8").strip())
+            self.assertEqual(result.get("actual_cost"), 0.0)
+            self.assertEqual(result.get("charge_outcome"), "not_incurred")
 
 
 if __name__ == "__main__":
