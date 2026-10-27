@@ -26,6 +26,7 @@ _BILLING_ACTION_CODES = {
 }
 _AUTH_CODES = {"invalid_api_key", "invalid_token", "unauthorized"}
 _PERMISSION_CODES = {"permission_denied", "insufficient_scope", "forbidden"}
+_RATE_LIMIT_CODES = {"rate_limit_exceeded", "rate_limited", "too_many_requests"}
 _TRANSIENT_CODES = {"temporarily_unavailable", "overloaded", "server_overloaded"}
 
 
@@ -111,7 +112,7 @@ def classify_provider_error(
             "action": "review_provider_permissions_and_scopes",
             "http_status": http_status,
         }
-    if http_status == 429:
+    if http_status == 429 or code in _RATE_LIMIT_CODES:
         result = {
             "status": "RATE_LIMITED",
             "category": "rate_limit",
