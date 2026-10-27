@@ -1,0 +1,45 @@
+name: Provider Store Integration Verification
+
+on:
+  pull_request:
+    paths:
+      - "projects/provider_store/**"
+      - "tests/test_provider_store_compat.py"
+      - ".github/workflows/provider-store-integration.yml"
+  push:
+    branches:
+      - main
+      - task-advanced-provider-store-review
+    paths:
+      - "projects/provider_store/**"
+      - "tests/test_provider_store_compat.py"
+      - ".github/workflows/provider-store-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-store-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    name: Python 3.13 compatibility and syntax checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Compile provider-store and compatibility test
+        run: python -m compileall -q projects/provider_store tests/test_provider_store_compat.py
+
+      - name: Run provider-store compatibility regression tests
+        run: python -m unittest discover -s tests -p "test_provider_store_compat.py" -v
