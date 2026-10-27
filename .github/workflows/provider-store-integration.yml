@@ -3,7 +3,17 @@ name: Provider Store Integration Verification
 on:
   pull_request:
     paths:
-      - "projects/provider_store/**"
+      - "projects/provider_store/advanced/advps/**"
+      - "projects/provider_store/advanced/advanced_store_bridge.py"
+      - "projects/provider_store/advanced/advanced_provider_manager.py"
+      - "projects/provider_store/advanced/tools_coverage.py"
+      - "projects/provider_store/advanced/pyproject.toml"
+      - "projects/provider_store/advanced/run_tests.sh"
+      - "projects/provider_store/connection_manager.py"
+      - "projects/provider_store/provider_service.py"
+      - "projects/provider_store/provider_store_manager.py"
+      - "projects/provider_store/provider_catalog.json"
+      - "projects/provider_store/advanced/advanced_provider_catalog.json"
       - "tests/test_provider_store_compat.py"
       - "tests/test_provider_service.py"
       - "tests/test_advanced_store_bridge.py"
@@ -15,7 +25,17 @@ on:
       - main
       - task-advanced-provider-store-review
     paths:
-      - "projects/provider_store/**"
+      - "projects/provider_store/advanced/advps/**"
+      - "projects/provider_store/advanced/advanced_store_bridge.py"
+      - "projects/provider_store/advanced/advanced_provider_manager.py"
+      - "projects/provider_store/advanced/tools_coverage.py"
+      - "projects/provider_store/advanced/pyproject.toml"
+      - "projects/provider_store/advanced/run_tests.sh"
+      - "projects/provider_store/connection_manager.py"
+      - "projects/provider_store/provider_service.py"
+      - "projects/provider_store/provider_store_manager.py"
+      - "projects/provider_store/provider_catalog.json"
+      - "projects/provider_store/advanced/advanced_provider_catalog.json"
       - "tests/test_provider_store_compat.py"
       - "tests/test_provider_service.py"
       - "tests/test_advanced_store_bridge.py"
