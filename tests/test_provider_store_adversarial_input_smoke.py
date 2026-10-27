@@ -41,6 +41,15 @@ class ProviderStoreAdversarialInputSmokeTests(unittest.TestCase):
             self.assertIsInstance(result.get("valid"), bool, f"case {index}")
             self.assertIsInstance(result.get("errors"), list, f"case {index}")
 
+    def test_signature_with_wrong_extension_is_rejected(self):
+        validator = ProviderOutputValidator()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "payload.txt"
+            path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"not-a-complete-image")
+            result = validator.validate_file(path, modality="image")
+            self.assertFalse(result["valid"])
+            self.assertEqual(result["status"], "EXTENSION_MISMATCH")
+
     def test_output_validator_never_crashes_on_random_untrusted_artifact_bytes(self):
         rng = random.Random(731)
         validator = ProviderOutputValidator(max_size_bytes=4096)
