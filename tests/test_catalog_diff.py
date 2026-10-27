@@ -63,7 +63,9 @@ class CatalogDiffTests(unittest.TestCase):
         blocked = apply_catalog_candidate(
             self.current, self.candidate, dry_run=False
         )
-        self.assertEqual(blocked["status"], "CATALOG_DIFF_REMOVAL_APPROVAL_REQUIRED")
+        self.assertEqual(
+            blocked["status"], "CATALOG_DIFF_REMOVAL_APPROVAL_REQUIRED"
+        )
         self.assertEqual(self.current.read_bytes(), original)
 
         applied = apply_catalog_candidate(
@@ -78,9 +80,7 @@ class CatalogDiffTests(unittest.TestCase):
 
     def test_invalid_boolean_controls_are_rejected(self):
         with self.assertRaises(ValueError):
-            apply_catalog_candidate(
-                self.current, self.candidate, dry_run="no"
-            )
+            apply_catalog_candidate(self.current, self.candidate, dry_run="no")
 
 
 if __name__ == "__main__":
