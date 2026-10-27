@@ -11,6 +11,8 @@ Changes are recorded here by release intent. This file does not imply a publishe
 - SPDX 2.3 source-file SBOM containing SHA-256 hashes for packaged files.
 - Pinned isolated wheel build metadata and a cross-platform verifier for reproducible wheel output, clean-target installation, module import, and catalog JSON inclusion.
 - Focused Ruff, mypy, and coverage gates for provider-store maintenance/release modules.
+- Bounded poll-driven health scheduler with injected probes and explicit timeout propagation.
+- Outage detector that opens/deduplicates incidents for unhealthy or stale health evidence and resolves them after verified recovery.
 
 ### Fixed
 - Preserve original configuration bytes and temporary-file cleanup when config migration replacement fails.
