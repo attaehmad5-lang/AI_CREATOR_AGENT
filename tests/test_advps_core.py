@@ -264,7 +264,7 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
             validate_media_payload(png, media_type="image", mime_type=[], max_bytes=100)
         with self.assertRaises(ValidationError):
             validate_media_payload(png, media_type="image", mime_type="image/png", max_bytes=100, expected_sha256=123)
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(SecurityError):
             validate_media_metadata({"mime_type": [], "size_bytes": 10}, media_type="image", max_bytes=100)
         with self.assertRaises(ValidationError):
             validate_media_metadata({"mime_type": "image/png", "size_bytes": 10}, media_type=[], max_bytes=100)
