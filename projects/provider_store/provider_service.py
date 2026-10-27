@@ -1687,8 +1687,18 @@ class ProviderService:
         return {"status": "RELEASED" if released else "RELEASE_PARTIAL", "released": released, **results}
 
 
-    def run_due_provider_rechecks(self) -> dict[str, Any]:
-        """Explicitly run due health rechecks; never starts generation or reroutes work."""
+    def run_due_provider_rechecks(
+        self, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        """Run due health rechecks after provider-verification authorization."""
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            # Do not expose internal authorization details from this maintenance action.
+            return {
+                "status": "PROVIDER_RECHECK_AUTHORIZATION_DENIED",
+                "probed": [],
+                "results": {},
+            }
         if self.recovery_coordinator is None:
             return {"status": "RECOVERY_COORDINATOR_UNAVAILABLE", "probed": [], "results": {}}
         try:
