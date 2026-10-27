@@ -85,6 +85,15 @@ class ProviderCreditManager:
                 raise ValueError("invalid provider credit usage record")
             timestamp_key = "created_at" if request_id in loaded["reservations"] else "committed_at"
             self._parse_timestamp(record.get(timestamp_key))
+            if request_id in loaded["reservations"] and "outcome_uncertain" in record:
+                if not isinstance(record["outcome_uncertain"], bool):
+                    raise ValueError("invalid provider credit uncertainty flag")
+                if record["outcome_uncertain"] is True:
+                    if record.get("uncertainty_reason") not in {
+                        "TIMEOUT", "CONNECTION_LOST", "PROVIDER_ERROR", "UNKNOWN"
+                    }:
+                        raise ValueError("invalid provider credit uncertainty reason")
+                    self._parse_timestamp(record.get("uncertain_at"))
             if request_id in loaded["usage"]:
                 version = record.get("snapshot_version", 1)
                 if not isinstance(version, int) or isinstance(version, bool) or version < 1:
