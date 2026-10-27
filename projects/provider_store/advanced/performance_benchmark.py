@@ -18,7 +18,8 @@ def run_benchmark(*, iterations: int = 25, max_seconds: float = 15.0,
                   repo_root: str | Path | None = None) -> dict[str, Any]:
     if isinstance(iterations, bool) or not isinstance(iterations, int) or not 1 <= iterations <= 10000:
         raise ValueError("iterations must be an integer between 1 and 10000")
-    if (isinstance(max_seconds, bool) or not isinstance(max_seconds, (int, float))\n            or not math.isfinite(max_seconds) or max_seconds <= 0):
+    if (isinstance(max_seconds, bool) or not isinstance(max_seconds, (int, float))
+            or not math.isfinite(max_seconds) or max_seconds <= 0):
         raise ValueError("max_seconds must be positive")
     root = Path(repo_root).resolve() if repo_root is not None else Path(__file__).resolve().parents[3]
     central = root / "projects" / "provider_store" / "provider_catalog.json"
