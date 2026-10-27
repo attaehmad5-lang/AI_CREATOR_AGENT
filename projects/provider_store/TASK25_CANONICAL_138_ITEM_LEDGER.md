@@ -88,7 +88,7 @@ GitHub Actions run [#40442372725](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 45 | 🔴 | Active Health Probes | PARTIAL | Generic HTTPS probe exists; provider-specific authenticated probes and live results remain open. |
 | 46 | 🟡 | Unhealthy Provider Exclusion | VERIFIED | Unhealthy providers are excluded by health eligibility and routing regression tests. |
 | 47 | 🔴 | Provider Recovery Detection | PARTIAL | `ProviderHealthManager` supports a configurable consecutive-success recovery threshold; providers recovering from `UNHEALTHY` remain ineligible as `RECOVERING` until enough successful probes are recorded. Default threshold preserves existing one-success behavior; full automated probe scheduling remains open. |
-| 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale health exclusion and malformed persisted-state checks exist; full health/consistency reconciliation is not complete. |
+| 48 | 🔴 | Stale Health and Consistency Checks | PARTIAL | Stale/future health evidence is excluded, malformed persisted-state checks fail closed, and `ProviderHealthManager.audit_consistency()` now performs a read-only audit for conflicting status/counters, impossible recovery state, future timestamps, invalid latency, and non-chronological history. Five regression tests cover consistent empty state, counter conflicts, threshold mismatch, future timestamps without repair, and history ordering; run [#40446263623](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40446263623) passes 627 tests on Ubuntu and Windows. Full automated health reconciliation, scheduled re-probing, and safe repair workflows remain open. |
 
 ## G — Output and Asset Safety
 
