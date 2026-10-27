@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -116,10 +118,32 @@ def main():
         "created_at": datetime.now().isoformat(),
     }
 
-    OUTPUT.write_text(
-        json.dumps(result, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    # Publish the status atomically: a crash or full disk must not leave a
+    # truncated JSON file that another health gate could misread as valid.
+    output_payload = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=str(OUTPUT.parent),
+            prefix=OUTPUT.name + ".",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(output_payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, OUTPUT)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
 
     print("===================================")
     print(" PROVIDER CAPABILITY GATE")
