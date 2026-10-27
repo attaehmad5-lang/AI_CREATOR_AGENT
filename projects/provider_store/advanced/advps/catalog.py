@@ -13,6 +13,7 @@ from .storage import AtomicJsonStore, digest
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 SCHEMA_VERSION = 1
 MAX_HISTORY = 20
+MEDIA_TYPES = {"image", "video", "audio", "text"}
 _SAFE_REFERENCE_KEYS = {"token_env", "token_expiry_env", "api_key_env", "secret_ref", "credential_env"}
 _SECRET_MARKERS = ("access_token", "refresh_token", "api_key", "apikey", "password", "secret", "credential",
                    "authorization", "bearer", "private_key", "signing_key", "encryption_key", "cookie", "session")
@@ -96,11 +97,21 @@ def validate_provider(rec: dict, allowlist: Optional[Iterable[str]] = None) -> d
         latency = model.get("avg_latency_ms")
         if latency is not None:
             latency = _finite_nonnegative(latency, f"model {mid!r} avg_latency_ms")
+        quality = model.get("quality_score")
+        if quality is not None:
+            quality = _finite_nonnegative(quality, f"model {mid!r} quality_score")
+            if quality > 100:
+                raise ValidationError(f"model {mid!r}: quality_score must be <= 100")
+        media_types = model.get("media_types", [])
+        if not isinstance(media_types, list) or any(t not in MEDIA_TYPES for t in media_types):
+            raise ValidationError(f"model {mid!r}: media_types must be supported media types")
         clean_models[mid] = {
             "capabilities": list(model_caps),
             "price_per_unit": price,
             "unit": unit,
             "avg_latency_ms": latency,
+            "quality_score": quality,
+            "media_types": list(media_types),
         }
     return {
         "id": pid,
