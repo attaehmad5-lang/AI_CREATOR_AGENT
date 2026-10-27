@@ -69,6 +69,15 @@ class ProviderQuotaManager:
                 self._parse_timestamp(record.get("committed_at"))
             if record.get("status") == "RELEASED":
                 self._parse_timestamp(record.get("released_at"))
+            if "outcome_uncertain" in record:
+                if not isinstance(record["outcome_uncertain"], bool):
+                    raise ValueError("invalid quota uncertainty flag")
+                if record["outcome_uncertain"] is True:
+                    if record.get("uncertainty_reason") not in {
+                        "TIMEOUT", "CONNECTION_LOST", "PROVIDER_ERROR", "UNKNOWN"
+                    }:
+                        raise ValueError("invalid quota uncertainty reason")
+                    self._parse_timestamp(record.get("uncertain_at"))
         self.data = loaded
 
     @contextmanager
