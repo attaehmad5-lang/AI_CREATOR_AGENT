@@ -106,7 +106,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
     files = _safe_source_files(root)
     if not files:
         raise ValueError("no eligible provider-store source files found")
-    manifest_entries = []
+    manifest_entries: list[dict[str, Any]] = []
     payloads: list[tuple[str, bytes]] = []
     for path in files:
         relative = path.relative_to(root).as_posix()
