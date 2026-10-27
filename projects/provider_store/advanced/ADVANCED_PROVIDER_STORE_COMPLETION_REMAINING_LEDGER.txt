@@ -102,9 +102,9 @@ Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_p
 Remaining work: Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are rejected before any probe; full 429-test suite passed on Ubuntu and Windows at run #40555608773.
 
 Feature 017: Connection Management
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py
-Remaining work: Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are rejected before any probe; full 429-test suite passed on Ubuntu and Windows at run #40555608773.
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; provider_service.py; tests/test_connection_manager.py; tests/test_provider_service.py; CI #40560954116
+Remaining work: Persistent connection state, configure/enable/disable, verified-state transitions, manual-auth separation, concurrent lifecycle operations and failure-safe cleanup pass tests. Live provider connectivity remains separately tracked in point 021.
 
 Feature 018: TLS/HTTPS Security
 Status: PARTIAL
