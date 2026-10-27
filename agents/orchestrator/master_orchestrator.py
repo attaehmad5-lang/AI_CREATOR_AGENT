@@ -5,14 +5,18 @@ from agents.idea.idea_engine import IdeaEngine
 from agents.script.script_engine import ScriptEngine
 
 class MasterOrchestrator:
-    def __init__(self):
+    def __init__(self, *, provider_store_service=None, provider_store_adapter=None, job_storage_path=None):
         self.brain = CreativeBrain()
-        self.job_engine = MasterJobEngine()
+        self.job_engine = MasterJobEngine(
+            provider_store_service=provider_store_service,
+            provider_store_adapter=provider_store_adapter,
+            storage_path=job_storage_path,
+        )
         self.research_engine = ResearchEngine()
         self.idea_engine = IdeaEngine()
         self.script_engine = ScriptEngine()
         self.status = "READY"
-        self.version = "1.0"
+        self.version = "1.1"
 
     def run(self, request):
         request = request or {}
