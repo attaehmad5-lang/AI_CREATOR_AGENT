@@ -15,16 +15,37 @@ from typing import Any
 from .catalog_integrity import validate_advanced_catalogs
 
 
-def run_benchmark(*, iterations: int = 25, workers: int = 1, max_seconds: float = 15.0,
-                  repo_root: str | Path | None = None) -> dict[str, Any]:
-    if isinstance(iterations, bool) or not isinstance(iterations, int) or not 1 <= iterations <= 10000:
+def run_benchmark(
+    *,
+    iterations: int = 25,
+    workers: int = 1,
+    max_seconds: float = 15.0,
+    repo_root: str | Path | None = None,
+) -> dict[str, Any]:
+    if (
+        isinstance(iterations, bool)
+        or not isinstance(iterations, int)
+        or not 1 <= iterations <= 10000
+    ):
         raise ValueError("iterations must be an integer between 1 and 10000")
-    if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 32:
+    if (
+        isinstance(workers, bool)
+        or not isinstance(workers, int)
+        or not 1 <= workers <= 32
+    ):
         raise ValueError("workers must be an integer between 1 and 32")
-    if (isinstance(max_seconds, bool) or not isinstance(max_seconds, (int, float))
-            or not math.isfinite(max_seconds) or max_seconds <= 0):
+    if (
+        isinstance(max_seconds, bool)
+        or not isinstance(max_seconds, (int, float))
+        or not math.isfinite(max_seconds)
+        or max_seconds <= 0
+    ):
         raise ValueError("max_seconds must be positive")
-    root = Path(repo_root).resolve() if repo_root is not None else Path(__file__).resolve().parents[3]
+    root = (
+        Path(repo_root).resolve()
+        if repo_root is not None
+        else Path(__file__).resolve().parents[3]
+    )
     central = root / "projects" / "provider_store" / "provider_catalog.json"
     advanced = root / "projects" / "provider_store" / "advanced" / "advanced_provider_catalog.json"
     categories = root / "projects" / "provider_store" / "advanced" / "advanced_categories.json"
@@ -67,7 +88,11 @@ def main() -> int:
     parser.add_argument("--max-seconds", type=float, default=15.0)
     args = parser.parse_args()
     try:
-        result = run_benchmark(iterations=args.iterations, workers=args.workers, max_seconds=args.max_seconds)
+        result = run_benchmark(
+            iterations=args.iterations,
+            workers=args.workers,
+            max_seconds=args.max_seconds,
+        )
     except (OSError, ValueError, TimeoutError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, indent=2))
