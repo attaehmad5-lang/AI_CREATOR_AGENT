@@ -39,6 +39,13 @@ class ProviderBenchmarkManagerTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["provider_id"], "high-quality")
         self.assertEqual(result["results"][0]["avg_quality_score"], 0.95)
 
+    def test_latency_breaks_benchmark_ties_after_quality(self):
+        self.add("slow", "model-1", True, 400, 0.1, 0.8)
+        self.add("fast", "model-2", True, 100, 0.1, 0.8)
+        result = self.manager.compare()
+        self.assertEqual(result["results"][0]["provider_id"], "fast")
+        self.assertEqual(result["results"][0]["p95_latency_ms"], 100)
+
     def test_invalid_samples_fail_closed(self):
         self.assertEqual(self.manager.record(
             provider_id="image", model_id="m", modality="image", run_id="r",
