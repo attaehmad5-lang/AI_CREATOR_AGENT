@@ -70,7 +70,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
                 self.assertEqual(result["status"], "UNSUPPORTED_MEDIA_MODALITY")
                 self.assertFalse(result["valid"])
 
-        for path in (None, 1, object(), ""):
+        for path in (None, 1, object(), "", "   "):
             with self.subTest(path_type=type(path).__name__):
                 result = self.validator.validate(path, modality="audio")
                 self.assertEqual(result["status"], "INVALID_MEDIA_PATH")
