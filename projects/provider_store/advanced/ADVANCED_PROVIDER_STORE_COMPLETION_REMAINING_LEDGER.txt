@@ -13,7 +13,7 @@ BLOCKED = cannot proceed; exact reason must be recorded.
 VERIFICATION FACTS
 - Repository: attaehmad5-lang/AI_CREATOR_AGENT
 - Advanced catalog: 18 entries; canonical catalog: 54 entries; field-by-field metadata and category-capability consistency tests pass.
-- Latest verified GitHub Actions run #40580523121 passed compilation, catalog JSON validation, all 480 unit/regression tests on Ubuntu and Windows, Ruff lint/format gates, focused mypy checks, 80% focused source coverage, the catalog maintenance CLI tests, SPDX 2.3 source SBOM generation, the bounded concurrent catalog benchmark, and release artifact generation.
+- Latest verified test/type/coverage/SBOM run #40581121875 passed compilation, catalog JSON validation, all 480 unit/regression tests on Ubuntu and Windows, Ruff lint/format gates, focused mypy checks and 80% focused source coverage. Wheel/reproducibility run #40581736079 passed on Ubuntu and Windows, including clean-target installation, package-data import, and release report/source ZIP/SBOM generation.
 - Passing evidence includes advanced capability/lifecycle/readiness tests, invalid category-catalog rejection, incident lifecycle, HMAC webhook/replay, provider authorization, OAuth/API-key safeguards, routing/quotas/budgets, media integrity, trace-context primitives, ledger/report validation, private-key fail-closed checks, clean ZIP extraction, per-file hashes and ZIP checksum sidecar verification.
 - CI generated and uploaded Linux and Windows report/package artifacts (source ZIP, JSON/Markdown/PDF report, source manifest, SPDX 2.3 source-file SBOM and ZIP checksum sidecar); PDF/SBOM rendering and ZIP inclusion are covered by focused tests. The report correctly stays INCOMPLETE until all 150 points are completed.
 - No provider credentials were supplied or used. No live generation, credit balance, or billing test is claimed.
@@ -632,14 +632,14 @@ Implementation/evidence inspected: .github/workflows/task-25-tests.yml; coverage
 Remaining work: Coverage gate passed with 80% combined statement coverage across seven catalog/config/release/benchmark modules while all 480 tests passed; repository-wide coverage threshold remains undefined.
 
 Feature 123: Build Verification
-Status: PARTIAL
-Implementation/evidence inspected: .github/workflows/task-25-tests.yml; advanced/release_report.py; CI #40580523121
-Remaining work: Python compilation, catalog JSON validation and integrity-checked source ZIP/report/SBOM generation pass cross-platform CI. A standard distributable package build remains unavailable because the repository has no package build metadata.
+Status: COMPLETED
+Implementation/evidence inspected: pyproject.toml; advanced/verify_wheel.py; .github/workflows/task-25-tests.yml; CI #40581736079
+Completion evidence: Ubuntu and Windows build the provider-store wheel twice with isolated pinned build dependencies, compare SHA-256 hashes, install into a clean target and verify module import plus catalog JSON package data.
 
 Feature 124: Wheel Installation Testing
-Status: UNVERIFIED
-Implementation/evidence inspected: No passing evidence located for the complete repository-wide gate
-Remaining work: Run and record formatting, lint, type, coverage, build, wheel, clean extraction, dependency lock and SBOM checks.
+Status: COMPLETED
+Implementation/evidence inspected: pyproject.toml; advanced/verify_wheel.py; CI #40581736079
+Completion evidence: Ubuntu and Windows both install the wheel into a temporary target and import projects.provider_store.catalog_cli while loading provider_catalog.json from installed package data.
 
 Feature 125: Clean ZIP Extraction Testing
 Status: COMPLETED
@@ -647,14 +647,14 @@ Implementation/evidence inspected: advanced/release_report.py; tests/test_advanc
 Remaining work: Generated source ZIP passes CRC/integrity checks, SHA-256 manifest comparisons and clean extraction with expected files; full-app packaging remains separate.
 
 Feature 126: Reproducible Build Verification
-Status: UNVERIFIED
-Implementation/evidence inspected: No passing evidence located for the complete repository-wide gate
-Remaining work: Run and record formatting, lint, type, coverage, build, wheel, clean extraction, dependency lock and SBOM checks.
+Status: PARTIAL
+Implementation/evidence inspected: pyproject.toml; advanced/verify_wheel.py; CI #40581736079
+Remaining work: Two isolated builds are byte-for-byte identical per OS with SOURCE_DATE_EPOCH fixed; cross-OS binary equivalence and long-term reproducibility across toolchain versions are not claimed.
 
 Feature 127: Dependency Locking
-Status: UNVERIFIED
-Implementation/evidence inspected: No passing evidence located for the complete repository-wide gate
-Remaining work: Run and record formatting, lint, type, coverage, build, wheel, clean extraction, dependency lock and SBOM checks.
+Status: PARTIAL
+Implementation/evidence inspected: pyproject.toml; advanced/verify_wheel.py; .github/workflows/task-25-tests.yml
+Remaining work: Runtime dependencies are explicitly empty and direct build requirements setuptools==80.9.0 and wheel==0.45.1 are pinned; transitive build dependency hashes and a full platform lockfile remain.
 
 Feature 128: Software Bill of Materials (SBOM)
 Status: PARTIAL
