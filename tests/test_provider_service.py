@@ -483,6 +483,58 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["finalization"]["finalized"])
         self.assertEqual(result["provider"], "image")
 
+    def test_artifact_scanner_can_block_untrusted_output_after_signature_validation(self):
+        class Scanner:
+            def scan(self, path, *, modality):
+                return {"clean": False, "status": "MALWARE_DETECTED"}
+
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota, artifact_scanner=Scanner(),
+            require_artifact_scan=True,
+        )
+        output_path = self.root / "scan-blocked.png"
+        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-signature-test")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="scan-blocked",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "OUTPUT_VALIDATION_FAILED")
+        self.assertFalse(result["output"]["valid"])
+        self.assertEqual(result["output"]["status"], "ARTIFACT_SCAN_REJECTED")
+        self.assertFalse(result["artifact_scan"]["clean"])
+
+    def test_required_artifact_scan_fails_closed_when_scanner_is_missing(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota, require_artifact_scan=True,
+        )
+        output_path = self.root / "scan-missing.png"
+        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-signature-test")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="scan-missing",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "OUTPUT_VALIDATION_FAILED")
+        self.assertEqual(result["output"]["status"], "ARTIFACT_SCANNER_UNAVAILABLE")
+        self.assertEqual(result["artifact_scan"]["status"], "ARTIFACT_SCANNER_UNAVAILABLE")
+
     def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
