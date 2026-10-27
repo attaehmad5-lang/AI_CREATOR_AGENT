@@ -523,13 +523,13 @@ Remaining work: Readiness diagnostics expose category/catalog/credential/runtime
 
 Feature 101: Dry-Run Mode
 Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
-Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+Implementation/evidence inspected: catalog_diff.py; catalog_cli.py; tests/test_catalog_cli.py
+Remaining work: Catalog apply is dry-run by default and tested; other manager workflows still need dry-run acceptance coverage.
 
 Feature 102: Routing Policy Simulation
 Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
-Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+Implementation/evidence inspected: routing_manager.py; catalog_diff.py; catalog_cli.py; tests/test_catalog_cli.py
+Remaining work: Catalog diff/apply simulation is dry-run-first; full routing-policy simulation across quotas, budgets, health and fallback combinations remains.
 
 Feature 103: Provider Benchmarking
 Status: COMPLETED
@@ -657,9 +657,9 @@ Implementation/evidence inspected: No passing evidence located for the complete 
 Remaining work: Run and record formatting, lint, type, coverage, build, wheel, clean extraction, dependency lock and SBOM checks.
 
 Feature 128: Software Bill of Materials (SBOM)
-Status: UNVERIFIED
-Implementation/evidence inspected: No passing evidence located for the complete repository-wide gate
-Remaining work: Run and record formatting, lint, type, coverage, build, wheel, clean extraction, dependency lock and SBOM checks.
+Status: PARTIAL
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; .github/workflows/task-25-tests.yml
+Remaining work: SPDX 2.3 JSON with SHA-256 hashes for packaged source files is generated and included in the source ZIP; cross-platform verification is pending. Third-party dependency inventory and license conclusions are not inferred.
 
 Feature 129: CI/CD Pipeline
 Status: PARTIAL
@@ -688,13 +688,13 @@ Remaining work: CI/release-gate/checksum/version primitives exist; the full Adva
 
 Feature 134: Changelog Management
 Status: PARTIAL
-Implementation/evidence inspected: PROVIDER_MANAGER_GUIDE.md; existing task ledgers
-Remaining work: A provider guide and task ledgers exist; changelog/API/architecture/migration/troubleshooting docs need a completeness pass.
+Implementation/evidence inspected: PROVIDER_MANAGER_GUIDE.md; catalog CLI and release-report commits
+Remaining work: Catalog maintenance and SBOM behavior are documented; a versioned changelog and broader API/architecture migration documentation remain.
 
 Feature 135: API Documentation
 Status: PARTIAL
-Implementation/evidence inspected: PROVIDER_MANAGER_GUIDE.md; existing task ledgers
-Remaining work: A provider guide and task ledgers exist; changelog/API/architecture/migration/troubleshooting docs need a completeness pass.
+Implementation/evidence inspected: PROVIDER_MANAGER_GUIDE.md; catalog_cli.py; catalog_interchange.py; catalog_diff.py
+Remaining work: CLI syntax and import/export safety behavior are documented; full generated Python API reference remains.
 
 Feature 136: Architecture Documentation
 Status: PARTIAL
