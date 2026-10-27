@@ -169,8 +169,10 @@ def create_catalog_snapshot(
         snapshot = history_path / f"catalog-{timestamp}{suffix}.json"
         try:
             with snapshot.open("x", encoding="utf-8") as stream:
-                json.dump(catalog, stream, ensure_ascii=False, indent=2, allow_nan=False)
-                stream.write("\\n")
+                json.dump(
+                    catalog, stream, ensure_ascii=False, indent=2, allow_nan=False
+                )
+                stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
         except FileExistsError:
