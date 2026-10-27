@@ -119,7 +119,7 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
 
         main_by_id = {p["id"]: p for p in json.loads(main_catalog.read_text(encoding="utf-8"))["providers"]}
         advanced_records = json.loads(advanced_catalog.read_text(encoding="utf-8"))["providers"]
-        backup_catalog = root / "advanced" / "advanced_provider_catalog_backup.json"
+        backup_catalog = project_root / "projects" / "provider_store" / "advanced" / "advanced_provider_catalog_backup.json"
         backup_records = json.loads(backup_catalog.read_text(encoding="utf-8"))["providers"]
         self.assertEqual(len(backup_records), len(advanced_records))
         backup_by_id = {p["id"]: p for p in backup_records}
