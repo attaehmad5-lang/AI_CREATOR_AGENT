@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#40549056812](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40549056812) completed successfully for commit `00c4c4f51cda7b750e64b1d460b3b39772ccf8d6`. Both Ubuntu and Windows jobs passed secret-file exclusion, compilation, provider catalog validation, and unit/regression tests. This run includes a new regression test verifying that a provider factory mutating its input metadata cannot mutate the persisted provider catalog.
+GitHub Actions run [#40551020477](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40551020477) completed successfully on Ubuntu and Windows for commit `d842c70ffb8f7538cb9778880cfa887530dbeef7`. Both jobs passed secret-file exclusion, compilation, provider catalog validation, and unit/regression tests. The latest changes add regression coverage rejecting Unicode C1/C0 control characters in provider-balance credentials before any network request; the prior nested-metadata factory-mutation regression also passes on both platforms. This remains evidence for tested behavior only, not proof that all 138 items are complete.
 
 Earlier successful cross-platform coverage includes privacy-safe discovery telemetry, deterministic bounded pagination, priority ranking/validation, and concurrent factory registration. This is evidence for these tested behaviors only; it does not establish completion of all 138 canonical items or live external integrations.
 
@@ -28,7 +28,7 @@ Earlier successful cross-platform coverage includes privacy-safe discovery telem
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 9 | 🔴 | API Key/Token Authentication | PARTIAL | Environment-only credential references and bounded HTTP probes exist; provider-specific auth schemes require live verification. |
+| 9 | 🔴 | API Key/Token Authentication | PARTIAL | Environment-only credential references and bounded HTTP probes exist. The generic account-balance probe now rejects all Unicode Cc control characters in credential values before network use; regression tests cover C0/C1 examples. Provider-specific auth schemes still require live verification. |
 | 10 | 🔴 | OAuth/Login and Manual Account Connection | PARTIAL | Manual connection verification now returns `CATALOG_INVALID` for invalid provider catalogs and preserves `STATE_READ_FAILED` for corrupt state; no provider probe is invoked in either failure path. Full OAuth authorization-code/state/PKCE and token-refresh flows remain open. |
 | 11 | 🔴 | Credential Expiry/Refresh | PARTIAL | Credential status checks fail closed for invalid catalogs and distinguish missing/present/expired credentials without returning secret values. Public/anonymous providers now explicitly report `credential_required: false` and `credential_present: false` instead of incorrectly claiming a credential is present. Secure token refresh/rotation remains open. |
 | 12 | 🔴 | Connection and Network Timeouts | PARTIAL | Bounded timeout validation and tests exist; full generation cancellation/deadline propagation remains open. |
