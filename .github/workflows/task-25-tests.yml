@@ -43,7 +43,7 @@ jobs:
           tests/test_advanced_provider_pdf_report.py
       - name: Check formatting of new catalog and benchmark code
         run: >-
-          python -m ruff format --check
+          python -m ruff format --diff
           projects/provider_store/catalog_interchange.py
           projects/provider_store/catalog_diff.py
           projects/provider_store/advanced/performance_benchmark.py
