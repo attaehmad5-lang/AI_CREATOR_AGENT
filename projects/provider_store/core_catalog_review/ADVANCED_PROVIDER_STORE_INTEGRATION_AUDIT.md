@@ -4,54 +4,57 @@ Date: 2026-10-27
 Repository: attaehmad5-lang/AI_CREATOR_AGENT
 Base branch: main
 
-## Confirmed repository state
+## Canonical repository architecture
 
-The repository already contains an established provider-store implementation. Relevant files include:
+The repository already has a provider-store implementation with a central `ConnectionManager`, `ProviderStoreManager`, `ProviderService`, and compatibility tests. The new bridge and advanced facade reuse this central state rather than creating duplicate production connection/catalog state.
 
-- `projects/provider_store/provider_store_manager.py`: compatibility facade over the central ConnectionManager.
-- `projects/provider_store/provider_service.py`: provider connection, routing, health, retry, output validation, cost/quota/credit, authorization, privacy, jobs, metrics, quality and related integration points.
-- `projects/provider_store/advanced/advanced_provider_manager.py`: advanced-provider view over the existing central catalog.
-- `projects/provider_store/advanced/advanced_store_bridge.py`: new read-only bridge for capability/region/price-aware dry-run candidate selection, backed by the same ConnectionManager.
-- `tests/test_provider_store_compat.py` and `tests/test_advanced_store_bridge.py`: compatibility and bridge contract tests.
+## New source committed
 
-The uploaded archive adds a standalone `advps/` reference core under `projects/provider_store/advanced/`. The bridge now integrates safe candidate discovery into the existing advanced manager without creating a second catalog, connection state, credential store, or billing ledger. The standalone `advps/` source archive itself has **not** yet been copied into the repository tree; bridge integration is not evidence that all 37 archive files are present.
+- `projects/provider_store/advanced/advps/`: standalone core modules for normalized errors, catalog/versioning/import/export/diff/rollback, atomic checksummed storage/recovery, redaction, hash-chained audit, endpoint security helpers, bounded HTTPS transport, retry/circuit-breaker, routing, accounting, and CLI.
+- `projects/provider_store/advanced/advanced_store_bridge.py`: read-only candidate discovery over the canonical ConnectionManager.
+- `projects/provider_store/advanced/advanced_provider_manager.py`: exposes `route_candidates()` and `simulate_route()` via the shared bridge.
+- `tests/test_advps_core.py` and `tests/test_advanced_store_bridge.py`: repository-owned core and integration contract tests.
+- `projects/provider_store/advanced/tools_coverage.py`: Python 3.13-safe stdlib coverage runner with an 80% CI gate.
 
-## Implemented bridge behavior
+The full original 37-entry archive's documentation/tooling/test set has not been copied verbatim. Core behavior has been ported into repository source and is now covered by the repository-owned tests.
+
+## Bridge behavior
 
 - Reads provider metadata and live verification status from the canonical ConnectionManager.
-- Routes only enabled, actually verified providers.
-- Supports capability, region, priority/cost, and optional maximum-price filters.
-- Fails closed for region filters when region metadata is missing, and excludes unknown prices when a maximum-price ceiling is supplied.
-- Exposes only allow-listed provider metadata and returns detached snapshots.
-- Provides dry-run candidate IDs only; it does not execute providers, access credentials, spend credits, or finalize usage. Live execution and billing remain ProviderService responsibilities.
+- Only returns enabled and verified providers for routing candidates.
+- Supports capability, region, priority/cost, and maximum-price filters.
+- Fails closed when region metadata is missing and a region is requested; excludes unknown prices when a ceiling is configured.
+- Returns an allow-listed detached metadata view, avoiding accidental leakage of arbitrary catalog fields.
+- Provides dry-run candidate IDs only. ProviderService remains responsible for live execution, credentials, authorization, quota/billing, and usage finalization.
 
-## Defect found and fixed in the uploaded package
+## Bounded HTTPS transport
 
-The standalone package's `tools_coverage.py` crashed on Python 3.13 because `trace._find_executable_linenos()` can yield `None`, and the code compared it with an integer. The local archive fix filters valid integer source lines. After the fix, 99 tests passed and the coverage runner reported 825/828 = 99.6%.
+`SecureHTTPTransport` is now implemented with HTTPS-only requests, public DNS-address validation, connect-time IP pinning, TLS hostname/SNI verification, redirect revalidation, no CONNECT tunneling, bounded request/response bodies, and timeout controls. Tests use fake resolvers/connections and do not make live provider requests. It is not yet wired into ProviderService execution and still needs controlled adversarial network/TLS integration testing before production use.
 
-## Remaining gaps / release blockers
+## Verification
 
-- The 37-file standalone package and its coverage-runner fix are not yet committed into the repository source tree.
-- No real HTTP client in the standalone package; SSRF/redirect/size helpers are not bound to network I/O.
-- DNS validation is not pinned to the connected IP; DNS rebinding remains a risk for any future transport.
-- Credential/OAuth storage and rotation are absent in the standalone package.
-- Dynamic provider loader/runtime unload, live health probes/scheduling, async jobs/cancellation/crash/stale-job recovery, full media/codec validation, and quality-based routing remain absent or unverified.
-- Mutation/build combined checks, fuzz, load/performance, macOS, and full repository test suite remain unverified.
-- The bridge is a dry-run selection adapter, not a replacement for ProviderService execution, usage accounting, or connection/auth flows.
+- Original archive: 99 tests passed; fixed local coverage runner 825/828 = 99.6%; 37-entry ZIP integrity passed.
+- Repository CI [40500716692](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40500716692): all four matrix jobs passed (Ubuntu/Windows × Python 3.12/3.13); core, bridge, ProviderService and compatibility suites passed.
+- Core coverage: 76 tests, 0 failures/errors; 872/1050 executable lines = 83.0%, above the enforced 80% minimum.
+- Task 25 CI [40500716682](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40500716682): Ubuntu and Windows passed.
+- Live paid/provider requests were not made.
 
-## Verification boundary
+## Remaining release blockers
 
-The standalone package's 99 passing tests and 99.6% approximate line coverage apply to the extracted local archive only. The repository bridge is separately tested by the new CI matrix. Neither result alone proves production readiness. No paid/live provider calls were made.
+- Credential/OAuth storage and rotation are absent in the standalone core.
+- Dynamic provider loader/runtime unload, live health probes/scheduling, async job cancellation/crash/stale-job recovery, and full media/codec quality policies remain absent or unverified.
+- The transport is not wired into ProviderService and has not had real-network TLS/DNS-rebinding/adversarial redirect testing in a controlled test environment.
+- Mutation/build, security scanner, fuzz, load/performance, macOS and full repository suite remain unverified.
+- The complete original archive tooling/docs/tests set is not copied verbatim; repository-owned tests cover the committed implementation but do not replace every original test.
 
-## Required gates before release
+## Required gates before production release
 
-1. Commit the standalone package source and tests into the repository, or explicitly retire it in favor of the integrated bridge and update the product scope accordingly.
-2. Add cross-package regression tests for shared catalog/state, error normalization, ambiguous-billing retry/failover safety, quota/budget enforcement, secret redaction, rollback/recovery, and concurrency.
-3. Run the full repository suite and the standalone suite from the committed tree.
-4. Add real transport only with redirect revalidation, connect-time DNS/IP pinning, timeouts, bounded bodies, TLS verification and secret-safe logs.
-5. Run formatter, linter, static type checker, security scanner, fuzz and load/performance checks.
-6. Review the exact diff and merge only after all applicable checks pass.
+1. Integrate the transport only through ProviderService authorization, credentials, and usage-finalization boundaries.
+2. Add controlled network tests for TLS verification, DNS rebinding, redirects, timeouts, and body limits without paid provider calls.
+3. Add/run cross-package regressions for authorization, ambiguous billing outcomes, quota/budget enforcement, redaction, rollback/recovery, and concurrency.
+4. Run the full repository suite plus mutation/build/security/fuzz/load checks.
+5. Review the exact diff and merge only after all applicable checks pass.
 
 ## Status
 
-**Bridge implementation committed and CI testing underway. Standalone package tests PASS (99/99) locally. Full 37-file package source integration and production release are NOT COMPLETE / NOT VERIFIED.**
+**Core/bridge/transport CI: PASS (4/4 matrix jobs); Task 25 CI: PASS (2/2 OS jobs); coverage: PASS (83.0%). Production release is NOT COMPLETE / NOT VERIFIED.**
