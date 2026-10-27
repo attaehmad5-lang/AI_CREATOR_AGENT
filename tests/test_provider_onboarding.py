@@ -143,9 +143,9 @@ class ProviderOnboardingTests(unittest.TestCase):
         self.assertEqual(self.manager.registered, [])
 
     def test_invalid_candidate_and_existing_provider_are_not_persisted(self):
-        self.assertFalse(self.workflow.register_candidate(dict(self.provider, official_api_url="http://bad.test"))["saved"])
+        self.assertFalse(self.workflow.register_candidate(dict(self.provider, official_api_url="http://bad.test"), principal_id="admin")["saved"])
         self.manager.catalog["providers"].append({"id": "sample_api"})
-        self.assertEqual(self.workflow.register_candidate(self.provider)["status"], "ALREADY_EXISTS")
+        self.assertEqual(self.workflow.register_candidate(self.provider, principal_id="admin")["status"], "ALREADY_EXISTS")
         self.assertEqual(self.manager.registered, [])
 
 
