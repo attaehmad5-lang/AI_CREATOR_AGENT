@@ -127,9 +127,9 @@ Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_p
 Remaining work: Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are rejected before any probe; full 429-test suite passed on Ubuntu and Windows at run #40555608773.
 
 Feature 022: Permission Management
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py
-Remaining work: Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are rejected before any probe; full 429-test suite passed on Ubuntu and Windows at run #40555608773.
+Status: COMPLETED
+Implementation/evidence inspected: provider_authorization.py; tests/test_provider_authorization.py; CI #40560954116
+Remaining work: Unknown principals/operations fail closed, roles receive only explicit permissions, disabled principals are denied, and malformed persistent assignments are rejected.
 
 Feature 023: Provider Health Monitoring
 Status: PARTIAL
@@ -242,9 +242,9 @@ Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider
 Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
 
 Feature 045: Concurrency Management
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; quota_manager.py; cost_policy.py; tests/test_provider_job_manager.py; tests/test_quota_manager.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Queue concurrency limits and cross-process quota/budget reservations prevent concurrent overcommit in regression tests.
 
 Feature 046: Request Queue Management
 Status: COMPLETED
@@ -332,14 +332,14 @@ Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_mana
 Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
 
 Feature 063: Credit Management
-Status: PARTIAL
-Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
-Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+Status: COMPLETED
+Implementation/evidence inspected: credit_manager.py; tests/test_credit_manager.py; CI #40560954116
+Remaining work: Verified credit snapshots, timestamp monotonicity, reservations, cross-process overspend protection and stale/unverified balance rejection pass focused tests; provider-specific live refresh remains integration-only.
 
 Feature 064: Quota Management
-Status: PARTIAL
-Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
-Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+Status: COMPLETED
+Implementation/evidence inspected: quota_manager.py; tests/test_quota_manager.py; CI #40560954116
+Remaining work: Idempotent reserve/commit/release, concurrent limits, persistence, UTC daily/monthly reset and corrupt-state rejection pass focused tests.
 
 Feature 065: Budget Management
 Status: COMPLETED
