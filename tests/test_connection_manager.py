@@ -1094,6 +1094,39 @@ class ConnectionManagerTests(unittest.TestCase):
         results = self.manager.discover_providers(capability="EDIT")
         self.assertEqual([item["id"] for item in results], ["public_image"])
 
+    def test_discovery_supports_bounded_stable_pagination(self):
+        providers = []
+        for index in range(7):
+            providers.append({
+                "id": f"page_{index}",
+                "name": f"Page {index}",
+                "category": "image",
+                "auth_type": "NONE",
+                "connection_type": "LOCAL",
+                "enabled": True,
+            })
+        for provider in providers:
+            self.assertEqual(self.manager.register_provider(provider)["status"], "REGISTERED")
+
+        first = self.manager.discover_providers(category="image", limit=3, offset=0)
+        second = self.manager.discover_providers(category="image", limit=3, offset=3)
+        third = self.manager.discover_providers(category="image", limit=3, offset=6)
+
+        self.assertEqual(len(first), 3)
+        self.assertEqual(len(second), 3)
+        self.assertEqual(len(third), 1)
+        ids = [item["id"] for item in first + second + third]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(ids, sorted(ids))
+
+    def test_discovery_rejects_invalid_pagination_arguments(self):
+        for kwargs in (
+            {"limit": 0}, {"limit": 501}, {"limit": True}, {"limit": "10"},
+            {"offset": -1}, {"offset": 1_000_001}, {"offset": True}, {"offset": "0"},
+        ):
+            with self.subTest(kwargs=kwargs):
+                self.assertEqual(self.manager.discover_providers(**kwargs), [])
+
     def test_discovery_enabled_only_excludes_unspecified_and_disabled(self):
         self.manager.catalog["providers"][0]["enabled"] = True
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
