@@ -454,7 +454,7 @@ Remaining work: Configuration/storage/recovery primitives exist; migration, cras
 Feature 087: Catalog Import/Export
 Status: COMPLETED
 Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py; CI #40576942629
-Completion evidence: Validated JSON export/import uses atomic replacement, schema validation, interprocess locking, backup and post-write verification. Injected write failure restores prior bytes or preserves an absent target. Cross-platform CI #40576942629 passed 471 tests on Ubuntu and Windows.
+Completion evidence: Validated JSON export/import uses atomic replacement, schema validation, interprocess locking, backup and post-write verification. Injected write failure restores prior bytes or preserves an absent target. Cross-platform CI #40578756447 passed 476 tests on Ubuntu and Windows.
 
 Feature 088: Catalog Integrity Verification
 Status: COMPLETED
@@ -462,14 +462,14 @@ Implementation/evidence inspected: connection_manager.py; provider catalog JSON/
 Remaining work: Catalog synchronization, schema/version validation, safe provider identity, required host allowlists, capability contracts and advanced-vs-canonical metadata consistency pass tests.
 
 Feature 089: Catalog Diff Management
-Status: PARTIAL
-Implementation/evidence inspected: advanced_provider_manager.py; advanced catalog tests
-Remaining work: Metadata drift is detected and reported; safe automated diff application/rollback workflow remains incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: catalog_diff.py; catalog_interchange.py; tests/test_catalog_diff.py; tests/test_catalog_interchange.py; CI #40578756447
+Completion evidence: Validated dry-run diff reports added/removed IDs and changed field names without values; application is explicit, provider removal requires approval, and application uses backed-up atomic import. Cross-platform CI passed 476 tests.
 
 Feature 090: Catalog Rollback
 Status: COMPLETED
-Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py; CI #40576766499
-Completion evidence: Added immutable timestamped catalog snapshots, safe history listing without configuration contents, schema-validated snapshot restore through atomic import/backup, and invalid snapshot filtering. Cross-platform CI passed 471 tests on Ubuntu and Windows.
+Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py; CI #40578756447
+Completion evidence: Added immutable timestamped catalog snapshots, safe history listing without configuration contents, schema-validated snapshot restore through atomic import/backup, and invalid snapshot filtering. Cross-platform CI passed 476 tests on Ubuntu and Windows.
 
 Feature 091: Backup Management
 Status: PARTIAL
