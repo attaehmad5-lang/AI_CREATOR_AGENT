@@ -105,13 +105,15 @@ def import_catalog(
                     pass
                 return {"status": "CATALOG_BACKUP_FAILED", "imported": False}
         fd, temp_name = tempfile.mkstemp(
-            prefix=f".{destination_path.name}.", suffix=".tmp", dir=destination_path.parent
+            prefix=f".{destination_path.name}.",
+            suffix=".tmp",
+            dir=destination_path.parent,
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 json.dump(
-                candidate, stream, ensure_ascii=False, indent=2, allow_nan=False
-            )
+                    candidate, stream, ensure_ascii=False, indent=2, allow_nan=False
+                )
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
