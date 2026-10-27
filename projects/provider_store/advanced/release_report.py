@@ -166,7 +166,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
             if _sha256(archived_data) != entry["sha256"]:
                 raise ValueError(f"ZIP checksum mismatch for {entry['path']}")
     archive_digest = _sha256(archive.read_bytes())
-    archive_checksum.write_text(f"{archive_digest}  {archive.name}\\n", encoding="ascii")
+    archive_checksum.write_text(f"{archive_digest}  {archive.name}\n", encoding="ascii")
     if archive_checksum.read_text(encoding="ascii").split()[0] != _sha256(archive.read_bytes()):
         raise ValueError("release ZIP SHA-256 sidecar verification failed")
     return {
