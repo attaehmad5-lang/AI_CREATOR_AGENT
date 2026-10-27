@@ -1,5 +1,4 @@
 import unittest
-from pathlib import Path
 
 from projects.provider_store.advanced.performance_benchmark import run_benchmark
 
