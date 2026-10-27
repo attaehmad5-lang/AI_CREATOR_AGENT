@@ -16,6 +16,17 @@ _MAX_ATTRIBUTES = 24
 _MAX_VALUE = 256
 
 
+def _finite_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if isinstance(value, int) and abs(value) > 9_223_372_036_854_775_807:
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 def parse_traceparent(value: Any) -> dict[str, Any]:
     """Parse W3C traceparent version 00; reject malformed/all-zero identifiers."""
     if not isinstance(value, str) or len(value) != 55:
@@ -44,9 +55,11 @@ def _safe_attributes(attributes: Any) -> dict[str, Any]:
         lowered = key.casefold()
         if any(token in lowered for token in _SENSITIVE_KEYS):
             safe[key[:80]] = "[REDACTED]"
-        elif isinstance(value, bool) or value is None or isinstance(value, int):
+        elif isinstance(value, bool) or value is None:
             safe[key] = value
-        elif isinstance(value, float) and math.isfinite(value):
+        elif isinstance(value, int) and _finite_number(value):
+            safe[key] = value
+        elif isinstance(value, float) and _finite_number(value):
             safe[key] = value
         elif isinstance(value, str):
             safe[key] = value[:_MAX_VALUE]
@@ -91,7 +104,7 @@ class ProviderTraceManager:
         span_id = secrets.token_hex(8)
         flags = parent["flags"] if parent else "01"
         started = self.clock()
-        if isinstance(started, bool) or not isinstance(started, (int, float)) or not math.isfinite(float(started)):
+        if not _finite_number(started):
             return {"status": "INVALID_CLOCK"}
         return {
             "status": "SPAN_STARTED",
@@ -112,15 +125,13 @@ class ProviderTraceManager:
         if duration_ms is None:
             ended = self.clock()
             if (
-                isinstance(ended, bool) or not isinstance(ended, (int, float))
-                or not math.isfinite(float(ended)) or ended < span["started_at"]
+                not _finite_number(ended) or ended < span["started_at"]
             ):
                 return {"status": "INVALID_CLOCK"}
             duration = (float(ended) - span["started_at"]) * 1000.0
         else:
             if (
-                isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float))
-                or not math.isfinite(float(duration_ms)) or duration_ms < 0
+                not _finite_number(duration_ms) or duration_ms < 0
             ):
                 return {"status": "INVALID_DURATION"}
             duration = float(duration_ms)
