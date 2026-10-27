@@ -168,6 +168,27 @@ class AdvancedProviderManagerTests(unittest.TestCase):
         self.assertEqual(text_ids, [f"{feature_id:03d}" for feature_id in range(1, 151)])
         self.assertEqual(len(re.findall(r"^Status: (PARTIAL|NOT STARTED|UNVERIFIED|COMPLETED|BLOCKED)$", text_content, re.MULTILINE)), 150)
 
+    def test_readiness_report_separates_locked_catalog_and_unverified_runtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, advanced = self._manager(Path(tmp))
+            report = advanced.readiness_report()
+            self.assertEqual(report["status"], "DEGRADED")
+            self.assertEqual(report["providers_total"], 3)
+            story = next(item for item in report["providers"] if item["provider"] == "story_test")
+            self.assertIn("CONNECTION_NOT_VERIFIED", story["blockers"])
+            self.assertIn("CREDENTIAL_MANUAL_CONNECTION_REQUIRED", story["blockers"])
+            locked = next(item for item in report["providers"] if item["provider"] == "story_locked")
+            self.assertIn("CATALOG_LOCKED", locked["blockers"])
+            self.assertFalse(locked["ready"])
+            self.assertEqual(report["catalog_consistency"], "MATCH")
+
+    def test_readiness_report_never_contains_raw_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, advanced = self._manager(Path(tmp))
+            report = json.dumps(advanced.readiness_report()).casefold()
+            self.assertNotIn("secret", report)
+            self.assertNotIn("api_key", report)
+
     def test_diagnostics_never_returns_credential_values(self):
         with tempfile.TemporaryDirectory() as tmp:
             _, advanced = self._manager(Path(tmp))
