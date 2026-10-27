@@ -171,7 +171,7 @@ class ProviderQuotaManager:
         allowed_reasons = {"TIMEOUT", "CONNECTION_LOST", "PROVIDER_ERROR", "UNKNOWN"}
         if not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST", "marked": False}
-        if reason not in allowed_reasons:
+        if not isinstance(reason, str) or reason not in allowed_reasons:
             return {"status": "INVALID_UNCERTAINTY_REASON", "marked": False}
         with self._transaction():
             record = self.data["requests"].get(request_id)
