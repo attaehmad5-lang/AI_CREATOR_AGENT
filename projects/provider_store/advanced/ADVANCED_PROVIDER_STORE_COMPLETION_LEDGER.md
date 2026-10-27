@@ -1,6 +1,6 @@
 # Advanced Provider Store — Evidence-Based Completion Ledger
 
-**Scope:** canonical 150-point Advanced Provider Store list. **Coordinator:** ChatGPT. **Last audited:** 2026-10-27 (latest hardening slice CI verified).
+**Scope:** canonical 150-point Advanced Provider Store list. **Coordinator:** ChatGPT. **Last audited:** 2026-10-27 (capability/lifecycle/readiness and source-package reporting slice CI verified).
 
 ## Rules
 
@@ -14,8 +14,9 @@
 
 - Repository: attaehmad5-lang/AI_CREATOR_AGENT.
 - The advanced catalog has 18 entries; compatibility tests assert those IDs are a subset of the 54-provider central catalog.
-- Latest relevant GitHub Actions run [#40559469358](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40559469358) passed compilation, catalog JSON validation, and all **440 unit/regression tests on both Ubuntu and Windows** at commit `26e0ee6ee3c1739cc85872d044fcf4d71dd04e9e`.
-- The passing suite includes advanced capability discovery (exact case-insensitive matching and category filtering), advanced-only adapter load/unload lifecycle, disabled/locked/missing-provider rejection, secret-free readiness diagnostics, catalog mismatch detection, and malformed-versus-missing catalog reporting, in addition to the existing provider regression suite.
+- Latest relevant GitHub Actions run [#40560097080](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40560097080) passed compilation, catalog JSON validation, and all **443 unit/regression tests on both Ubuntu and Windows** at commit `8bcef7c9717c2583e7dbe64e621a463e02115a4b`.
+- The passing suite includes advanced capability discovery (exact case-insensitive matching and category filtering), advanced-only adapter load/unload lifecycle, disabled/locked/missing-provider rejection, secret-free readiness diagnostics, catalog mismatch detection, malformed-versus-missing catalog reporting, ledger validation, release-report counting, and source ZIP/manifest integrity checks.
+- The release-report builder generates JSON/Markdown evidence, a SHA-256 source manifest and an integrity-checked source-only ZIP. It reports `INCOMPLETE` until all 150 points are complete. PDF generation is not implemented.
 - No live provider credentials were supplied or used. No live generation, credit balance, or billing test is claimed; those require user-configured credentials and approval for any billable action.
 - CI is the verified runtime execution path for this workspace; no local test execution is claimed.
 
@@ -163,11 +164,11 @@
 | 138 | Troubleshooting Guide | PARTIAL | PROVIDER_MANAGER_GUIDE.md; existing task ledgers | A provider guide and task ledgers exist; changelog/API/architecture/migration/troubleshooting docs need a completeness pass. |
 | 139 | Migration Guide | PARTIAL | PROVIDER_MANAGER_GUIDE.md; existing task ledgers | A provider guide and task ledgers exist; changelog/API/architecture/migration/troubleshooting docs need a completeness pass. |
 | 140 | Feature Ledger | COMPLETED | ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md; ADVANCED_PROVIDER_STORE_COMPLETION_REMAINING_LEDGER.txt; tests/test_advanced_provider_manager.py | Both 150-row ledgers are present and their IDs/status rows are validated by regression tests. |
-| 141 | Test Report Generation | UNVERIFIED | No verified report/ZIP generation artifact produced in this pass | Generate and validate final report/package after code and tests pass. |
-| 142 | PDF Report Generation | UNVERIFIED | No verified report/ZIP generation artifact produced in this pass | Generate and validate final report/package after code and tests pass. |
-| 143 | ZIP Package Generation | UNVERIFIED | No verified report/ZIP generation artifact produced in this pass | Generate and validate final report/package after code and tests pass. |
-| 144 | Package File Manifest | UNVERIFIED | No verified report/ZIP generation artifact produced in this pass | Generate and validate final report/package after code and tests pass. |
-| 145 | Secret-Free Package Verification | PARTIAL | task-25-tests.yml; sensitive_data_policy.py | Secret-tracking checks and redaction tests exist; a final release ZIP scan is still required. |
+| 141 | Test Report Generation | PARTIAL | advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40560097080 | Generates JSON and Markdown evidence from the canonical 150-point ledger; output is tested. Final production release report remains incomplete until the ledger is complete. |
+| 142 | PDF Report Generation | UNVERIFIED | No PDF generator implemented | Implement and validate PDF output with an approved dependency and Unicode-safe rendering. |
+| 143 | ZIP Package Generation | PARTIAL | advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40560097080 | Source-only ZIP is generated and integrity-checked; final distributable package and clean extraction gate remain. |
+| 144 | Package File Manifest | PARTIAL | advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40560097080 | SHA-256 manifest is emitted and archive membership is checked; release-level reproducibility verification remains. |
+| 145 | Secret-Free Package Verification | PARTIAL | advanced/release_report.py; tests/test_advanced_provider_release_report.py; sensitive_data_policy.py; CI #40560097080 | Explicit source allowlist excludes runtime state, backups, environment/credential files and private-key material; ZIP regression checks pass. Broader secret scanning and final release ZIP audit remain. |
 | 146 | Backward Compatibility | PARTIAL | provider_store modules; test_provider_store_compat.py; regression tests | Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains. |
 | 147 | Deprecation Management | PARTIAL | provider_store modules; test_provider_store_compat.py; regression tests | Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains. |
 | 148 | Error Diagnostics | PARTIAL | provider_store modules; advanced/advanced_provider_manager.py; tests/test_advanced_provider_manager.py | Secret-free readiness report identifies catalog, enablement, credential and verified-connectivity blockers; broader normalized error taxonomy and acceptance coverage remain. |
