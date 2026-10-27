@@ -21,7 +21,6 @@ The original uploaded standalone archive was tested from a clean extraction at P
 - `advps/` contains normalized errors, atomic checksummed storage/recovery, redaction, hash-chained audit, catalog validation/versioning/import/export/diff/rollback, endpoint validators, bounded HTTPS transport, environment-backed credential resolution with injected refresh callbacks, provider health/probe leases and backoff, allowlisted provider runtime load/unload, retry budget/circuit breaker, routing, accounting, persistent job lifecycle, and CLI.
 - `SecureHTTPTransport` validates every hop, rejects non-public DNS results, pins TCP to a validated IP, preserves URL hostname for TLS SNI/certificate validation, disables CONNECT tunneling, revalidates redirects, strips credential-like headers on cross-origin redirects, and bounds request/response bodies. It is not yet wired into ProviderService live execution.
 - `JobManager` persists job metadata, hashed idempotency keys, attempts, worker leases, terminal states, cancellation requests, and stale-lease recovery. It never persists the input payload or raw idempotency key, and stores error codes rather than arbitrary exception text.
-- `ProviderRuntime` loads only explicitly registered trusted factories, validates the generate interface, tracks in-flight calls, and prevents new calls while draining for unload. It does not import module names from provider catalog data.
 - `CredentialManager` resolves environment-variable references and supports a host-injected refresh callback. It keeps refreshed tokens in process memory only and does not persist credentials or implement OAuth/network policy itself.
 - `HealthRegistry` stores sanitized health status, due-probe scheduling, worker probe leases, latency EWMA, failure thresholds and exponential backoff. The host supplies actual probe execution; it does not make live network calls itself.
 - `ProviderRuntime` uses an explicit factory allowlist (not catalog-controlled dynamic imports), validates the `generate` contract, tracks in-flight calls, blocks new calls during drain, and supports timed safe unload/close.
@@ -49,4 +48,4 @@ The original uploaded standalone archive was tested from a clean extraction at P
 
 ## Status
 
-**Repository core/bridge/transport/job CI: PASS (4/4 matrix jobs); Task 25 CI: PASS (2/2 OS jobs); coverage: PASS (82.4%, 80% minimum). Original standalone archive: PASS (99/99 tests, 99.6% local coverage). Full production release: NOT COMPLETE / NOT VERIFIED.**
+**Repository core/bridge/transport/job CI: PASS (4/4 matrix jobs); Task 25 CI: PASS (2/2 OS jobs); coverage: PASS (83.4%, 80% minimum). Original standalone archive: PASS (99/99 tests, 99.6% local coverage). Full production release: NOT COMPLETE / NOT VERIFIED.**
