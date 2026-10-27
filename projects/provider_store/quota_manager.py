@@ -194,6 +194,11 @@ class ProviderQuotaManager:
                 return {"status": "ALREADY_COMMITTED", "marked": False}
             if record.get("status") != "RESERVED":
                 return {"status": "INVALID_RESERVATION_STATE", "marked": False}
+            if record.get("outcome_uncertain") is True:
+                return {
+                    "status": "ALREADY_UNCERTAIN", "marked": False,
+                    "request_id": request_id,
+                }
             record["outcome_uncertain"] = True
             record["uncertainty_reason"] = reason
             record["uncertain_at"] = self.clock().astimezone(timezone.utc).isoformat()
