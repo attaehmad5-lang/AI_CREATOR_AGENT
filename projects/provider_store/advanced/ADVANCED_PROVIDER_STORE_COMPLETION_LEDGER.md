@@ -14,7 +14,7 @@
 
 - Repository: attaehmad5-lang/AI_CREATOR_AGENT.
 - The advanced catalog has 18 entries; compatibility tests assert those IDs are a subset of the 54-provider central catalog.
-- Latest observed full CI run on another branch compiled provider modules and parsed JSON, then ran 488 tests with 6 failures, all related to Unicode C1 control characters in credentials. The targeted fix is in draft PR #84 and awaits its own CI result.
+- GitHub Actions run [#40554027481](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40554027481) passed compilation, catalog JSON validation, and the full unit/regression suite on Ubuntu and Windows after the Unicode C1 credential fix. Run [#40554701073](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40554701073) also passed after adding advanced-manager readiness tests and canonical/legacy catalog drift assertions. The newest locked-provider regression changes are awaiting run [#40554847825](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40554847825).
 - No live provider credentials were supplied or used. No live generation, credit balance, or billing test is claimed.
 - No local test execution is claimed in this audit; GitHub Actions is the runtime verification path for this workspace.
 
@@ -22,7 +22,7 @@
 
 | # | Feature | Status | Implementation/evidence inspected | Remaining work |
 |---:|---|---|---|---|
-| 1 | Provider Catalog Management | PARTIAL | connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain. |
+| 1 | Provider Catalog Management | PARTIAL | connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog/lifecycle foundations exist; active advanced catalog has 18 records and is subset of the 54-provider registry; a field-by-field drift test was added. Runtime adapter completeness remains. |
 | 2 | Provider Registration | PARTIAL | connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain. |
 | 3 | Provider Discovery | PARTIAL | connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain. |
 | 4 | Provider Loading | PARTIAL | connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain. |
@@ -34,7 +34,7 @@
 | 10 | Capability Management | PARTIAL | connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain. |
 | 11 | Provider Version Management | PARTIAL | connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain. |
 | 12 | Provider Adapter System | PARTIAL | connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain. |
-| 13 | API Key Authentication | PARTIAL | connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py | Credential/network/OAuth primitives exist. CI exposed Unicode C1 credential-validation failures; fix is in PR #84 and awaits CI. |
+| 13 | API Key Authentication | PARTIAL | connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py | Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are now rejected; full suite passed on Ubuntu and Windows at run #40554027481. |
 | 14 | OAuth Authentication | PARTIAL | connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py | Credential/network/OAuth primitives exist. CI exposed Unicode C1 credential-validation failures; fix is in PR #84 and awaits CI. |
 | 15 | Credential Management | PARTIAL | connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py | Credential/network/OAuth primitives exist. CI exposed Unicode C1 credential-validation failures; fix is in PR #84 and awaits CI. |
 | 16 | Credential Rotation | PARTIAL | connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py | Credential/network/OAuth primitives exist. CI exposed Unicode C1 credential-validation failures; fix is in PR #84 and awaits CI. |
