@@ -69,7 +69,7 @@
 | G058 | Provider Connection Manager | Unit tests | OPEN | Inspect repository, map canonical IDs, define acceptance criteria, implement, test, verify, and record commit/CI evidence. |
 | G059 | Provider Connection Manager | Integration tests | OPEN | Inspect repository, map canonical IDs, define acceptance criteria, implement, test, verify, and record commit/CI evidence. |
 | G060 | Provider Connection Manager | Fault-injection and recovery tests | OPEN | Inspect repository, map canonical IDs, define acceptance criteria, implement, test, verify, and record commit/CI evidence. |
-| G061 | Provider Connection Manager | Security regression tests | OPEN | Inspect repository, map canonical IDs, define acceptance criteria, implement, test, verify, and record commit/CI evidence. |
+| G061 | Provider Connection Manager | Security regression tests | PARTIAL | Added test that factory mutation of input metadata cannot alter persisted catalog; commit 00c4c4f; Ubuntu + Windows CI passed: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40549056812. Full security-regression inventory remains open. |
 | G062 | Provider Connection Manager | Performance and resource limits | OPEN | Inspect repository, map canonical IDs, define acceptance criteria, implement, test, verify, and record commit/CI evidence. |
 | G063 | Provider Connection Manager | Cross-platform/runtime verification | OPEN | Inspect repository, map canonical IDs, define acceptance criteria, implement, test, verify, and record commit/CI evidence. |
 | G064 | Provider Connection Manager | Accessibility and localization review | OPEN | Inspect repository, map canonical IDs, define acceptance criteria, implement, test, verify, and record commit/CI evidence. |
