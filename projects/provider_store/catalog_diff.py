@@ -41,7 +41,12 @@ def diff_catalogs(
         "added": added,
         "removed": removed,
         "changed": changed,
-        "has_changes": bool(added or removed or changed or current.get("version") != candidate.get("version")),
+        "has_changes": bool(
+            added
+            or removed
+            or changed
+            or current.get("version") != candidate.get("version")
+        ),
     }
 
 
