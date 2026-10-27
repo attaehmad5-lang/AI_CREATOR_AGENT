@@ -1,6 +1,6 @@
 # Advanced Provider Store — Evidence-Based Completion Ledger
 
-**Scope:** canonical 150-point Advanced Provider Store list. **Coordinator:** ChatGPT. **Last audited:** 2026-10-27.
+**Scope:** canonical 150-point Advanced Provider Store list. **Coordinator:** ChatGPT. **Last audited:** 2026-10-27 (latest hardening slice CI verified).
 
 ## Rules
 
@@ -14,9 +14,10 @@
 
 - Repository: attaehmad5-lang/AI_CREATOR_AGENT.
 - The advanced catalog has 18 entries; compatibility tests assert those IDs are a subset of the 54-provider central catalog.
-- GitHub Actions run [#40556234168](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40556234168) passed compilation, catalog JSON validation, and all 431 unit/regression tests on both Ubuntu and Windows. It includes the Unicode-control credential fix, advanced-manager readiness diagnostics, locked/deprecated provider exclusion, runtime catalog-consistency diagnostics, catalog metadata-drift checks, category-capability consistency checks, category metadata validation, and integrity checks for both 150-row ledgers.
-- No live provider credentials were supplied or used. No live generation, credit balance, or billing test is claimed.
-- No local test execution is claimed in this audit; GitHub Actions is the runtime verification path for this workspace.
+- Latest relevant GitHub Actions run [#40559469358](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40559469358) passed compilation, catalog JSON validation, and all **440 unit/regression tests on both Ubuntu and Windows** at commit `26e0ee6ee3c1739cc85872d044fcf4d71dd04e9e`.
+- The passing suite includes advanced capability discovery (exact case-insensitive matching and category filtering), advanced-only adapter load/unload lifecycle, disabled/locked/missing-provider rejection, secret-free readiness diagnostics, catalog mismatch detection, and malformed-versus-missing catalog reporting, in addition to the existing provider regression suite.
+- No live provider credentials were supplied or used. No live generation, credit balance, or billing test is claimed; those require user-configured credentials and approval for any billable action.
+- CI is the verified runtime execution path for this workspace; no local test execution is claimed.
 
 ## 150-point ledger
 
@@ -24,9 +25,9 @@
 |---:|---|---|---|---|
 | 001 | Provider Catalog Management | PARTIAL | connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog/lifecycle foundations exist; active advanced catalog has 18 records and is a subset of the 54-provider registry. Field-by-field metadata drift and category-capability consistency tests pass. Runtime adapter completeness remains. |
 | 002 | Provider Registration | PARTIAL | connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog/lifecycle foundations exist; capability-to-category consistency is tested, and runtime catalog-consistency diagnostics compare all 18 advanced records against the 54-provider registry. Runtime adapter completeness remains. |
-| 003 | Provider Discovery | COMPLETED | connection_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog discovery by category/capability is implemented and covered by regression tests. |
-| 004 | Provider Loading | COMPLETED | connection_manager.py; tests/test_connection_manager.py | Factory loading, disabled-provider rejection, contract enforcement and safe failure behavior are tested. |
-| 005 | Provider Unloading | COMPLETED | connection_manager.py; tests/test_connection_manager.py | Unload/cleanup behavior and cleanup-failure preservation are covered by regression tests. |
+| 003 | Provider Discovery | COMPLETED | connection_manager.py; unified_provider_registry.py; advanced/advanced_provider_manager.py; tests/test_provider_store_compat.py; tests/test_advanced_provider_manager.py | Stable exact case-insensitive capability discovery with optional category filtering is covered by the passing 440-test CI run #40559469358. |
+| 004 | Provider Loading | COMPLETED | connection_manager.py; advanced/advanced_provider_manager.py; tests/test_connection_manager.py; tests/test_advanced_provider_manager.py | Canonical factory contract enforcement plus advanced-only facade rejection of missing, disabled and locked providers is covered by CI run #40559469358. |
+| 005 | Provider Unloading | COMPLETED | connection_manager.py; advanced/advanced_provider_manager.py; tests/test_connection_manager.py; tests/test_advanced_provider_manager.py | Advanced facade delegates unload and cleanup to canonical lifecycle manager; adapter cleanup/instance removal is covered by CI run #40559469358. |
 | 006 | Provider Enable/Disable | COMPLETED | connection_manager.py; tests/test_connection_manager.py; tests/test_provider_catalogs.py | Enable/disable state, unload-on-disable, candidate catalog validation and deprecation rejection are tested. |
 | 007 | Provider Metadata Management | PARTIAL | connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py | Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain. |
 | 008 | Provider Interface Contracts | COMPLETED | connection_manager.py; tests/test_connection_manager.py; tests/test_provider_catalogs.py | Modality callable contracts and load-time contract rejection are tested. |
@@ -169,7 +170,7 @@
 | 145 | Secret-Free Package Verification | PARTIAL | task-25-tests.yml; sensitive_data_policy.py | Secret-tracking checks and redaction tests exist; a final release ZIP scan is still required. |
 | 146 | Backward Compatibility | PARTIAL | provider_store modules; test_provider_store_compat.py; regression tests | Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains. |
 | 147 | Deprecation Management | PARTIAL | provider_store modules; test_provider_store_compat.py; regression tests | Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains. |
-| 148 | Error Diagnostics | PARTIAL | provider_store modules; test_provider_store_compat.py; regression tests | Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains. |
+| 148 | Error Diagnostics | PARTIAL | provider_store modules; advanced/advanced_provider_manager.py; tests/test_advanced_provider_manager.py | Secret-free readiness report identifies catalog, enablement, credential and verified-connectivity blockers; broader normalized error taxonomy and acceptance coverage remain. |
 | 149 | Recovery Diagnostics | PARTIAL | provider_store modules; test_provider_store_compat.py; regression tests | Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains. |
 | 150 | Production Readiness Verification | NOT STARTED | No release-grade end-to-end evidence | Complete remaining adapter, live integration, packaging and release gates before production readiness can be claimed. |
 
