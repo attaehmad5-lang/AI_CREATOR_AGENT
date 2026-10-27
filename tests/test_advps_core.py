@@ -14,7 +14,7 @@ from projects.provider_store.advanced.advps.health import HealthRegistry
 from projects.provider_store.advanced.advps.runtime import ProviderRuntime
 from projects.provider_store.advanced.advps.cli import main as cli_main
 from projects.provider_store.advanced.advps.errors import (
-    AmbiguousOutcomeError, BudgetExceededError, CredentialExpiredError, CredentialUnavailableError, PaidUsageNotApprovedError,
+    AmbiguousOutcomeError, BudgetExceededError, CredentialExpiredError, CredentialUnavailableError, NotFoundError, PaidUsageNotApprovedError,
     PriceUnknownError, SecurityError, ValidationError,
 )
 from projects.provider_store.advanced.advps.redact import redact, redact_text
@@ -247,7 +247,7 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
                 self.closed = True
         instance = Provider()
         runtime = ProviderRuntime()
-        with self.assertRaises(Exception):
+        with self.assertRaises(NotFoundError):
             runtime.load("unregistered")
         runtime.register_factory("p", lambda config: instance)
         self.assertTrue(runtime.load("p")["loaded"])
@@ -258,7 +258,7 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         self.assertTrue(runtime.unload("p")["already_unloaded"] is False)
         self.assertTrue(instance.closed)
         self.assertFalse(runtime.status("p")["loaded"])
-        with self.assertRaises(Exception):
+        with self.assertRaises(NotFoundError):
             runtime.invoke("p", "generate", "nope")
 
     def test_provider_runtime_does_not_unload_active_call(self):
