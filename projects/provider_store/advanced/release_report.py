@@ -192,7 +192,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
             "relatedSpdxElement": "SPDXRef-Package-AdvancedProviderStore",
         }],
     }
-    sbom_json.write_text(json.dumps(sbom, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
+    sbom_json.write_text(json.dumps(sbom, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for relative, data in payloads:
             zf.writestr(relative, data)
