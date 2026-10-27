@@ -126,12 +126,13 @@ class ProviderConfigLifecycleManager:
         with self._lock:
             if not self._history:
                 return {"status": "NO_CONFIG_ROLLBACK_AVAILABLE", "rolled_back": False}
-            previous = self._history.pop()
-            if self.active_config is not None:
-                self._history.append(copy.deepcopy(self.active_config))
+            previous = copy.deepcopy(self._history[-1])
             valid, reason = self._validate(previous)
             if not valid:
                 return {"status": "ROLLBACK_CONFIG_INVALID", "rolled_back": False, "reason": reason}
+            self._history.pop()
+            if self.active_config is not None:
+                self._history.append(copy.deepcopy(self.active_config))
             self.active_config = copy.deepcopy(previous)
             self.generation += 1
             return {
@@ -166,12 +167,18 @@ class ProviderConfigLifecycleManager:
         try:
             shutil.copy2(config_path, backup_path)
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                fd = -1
                 json.dump(result["config"], stream, indent=2, ensure_ascii=False, allow_nan=False)
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             atomic_replace_with_retry(temp_name, config_path)
         except Exception as exc:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
             try:
                 os.unlink(temp_name)
             except FileNotFoundError:
