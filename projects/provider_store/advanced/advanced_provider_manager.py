@@ -6,6 +6,7 @@ from typing import Any
 from ..connection_manager import ConnectionManager
 from ..unified_provider_registry import ADVANCED_CATEGORIES
 from ..provider_store_manager import ProviderStoreManager
+from .advanced_store_bridge import AdvancedStoreBridge
 
 
 class AdvancedProviderManager:
@@ -21,6 +22,8 @@ class AdvancedProviderManager:
         self.store = ProviderStoreManager(
             catalog_path, state_path, connection_manager=connection_manager
         )
+        # Reuse exactly the same ConnectionManager; no duplicate catalog/state.
+        self.bridge = AdvancedStoreBridge(self.store.manager)
 
     @property
     def catalog(self) -> dict[str, Any]:
@@ -41,6 +44,17 @@ class AdvancedProviderManager:
             provider for provider in self.list_providers()
             if provider.get("category") == category
         ]
+
+    def route_candidates(self, capability: str, **kwargs: Any) -> list[dict[str, Any]]:
+        """Return verified advanced providers eligible for a dry-run route."""
+        return [
+            provider for provider in self.bridge.candidates(capability, **kwargs)
+            if provider.get("category") in ADVANCED_CATEGORIES
+        ]
+
+    def simulate_route(self, capability: str, **kwargs: Any) -> list[str]:
+        """Return candidate IDs without making provider calls or spending credits."""
+        return [provider["id"] for provider in self.route_candidates(capability, **kwargs)]
 
     def status(self) -> dict[str, Any]:
         providers = self.list_providers()
