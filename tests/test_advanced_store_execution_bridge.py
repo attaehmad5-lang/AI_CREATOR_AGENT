@@ -35,7 +35,8 @@ class ExecutionDelegationTests(unittest.TestCase):
 
         result = self.bridge.execute_via_service(BrokenService(), request_id="req-3")
         self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
-        self.assertTrue(result["reservations_retained"])
+        self.assertEqual(result["reservation_state"], "UNKNOWN")
+        self.assertTrue(result["manual_reconciliation_required"])
         self.assertEqual(result["request_id"], "req-3")
         self.assertNotIn("private details", repr(result))
 
