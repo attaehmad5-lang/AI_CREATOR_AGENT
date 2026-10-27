@@ -26,10 +26,13 @@ class MediaIntegrityValidator:
             return {"valid": False, "status": "UNSUPPORTED_MEDIA_MODALITY"}
         if not isinstance(path, (str, os.PathLike)):
             return {"valid": False, "status": "INVALID_MEDIA_PATH"}
+        # Path("") resolves to "."; reject blank textual paths before pathlib
+        # normalizes them, otherwise the caller gets a misleading missing-output
+        # status instead of the stable invalid-input result.
+        if isinstance(path, str) and not path.strip():
+            return {"valid": False, "status": "INVALID_MEDIA_PATH"}
         try:
             file_path = Path(path)
-            if not str(file_path).strip():
-                return {"valid": False, "status": "INVALID_MEDIA_PATH"}
             size = file_path.stat().st_size
             if not file_path.is_file() or size <= 0:
                 return {"valid": False, "status": "OUTPUT_FILE_MISSING_OR_EMPTY"}
