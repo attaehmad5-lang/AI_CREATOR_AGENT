@@ -133,5 +133,21 @@ class ProviderQuotaManagerTests(unittest.TestCase):
         self.assertTrue(record["outcome_uncertain"])
         self.assertEqual(record["uncertainty_reason"], "TIMEOUT")
 
+    def test_corrupt_uncertain_quota_metadata_is_rejected_on_reload(self):
+        self.path.write_text(json.dumps({
+            "requests": {
+                "job": {
+                    "provider_id": "image", "status": "RESERVED",
+                    "created_at": self.now[0].isoformat(),
+                    "outcome_uncertain": True, "uncertainty_reason": "UNTRUSTED",
+                    "uncertain_at": self.now[0].isoformat(),
+                }
+            }
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ProviderQuotaManager(
+                self.path, limits=self.limits, clock=lambda: self.now[0]
+            )
+
 if __name__ == "__main__":
     unittest.main()
