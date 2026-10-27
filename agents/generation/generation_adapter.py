@@ -126,7 +126,7 @@ class GenerationAdapter:
 
         options = dict(adapter_options or {})
         reserved_adapter_keys = {
-            "provider_id", "request_id", "project_id", "principal_id",
+            "project_id", "principal_id",
             "data_categories", "retention_days", "provider_training_use",
             "user_training_consent", "estimated_cost", "estimated_cost_unit",
             "actual_cost", "charge_outcome", "reservation_state",
