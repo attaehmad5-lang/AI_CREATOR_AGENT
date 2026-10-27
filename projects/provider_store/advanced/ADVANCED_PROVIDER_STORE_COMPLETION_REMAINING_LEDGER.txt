@@ -452,9 +452,9 @@ Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; 
 Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
 
 Feature 087: Catalog Import/Export
-Status: PARTIAL
-Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py
-Remaining work: Validated JSON export and import use atomic replacement, an interprocess lock, backup, post-write validation and rollback. Round-trip, malformed/secret-bearing input and injected-write-failure tests are awaiting the latest cross-platform CI result.
+Status: COMPLETED
+Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py; CI #40574722254
+Remaining work: Validated JSON export and import use atomic replacement, an interprocess lock, backup, post-write validation and rollback. Round-trip, malformed/secret-bearing input and injected-write-failure tests pass on Ubuntu and Windows (469-test suite).
 
 Feature 088: Catalog Integrity Verification
 Status: COMPLETED
