@@ -86,8 +86,14 @@ else:
 
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
-Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+Live provider API/account probes, provider-specific authorization-code/PKCE and consent flows (a generic OAuth2 refresh-token manager is available), complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution with a real trusted executor, provider-specific network-failure injection, cross-manager atomic transactions, production ClamAV operation, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
 
+
+
+
+### OAuth2 refresh-token manager
+
+`OAuth2RefreshTokenManager` implements the standard refresh-token grant, in-memory access-token caching, expiry checks, body/basic client authentication, sanitized failures, and optional refresh-token rotation through an external secret-manager sink. It does not perform browser authorization-code/PKCE or consent UI flows. The injected `request_token` callback must use the deployment's reviewed HTTPS transport, verify the configured allowed host, and enforce redirect and response-size policies; never use a callback that logs form data or credentials. For providers that require refresh-token rotation, set `refresh_token_rotation_required=True` and provide a sink that returns `True` only after the external secret manager confirms persistence.
 
 ## Canonical generation execution and artifact scanning
 
