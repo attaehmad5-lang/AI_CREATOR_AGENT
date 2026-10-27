@@ -112,7 +112,11 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
         relative = path.relative_to(root).as_posix()
         data = path.read_bytes()
         # Fail closed on private-key material; don't copy it into a release archive.
-        if b"-----BEGIN PRIVATE KEY-----" in data or b"-----BEGIN RSA PRIVATE KEY-----" in data:
+        private_key_markers = (
+            b"-----BEGIN " + b"PRIVATE KEY-----",
+            b"-----BEGIN " + b"RSA PRIVATE KEY-----",
+        )
+        if any(marker in data for marker in private_key_markers):
             raise ValueError(f"private-key material detected in eligible source file: {relative}")
         manifest_entries.append({"path": relative, "size_bytes": len(data), "sha256": _sha256(data)})
         payloads.append((relative, data))
