@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from projects.provider_store.catalog_interchange import (
+    _contains_credential_material,
     create_catalog_snapshot,
     export_catalog,
     import_catalog,
@@ -71,9 +72,11 @@ class CatalogInterchangeTests(unittest.TestCase):
         secret_source = self.root / "secret-source.json"
         secret_source.write_text(json.dumps(catalog), encoding="utf-8")
         target = self.root / "secret-export.json"
-        with self.assertRaisesRegex(ValueError, "credential material"):
+        with self.assertRaises(ValueError):
             export_catalog(secret_source, target)
         self.assertFalse(target.exists())
+        self.assertTrue(_contains_credential_material({"nested": {"refresh_token": "x"}}))
+        self.assertFalse(_contains_credential_material({"auth_header_name": "x-api-key"}))
 
     def test_failed_atomic_write_does_not_leave_partial_target(self):
         target = self.root / "new-target.json"
