@@ -132,7 +132,7 @@ class GenerationAdapter:
             "actual_cost", "charge_outcome", "reservation_state",
             "authorization", "authorization_context", "credentials",
             "api_key", "token", "access_token", "refresh_token",
-            "endpoint", "base_url", "url", "output_path", "prompt",
+            "endpoint", "base_url", "url",
         }
         if any(key in reserved_adapter_keys for key in options):
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
