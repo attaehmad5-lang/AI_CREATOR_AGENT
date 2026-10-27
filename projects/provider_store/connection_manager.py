@@ -1719,7 +1719,7 @@ class ConnectionManager:
             return {"provider": provider_id, "status": "INVALID_ENVIRONMENT", "credential_present": False}
         env = os.environ if environ is None else environ
         raw_token = env.get(token_env)
-        if isinstance(raw_token, str) and any(unicodedata.category(char) == "Cc" for char in raw_token):
+        if isinstance(raw_token, str) and any(unicodedata.category(char).startswith("C") for char in raw_token):
             return {
                 "provider": provider_id,
                 "status": "CREDENTIAL_VALUE_INVALID",
