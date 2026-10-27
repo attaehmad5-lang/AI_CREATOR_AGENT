@@ -192,6 +192,36 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertFalse(rejected["allowed"])
         self.assertEqual(rejected["decisions"][0]["status"], "REGION_METADATA_UNVERIFIED")
 
+    def test_routing_rechecks_credentials_after_a_verified_connection(self):
+        catalog_path = self.root / "credential-provider.json"
+        state_path = self.root / "credential-state.json"
+        catalog_path.write_text(json.dumps({
+            "providers": [{
+                "id": "credential_image", "name": "Credential Image", "category": "image",
+                "auth_type": "API_KEY", "token_env": "TEST_ROUTING_API_TOKEN",
+                "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                "priority": 1, "capabilities": ["image"],
+            }],
+        }), encoding="utf-8")
+        state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        connection = ConnectionManager(catalog_path, state_path)
+        with patch.dict("os.environ", {"TEST_ROUTING_API_TOKEN": "temporary-test-token"}):
+            verification = connection.verify_connectivity(
+                "credential_image", lambda provider, **kwargs: {"ok": True}
+            )
+            self.assertTrue(verification["verified"])
+            router = ProviderRoutingManager(connection)
+            routed = router.route(category="image", project_id="demo", capability="image")
+            self.assertTrue(routed["allowed"], routed)
+        # The stored CONNECTED state must not authorize routing after the token disappears.
+        router = ProviderRoutingManager(connection)
+        blocked = router.route(category="image", project_id="demo", capability="image")
+        self.assertFalse(blocked["allowed"])
+        self.assertTrue(any(
+            item.get("provider") == "credential_image" and item.get("status") == "CREDENTIALS_MISSING"
+            for item in blocked.get("decisions", [])
+        ), blocked)
+
     def test_routing_rejects_unverified_provider_even_if_catalog_label_says_connected(self):
         self.connections.set_state("primary", "READY")
         router = ProviderRoutingManager(self.connections)
