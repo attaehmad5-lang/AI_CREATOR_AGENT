@@ -270,5 +270,55 @@ class ProviderCreditManagerTests(unittest.TestCase):
             ProviderCreditManager(self.path)
 
 
+    def test_uncertain_provider_outcome_keeps_credit_reservation_and_blocks_release(self):
+        self.manager.refresh(
+            "image-provider",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 5.0,
+                "unit": "USD", "source": "official-account-api",
+            },
+        )
+        self.assertEqual(
+            self.manager.reserve(
+                provider_id="image-provider", amount=2.0,
+                request_id="timeout-job", unit="USD"
+            )["status"],
+            "RESERVED",
+        )
+        marked = self.manager.mark_uncertain(
+            request_id="timeout-job", provider_id="image-provider", reason="TIMEOUT"
+        )
+        self.assertEqual(marked["status"], "OUTCOME_UNCERTAIN")
+        repeated = self.manager.mark_uncertain(
+            request_id="timeout-job", provider_id="image-provider", reason="UNKNOWN"
+        )
+        self.assertEqual(repeated["status"], "ALREADY_UNCERTAIN")
+        self.assertEqual(
+            self.manager.data["reservations"]["timeout-job"]["uncertainty_reason"],
+            "TIMEOUT",
+        )
+        released = self.manager.release(request_id="timeout-job", provider_id="image-provider")
+        self.assertEqual(released["status"], "OUTCOME_UNCERTAIN_RELEASE_BLOCKED")
+        self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 3.0})
+        reservation = self.manager.data["reservations"]["timeout-job"]
+        self.assertTrue(reservation["outcome_uncertain"])
+        self.assertEqual(reservation["uncertainty_reason"], "TIMEOUT")
+
+    def test_corrupt_uncertain_reservation_metadata_is_rejected_on_reload(self):
+        self.path.write_text(json.dumps({
+            "providers": {},
+            "reservations": {
+                "job": {
+                    "provider_id": "provider", "amount": 1.0, "unit": "USD",
+                    "created_at": self.now[0].isoformat(),
+                    "outcome_uncertain": True, "uncertainty_reason": "UNTRUSTED",
+                    "uncertain_at": self.now[0].isoformat(),
+                }
+            },
+            "usage": {},
+        }), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ProviderCreditManager(self.path, clock=lambda: self.now[0])
+
 if __name__ == "__main__":
     unittest.main()

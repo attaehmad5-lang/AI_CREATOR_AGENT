@@ -9,9 +9,11 @@ import json
 import math
 import os
 import re
+import ssl
+import unicodedata
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPSHandler, HTTPRedirectHandler, Request, build_opener
 
 from .connection_manager import ConnectionManager
 
@@ -107,14 +109,16 @@ class ProviderJSONBalanceProbe:
         self.timeout_seconds = timeout_value
         self.max_response_bytes = max_response_bytes
         self.environ = os.environ if environ is None else environ
-        self.opener = opener or build_opener(_RejectRedirects())
+        self.opener = opener or build_opener(
+            _RejectRedirects(), HTTPSHandler(context=ssl.create_default_context())
+        )
 
     def __call__(self, provider_id: str) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", provider_id):
             return {"status": "INVALID_PROVIDER", "verified": False}
         token = self.environ.get(self.token_env)
         if not isinstance(token, str) or not token.strip() or len(token) > 16384 or any(
-            ord(char) < 32 or ord(char) == 127 for char in token
+            unicodedata.category(char) == "Cc" for char in token
         ):
             return {"status": "CREDENTIAL_MISSING_OR_INVALID", "provider": provider_id, "verified": False}
         headers = {"Accept": "application/json", "User-Agent": "AI_CREATOR_AGENT-BalanceProbe/1.0"}

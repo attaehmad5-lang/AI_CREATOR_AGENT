@@ -11,6 +11,7 @@ import os
 import re
 import tempfile
 import threading
+import unicodedata
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -68,6 +69,15 @@ class ConnectionManager:
         if not isinstance(self.state.get("providers"), dict):
             raise ValueError("Invalid connection state schema: providers must be an object")
         self._lock = threading.RLock()
+        # Discovery telemetry is bounded, process-local, and never stores query values,
+        # provider payloads, credentials, or user-supplied strings.
+        self._discovery_metrics_lock = threading.Lock()
+        self._discovery_metrics = {
+            "calls": 0,
+            "invalid_inputs": 0,
+            "catalog_errors": 0,
+            "providers_returned": 0,
+        }
         # Runtime instances are intentionally process-local and never serialized.
         self._loaded_providers: dict[str, Any] = {}
 
@@ -290,6 +300,12 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].connection_type is unsupported")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
+                    if "priority" in provider and (
+                        isinstance(provider["priority"], bool)
+                        or not isinstance(provider["priority"], int)
+                        or not -1000 <= provider["priority"] <= 1000
+                    ):
+                        errors.append(f"providers[{index}].priority must be an integer from -1000 to 1000")
                     if "allowed_hosts" in provider:
                         hosts = provider["allowed_hosts"]
                         if not isinstance(hosts, list) or not hosts or len(hosts) > 100:
@@ -365,7 +381,7 @@ class ConnectionManager:
                                 not isinstance(raw_url, str)
                                 or not raw_url.strip()
                                 or len(raw_url) > 2048
-                                or any(ord(char) < 32 or ord(char) == 127 for char in raw_url)
+                                or any(unicodedata.category(char) == "Cc" for char in raw_url)
                                 or parsed_url is None
                                 or parsed_url.scheme != "https"
                                 or not parsed_url.hostname
@@ -524,28 +540,32 @@ class ConnectionManager:
         return self.get_provider(provider_id) is not None
 
     def get_provider_metadata(self, provider_id: str) -> dict[str, Any] | None:
-        """Return a detached, secret-filtered view of catalog metadata."""
-        provider = self.get_provider(provider_id)
+        """Return a detached, secret-filtered view; invalid catalogs fail closed."""
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError, TypeError):
+            # This legacy API has no status envelope. Returning None avoids
+            # leaking raw catalog/parser errors or exposing stale metadata.
+            return None
         if provider is None:
             return None
-        safe: dict[str, Any] = {}
-        for key, value in provider.items():
-            normalized = str(key).casefold().replace("-", "_")
-            # Environment-variable/reference names are metadata, not credential values.
-            if normalized in {"token_env", "token_expiry_env", "api_key_env", "secret_ref", "credential_env"}:
-                safe[key] = value
-                continue
-            if any(term in normalized for term in ("password", "secret", "credential", "api_key", "apikey", "access_token", "refresh_token")):
-                continue
-            if normalized == "token":
-                continue
-            safe[key] = value
-        return safe
+        # Reuse the shared recursive sanitizer so catalog metadata and runtime
+        # status/configuration responses enforce the same credential redaction.
+        sanitized = self._sanitize_public_data(provider)
+        return sanitized if isinstance(sanitized, dict) else None
 
     def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
         """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
         with self._lock:
-            return self._set_provider_enabled_locked(provider_id, enabled)
+            try:
+                return self._set_provider_enabled_locked(provider_id, enabled)
+            except (OSError, ValueError) as exc:
+                return {
+                    "status": "CATALOG_INVALID",
+                    "provider": provider_id,
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
 
     def _set_provider_enabled_locked(
         self, provider_id: str, enabled: bool
@@ -580,6 +600,8 @@ class ConnectionManager:
                     "provider": provider_id,
                     "saved": True,
                     "runtime_unloaded": False,
+                    "runtime_loaded": provider_id in self._loaded_providers,
+                    "cleanup_error_type": unload_result.get("error_type"),
                 }
         return {
             "status": "ENABLED" if enabled else "DISABLED",
@@ -595,7 +617,16 @@ class ConnectionManager:
 
     def validate_provider_contract(self, provider_id: str, instance: Any) -> dict[str, Any]:
         """Validate the callable surface required by the provider's declared modality."""
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "valid": False,
+                "contract_version": "1.0",
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
@@ -650,11 +681,21 @@ class ConnectionManager:
 
     def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
         """Load one validated runtime instance while holding the lifecycle lock."""
+        if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", provider_id):
+            return {"status": "INVALID_PROVIDER", "provider": provider_id, "loaded": False}
         with self._lock:
             return self._load_provider_locked(provider_id, factory)
 
     def _load_provider_locked(self, provider_id: str, factory: Any) -> dict[str, Any]:
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except Exception as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "loaded": False,
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "loaded": False}
         if provider.get("enabled") is not True:
@@ -676,13 +717,31 @@ class ConnectionManager:
             return {"status": "LOAD_FAILED", "provider": provider_id, "loaded": False}
         contract = self.validate_provider_contract(provider_id, instance)
         if not contract["valid"]:
-            return {
+            # Factories may allocate resources before returning an incompatible
+            # object. Best-effort cleanup prevents a failed load leaking them.
+            cleanup_error_type = None
+            try:
+                cleanup = getattr(instance, "close", None)
+                if not callable(cleanup):
+                    cleanup = getattr(instance, "shutdown", None)
+            except Exception as exc:
+                cleanup = None
+                cleanup_error_type = type(exc).__name__
+            if callable(cleanup):
+                try:
+                    cleanup()
+                except Exception as exc:
+                    cleanup_error_type = type(exc).__name__
+            result = {
                 "status": "CONTRACT_VIOLATION",
                 "provider": provider_id,
                 "loaded": False,
                 "contract_status": contract["status"],
                 "missing_methods": contract.get("missing_methods", []),
             }
+            if cleanup_error_type is not None:
+                result["cleanup_error_type"] = cleanup_error_type
+            return result
         self._loaded_providers[provider_id] = instance
         return {"status": "LOADED", "provider": provider_id, "loaded": True}
 
@@ -693,18 +752,38 @@ class ConnectionManager:
 
     def unload_provider(self, provider_id: str) -> dict[str, Any]:
         """Unload a runtime instance under the same lock used by loading/disabling."""
+        if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", provider_id):
+            return {"status": "INVALID_PROVIDER", "provider": provider_id, "unloaded": False}
         with self._lock:
             return self._unload_provider_locked(provider_id)
 
     def _unload_provider_locked(self, provider_id: str) -> dict[str, Any]:
-        if not self.provider_exists(provider_id):
-            return {"status": "NOT_FOUND", "provider": provider_id, "unloaded": False}
-        if provider_id not in self._loaded_providers:
+        # Runtime cleanup must remain possible even if the on-disk catalog is
+        # corrupted after a provider was loaded; otherwise resources can leak.
+        instance = self._loaded_providers.get(provider_id)
+        if instance is None:
+            try:
+                if not self.provider_exists(provider_id):
+                    return {"status": "NOT_FOUND", "provider": provider_id, "unloaded": False}
+            except Exception as exc:
+                return {
+                    "status": "CATALOG_INVALID",
+                    "provider": provider_id,
+                    "unloaded": False,
+                    "error_type": type(exc).__name__,
+                }
             return {"status": "NOT_LOADED", "provider": provider_id, "unloaded": False}
-        instance = self._loaded_providers[provider_id]
-        cleanup = getattr(instance, "close", None)
-        if not callable(cleanup):
-            cleanup = getattr(instance, "shutdown", None)
+        try:
+            cleanup = getattr(instance, "close", None)
+            if not callable(cleanup):
+                cleanup = getattr(instance, "shutdown", None)
+        except Exception as exc:
+            return {
+                "status": "UNLOAD_FAILED",
+                "provider": provider_id,
+                "error_type": type(exc).__name__,
+                "unloaded": False,
+            }
         if callable(cleanup):
             try:
                 cleanup()
@@ -718,25 +797,94 @@ class ConnectionManager:
         del self._loaded_providers[provider_id]
         return {"status": "UNLOADED", "provider": provider_id, "unloaded": True}
 
+    def discovery_metrics(self) -> dict[str, int]:
+        """Return a snapshot of bounded discovery counters without sensitive dimensions."""
+        with self._discovery_metrics_lock:
+            return dict(self._discovery_metrics)
+
     def discover_providers(
         self,
         *,
         category: str | None = None,
         capability: str | None = None,
         enabled_only: bool = False,
+        include_deprecated: bool = False,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Discover catalog entries by modality/capability without probing providers."""
+        """Discover providers and record privacy-safe aggregate telemetry."""
+        with self._discovery_metrics_lock:
+            self._discovery_metrics["calls"] += 1
+        valid = (
+            (category is None or (isinstance(category, str) and bool(category.strip())))
+            and (capability is None or (isinstance(capability, str) and bool(capability.strip())))
+            and isinstance(enabled_only, bool)
+            and isinstance(include_deprecated, bool)
+            and not isinstance(limit, bool) and isinstance(limit, int) and 1 <= limit <= 500
+            and not isinstance(offset, bool) and isinstance(offset, int) and 0 <= offset <= 1_000_000
+        )
+        if not valid:
+            with self._discovery_metrics_lock:
+                self._discovery_metrics["invalid_inputs"] += 1
+            return []
+        try:
+            result = self._discover_providers_impl(
+                category=category,
+                capability=capability,
+                enabled_only=enabled_only,
+                include_deprecated=include_deprecated,
+                limit=limit,
+                offset=offset,
+            )
+        except Exception:
+            # Fail closed and never include exception text in telemetry.
+            with self._discovery_metrics_lock:
+                self._discovery_metrics["catalog_errors"] += 1
+            return []
+        with self._discovery_metrics_lock:
+            self._discovery_metrics["providers_returned"] += len(result)
+        return result
+
+    def _discover_providers_impl(
+        self,
+        *,
+        category: str | None = None,
+        capability: str | None = None,
+        enabled_only: bool = False,
+        include_deprecated: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Discover providers with bounded pagination; invalid inputs fail closed."""
         if category is not None and (not isinstance(category, str) or not category.strip()):
             return []
         if capability is not None and (not isinstance(capability, str) or not capability.strip()):
             return []
-        if not isinstance(enabled_only, bool):
+        if not isinstance(enabled_only, bool) or not isinstance(include_deprecated, bool):
             return []
-        wanted_category = category.strip().casefold() if category else None
-        wanted_capability = capability.strip().casefold() if capability else None
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            return []
+        if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 1_000_000:
+            return []
+        def normalize_filter(value: str) -> str:
+            return value.strip().casefold().replace("-", "_").replace(" ", "_")
+
+        wanted_category = normalize_filter(category) if category else None
+        wanted_capability = normalize_filter(capability) if capability else None
         discovered: list[dict[str, Any]] = []
-        for provider in self.list_providers():
-            if wanted_category and str(provider.get("category", "")).casefold() != wanted_category:
+        try:
+            providers = self.list_providers()
+        except Exception:
+            # Discovery is advisory, but must fail closed when the on-disk
+            # catalog cannot be reloaded or validated; never expose stale,
+            # partially parsed, or schema-invalid provider metadata.
+            with self._discovery_metrics_lock:
+                self._discovery_metrics["catalog_errors"] += 1
+            return []
+        for provider in providers:
+            if provider.get("deprecated") is True and not include_deprecated:
+                continue
+            if wanted_category and normalize_filter(str(provider.get("category", ""))) != wanted_category:
                 continue
             if enabled_only and provider.get("enabled") is not True:
                 continue
@@ -749,13 +897,21 @@ class ConnectionManager:
                 else:
                     capabilities = []
                 # Category is also a discoverable modality for simple legacy catalog entries.
-                supported = {item.casefold() for item in capabilities}
+                supported = {normalize_filter(item) for item in capabilities}
                 if provider.get("category"):
-                    supported.add(str(provider["category"]).casefold())
+                    supported.add(normalize_filter(str(provider["category"])))
                 if wanted_capability not in supported:
                     continue
             discovered.append(dict(provider))
-        return discovered
+        # Stable ordering makes page boundaries deterministic across calls for
+        # an unchanged catalog; never return more than the validated page limit.
+        discovered.sort(
+            key=lambda item: (
+                -item.get("priority", 0),
+                str(item.get("id", "")),
+            )
+        )
+        return discovered[offset:offset + limit]
 
     def register_provider(
         self, provider: dict[str, Any], *, overwrite: bool = False
@@ -763,6 +919,8 @@ class ConnectionManager:
         """Register validated provider metadata; never accept credentials in catalog data."""
         if not isinstance(provider, dict):
             return {"status": "INVALID_PROVIDER", "reason": "provider must be an object"}
+        if not isinstance(overwrite, bool):
+            return {"status": "INVALID_OVERWRITE_FLAG", "saved": False}
         required = ("id", "name", "category", "auth_type", "connection_type")
         if any(not isinstance(provider.get(key), str) or not provider[key].strip() for key in required):
             return {
@@ -777,24 +935,40 @@ class ConnectionManager:
         if self._contains_credential_value_field(provider):
             return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id}
 
-        with self._catalog_transaction():
-            providers = self._list_providers_unlocked()
-            existing = next((item for item in providers if item.get("id") == provider_id), None)
-            if existing is not None and not overwrite:
-                return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
-            safe_provider = dict(provider)
-            safe_provider["id"] = provider_id
-            updated = [item for item in providers if item.get("id") != provider_id]
-            updated.append(safe_provider)
-            new_catalog = dict(self.catalog)
-            new_catalog["providers"] = updated
-            self._atomic_write_json(self.catalog_path, new_catalog)
-            self.catalog = new_catalog
+        try:
+            with self._catalog_transaction():
+                providers = self._list_providers_unlocked()
+                existing = next((item for item in providers if item.get("id") == provider_id), None)
+                if existing is not None and not overwrite:
+                    return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
+                safe_provider = dict(provider)
+                safe_provider["id"] = provider_id
+                updated = [item for item in providers if item.get("id") != provider_id]
+                updated.append(safe_provider)
+                new_catalog = dict(self.catalog)
+                new_catalog["providers"] = updated
+                validation = self.validate_catalog_schema(new_catalog)
+                if not validation.get("valid"):
+                    return {
+                        "status": "INVALID_PROVIDER_SCHEMA",
+                        "provider": provider_id,
+                        "saved": False,
+                        "errors": validation.get("errors", []),
+                    }
+                self._atomic_write_json(self.catalog_path, new_catalog)
+                self.catalog = new_catalog
+                return {
+                    "status": "REGISTERED",
+                    "provider": provider_id,
+                    "saved": True,
+                    "overwritten": existing is not None,
+                }
+        except (OSError, ValueError) as exc:
             return {
-                "status": "REGISTERED",
+                "status": "CATALOG_INVALID",
                 "provider": provider_id,
-                "saved": True,
-                "overwritten": existing is not None,
+                "saved": False,
+                "error_type": type(exc).__name__,
             }
 
     @staticmethod
@@ -856,7 +1030,16 @@ class ConnectionManager:
     ) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER", "saved": False}
-        if not self.provider_exists(provider_id):
+        try:
+            exists = self.provider_exists(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not exists:
             return {"status": "NOT_FOUND", "provider": provider_id}
         if not isinstance(status, str) or status not in self.VALID_STATES:
             return {"status": "INVALID_STATE", "provider": provider_id}
@@ -871,17 +1054,25 @@ class ConnectionManager:
                 "saved": False,
             }
 
-        with self._state_transaction():
-            existing = self.state["providers"].get(provider_id, {})
-            record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
-            record.update({
-                "status": status,
-                "verified": bool(verified),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
-            self.state["providers"][provider_id] = record
-            self._save()
-            return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
+        try:
+            with self._state_transaction():
+                existing = self.state["providers"].get(provider_id, {})
+                record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+                record.update({
+                    "status": status,
+                    "verified": bool(verified),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+                self.state["providers"][provider_id] = record
+                self._save()
+                return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "STATE_ACCESS_FAILED",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
 
     def _mark_connected_after_probe(self, provider_id: str) -> dict[str, Any]:
         """Record CONNECTED only after the provider-specific probe succeeds."""
@@ -914,7 +1105,7 @@ class ConnectionManager:
             return {"valid": False, "status": "INVALID_LOOPBACK_HTTP_POLICY"}
         if not isinstance(endpoint, str) or not endpoint.strip():
             return {"valid": False, "status": "INVALID_ENDPOINT"}
-        if any(ord(char) < 32 or ord(char) == 127 for char in endpoint):
+        if any(unicodedata.category(char) == "Cc" for char in endpoint):
             return {"valid": False, "status": "INVALID_ENDPOINT"}
         if allowed_hosts is not None and (
             not isinstance(allowed_hosts, (set, frozenset, list, tuple))
@@ -982,7 +1173,15 @@ class ConnectionManager:
         Set authentication_required=True only when the configured endpoint is
         documented to require and validate the provider credential.
         """
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
         configuration: dict[str, Any] = {}
@@ -991,7 +1190,12 @@ class ConnectionManager:
                 return {"status": "INVALID_AUTHENTICATION_POLICY", "provider": provider_id, "saved": False}
             configuration["authentication_required"] = authentication_required
         if model is not None:
-            if not isinstance(model, str) or not model.strip() or len(model) > 200:
+            if (
+                not isinstance(model, str)
+                or not model.strip()
+                or len(model) > 200
+                or any(unicodedata.category(char) == "Cc" for char in model)
+            ):
                 return {"status": "INVALID_MODEL", "provider": provider_id, "saved": False}
             if any(
                 term in model.casefold()
@@ -1044,36 +1248,60 @@ class ConnectionManager:
             configuration["probe_endpoint"] = probe_endpoint.strip()
         if not configuration:
             return {"status": "NO_CONFIGURATION", "provider": provider_id, "saved": False}
-        with self._state_transaction():
-            state = self.state["providers"].get(provider_id, {})
-            record = dict(state) if isinstance(state, dict) else {}
-            current = record.get("configuration", {})
-            merged = dict(current) if isinstance(current, dict) else {}
-            merged.update(configuration)
-            record["configuration"] = merged
-            record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
-            self.state["providers"][provider_id] = record
-            self._save()
+        try:
+            with self._state_transaction():
+                state = self.state["providers"].get(provider_id, {})
+                record = dict(state) if isinstance(state, dict) else {}
+                current = record.get("configuration", {})
+                merged = dict(current) if isinstance(current, dict) else {}
+                merged.update(configuration)
+                record["configuration"] = merged
+                record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
+                self.state["providers"][provider_id] = record
+                self._save()
+                return {
+                    "status": "CONFIGURED",
+                    "provider": provider_id,
+                    "saved": True,
+                    "configuration": dict(merged),
+                }
+        except (OSError, ValueError) as exc:
             return {
-                "status": "CONFIGURED",
+                "status": "STATE_ACCESS_FAILED",
                 "provider": provider_id,
-                "saved": True,
-                "configuration": dict(merged),
+                "saved": False,
+                "error_type": type(exc).__name__,
             }
 
     def get_provider_configuration(self, provider_id: str) -> dict[str, Any]:
         """Return validated non-secret runtime configuration for a known provider."""
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "configuration": {},
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "configuration": {}}
-        with self._state_transaction():
-            state = self.state["providers"].get(provider_id, {})
-            raw = state.get("configuration", {}) if isinstance(state, dict) else {}
-            if not isinstance(raw, dict):
-                return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
-            if self._contains_credential_value_field(raw):
-                return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
-            configuration = self._sanitize_public_data(raw)
+        try:
+            with self._state_transaction():
+                state = self.state["providers"].get(provider_id, {})
+                raw = state.get("configuration", {}) if isinstance(state, dict) else {}
+                if not isinstance(raw, dict):
+                    return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
+                if self._contains_credential_value_field(raw):
+                    return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
+                configuration = self._sanitize_public_data(raw)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "STATE_ACCESS_FAILED",
+                "provider": provider_id,
+                "configuration": {},
+                "error_type": type(exc).__name__,
+            }
         if self._contains_credential_value_field(configuration):
             return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
         authentication_required = configuration.get("authentication_required")
@@ -1081,7 +1309,10 @@ class ConnectionManager:
             return {"status": "INVALID_AUTHENTICATION_POLICY", "provider": provider_id, "configuration": {}}
         model = configuration.get("model")
         if model is not None and (
-            not isinstance(model, str) or not model.strip() or len(model) > 200
+            not isinstance(model, str)
+            or not model.strip()
+            or len(model) > 200
+            or any(unicodedata.category(char) == "Cc" for char in model)
         ):
             return {"status": "INVALID_MODEL", "provider": provider_id, "configuration": {}}
         if isinstance(model, str) and any(
@@ -1130,7 +1361,15 @@ class ConnectionManager:
         """Run an explicitly injected probe; only persisted success marks CONNECTED."""
         import time
 
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "verified": False}
         if provider.get("enabled") is False:
@@ -1155,6 +1394,19 @@ class ConnectionManager:
                 "status": "STATE_READ_FAILED", "provider": provider_id,
                 "verified": False, "error_type": type(exc).__name__,
             }
+        if configuration_result.get("status") == "STATE_ACCESS_FAILED":
+            # A corrupt/unreadable state store cannot safely accept an ERROR
+            # write either; preserve the read-failure classification.
+            return {
+                "status": "STATE_READ_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                **(
+                    {"error_type": configuration_result["error_type"]}
+                    if isinstance(configuration_result.get("error_type"), str)
+                    else {}
+                ),
+            }
         if configuration_result.get("status") not in {"CONFIGURED", "NO_CONFIGURATION"}:
             if not save_state("ERROR"):
                 return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
@@ -1168,8 +1420,9 @@ class ConnectionManager:
 
         credentials = self.credential_status(provider_id, environ)
         blocked_credential_states = {
-            "CREDENTIALS_MISSING", "CREDENTIALS_EXPIRED", "CREDENTIAL_EXPIRY_INVALID",
-            "CREDENTIAL_EXPIRY_UNKNOWN", "INVALID_ENVIRONMENT", "MANUAL_CONNECTION_REQUIRED",
+            "CATALOG_INVALID", "NOT_FOUND", "CREDENTIALS_MISSING", "CREDENTIAL_VALUE_INVALID", "CREDENTIALS_EXPIRED",
+            "CREDENTIAL_EXPIRY_INVALID", "CREDENTIAL_EXPIRY_UNKNOWN",
+            "INVALID_ENVIRONMENT", "MANUAL_CONNECTION_REQUIRED",
         }
         if credentials["status"] in blocked_credential_states:
             if not save_state("ERROR"):
@@ -1193,7 +1446,16 @@ class ConnectionManager:
         except Exception as exc:
             name = type(exc).__name__.casefold()
             http_status = getattr(exc, "status_code", None)
+            if http_status is None:
+                http_status = getattr(exc, "code", None)
+            if http_status is None:
+                response = getattr(exc, "response", None)
+                http_status = getattr(response, "status_code", None)
             retry_after = getattr(exc, "retry_after", None)
+            if retry_after is None:
+                headers = getattr(exc, "headers", None)
+                if callable(getattr(headers, "get", None)):
+                    retry_after = headers.get("Retry-After") or headers.get("retry-after")
             if (
                 not isinstance(http_status, int) or isinstance(http_status, bool)
                 or not 100 <= http_status <= 599
@@ -1270,7 +1532,15 @@ class ConnectionManager:
 
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER", "provider": provider_id, "verified": False}
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "verified": False}
         if provider.get("enabled") is False:
@@ -1300,6 +1570,17 @@ class ConnectionManager:
             return {
                 "status": "STATE_READ_FAILED", "provider": provider_id,
                 "verified": False, "error_type": type(exc).__name__,
+            }
+        if configuration_result.get("status") == "STATE_ACCESS_FAILED":
+            return {
+                "status": "STATE_READ_FAILED",
+                "provider": provider_id,
+                "verified": False,
+                **(
+                    {"error_type": configuration_result["error_type"]}
+                    if isinstance(configuration_result.get("error_type"), str)
+                    else {}
+                ),
             }
         if configuration_result.get("status") not in {"CONFIGURED", "NO_CONFIGURATION"}:
             return {
@@ -1367,7 +1648,15 @@ class ConnectionManager:
         }
 
     def credential_status(self, provider_id: str, environ: dict[str, str] | None = None) -> dict[str, Any]:
-        provider = self.get_provider(provider_id)
+        try:
+            provider = self.get_provider(provider_id)
+        except (OSError, ValueError) as exc:
+            return {
+                "status": "CATALOG_INVALID",
+                "provider": provider_id,
+                "credential_present": False,
+                "error_type": type(exc).__name__,
+            }
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id}
 
@@ -1415,7 +1704,12 @@ class ConnectionManager:
             }.get(provider_id)
 
         if auth_type in {"NONE", "PUBLIC", "ANONYMOUS"}:
-            return {"provider": provider_id, "status": "NO_CREDENTIAL_REQUIRED", "credential_present": True}
+            return {
+                "provider": provider_id,
+                "status": "NO_CREDENTIAL_REQUIRED",
+                "credential_required": False,
+                "credential_present": False,
+            }
         if not token_env:
             return {"provider": provider_id, "status": "MANUAL_CONNECTION_REQUIRED", "credential_present": False}
         if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
@@ -1425,7 +1719,14 @@ class ConnectionManager:
             return {"provider": provider_id, "status": "INVALID_ENVIRONMENT", "credential_present": False}
         env = os.environ if environ is None else environ
         raw_token = env.get(token_env)
-        present = isinstance(raw_token, str) and bool(raw_token.strip())
+        if isinstance(raw_token, str) and any(unicodedata.category(char).startswith("C") for char in raw_token):
+            return {
+                "provider": provider_id,
+                "status": "CREDENTIAL_VALUE_INVALID",
+                "credential_present": False,
+                "credential_name": token_env,
+            }
+        present = isinstance(raw_token, str) and bool(raw_token.strip()) and len(raw_token) <= 16384
         if not present:
             return {
                 "provider": provider_id,

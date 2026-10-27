@@ -85,6 +85,15 @@ class ProviderCreditManager:
                 raise ValueError("invalid provider credit usage record")
             timestamp_key = "created_at" if request_id in loaded["reservations"] else "committed_at"
             self._parse_timestamp(record.get(timestamp_key))
+            if request_id in loaded["reservations"] and "outcome_uncertain" in record:
+                if not isinstance(record["outcome_uncertain"], bool):
+                    raise ValueError("invalid provider credit uncertainty flag")
+                if record["outcome_uncertain"] is True:
+                    if record.get("uncertainty_reason") not in {
+                        "TIMEOUT", "CONNECTION_LOST", "PROVIDER_ERROR", "UNKNOWN"
+                    }:
+                        raise ValueError("invalid provider credit uncertainty reason")
+                    self._parse_timestamp(record.get("uncertain_at"))
             if request_id in loaded["usage"]:
                 version = record.get("snapshot_version", 1)
                 if not isinstance(version, int) or isinstance(version, bool) or version < 1:
@@ -365,6 +374,32 @@ class ProviderCreditManager:
             self._save()
             return {"status": "COMMITTED", "committed": True, "request_id": request_id, "amount": amount}
 
+    def mark_uncertain(self, *, request_id: str, provider_id: str | None = None, reason: str = "UNKNOWN") -> dict[str, Any]:
+        """Keep reserved credits blocked when a provider may have processed the request."""
+        allowed_reasons = {"TIMEOUT", "CONNECTION_LOST", "PROVIDER_ERROR", "UNKNOWN"}
+        if not isinstance(request_id, str) or not request_id.strip():
+            return {"status": "INVALID_REQUEST_ID", "marked": False}
+        if not isinstance(reason, str) or reason not in allowed_reasons:
+            return {"status": "INVALID_UNCERTAINTY_REASON", "marked": False}
+        with self._transaction():
+            if request_id in self.data["usage"]:
+                return {"status": "ALREADY_COMMITTED", "marked": False}
+            reservation = self.data["reservations"].get(request_id)
+            if not isinstance(reservation, dict):
+                return {"status": "RESERVATION_NOT_FOUND", "marked": False}
+            if provider_id is not None and reservation.get("provider_id") != provider_id:
+                return {"status": "REQUEST_PROVIDER_MISMATCH", "marked": False}
+            if reservation.get("outcome_uncertain") is True:
+                return {
+                    "status": "ALREADY_UNCERTAIN", "marked": False,
+                    "request_id": request_id,
+                }
+            reservation["outcome_uncertain"] = True
+            reservation["uncertainty_reason"] = reason
+            reservation["uncertain_at"] = self.clock().astimezone(timezone.utc).isoformat()
+            self._save()
+            return {"status": "OUTCOME_UNCERTAIN", "marked": True, "request_id": request_id}
+
     def release(self, *, request_id: str, provider_id: str | None = None) -> dict[str, Any]:
         """Release only a reservation known not to have been consumed."""
         if not isinstance(request_id, str) or not request_id.strip():
@@ -377,6 +412,8 @@ class ProviderCreditManager:
                 return {"status": "RESERVATION_NOT_FOUND", "released": False}
             if provider_id is not None and reservation.get("provider_id") != provider_id:
                 return {"status": "REQUEST_PROVIDER_MISMATCH", "released": False}
+            if reservation.get("outcome_uncertain") is True:
+                return {"status": "OUTCOME_UNCERTAIN_RELEASE_BLOCKED", "released": False}
             del self.data["reservations"][request_id]
             self._save()
             return {"status": "RELEASED", "released": True, "request_id": request_id}

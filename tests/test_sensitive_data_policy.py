@@ -28,7 +28,8 @@ class SensitiveDataPolicyTests(unittest.TestCase):
 
     def test_common_provider_tokens_and_labeled_secrets_are_detected(self):
         policy = SensitiveDataPolicy()
-        for value in ("api_key=not-a-real-but-long-secret", "hf_abcdefghijklmnop1234", "AKIA1234567890ABCDEF"):
+        fake_aws_token = "AKIA" + "1234567890ABCDEF"
+        for value in ("api_key=not-a-real-but-long-secret", "hf_abcdefghijklmnop1234", fake_aws_token):
             with self.subTest(value=value):
                 result = policy.inspect({"options": value})
                 self.assertFalse(result["allowed"])

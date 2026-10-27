@@ -1,19 +1,17 @@
 # Task #25 — Provider Connection Manager Verification Audit
 
-**Follow-up branch:** `task-25-followup-audit`  
-**Pull request:** #1 (merged; follow-up work requires a new branch/PR)  
+**Active follow-up branch:** `task-25-safe-provider-plugin-lifecycle-20261020`  
+**Active pull request:** [#77](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/77) (draft; not merged)  
 **Audit status:** In progress — do not mark Task #25 complete yet.
 
 ## Latest automated verification
 
-GitHub Actions code-verification run [#38305883948](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38304167680) completed successfully on Python 3.13:
+GitHub Actions run [#40551020477](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40551020477) completed successfully on Ubuntu and Windows for commit `d842c70ffb8f7538cb9778880cfa887530dbeef7`:
 
-- Ubuntu: 312 tests passed, 0 failures.
-- Windows: 304 tests passed, 0 failures.
-- Provider module/test compilation and provider JSON catalog validation passed on both platforms.
-- The only changes after that code-verification run are audit/documentation updates. Follow-up work is isolated in draft PR #7; PR #1 is already merged, but this audit remains IN PROGRESS because item-by-item and live integration evidence is incomplete.
-
-Passing tests demonstrate the tested behavior only. They do not prove live credentials, account credits, external provider availability, or every feature in the canonical checklist.
+- Both platforms passed secret-file exclusion, compilation, provider JSON catalog validation, and the unit/regression suite.
+- Added a regression test confirming C0/C1 Unicode control characters in provider-balance credentials are rejected before any network call.
+- The nested provider metadata mutation regression also passed on both platforms in run [#40549998711](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40549998711).
+- Passing CI proves only the exercised code paths. The active follow-up remains draft PR #77; all 138 canonical features, authorized live provider verification, real modality E2E, Android/Pydroid validation, and enterprise resilience checks are not complete. No final Task #25 PASS is claimed.
 
 ## Evidence-backed implementation areas
 
@@ -50,4 +48,4 @@ Passing tests demonstrate the tested behavior only. They do not prove live crede
 
 ## Completion gate
 
-Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and platform/runtime constraints are tested. PR #1 is already merged; that merge is not a completion signal.
+Do not mark this task complete or mark all 138 items PASS until the exact canonical feature checklist has evidence for each item, required tests are green, unresolved external/account-dependent requirements are explicitly handled, and platform/runtime constraints are tested. PR #77 remains a draft and is not a completion signal.

@@ -248,6 +248,27 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["saved"])
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
 
+    def test_set_state_fails_closed_when_state_store_is_corrupt(self):
+        self.state_path.write_text("{not-json", encoding="utf-8")
+        before = self.state_path.read_bytes()
+
+        result = self.manager.set_state("public_image", "READY")
+
+        self.assertEqual(result["status"], "STATE_ACCESS_FAILED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertEqual(self.state_path.read_bytes(), before)
+
+    def test_set_state_fails_closed_when_catalog_is_corrupt(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+
+        result = self.manager.set_state("public_image", "READY")
+
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["saved"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertEqual(self.manager.state["providers"].get("public_image"), None)
+
     def test_public_state_setter_cannot_mint_verified_connection(self):
         for state in ("CONNECTED", "READY"):
             with self.subTest(state=state):
@@ -319,9 +340,22 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(non_string["status"], "CREDENTIALS_MISSING")
         self.assertFalse(non_string["credential_present"])
 
+    def test_unicode_control_credentials_are_invalid_and_block_connectivity(self):
+        for token in ("private\u0085token", "private\u009ftoken"):
+            with self.subTest(token=token):
+                result = self.manager.credential_status(
+                    "token_image", {"TEST_PROVIDER_TOKEN": token}
+                )
+                self.assertEqual(result["status"], "CREDENTIAL_VALUE_INVALID")
+                self.assertFalse(result["credential_present"])
+                self.assertNotIn(token, repr(result))
+
     def test_public_provider_needs_no_credential(self):
         result = self.manager.credential_status("public_image", {})
         self.assertEqual(result["status"], "NO_CREDENTIAL_REQUIRED")
+        self.assertFalse(result["credential_required"])
+        self.assertFalse(result["credential_present"])
+        self.assertNotIn("credential_name", result)
 
     def test_credential_expiry_detection_never_exposes_token(self):
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
@@ -402,6 +436,69 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["restored"])
         self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{still-corrupt")
 
+    def test_connectivity_manual_connection_and_credentials_fail_closed_on_invalid_catalog(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        probe_calls = []
+        connectivity = self.manager.verify_connectivity(
+            "public_image", lambda provider, **kwargs: probe_calls.append("connectivity") or True
+        )
+        manual = self.manager.verify_manual_connection(
+            "public_image",
+            manual_session=object(),
+            probe=lambda provider, **kwargs: probe_calls.append("manual") or True,
+        )
+        credentials = self.manager.credential_status("public_image", environ={})
+
+        self.assertEqual(connectivity["status"], "CATALOG_INVALID")
+        self.assertEqual(manual["status"], "CATALOG_INVALID")
+        self.assertEqual(credentials["status"], "CATALOG_INVALID")
+        self.assertFalse(connectivity["verified"])
+        self.assertFalse(manual["verified"])
+        self.assertFalse(credentials["credential_present"])
+        self.assertEqual(probe_calls, [])
+
+    def test_provider_configuration_fails_closed_when_catalog_is_invalid(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        before = self.state_path.read_bytes()
+
+        configured = self.manager.configure_provider("public_image", model="safe-model")
+        readback = self.manager.get_provider_configuration("public_image")
+
+        self.assertEqual(configured["status"], "CATALOG_INVALID")
+        self.assertFalse(configured["saved"])
+        self.assertEqual(configured["error_type"], "ValueError")
+        self.assertEqual(readback["status"], "CATALOG_INVALID")
+        self.assertEqual(readback["configuration"], {})
+        self.assertEqual(self.state_path.read_bytes(), before)
+
+    def test_manual_connection_preserves_state_read_failure_for_corrupt_store(self):
+        self.manager.catalog["providers"][0]["auth_type"] = "MANUAL"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        self.state_path.write_text("{not-json", encoding="utf-8")
+        probe_calls = []
+        result = self.manager.verify_manual_connection(
+            "public_image",
+            manual_session=object(),
+            probe=lambda provider, **kwargs: probe_calls.append(True) or True,
+        )
+        self.assertEqual(result["status"], "STATE_READ_FAILED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertEqual(probe_calls, [])
+
+    def test_provider_configuration_fails_closed_when_state_store_is_invalid(self):
+        self.state_path.write_text("{not-json", encoding="utf-8")
+        before = self.state_path.read_bytes()
+
+        configured = self.manager.configure_provider("public_image", model="safe-model")
+        readback = self.manager.get_provider_configuration("public_image")
+
+        self.assertEqual(configured["status"], "STATE_ACCESS_FAILED")
+        self.assertFalse(configured["saved"])
+        self.assertEqual(readback["status"], "STATE_ACCESS_FAILED")
+        self.assertEqual(readback["configuration"], {})
+        self.assertEqual(self.state_path.read_bytes(), before)
+
     def test_persisted_authentication_policy_must_be_boolean(self):
         self.state_path.write_text(json.dumps({
             "version": "1.0", "policy": "USER_CONTROLLED",
@@ -422,6 +519,33 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "INVALID_AUTHENTICATION_POLICY")
         self.assertFalse(result["saved"])
+
+    def test_catalog_rejects_unicode_control_characters_in_official_urls(self):
+        result = ConnectionManager.validate_catalog_schema({
+            "version": "1.0",
+            "providers": [{
+                "id": "public_image",
+                "official_api_url": "https://api.example.com/docs\u0085injected",
+            }],
+        })
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("safe HTTPS URL" in error for error in result["errors"]))
+
+    def test_endpoint_validation_rejects_unicode_control_characters(self):
+        result = ConnectionManager.validate_endpoint(
+            "https://api.example.com/path\u0085header-injection",
+            allowed_hosts={"api.example.com"},
+        )
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "INVALID_ENDPOINT")
+
+    def test_configure_provider_rejects_control_characters_in_model_without_persisting(self):
+        for model in ("image-v1\nmalicious", "image-v1\tmalicious", "image-v1\x7f", "image-v1\u0085malicious"):
+            with self.subTest(model=repr(model)):
+                result = self.manager.configure_provider("public_image", model=model)
+                self.assertEqual(result["status"], "INVALID_MODEL")
+                self.assertFalse(result["saved"])
+        self.assertNotIn("configuration", self.manager.state["providers"].get("public_image", {}))
 
     def test_configured_endpoint_and_model_are_passed_to_probe(self):
         self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
@@ -520,6 +644,29 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "STATE_READ_FAILED")
         self.assertFalse(result["verified"])
         self.assertEqual(called, [])
+
+    def test_persisted_model_control_characters_are_rejected_before_probe(self):
+        self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        for model in ("image-v1\nmalicious", "image-v1\tmalicious", "image-v1\x7f", "image-v1\u0085malicious"):
+            with self.subTest(model=repr(model)):
+                self.manager.state["providers"]["public_image"] = {
+                    "status": "CONNECTED",
+                    "verified": True,
+                    "configuration": {
+                        "endpoint": "https://api.example.com/health",
+                        "model": model,
+                    },
+                }
+                self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+                called = []
+                result = self.manager.verify_connectivity(
+                    "public_image",
+                    lambda provider, **kwargs: called.append(True) or {"ok": True},
+                )
+                self.assertEqual(result["status"], "INVALID_MODEL")
+                self.assertFalse(result["verified"])
+                self.assertEqual(called, [])
 
     def test_persisted_secret_bearing_model_is_rejected_before_probe(self):
         self.manager.catalog["providers"][0]["allowed_hosts"] = ["api.example.com"]
@@ -636,6 +783,37 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "MANUAL_SESSION_REQUIRED")
         self.assertEqual(called, [])
 
+    def test_connectivity_maps_standard_http_error_code_and_retry_after_header(self):
+        class StandardHttpError(Exception):
+            code = 401
+            headers = {"Retry-After": "12"}
+
+        result = self.manager.verify_connectivity(
+            "public_image",
+            lambda provider, **kwargs: (_ for _ in ()).throw(StandardHttpError("private server detail")),
+        )
+        self.assertEqual(result["status"], "AUTHENTICATION_OR_PERMISSION_FAILED")
+        self.assertEqual(result["http_status"], 401)
+        self.assertEqual(result["retry_after"], "12")
+        self.assertNotIn("private server detail", repr(result))
+
+    def test_connectivity_maps_response_status_code_for_rate_limit(self):
+        class Response:
+            status_code = 429
+
+        class RateLimitError(Exception):
+            response = Response()
+            headers = {"retry-after": "7"}
+
+        result = self.manager.verify_connectivity(
+            "public_image",
+            lambda provider, **kwargs: (_ for _ in ()).throw(RateLimitError("private rate-limit detail")),
+        )
+        self.assertEqual(result["status"], "RATE_LIMITED")
+        self.assertEqual(result["http_status"], 429)
+        self.assertEqual(result["retry_after"], "7")
+        self.assertNotIn("private rate-limit detail", repr(result))
+
     def test_connectivity_fails_closed_when_state_cannot_be_read_or_saved(self):
         self.state_path.write_text("{invalid-json", encoding="utf-8")
         self.assertEqual(self.manager.get_state("public_image")["status"], "STATE_READ_FAILED")
@@ -709,6 +887,24 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(state["verified"])
         self.assertEqual(self.manager.summary()["UNKNOWN"], 1)
 
+    def test_register_provider_fails_closed_when_existing_catalog_is_invalid(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        provider = {
+            "id": "new_image",
+            "name": "New Image",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+        }
+        before = self.catalog_path.read_bytes()
+
+        result = self.manager.register_provider(provider)
+
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["saved"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
     def test_register_provider_persists_valid_metadata(self):
         provider = {
             "id": "local_image", "name": "Local Image", "category": "image",
@@ -727,6 +923,83 @@ class ConnectionManagerTests(unittest.TestCase):
         result = self.manager.register_provider(provider)
         self.assertEqual(result["status"], "ALREADY_EXISTS")
         self.assertEqual(self.manager.get_provider("token_image")["auth_type"], "API_TOKEN")
+
+    def test_registration_enforces_version_three_required_fields(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["version"] = "3.0"
+        for index, existing in enumerate(catalog["providers"]):
+            existing.setdefault("name", f"Existing Provider {index}")
+            existing.setdefault(
+                "connection_type",
+                "API" if existing.get("auth_type") == "API_TOKEN" else "LOCAL",
+            )
+            existing.setdefault("enabled", False)
+            existing.setdefault("subscription_required", False)
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        self.manager = ConnectionManager(self.catalog_path, self.state_path)
+        provider = {
+            "id": "v3_missing_flags",
+            "name": "Missing Flags",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+        }
+        before = self.catalog_path.read_bytes()
+
+        result = self.manager.register_provider(provider)
+
+        self.assertEqual(result["status"], "INVALID_PROVIDER_SCHEMA")
+        self.assertFalse(result["saved"])
+        self.assertTrue(any("enabled" in error for error in result["errors"]))
+        self.assertTrue(any("subscription_required" in error for error in result["errors"]))
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_register_provider_rejects_schema_invalid_metadata_without_mutating_catalog(self):
+        provider = {
+            "id": "invalid_enabled",
+            "name": "Invalid Enabled",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+            "enabled": "yes",
+        }
+        before = self.catalog_path.read_bytes()
+        result = self.manager.register_provider(provider)
+        self.assertEqual(result["status"], "INVALID_PROVIDER_SCHEMA")
+        self.assertFalse(result["saved"])
+        self.assertTrue(any("enabled must be boolean" in error for error in result["errors"]))
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+        self.assertFalse(self.manager.provider_exists("invalid_enabled"))
+
+    def test_invalid_overwrite_preserves_existing_provider_catalog(self):
+        provider = {
+            "id": "public_image",
+            "name": "Broken Replacement",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+            "enabled": "yes",
+        }
+        before = self.catalog_path.read_bytes()
+        result = self.manager.register_provider(provider, overwrite=True)
+        self.assertEqual(result["status"], "INVALID_PROVIDER_SCHEMA")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+        self.assertNotEqual(self.manager.get_provider("public_image").get("name"), "Broken Replacement")
+
+    def test_register_provider_requires_boolean_overwrite_flag(self):
+        provider = {
+            "id": "new_image",
+            "name": "New Image",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+        }
+        before = self.catalog_path.read_bytes()
+        result = self.manager.register_provider(provider, overwrite="yes")
+        self.assertEqual(result["status"], "INVALID_OVERWRITE_FLAG")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.catalog_path.read_bytes(), before)
 
     def test_register_provider_rejects_missing_contract_fields(self):
         result = self.manager.register_provider({"id": "broken"})
@@ -776,6 +1049,51 @@ class ConnectionManagerTests(unittest.TestCase):
         }
         self.assertEqual(self.manager.register_provider(provider)["status"], "INVALID_PROVIDER")
 
+    def test_discovery_fails_closed_for_malformed_or_schema_invalid_catalog(self):
+        invalid_catalogs = (
+            "{not-json",
+            json.dumps({"providers": [{"id": "../unsafe", "category": "image"}]}),
+            json.dumps({"providers": "not-a-list"}),
+        )
+        for raw_catalog in invalid_catalogs:
+            with self.subTest(raw_catalog=raw_catalog):
+                self.catalog_path.write_text(raw_catalog, encoding="utf-8")
+                self.assertEqual(self.manager.discover_providers(), [])
+
+    def test_discovery_hides_deprecated_providers_unless_explicitly_requested(self):
+        retired = {
+            "id": "retired_image",
+            "name": "Retired Image",
+            "category": "image",
+            "auth_type": "NONE",
+            "connection_type": "LOCAL",
+            "enabled": False,
+            "deprecated": True,
+            "deprecation_reason": "provider end of life",
+            "deprecation_date": "2026-10-01",
+        }
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"].append(retired)
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+        self.assertNotIn(
+            "retired_image",
+            {item["id"] for item in self.manager.discover_providers()},
+        )
+        self.assertIn(
+            "retired_image",
+            {item["id"] for item in self.manager.discover_providers(include_deprecated=True)},
+        )
+        self.assertEqual(self.manager.discover_providers(include_deprecated="yes"), [])
+
+    def test_discovery_normalizes_category_alias_separators(self):
+        self.manager.catalog["providers"][0]["category"] = "image-editing"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+
+        results = self.manager.discover_providers(category="IMAGE EDITING")
+
+        self.assertEqual([item["id"] for item in results], ["public_image"])
+
     def test_discovery_filters_by_category_case_insensitively(self):
         results = self.manager.discover_providers(category="IMAGE")
         self.assertEqual({item["id"] for item in results}, {"public_image", "token_image"})
@@ -786,11 +1104,95 @@ class ConnectionManagerTests(unittest.TestCase):
         results = self.manager.discover_providers(capability="EDIT")
         self.assertEqual([item["id"] for item in results], ["public_image"])
 
+    def test_discovery_supports_bounded_stable_pagination(self):
+        providers = []
+        for index in range(7):
+            providers.append({
+                "id": f"page_{index}",
+                "name": f"Page {index}",
+                "category": "pagination_test",
+                "auth_type": "NONE",
+                "connection_type": "LOCAL",
+                "enabled": True,
+            })
+        for provider in providers:
+            self.assertEqual(self.manager.register_provider(provider)["status"], "REGISTERED")
+
+        first = self.manager.discover_providers(category="pagination_test", limit=3, offset=0)
+        second = self.manager.discover_providers(category="pagination_test", limit=3, offset=3)
+        third = self.manager.discover_providers(category="pagination_test", limit=3, offset=6)
+
+        self.assertEqual(len(first), 3)
+        self.assertEqual(len(second), 3)
+        self.assertEqual(len(third), 1)
+        ids = [item["id"] for item in first + second + third]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(ids, sorted(ids))
+
+    def test_discovery_ranks_by_validated_priority_then_provider_id(self):
+        providers = [
+            ("rank_z", 20),
+            ("rank_b", 50),
+            ("rank_a", 50),
+            ("rank_low", -10),
+        ]
+        for provider_id, priority in providers:
+            result = self.manager.register_provider({
+                "id": provider_id,
+                "name": provider_id,
+                "category": "ranking_test",
+                "auth_type": "NONE",
+                "connection_type": "LOCAL",
+                "enabled": True,
+                "priority": priority,
+            })
+            self.assertEqual(result["status"], "REGISTERED")
+
+        results = self.manager.discover_providers(category="ranking_test")
+        self.assertEqual(
+            [item["id"] for item in results],
+            ["rank_a", "rank_b", "rank_z", "rank_low"],
+        )
+
+    def test_catalog_rejects_invalid_provider_priority(self):
+        for priority in (True, 1001, -1001, 1.5, "10"):
+            with self.subTest(priority=priority):
+                result = self.manager.register_provider({
+                    "id": f"bad_priority_{str(priority).replace('.', '_')}",
+                    "name": "Bad priority",
+                    "category": "ranking_test",
+                    "auth_type": "NONE",
+                    "connection_type": "LOCAL",
+                    "priority": priority,
+                })
+                self.assertEqual(result["status"], "INVALID_PROVIDER_SCHEMA")
+                self.assertFalse(result["saved"])
+
+    def test_discovery_rejects_invalid_pagination_arguments(self):
+        for kwargs in (
+            {"limit": 0}, {"limit": 501}, {"limit": True}, {"limit": "10"},
+            {"offset": -1}, {"offset": 1_000_001}, {"offset": True}, {"offset": "0"},
+        ):
+            with self.subTest(kwargs=kwargs):
+                self.assertEqual(self.manager.discover_providers(**kwargs), [])
+
     def test_discovery_enabled_only_excludes_unspecified_and_disabled(self):
         self.manager.catalog["providers"][0]["enabled"] = True
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         results = self.manager.discover_providers(enabled_only=True)
         self.assertEqual([item["id"] for item in results], ["public_image"])
+
+    def test_load_provider_fails_closed_when_catalog_cannot_be_validated(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        factory_calls = []
+        result = self.manager.load_provider(
+            "public_image", lambda metadata: factory_calls.append(metadata) or object()
+        )
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["loaded"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertEqual(factory_calls, [])
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
 
     def test_load_provider_uses_factory_and_keeps_instance_in_memory(self):
         class ImageProvider:
@@ -818,6 +1220,17 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn(secret, repr(result))
         self.assertEqual(result["error_type"], "RuntimeError")
 
+    def test_load_rejects_malformed_provider_ids_without_calling_factory(self):
+        factory_calls = []
+        for provider_id in (None, [], "bad provider id", "x" * 101):
+            with self.subTest(provider_id=repr(provider_id)):
+                result = self.manager.load_provider(
+                    provider_id, lambda metadata: factory_calls.append(metadata) or object()
+                )
+                self.assertEqual(result["status"], "INVALID_PROVIDER")
+                self.assertFalse(result["loaded"])
+        self.assertEqual(factory_calls, [])
+
     def test_load_provider_rejects_missing_factory_and_unknown_provider(self):
         self.assertEqual(
             self.manager.load_provider("public_image", None)["status"], "INVALID_FACTORY"
@@ -826,6 +1239,76 @@ class ConnectionManagerTests(unittest.TestCase):
             self.manager.load_provider("not_registered", lambda metadata: object())["status"],
             "NOT_FOUND",
         )
+
+    def test_provider_contract_fails_closed_when_catalog_is_corrupt(self):
+        class ImageProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        result = self.manager.validate_provider_contract("public_image", ImageProvider())
+
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["contract_version"], "1.0")
+        self.assertEqual(result["error_type"], "ValueError")
+
+    def test_failed_load_reports_cleanup_attribute_error_without_raising(self):
+        class IncompatibleProvider:
+            @property
+            def close(self):
+                raise RuntimeError("private cleanup detail")
+
+        result = self.manager.load_provider(
+            "public_image", lambda metadata: IncompatibleProvider()
+        )
+
+        self.assertEqual(result["status"], "CONTRACT_VIOLATION")
+        self.assertFalse(result["loaded"])
+        self.assertEqual(result["cleanup_error_type"], "RuntimeError")
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+        self.assertNotIn("private cleanup detail", repr(result))
+
+    def test_unload_fails_closed_when_cleanup_attribute_raises(self):
+        class BrokenCleanupProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+            @property
+            def close(self):
+                raise RuntimeError("private cleanup detail")
+
+        instance = BrokenCleanupProvider()
+        loaded = self.manager.load_provider("public_image", lambda metadata: instance)
+        self.assertTrue(loaded["loaded"])
+
+        result = self.manager.unload_provider("public_image")
+
+        self.assertEqual(result["status"], "UNLOAD_FAILED")
+        self.assertEqual(result["error_type"], "RuntimeError")
+        self.assertFalse(result["unloaded"])
+        self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
+        self.assertNotIn("private cleanup detail", repr(result))
+
+    def test_unload_cleans_loaded_provider_even_if_catalog_becomes_corrupt(self):
+        class ImageProvider:
+            def __init__(self):
+                self.closed = False
+            def generate_image(self, prompt, output_path):
+                return None
+            def close(self):
+                self.closed = True
+
+        instance = ImageProvider()
+        loaded = self.manager.load_provider("public_image", lambda metadata: instance)
+        self.assertTrue(loaded["loaded"])
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+
+        result = self.manager.unload_provider("public_image")
+
+        self.assertEqual(result["status"], "UNLOADED")
+        self.assertTrue(result["unloaded"])
+        self.assertTrue(instance.closed)
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
 
     def test_provider_contract_accepts_required_modality_method(self):
         class ImageProvider:
@@ -910,9 +1393,36 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("sensitive endpoint details", repr(result))
         self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
 
+    def test_unload_rejects_non_string_or_malformed_provider_ids_without_raising(self):
+        for provider_id in (None, [], "bad provider id", "x" * 101):
+            with self.subTest(provider_id=repr(provider_id)):
+                result = self.manager.unload_provider(provider_id)
+                self.assertEqual(result["status"], "INVALID_PROVIDER")
+                self.assertFalse(result["unloaded"])
+
     def test_unload_provider_reports_not_loaded_and_unknown(self):
         self.assertEqual(self.manager.unload_provider("public_image")["status"], "NOT_LOADED")
         self.assertEqual(self.manager.unload_provider("missing")["status"], "NOT_FOUND")
+
+    def test_disable_cleanup_failure_reports_provider_remains_loaded(self):
+        class BrokenCleanup:
+            def generate_image(self, prompt, output_path):
+                return None
+            def close(self):
+                raise RuntimeError("private cleanup detail")
+
+        instance = BrokenCleanup()
+        self.manager.load_provider("public_image", lambda metadata: instance)
+        result = self.manager.set_provider_enabled("public_image", False)
+
+        self.assertEqual(result["status"], "DISABLED_CLEANUP_FAILED")
+        self.assertTrue(result["saved"])
+        self.assertFalse(result["runtime_unloaded"])
+        self.assertTrue(result["runtime_loaded"])
+        self.assertEqual(result["cleanup_error_type"], "RuntimeError")
+        self.assertNotIn("private cleanup detail", repr(result))
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
+        self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
 
     def test_enable_disable_persists_catalog_flag_without_claiming_connection(self):
         result = self.manager.set_provider_enabled("public_image", False)
@@ -983,6 +1493,15 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
         self.assertFalse(self.manager.is_provider_enabled("public_image"))
 
+    def test_set_provider_enabled_fails_closed_for_invalid_catalog(self):
+        self.catalog_path.write_text("{not-json", encoding="utf-8")
+        result = self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["saved"])
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertFalse(self.manager._loaded_providers)
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{not-json")
+
     def test_enabled_flag_rejects_non_boolean_and_unknown_provider(self):
         self.assertEqual(
             self.manager.set_provider_enabled("public_image", "yes")["status"],
@@ -995,10 +1514,14 @@ class ConnectionManagerTests(unittest.TestCase):
     def test_metadata_returns_detached_copy_and_filters_sensitive_fields(self):
         self.manager.catalog["providers"][0]["official_api_url"] = "https://example.invalid"
         self.manager.catalog["providers"][0]["token_env"] = "PUBLIC_IMAGE_TOKEN"
+        self.manager.catalog["providers"][0]["metadata"] = {
+            "display_region": "global",
+        }
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         metadata = self.manager.get_provider_metadata("public_image")
         self.assertEqual(metadata["official_api_url"], "https://example.invalid")
         self.assertEqual(metadata["token_env"], "PUBLIC_IMAGE_TOKEN")
+        self.assertEqual(metadata["metadata"]["display_region"], "global")
         self.assertNotIn("access_token", metadata)
         sanitized = ConnectionManager._sanitize_public_data({
             "access_token": "must-not-appear",
@@ -1018,6 +1541,11 @@ class ConnectionManagerTests(unittest.TestCase):
         metadata["name"] = "mutated"
         self.assertNotEqual(self.manager.get_provider("public_image").get("name"), "mutated")
 
+    def test_metadata_fails_closed_for_secret_bearing_catalog(self):
+        self.manager.catalog["providers"][0]["private_key"] = "never-return-private-key"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        self.assertIsNone(self.manager.get_provider_metadata("public_image"))
+
     def test_catalog_status_is_not_exposed_as_live_connection_status(self):
         self.manager.catalog["providers"][0]["status"] = "CONNECTED"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
@@ -1028,6 +1556,12 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(metadata["catalog_status"], "CONNECTED")
         self.assertNotIn("status", metadata)
         self.assertNotEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
+
+    def test_metadata_returns_none_for_malformed_or_schema_invalid_catalog(self):
+        for raw_catalog in ('{not-json', '{"providers": "not-a-list"}'):
+            with self.subTest(raw_catalog=raw_catalog):
+                self.catalog_path.write_text(raw_catalog, encoding="utf-8")
+                self.assertIsNone(self.manager.get_provider_metadata("public_image"))
 
     def test_metadata_returns_none_for_unknown_provider(self):
         self.assertIsNone(self.manager.get_provider_metadata("not_registered"))
@@ -1040,6 +1574,38 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(result["verified"])
         self.assertEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
         self.assertTrue(self.manager.get_state("public_image")["verified"])
+
+    def test_connectivity_does_not_probe_when_credential_check_reports_invalid_catalog(self):
+        original_credential_status = self.manager.credential_status
+        probe_calls = []
+        self.manager.credential_status = lambda *args, **kwargs: {
+            "status": "CATALOG_INVALID",
+            "credential_present": False,
+        }
+        try:
+            result = self.manager.verify_connectivity(
+                "public_image",
+                lambda provider, **kwargs: probe_calls.append(True) or True,
+            )
+        finally:
+            self.manager.credential_status = original_credential_status
+
+        self.assertEqual(result["status"], "CATALOG_INVALID")
+        self.assertFalse(result["verified"])
+        self.assertEqual(probe_calls, [])
+        self.assertNotEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
+
+    def test_connectivity_does_not_probe_with_unicode_control_credentials(self):
+        calls = []
+        result = self.manager.verify_connectivity(
+            "token_image",
+            lambda *args, **kwargs: calls.append(True) or True,
+            environ={"TEST_PROVIDER_TOKEN": "private\u0085token"},
+        )
+        self.assertEqual(result["status"], "CREDENTIAL_VALUE_INVALID")
+        self.assertFalse(result["verified"])
+        self.assertEqual(calls, [])
+        self.assertNotEqual(self.manager.get_state("token_image")["status"], "CONNECTED")
 
     def test_connectivity_probe_requires_credentials_and_never_probes_without_them(self):
         called = []
@@ -1195,6 +1761,49 @@ class ConnectionManagerTests(unittest.TestCase):
             "HOST_ALLOWLIST_REQUIRED",
         )
         self.assertNotIn("configuration", self.manager.get_state("public_image"))
+
+
+    def test_discovery_metrics_count_calls_results_and_invalid_inputs_without_query_values(self):
+        self.assertEqual(
+            self.manager.discovery_metrics(),
+            {"calls": 0, "invalid_inputs": 0, "catalog_errors": 0, "providers_returned": 0},
+        )
+        results = self.manager.discover_providers(category=" image ", limit=1)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(
+            self.manager.discover_providers(category="PRIVATE-USER-QUERY", limit=0),
+            [],
+        )
+        metrics = self.manager.discovery_metrics()
+        self.assertEqual(metrics["calls"], 2)
+        self.assertEqual(metrics["invalid_inputs"], 1)
+        self.assertEqual(metrics["providers_returned"], 1)
+        self.assertNotIn("PRIVATE-USER-QUERY", repr(metrics))
+        self.assertNotIn("public_image", repr(metrics))
+
+    def test_discovery_metrics_are_thread_safe_under_concurrent_calls(self):
+        workers = 40
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda _: self.manager.discover_providers(limit=1), range(workers)))
+        metrics = self.manager.discovery_metrics()
+        self.assertEqual(len(results), workers)
+        self.assertEqual(metrics["calls"], workers)
+        self.assertEqual(metrics["invalid_inputs"], 0)
+        self.assertEqual(metrics["providers_returned"], workers)
+
+    def test_discovery_metrics_snapshot_is_defensive_copy(self):
+        metrics = self.manager.discovery_metrics()
+        metrics["calls"] = 999
+        self.assertEqual(self.manager.discovery_metrics()["calls"], 0)
+
+    def test_discovery_metrics_count_corrupt_catalog_without_exposing_error_details(self):
+        self.catalog_path.write_text("{broken", encoding="utf-8")
+        self.assertEqual(self.manager.discover_providers(), [])
+        metrics = self.manager.discovery_metrics()
+        self.assertEqual(metrics["calls"], 1)
+        self.assertEqual(metrics["catalog_errors"], 1)
+        self.assertNotIn("broken", repr(metrics))
+        self.assertNotIn(str(self.catalog_path), repr(metrics))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - task-25-provider-connection-manager
+      - task-25-safe-provider-plugin-lifecycle-20261020
   pull_request:
     branches:
       - main
@@ -26,6 +27,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Verify local secret files are not tracked
+        run: python tests/check_secret_exclusions.py
       - name: Compile provider modules and tests
         run: python -m compileall -q projects/provider_store tests
       - name: Validate provider JSON catalogs

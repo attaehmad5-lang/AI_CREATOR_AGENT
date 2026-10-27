@@ -520,17 +520,23 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             probe(provider, timeout_seconds=float("inf"))
 
     def test_malformed_credential_header_value_is_rejected(self):
-        opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(
-            environ={"HF_TOKEN": "private\r\nX-Evil: injected"}, opener=opener
-        )
-        with self.assertRaisesRegex(PermissionError, "credential format is invalid"):
-            probe({
-                "id": "huggingface", "auth_type": "API_TOKEN", "token_env": "HF_TOKEN",
-                "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
-            })
-        self.assertEqual(opener.calls, [])
+        for token in (
+            "private\r\nX-Evil: injected",
+            "private\u0085X-Evil: injected",
+            "private\u009fX-Evil: injected",
+        ):
+            with self.subTest(token=repr(token)):
+                opener = _Opener()
+                probe = ProviderHTTPConnectivityProbe(
+                    environ={"HF_TOKEN": token}, opener=opener
+                )
+                with self.assertRaisesRegex(PermissionError, "credential format is invalid"):
+                    probe({
+                        "id": "huggingface", "auth_type": "API_TOKEN", "token_env": "HF_TOKEN",
+                        "allowed_hosts": ["api.example.com"],
+                        "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
+                    })
+                self.assertEqual(opener.calls, [])
 
     def test_secret_cannot_be_sent_in_arbitrary_http_headers(self):
         opener = _Opener()
