@@ -2,6 +2,7 @@
 
 This is a local metadata-validation benchmark, not a live-provider or generation-load test.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -47,8 +48,16 @@ def run_benchmark(
         else Path(__file__).resolve().parents[3]
     )
     central = root / "projects" / "provider_store" / "provider_catalog.json"
-    advanced = root / "projects" / "provider_store" / "advanced" / "advanced_provider_catalog.json"
-    categories = root / "projects" / "provider_store" / "advanced" / "advanced_categories.json"
+    advanced = (
+        root
+        / "projects"
+        / "provider_store"
+        / "advanced"
+        / "advanced_provider_catalog.json"
+    )
+    categories = (
+        root / "projects" / "provider_store" / "advanced" / "advanced_categories.json"
+    )
 
     def validate_once(_: int) -> dict[str, Any]:
         result = validate_advanced_catalogs(central, advanced, categories)
@@ -65,7 +74,9 @@ def run_benchmark(
     last_result = results[-1]
     elapsed = time.perf_counter() - start
     if elapsed > max_seconds:
-        raise TimeoutError(f"catalog validation benchmark exceeded {max_seconds:g}s budget")
+        raise TimeoutError(
+            f"catalog validation benchmark exceeded {max_seconds:g}s budget"
+        )
     return {
         "benchmark": "offline_catalog_integrity_validation",
         "iterations": iterations,
