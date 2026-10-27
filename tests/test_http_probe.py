@@ -521,9 +521,9 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_malformed_credential_header_value_is_rejected(self):
         for token in (
-            "private\\r\\nX-Evil: injected",
-            "private\\u0085X-Evil: injected",
-            "private\\u009fX-Evil: injected",
+            "private\r\nX-Evil: injected",
+            "private\u0085X-Evil: injected",
+            "private\u009fX-Evil: injected",
         ):
             with self.subTest(token=repr(token)):
                 opener = _Opener()
