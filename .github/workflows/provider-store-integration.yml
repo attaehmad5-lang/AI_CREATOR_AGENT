@@ -40,6 +40,7 @@ on:
       - "tests/test_provider_store_compat.py"
       - "tests/test_provider_service.py"
       - "tests/test_advanced_store_bridge.py"
+      - "tests/test_advanced_store_execution_bridge.py"
       - "tests/test_advps_core.py"
       - ".github/workflows/provider-store-integration.yml"
   workflow_dispatch:
