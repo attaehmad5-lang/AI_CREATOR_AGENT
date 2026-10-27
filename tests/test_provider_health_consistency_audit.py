@@ -104,6 +104,13 @@ class ProviderHealthConsistencyAuditTests(unittest.TestCase):
             [issue["code"] for issue in result["issues"]],
         )
 
+    def test_oversized_persisted_state_fails_closed(self):
+        self.path.write_bytes(b" " * 4_000_001)
+        result = self.manager.audit_consistency()
+        self.assertEqual(result["status"], "HEALTH_STATE_UNREADABLE")
+        self.assertFalse(result["consistent"])
+        self.assertEqual(result["issues"][0]["code"], "STATE_READ_FAILED")
+
 
 if __name__ == "__main__":
     unittest.main()
