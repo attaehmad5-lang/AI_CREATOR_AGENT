@@ -75,6 +75,32 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
         self.assertEqual(calls[0]["prompt"], "trusted prompt")
         self.assertEqual(calls[0]["output_path"], "/tmp/output.png")
 
+    def test_non_mapping_service_result_is_marked_ambiguous(self):
+        class NonMappingService(CanonicalServiceStub):
+            def execute_routed_request(self, **request):
+                self.request = request
+                request["adapter"](provider_id="provider-a", request_id=request["request_id"])
+                return "unexpected provider response"
+
+        service = NonMappingService()
+        adapter = GenerationAdapter(
+            provider_store_service=service,
+            provider_store_adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred",
+            },
+        )
+
+        result = adapter.generate_image(
+            "prompt", "/tmp/output.png", request_id="non-mapping-result"
+        )
+
+        self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["reservation_state"], "UNKNOWN")
+        self.assertTrue(result["manual_reconciliation_required"])
+        self.assertEqual(result["request_id"], "non-mapping-result")
+
     def test_configured_service_fails_closed_without_executor(self):
         service = CanonicalServiceStub()
         adapter = GenerationAdapter(provider_store_service=service)
