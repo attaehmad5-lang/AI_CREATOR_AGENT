@@ -56,6 +56,7 @@ class ProviderTraceManagerTests(unittest.TestCase):
         self.assertEqual(manager.finish_span(span, outcome="UNKNOWN")["status"], "INVALID_SPAN_OUTCOME")
         self.assertEqual(manager.finish_span(span, duration_ms=-1)["status"], "INVALID_DURATION")
         self.assertEqual(manager.finish_span(span, duration_ms=float("nan"))["status"], "INVALID_DURATION")
+        self.assertEqual(manager.finish_span(span, duration_ms=10 ** 1000)["status"], "INVALID_DURATION")
         self.assertEqual(manager.finish_span(None)["status"], "INVALID_SPAN")
 
 
