@@ -19,7 +19,7 @@ class AdvancedStoreBridgeTests(unittest.TestCase):
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
                 "capabilities": ["text_to_image"], "priority": 20,
                 "regions": ["eu"], "price_per_unit": 0.02,
-                "api_key": "DO_NOT_LEAK",
+                "internal_private_note": "DO_NOT_LEAK",
             },
             {
                 "id": "image-fast", "name": "Fast", "category": "image",
