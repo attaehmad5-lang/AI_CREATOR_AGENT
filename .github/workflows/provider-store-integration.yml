@@ -63,6 +63,10 @@ on:
       - ".github/workflows/provider-store-integration.yml"
       - "projects/provider_store/artifact_scanner.py"
       - "projects/provider_store/oauth2_refresh_manager.py"
+      - "tests/test_orchestrator_provider_store_injection.py"
+      - "tests/test_job_engine_provider_store_injection.py"
+      - "agents/orchestrator/master_orchestrator.py"
+      - "agents/jobs/job_engine.py"
       - "tests/test_artifact_scanner.py"
       - "tests/test_oauth2_refresh_manager.py"
       - "tests/test_provider_store_workflow_filters.py"
@@ -165,6 +169,9 @@ jobs:
 
       - name: Compile all repository Python sources
         run: python -m compileall -q .
+
+      - name: Install dependencies needed by full repository tests
+        run: python -m pip install requests
 
       - name: Run full repository unit test suite
         run: python -m unittest discover -s tests -v
