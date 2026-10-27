@@ -14,14 +14,14 @@ WORKFLOW = ROOT / ".github" / "workflows" / "provider-store-integration.yml"
 
 def _event_paths(text: str, event: str, next_event: str) -> list[str]:
     match = re.search(
-        rf"^  {re.escape(event)}:\\n(.*?)(?=^  {re.escape(next_event)}:)",
+        rf"^  {re.escape(event)}:\n(.*?)(?=^  {re.escape(next_event)}:)",
         text,
         flags=re.MULTILINE | re.DOTALL,
     )
     if not match:
         raise AssertionError(f"Workflow event block not found: {event}")
     paths_match = re.search(
-        r"^    paths:\\n((?:^      - \"[^\"]+\"\\n)+)",
+        r"^    paths:\n((?:^      - \"[^\"]+\"\n)+)",
         match.group(1),
         flags=re.MULTILINE,
     )
