@@ -13,9 +13,9 @@ BLOCKED = cannot proceed; exact reason must be recorded.
 VERIFICATION FACTS
 - Repository: attaehmad5-lang/AI_CREATOR_AGENT
 - Advanced catalog: 18 entries; canonical catalog: 54 entries; field-by-field metadata and category-capability consistency tests pass.
-- Latest relevant GitHub Actions run #40560954116 passed compilation, catalog JSON validation, and all 445 unit/regression tests on both Ubuntu and Windows at commit 34bcf7709a3759eb4bd2f881abb6c3ad191ffd0c.
-- Passing evidence includes advanced capability/lifecycle/readiness tests, invalid category-catalog rejection, incident lifecycle tests, HMAC webhook/replay tests, ledger/report validation, private-key fail-closed checks, and source ZIP/manifest checksum verification.
-- The report builder generates JSON/Markdown evidence and a source-only ZIP; PDF generation is not implemented. The report correctly stays INCOMPLETE until all 150 points are completed.
+- Latest relevant GitHub Actions run #40563694393 passed compilation, catalog JSON validation, and all 449 unit/regression tests on both Ubuntu and Windows at commit bf6de7b2e62f4bb9db35da72ae059b95b401a278.
+- Passing evidence includes advanced capability/lifecycle/readiness tests, invalid category-catalog rejection, incident lifecycle, HMAC webhook/replay, provider authorization, OAuth/API-key safeguards, routing/quotas/budgets, media integrity, ledger/report validation, private-key fail-closed checks, clean ZIP extraction, per-file hashes and ZIP checksum sidecar verification.
+- The report builder generates JSON/Markdown evidence, a source-only ZIP, a SHA-256 manifest and a verified ZIP checksum sidecar; PDF generation is not implemented. The report correctly stays INCOMPLETE until all 150 points are completed.
 - No provider credentials were supplied or used. No live generation, credit balance, or billing test is claimed.
 - Draft PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/84
 
@@ -677,9 +677,9 @@ Implementation/evidence inspected: Release assets not verified for this componen
 Remaining work: Verify exact package assets and checksums before claiming release readiness.
 
 Feature 132: SHA-256 Checksum Verification
-Status: PARTIAL
-Implementation/evidence inspected: .github/workflows/task-25-tests.yml; .github/workflows/provider-store-core-catalog-release-gates.yml
-Remaining work: CI/release-gate/checksum/version primitives exist; the full Advanced Provider Store release package has not been verified.
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40563694393
+Remaining work: Source files are checked against manifest hashes and the generated ZIP has a SHA-256 sidecar whose digest is verified against archive bytes.
 
 Feature 133: Release Versioning
 Status: PARTIAL
