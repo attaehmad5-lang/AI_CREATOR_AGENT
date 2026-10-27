@@ -6,12 +6,13 @@
 
 ## Latest automated verification
 
-GitHub Actions run [#40549056812](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40549056812) completed successfully on Python 3.13 across Ubuntu and Windows:
+GitHub Actions run [#40551020477](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40551020477) completed successfully on Ubuntu and Windows for commit `d842c70ffb8f7538cb9778880cfa887530dbeef7`:
 
-- Both platform jobs passed.
-- Secret-file exclusion, module/test compilation, provider JSON catalog validation, and unit/regression tests passed.
-- The tested commit adds a provider-factory metadata-mutation regression test and retains earlier coverage for discovery pagination/ranking, concurrent factory registration, and privacy-safe discovery telemetry.
-- Task #25 remains IN PROGRESS. CI does not prove live provider credentials, external service availability, account credits, Android/Pydroid compatibility, production load, or all 138 canonical features.
+- Both platforms passed secret-file exclusion, compilation, provider JSON catalog validation, and the unit/regression suite.
+- Added a regression test confirming C0/C1 Unicode control characters in provider-balance credentials are rejected before any network call.
+- The nested provider metadata mutation regression also passed on both platforms in run [#40549998711](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40549998711).
+- Passing CI proves only the exercised code paths. The active follow-up remains draft PR #77; all 138 canonical features, authorized live provider verification, real modality E2E, Android/Pydroid validation, and enterprise resilience checks are not complete. No final Task #25 PASS is claimed.
+
 ## Evidence-backed implementation areas
 
 | Canonical section | Scope range | Current evidence | Audit disposition |
