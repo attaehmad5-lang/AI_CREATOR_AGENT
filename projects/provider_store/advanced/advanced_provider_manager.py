@@ -19,6 +19,7 @@ class AdvancedProviderManager:
         catalog_path: str | None = None,
         state_path: str | None = None,
         categories_path: str | None = None,
+        advanced_catalog_path: str | None = None,
     ) -> None:
         if connection_manager is not None and (catalog_path is not None or state_path is not None):
             raise ValueError("pass either connection_manager or explicit paths, not both")
@@ -29,6 +30,11 @@ class AdvancedProviderManager:
             Path(categories_path)
             if categories_path is not None
             else Path(__file__).with_name("advanced_categories.json")
+        )
+        self.advanced_catalog_path = (
+            Path(advanced_catalog_path)
+            if advanced_catalog_path is not None
+            else Path(__file__).with_name("advanced_provider_catalog.json")
         )
 
     @property
@@ -96,6 +102,63 @@ class AdvancedProviderManager:
             provider for provider in self.list_providers()
             if provider.get("category") == category
         ]
+
+    def catalog_consistency(self) -> dict[str, Any]:
+        """Compare the legacy advanced catalog with the canonical runtime catalog."""
+        try:
+            data = json.loads(self.advanced_catalog_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return {"status": "ADVANCED_CATALOG_UNAVAILABLE", "providers": 0, "differences": []}
+        records = data.get("providers") if isinstance(data, dict) else None
+        if not isinstance(records, list):
+            return {"status": "INVALID_ADVANCED_CATALOG", "providers": 0, "differences": []}
+        legacy: dict[str, dict[str, Any]] = {}
+        differences: list[dict[str, Any]] = []
+        for record in records:
+            if not isinstance(record, dict) or not isinstance(record.get("id"), str) or not record["id"].strip():
+                return {"status": "INVALID_ADVANCED_CATALOG", "providers": len(records), "differences": []}
+            provider_id = record["id"]
+            if provider_id in legacy:
+                differences.append({"provider": provider_id, "field": "id", "issue": "duplicate_advanced_id"})
+            legacy[provider_id] = record
+        canonical = {
+            provider["id"]: provider for provider in self.store.list_providers()
+            if isinstance(provider.get("id"), str) and provider.get("category") in ADVANCED_CATEGORIES
+        }
+        for provider_id in sorted(set(legacy) - set(canonical)):
+            differences.append({"provider": provider_id, "field": "id", "issue": "missing_from_canonical_catalog"})
+        for provider_id in sorted(set(canonical) - set(legacy)):
+            differences.append({"provider": provider_id, "field": "id", "issue": "missing_from_advanced_catalog"})
+        fields = ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required")
+        for provider_id in sorted(set(legacy) & set(canonical)):
+            old, current = legacy[provider_id], canonical[provider_id]
+            for field in fields:
+                if old.get(field) != current.get(field):
+                    differences.append({"provider": provider_id, "field": field, "issue": "metadata_mismatch"})
+            old_caps = old.get("capabilities", [])
+            current_caps = current.get("capabilities", [])
+            if not isinstance(old_caps, list) or not isinstance(current_caps, list):
+                differences.append({"provider": provider_id, "field": "capabilities", "issue": "invalid_capability_list"})
+            elif sorted(old_caps) != sorted(current_caps):
+                differences.append({"provider": provider_id, "field": "capabilities", "issue": "metadata_mismatch"})
+        category_data = self.category_catalog()
+        if category_data["status"] != "READY":
+            differences.append({"provider": "*", "field": "categories", "issue": category_data["status"]})
+        else:
+            for provider_id, record in legacy.items():
+                category_id = record.get("category")
+                category = category_data["categories"].get(category_id) if isinstance(category_id, str) else None
+                capabilities = record.get("capabilities", [])
+                if category is None:
+                    differences.append({"provider": provider_id, "field": "category", "issue": "unknown_category"})
+                elif isinstance(capabilities, list) and not set(capabilities).issubset(set(category["capabilities"])):
+                    differences.append({"provider": provider_id, "field": "capabilities", "issue": "capability_not_declared_by_category"})
+        return {
+            "status": "MATCH" if not differences else "MISMATCH",
+            "providers": len(legacy),
+            "canonical_advanced_providers": len(canonical),
+            "differences": differences,
+        }
 
     def list_verified_enabled_providers(
         self, capability: str | None = None
