@@ -46,6 +46,35 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
         self.assertEqual(calls[0]["prompt"], "cinematic landscape")
         self.assertEqual(calls[0]["output_path"], "/tmp/output.png")
 
+    def test_routed_provider_identity_overrides_untrusted_adapter_options(self):
+        calls = []
+        service = CanonicalServiceStub()
+        adapter = GenerationAdapter(
+            provider_store_service=service,
+            provider_store_adapter=lambda **kwargs: calls.append(kwargs) or {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred",
+            },
+        )
+
+        result = adapter.generate_image(
+            "trusted prompt", "/tmp/output.png",
+            request_id="trusted-request",
+            adapter_options={
+                "provider_id": "attacker-provider",
+                "request_id": "attacker-request",
+                "prompt": "attacker prompt",
+                "output_path": "/attacker/path",
+            },
+        )
+
+        self.assertEqual(result["status"], "PROVIDER_EXECUTION_SUCCEEDED")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["provider_id"], "provider-a")
+        self.assertEqual(calls[0]["request_id"], "trusted-request")
+        self.assertEqual(calls[0]["prompt"], "trusted prompt")
+        self.assertEqual(calls[0]["output_path"], "/tmp/output.png")
+
     def test_configured_service_fails_closed_without_executor(self):
         service = CanonicalServiceStub()
         adapter = GenerationAdapter(provider_store_service=service)
