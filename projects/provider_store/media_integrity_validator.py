@@ -20,10 +20,16 @@ class MediaIntegrityValidator:
         self.max_duration_seconds = max_duration_seconds
 
     def validate(self, path: str | os.PathLike[str], *, modality: str) -> dict[str, Any]:
-        if modality not in {"audio", "video"}:
+        # Validate untrusted arguments before set membership or filesystem calls:
+        # malformed inputs must return a controlled result, never leak TypeError.
+        if not isinstance(modality, str) or modality not in {"audio", "video"}:
             return {"valid": False, "status": "UNSUPPORTED_MEDIA_MODALITY"}
+        if not isinstance(path, (str, os.PathLike)):
+            return {"valid": False, "status": "INVALID_MEDIA_PATH"}
         try:
             file_path = Path(path)
+            if not str(file_path).strip():
+                return {"valid": False, "status": "INVALID_MEDIA_PATH"}
             size = file_path.stat().st_size
             if not file_path.is_file() or size <= 0:
                 return {"valid": False, "status": "OUTPUT_FILE_MISSING_OR_EMPTY"}
