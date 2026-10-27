@@ -58,7 +58,13 @@ class AdvancedProviderManager:
         verified: list[dict[str, Any]] = []
         for provider in self.list_providers():
             provider_id = provider.get("id")
-            if not isinstance(provider_id, str) or provider.get("enabled") is not True:
+            catalog_status = provider.get("catalog_status", provider.get("status"))
+            if (
+                not isinstance(provider_id, str)
+                or provider.get("enabled") is not True
+                or provider.get("deprecated") is True
+                or (isinstance(catalog_status, str) and catalog_status.upper() in {"LOCKED", "DISABLED", "DEPRECATED"})
+            ):
                 continue
             state = self.store.manager.get_state(provider_id)
             if state.get("status") != "CONNECTED" or state.get("verified") is not True:
