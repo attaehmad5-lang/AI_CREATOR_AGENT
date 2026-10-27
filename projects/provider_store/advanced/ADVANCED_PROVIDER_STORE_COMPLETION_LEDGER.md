@@ -14,9 +14,9 @@
 
 - Repository: attaehmad5-lang/AI_CREATOR_AGENT.
 - The advanced catalog has 18 entries; compatibility tests assert those IDs are a subset of the 54-provider central catalog.
-- Latest relevant GitHub Actions run [#40566320236](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40566320236) passed compilation, catalog JSON validation, and all **458 unit/regression tests on both Ubuntu and Windows** at the tested branch commit.
+- Latest verified GitHub Actions run [#40573699626](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40573699626) passed compilation, catalog JSON validation, all **463 unit/regression tests on both Ubuntu and Windows**, the bounded concurrent catalog benchmark, and report/source-ZIP generation at the tested branch commit.
 - The passing suite includes advanced capability discovery, adapter lifecycle/readiness, malformed catalog handling, provider authorization, OAuth/API-key safeguards, routing/quotas/budgets, media integrity, incident/webhook verification, trace-context primitives, truthful CLI diagnostics, ledger/report validation, private-key fail-closed checks, clean ZIP extraction, per-file SHA-256 validation and archive checksum sidecar verification.
-- CI generated and uploaded Linux and Windows report/package artifacts (source ZIP, JSON/Markdown/PDF report, manifest and ZIP checksum sidecar). The release report correctly says `INCOMPLETE` until all 150 points are complete. PDF rendering and inclusion in the source ZIP are covered by focused tests.
+- CI generated and uploaded Linux and Windows report/package artifacts (source ZIP, JSON/Markdown/PDF report, manifest and ZIP checksum sidecar). The release report correctly says `INCOMPLETE` until all 150 points are complete. PDF rendering, WinAnsi text escaping and inclusion in the source ZIP are covered by focused tests. CI also runs 25 concurrent offline catalog-integrity validations with four workers; live API/generation load remains untested.
 - No live provider credentials were supplied or used. No live generation, credit balance, or billing test is claimed; those require user-configured credentials and approval for any billable action.
 - CI is the verified runtime execution path for this workspace; no local test execution is claimed.
 
