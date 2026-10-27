@@ -1,4 +1,5 @@
 import json
+import socket
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,38 @@ from projects.provider_store.advanced.advps.resilience import RetryPolicy, retry
 from projects.provider_store.advanced.advps.router import Router
 from projects.provider_store.advanced.advps.security import check_redirect, enforce_size, validate_endpoint
 from projects.provider_store.advanced.advps.storage import AtomicJsonStore, StoreCorruptError
+from projects.provider_store.advanced.advps.transport import SecureHTTPTransport
+
+
+class _FakeResponse:
+    def __init__(self, status, headers, body):
+        self.status = status
+        self._headers = headers
+        self._body = body
+
+    def read(self, limit):
+        return self._body[:limit]
+
+    def getheaders(self):
+        return list(self._headers.items())
+
+
+class _FakeConnection:
+    def __init__(self, response, calls, host, port, pinned_ip):
+        self.response = response
+        self.calls = calls
+        self.host = host
+        self.port = port
+        self.pinned_ip = pinned_ip
+
+    def request(self, method, path, body=None, headers=None):
+        self.calls.append((self.host, self.port, self.pinned_ip, method, path, body, dict(headers or {})))
+
+    def getresponse(self):
+        return self.response
+
+    def close(self):
+        pass
 
 
 class AdvancedProviderStoreCoreTests(unittest.TestCase):
@@ -194,6 +227,76 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
             router.execute("text_to_image", ambiguous, idempotent=False)
         self.assertIn("ambiguous outcome", str(caught.exception))
         self.assertEqual(calls, ["provider-a"])
+
+    def test_secure_transport_pins_validated_ip_and_returns_bounded_response(self):
+        calls = []
+        def resolver(host, port, type=None):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+        def factory(host, port, pinned_ip, timeout, context):
+            return _FakeConnection(_FakeResponse(200, {"Content-Type": "text/plain"}, b"ok"), calls, host, port, pinned_ip)
+        transport = SecureHTTPTransport(resolver=resolver, connection_factory=factory)
+        result = transport.request("GET", "https://example.com/path?q=1")
+        self.assertEqual(result["status"], 200)
+        self.assertEqual(result["body"], b"ok")
+        self.assertEqual(result["redirects"], 0)
+        self.assertEqual(calls[0][2], "93.184.216.34")
+        self.assertEqual(calls[0][4], "/path?q=1")
+        self.assertEqual(calls[0][5], None)
+
+    def test_secure_transport_revalidates_redirect_and_pins_each_hop(self):
+        calls = []
+        responses = [
+            _FakeResponse(302, {"Location": "/next"}, b""),
+            _FakeResponse(200, {}, b"done"),
+        ]
+        def resolver(host, port, type=None):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+        def factory(host, port, pinned_ip, timeout, context):
+            return _FakeConnection(responses.pop(0), calls, host, port, pinned_ip)
+        transport = SecureHTTPTransport(resolver=resolver, connection_factory=factory)
+        result = transport.request("GET", "https://example.com/start")
+        self.assertEqual(result["status"], 200)
+        self.assertEqual(result["url"], "https://example.com/next")
+        self.assertEqual(result["redirects"], 1)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][2], calls[1][2])
+
+    def test_secure_transport_rejects_private_dns_and_oversized_payloads(self):
+        private_resolver = lambda host, port, type=None: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))
+        ]
+        transport = SecureHTTPTransport(resolver=private_resolver, connection_factory=lambda *a: None)
+        with self.assertRaises(SecurityError):
+            transport.request("GET", "https://example.com")
+        public_resolver = lambda host, port, type=None: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))
+        ]
+        bounded = SecureHTTPTransport(
+            resolver=public_resolver, max_request_bytes=2, max_response_bytes=2,
+            connection_factory=lambda *a: None,
+        )
+        with self.assertRaises(SecurityError):
+            bounded.request("POST", "https://example.com", body=b"long")
+        def large_factory(host, port, pinned_ip, timeout, context):
+            return _FakeConnection(_FakeResponse(200, {}, b"long"), [], host, port, pinned_ip)
+        bounded.connection_factory = large_factory
+        with self.assertRaises(SecurityError):
+            bounded.request("GET", "https://example.com")
+
+    def test_secure_transport_rejects_unsafe_headers_and_redirect_downgrade(self):
+        calls = []
+        def resolver(host, port, type=None):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+        transport = SecureHTTPTransport(
+            resolver=resolver,
+            connection_factory=lambda host, port, ip, timeout, context: _FakeConnection(
+                _FakeResponse(302, {"Location": "http://example.com/insecure"}, b""), calls, host, port, ip
+            ),
+        )
+        with self.assertRaises(SecurityError):
+            transport.request("GET", "https://example.com")
+        with self.assertRaises(SecurityError):
+            transport.request("GET", "https://example.com", headers={"Host": "attacker.example"})
 
     def test_router_simulates_and_executes_with_provider_callback(self):
         catalog = Catalog(AtomicJsonStore(self.root / "route.json"))
