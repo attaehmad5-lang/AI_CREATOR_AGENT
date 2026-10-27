@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+import tempfile
 import unittest
+from pathlib import Path
+
+from projects.provider_store.connection_manager import ConnectionManager
 
 from projects.provider_store.provider_onboarding import ProviderOnboardingWorkflow
 
@@ -88,6 +93,32 @@ class ProviderOnboardingTests(unittest.TestCase):
         self.assertEqual(result["status"], "REGISTERED_DISABLED")
         self.assertFalse(self.manager.registered[0]["enabled"])
         self.assertEqual(self.manager.registered[0]["status"], "LOCKED")
+
+    def test_real_connection_manager_registers_candidate_disabled(self):
+        root = Path(__file__).resolve().parents[1]
+        catalog_source = root / "projects" / "provider_store" / "provider_catalog.json"
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            catalog_path = base / "catalog.json"
+            catalog_path.write_text(catalog_source.read_text(encoding="utf-8"), encoding="utf-8")
+            manager = ConnectionManager(
+                catalog_path=catalog_path,
+                state_path=base / "state.json",
+                audit_path=base / "audit.jsonl",
+            )
+            workflow = ProviderOnboardingWorkflow(manager)
+            candidate = dict(
+                self.provider,
+                id="onboarding_test_provider",
+                name="Onboarding Test Provider",
+            )
+            result = workflow.register_candidate(candidate)
+            self.assertEqual(result["status"], "REGISTERED_DISABLED")
+            self.assertTrue(result["saved"])
+            stored = manager.get_provider("onboarding_test_provider")
+            self.assertIsNotNone(stored)
+            self.assertFalse(stored["enabled"])
+            self.assertEqual(stored["status"], "LOCKED")
 
     def test_invalid_candidate_and_existing_provider_are_not_persisted(self):
         self.assertFalse(self.workflow.register_candidate(dict(self.provider, official_api_url="http://bad.test"))["saved"])
