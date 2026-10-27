@@ -24,6 +24,8 @@ The original uploaded standalone archive was tested from a clean extraction at P
 - `ProviderRuntime` loads only explicitly registered trusted factories, validates the generate interface, tracks in-flight calls, and prevents new calls while draining for unload. It does not import module names from provider catalog data.
 - `CredentialManager` resolves environment-variable references and supports a host-injected refresh callback. It keeps refreshed tokens in process memory only and does not persist credentials or implement OAuth/network policy itself.
 - `HealthRegistry` stores sanitized health status, due-probe scheduling, worker probe leases, latency EWMA, failure thresholds and exponential backoff. The host supplies actual probe execution; it does not make live network calls itself.
+- `ProviderRuntime` uses an explicit factory allowlist (not catalog-controlled dynamic imports), validates the `generate` contract, tracks in-flight calls, blocks new calls during drain, and supports timed safe unload/close.
+- `media.py` validates allowlisted MIME types, size bounds, byte signatures and SHA-256; metadata checks cover basic dimensions/duration/quality fields but do not replace deep codec parsing or malware scanning.
 - `AdvancedStoreBridge` reads the canonical ConnectionManager, returns only enabled and verified candidates, supports capability/region/priority/cost/price-ceiling filters, and exposes allow-listed detached metadata.
 - `AdvancedProviderManager` exposes `route_candidates()` and `simulate_route()` using the same ConnectionManager. This is dry-run selection, not live execution.
 - ProviderService remains responsible for real connection/auth flows, provider execution, usage finalization, quotas and billing reconciliation.
@@ -47,4 +49,4 @@ The original uploaded standalone archive was tested from a clean extraction at P
 
 ## Status
 
-**Repository core/bridge/transport/job CI: PASS (4/4 matrix jobs); Task 25 CI: PASS (2/2 OS jobs); coverage: PASS (82.7%, 80% minimum). Original standalone archive: PASS (99/99 tests, 99.6% local coverage). Full production release: NOT COMPLETE / NOT VERIFIED.**
+**Repository core/bridge/transport/job CI: PASS (4/4 matrix jobs); Task 25 CI: PASS (2/2 OS jobs); coverage: PASS (82.4%, 80% minimum). Original standalone archive: PASS (99/99 tests, 99.6% local coverage). Full production release: NOT COMPLETE / NOT VERIFIED.**
