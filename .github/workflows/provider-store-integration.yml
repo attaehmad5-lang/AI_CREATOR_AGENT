@@ -14,6 +14,8 @@ on:
       - "agents/generation/generation_adapter.py"
       - "agents/execution/execution_gateway.py"
       - "tests/test_execution_gateway_provider_store.py"
+      - "agents/execution/execution_gateway.py"
+      - "tests/test_execution_gateway_provider_store.py"
       - "tests/test_generation_adapter_provider_store.py"
       - "agents/generation/generation_adapter.py"
       - "tests/test_generation_adapter_provider_store.py"
