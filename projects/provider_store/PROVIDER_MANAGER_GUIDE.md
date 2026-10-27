@@ -99,6 +99,10 @@ This probe does not display the account response body or token. Do not run it in
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
 
 
+## Secure provider onboarding
+
+`ProviderOnboardingWorkflow` validates a candidate against the existing catalog schema before writing anything. API-style providers must declare an official HTTPS documentation URL and validated capabilities; credential values, malformed/duplicate capabilities, duplicate provider IDs, unsafe documentation URLs, and invalid schema are rejected. A provider-specific probe can be run separately and must return a strict positive result to count as verified. Registration keeps the provider disabled with status `LOCKED`; it never implies connectivity or enables a provider. Actual provider probe callbacks and explicit authorized activation remain deployment responsibilities.
+
 ## Generation provider interface versioning
 
 The trusted generation-provider loader negotiates the adapter interface before registering an instance or replacing the active registry. Declare `PROVIDER_INTERFACE_VERSION = "1.0"` on adapters that explicitly implement the current interface. A missing declaration is treated as the legacy 1.0 contract to preserve existing adapters; malformed values and unsupported versions are rejected. Registry loading stages all candidates and leaves the prior active provider set unchanged if any candidate fails validation.
