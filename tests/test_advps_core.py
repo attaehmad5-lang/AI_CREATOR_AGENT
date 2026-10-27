@@ -11,7 +11,7 @@ from projects.provider_store.advanced.advps.credentials import CredentialManager
 from projects.provider_store.advanced.advps.jobs import JobManager
 from projects.provider_store.advanced.advps.cli import main as cli_main
 from projects.provider_store.advanced.advps.errors import (
-    AmbiguousOutcomeError, BudgetExceededError, PaidUsageNotApprovedError,
+    AmbiguousOutcomeError, BudgetExceededError, CredentialExpiredError, CredentialUnavailableError, PaidUsageNotApprovedError,
     PriceUnknownError, SecurityError, ValidationError,
 )
 from projects.provider_store.advanced.advps.redact import redact, redact_text
@@ -236,10 +236,10 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         now = [100.0]
         env = {"PROVIDER_TOKEN": "old-token", "PROVIDER_TOKEN_EXPIRY": "110"}
         manager = CredentialManager(environ=env, clock=lambda: now[0], refresh_before_seconds=60)
-        with self.assertRaises(Exception) as missing:
+        with self.assertRaises(CredentialUnavailableError) as missing:
             manager.resolve("missing-provider", "MISSING_TOKEN")
         self.assertIn("credential_unavailable", getattr(missing.exception, "code", ""))
-        with self.assertRaises(Exception) as expired:
+        with self.assertRaises(CredentialExpiredError) as expired:
             manager.resolve("provider-a", "PROVIDER_TOKEN", expires_at_env="PROVIDER_TOKEN_EXPIRY")
         self.assertIn("credential_expired", getattr(expired.exception, "code", ""))
 
@@ -253,7 +253,7 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         self.assertEqual(calls, [("provider-a", "old-token")])
         self.assertEqual(env["PROVIDER_TOKEN"], "old-token")
         manager.clear_cache("provider-a")
-        with self.assertRaises(Exception):
+        with self.assertRaises(CredentialUnavailableError):
             manager.resolve("provider-a", "MISSING_TOKEN")
 
     def test_credential_expiry_validation_and_bad_refresh_response(self):
@@ -262,7 +262,7 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
             manager.resolve("provider-a", "TOKEN", expires_at_env="EXPIRY")
         manager = CredentialManager(environ={"TOKEN": "old", "EXPIRY": "110"}, clock=lambda: 100.0, refresh_before_seconds=60)
         manager.register_refresher("provider-a", lambda provider, token: {"token": "new", "expires_at": float("nan")})
-        with self.assertRaises(Exception) as error:
+        with self.assertRaises(CredentialExpiredError) as error:
             manager.resolve("provider-a", "TOKEN", expires_at_env="EXPIRY")
         self.assertIn("credential_expired", getattr(error.exception, "code", ""))
 
