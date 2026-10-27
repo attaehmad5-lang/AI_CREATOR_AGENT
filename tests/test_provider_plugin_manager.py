@@ -53,6 +53,20 @@ class ProviderPluginManagerTests(unittest.TestCase):
         )
         self.assertEqual(self.plugins.register_factory("public_image", "module:class")["status"], "INVALID_FACTORY")
 
+    def test_concurrent_factory_registration_is_atomic_under_contention(self):
+        factory = lambda provider: ImagePlugin()
+        workers = 32
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(
+                lambda _: self.plugins.register_factory("public_image", factory),
+                range(workers),
+            ))
+
+        statuses = [result["status"] for result in results]
+        self.assertEqual(statuses.count("FACTORY_REGISTERED"), 1)
+        self.assertEqual(statuses.count("FACTORY_ALREADY_REGISTERED"), workers - 1)
+        self.assertEqual(self.plugins.status()["registered_plugin_ids"], ["public_image"])
+
     def test_load_unload_and_unregister_follow_validated_lifecycle(self):
         plugin = ImagePlugin()
         self.assertEqual(self.plugins.register_factory("public_image", lambda provider: plugin)["status"], "FACTORY_REGISTERED")
