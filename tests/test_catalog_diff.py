@@ -41,7 +41,7 @@ class CatalogDiffTests(unittest.TestCase):
         self.assertIn("new-test-provider", result["added"])
         self.assertIn(removed_id, result["removed"])
         self.assertIn("name", result["changed"][0]["changed_fields"])
-        self.assertNotIn("changed", json.dumps(result).lower().replace("changed_fields", ""))
+        self.assertNotIn("New Test Provider", json.dumps(result))
 
     def test_dry_run_is_default_and_does_not_mutate_current_catalog(self):
         candidate = json.loads(json.dumps(self.catalog))
