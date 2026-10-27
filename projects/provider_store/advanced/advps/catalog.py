@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any, Iterable, Optional
 
@@ -12,57 +13,106 @@ from .storage import AtomicJsonStore, digest
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 SCHEMA_VERSION = 1
 MAX_HISTORY = 20
+_SAFE_REFERENCE_KEYS = {"token_env", "token_expiry_env", "api_key_env", "secret_ref", "credential_env"}
+_SECRET_MARKERS = ("access_token", "refresh_token", "api_key", "apikey", "password", "secret", "credential",
+                   "authorization", "bearer", "private_key", "signing_key", "encryption_key", "cookie", "session")
 
 
 def _empty() -> dict:
     return {"schema": SCHEMA_VERSION, "revision": 0, "providers": {}, "history": []}
 
 
+def _contains_secret_key(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = str(key).casefold().replace("-", "_")
+            if normalized in _SAFE_REFERENCE_KEYS:
+                if not isinstance(item, str) or not item.strip():
+                    return True
+                continue
+            if normalized == "token" or any(marker in normalized for marker in _SECRET_MARKERS):
+                return True
+            if _contains_secret_key(item):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_secret_key(item) for item in value)
+    return False
+
+
+def _finite_nonnegative(value: Any, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValidationError(f"{field} must be a finite non-negative number")
+    number = float(value)
+    if not math.isfinite(number) or number < 0:
+        raise ValidationError(f"{field} must be a finite non-negative number")
+    return number
+
+
 def validate_provider(rec: dict, allowlist: Optional[Iterable[str]] = None) -> dict:
     if not isinstance(rec, dict):
         raise ValidationError("provider must be an object")
     pid = rec.get("id")
-    if not isinstance(pid, str) or not _ID_RE.match(pid):
+    if not isinstance(pid, str) or not _ID_RE.fullmatch(pid):
         raise ValidationError(f"invalid provider id: {pid!r}")
     version = rec.get("version", "0.0.0")
-    if not isinstance(version, str) or not re.match(r"^\d+\.\d+\.\d+$", version):
+    if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise ValidationError("version must be MAJOR.MINOR.PATCH")
     caps = rec.get("capabilities", [])
-    if not isinstance(caps, list) or not all(isinstance(c, str) and c for c in caps):
+    if not isinstance(caps, list) or not all(isinstance(c, str) and c.strip() for c in caps):
         raise ValidationError("capabilities must be a list of non-empty strings")
     endpoint = rec.get("endpoint")
     if endpoint is not None:
         validate_endpoint(endpoint, allowlist=allowlist, resolve=False)
+    enabled = rec.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ValidationError("enabled must be boolean")
+    priority = rec.get("priority", 100)
+    if isinstance(priority, bool) or not isinstance(priority, int):
+        raise ValidationError("priority must be an integer")
+    region = rec.get("region")
+    if region is not None and (not isinstance(region, str) or not region.strip()):
+        raise ValidationError("region must be a non-empty string or null")
+    metadata = rec.get("metadata", {})
+    if not isinstance(metadata, dict):
+        raise ValidationError("metadata must be an object")
+    if _contains_secret_key(metadata):
+        raise ValidationError("secret-bearing metadata is forbidden; use an environment reference")
     models = rec.get("models", {})
     if not isinstance(models, dict):
         raise ValidationError("models must be an object")
     clean_models = {}
-    for mid, m in models.items():
-        if not isinstance(m, dict):
-            raise ValidationError(f"model {mid!r} must be an object")
-        price = m.get("price_per_unit")
-        if price is not None and (isinstance(price, bool) or not isinstance(price, (int, float)) or price < 0):
-            raise ValidationError(f"model {mid!r}: price_per_unit must be a non-negative number or null")
-        mcaps = m.get("capabilities", caps)
-        if not isinstance(mcaps, list):
-            raise ValidationError(f"model {mid!r}: capabilities must be a list")
+    for mid, model in models.items():
+        if not isinstance(mid, str) or not mid.strip() or not isinstance(model, dict):
+            raise ValidationError(f"model {mid!r} must have a name and object metadata")
+        price = model.get("price_per_unit")
+        if price is not None:
+            price = _finite_nonnegative(price, f"model {mid!r} price_per_unit")
+        model_caps = model.get("capabilities", caps)
+        if not isinstance(model_caps, list) or not all(isinstance(c, str) and c.strip() for c in model_caps):
+            raise ValidationError(f"model {mid!r}: capabilities must be a list of non-empty strings")
+        unit = model.get("unit", "request")
+        if not isinstance(unit, str) or not unit.strip():
+            raise ValidationError(f"model {mid!r}: unit must be a non-empty string")
+        latency = model.get("avg_latency_ms")
+        if latency is not None:
+            latency = _finite_nonnegative(latency, f"model {mid!r} avg_latency_ms")
         clean_models[mid] = {
-            "capabilities": list(mcaps),
+            "capabilities": list(model_caps),
             "price_per_unit": price,
-            "unit": m.get("unit", "request"),
-            "avg_latency_ms": m.get("avg_latency_ms"),
+            "unit": unit,
+            "avg_latency_ms": latency,
         }
     return {
         "id": pid,
         "name": str(rec.get("name", pid)),
         "version": version,
         "endpoint": endpoint,
-        "enabled": bool(rec.get("enabled", True)),
+        "enabled": enabled,
         "capabilities": list(caps),
-        "region": rec.get("region"),
-        "priority": int(rec.get("priority", 100)),
+        "region": region,
+        "priority": priority,
         "models": clean_models,
-        "metadata": dict(rec.get("metadata", {})),
+        "metadata": dict(metadata),
     }
 
 
@@ -101,16 +151,16 @@ class Catalog:
             if pid not in state["providers"]:
                 raise NotFoundError(f"unknown provider: {pid}")
             self._commit(state, lambda s: s["providers"].pop(pid))
-
         self.store.update(op)
         self._log("provider.unregister", id=pid)
 
     def set_enabled(self, pid: str, enabled: bool) -> None:
+        if not isinstance(enabled, bool):
+            raise ValidationError("enabled must be boolean")
         def op(state):
             if pid not in state["providers"]:
                 raise NotFoundError(f"unknown provider: {pid}")
-            self._commit(state, lambda s: s["providers"][pid].__setitem__("enabled", bool(enabled)))
-
+            self._commit(state, lambda s: s["providers"][pid].__setitem__("enabled", enabled))
         self.store.update(op)
         self._log("provider.enable" if enabled else "provider.disable", id=pid)
 
@@ -126,7 +176,7 @@ class Catalog:
             if enabled_only and not prov["enabled"]:
                 continue
             if capability and capability not in prov["capabilities"] and not any(
-                capability in m["capabilities"] for m in prov["models"].values()
+                capability in model["capabilities"] for model in prov["models"].values()
             ):
                 continue
             if region and prov.get("region") != region:
@@ -159,16 +209,17 @@ class Catalog:
             raise ValidationError("catalog export checksum mismatch")
         if doc.get("schema") != SCHEMA_VERSION:
             raise ValidationError(f"unsupported schema: {doc.get('schema')!r}")
+        if not isinstance(providers, dict):
+            raise ValidationError("catalog providers must be an object")
         cleaned = [validate_provider(p, self.allowlist) for p in providers.values()]
 
         def op(state):
             def mutate(s):
-                for p in cleaned:
-                    if p["id"] in s["providers"] and not replace_existing:
+                for provider in cleaned:
+                    if provider["id"] in s["providers"] and not replace_existing:
                         continue
-                    s["providers"][p["id"]] = p
+                    s["providers"][provider["id"]] = provider
             self._commit(state, mutate)
-
         self.store.update(op)
         self._log("catalog.import", count=len(cleaned))
         return len(cleaned)
