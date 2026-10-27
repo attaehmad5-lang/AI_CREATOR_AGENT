@@ -17,12 +17,13 @@ _TIMEOUT_MAX = 30.0
 
 
 class ProviderOnboardingWorkflow:
-    def __init__(self, connection_manager: Any) -> None:
+    def __init__(self, connection_manager: Any, authorization_manager: Any | None = None) -> None:
         if not callable(getattr(connection_manager, "register_provider", None)):
             raise ValueError("connection manager must support provider registration")
         if not callable(getattr(connection_manager, "validate_catalog_schema", None)):
             raise ValueError("connection manager must validate catalog schemas")
         self.connection_manager = connection_manager
+        self.authorization_manager = authorization_manager
 
     @staticmethod
     def _validate_documentation_url(value: Any) -> bool:
@@ -126,8 +127,19 @@ class ProviderOnboardingWorkflow:
             "provider": prepared["provider"]["id"],
         }
 
-    def register_candidate(self, provider: Any) -> dict[str, Any]:
-        """Persist a valid candidate as disabled; never activate it implicitly."""
+    def register_candidate(self, provider: Any, *, principal_id: str) -> dict[str, Any]:
+        """Persist a valid candidate as disabled only after provider.configure authorization."""
+        if not isinstance(principal_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}", principal_id):
+            return {"status": "INVALID_PRINCIPAL", "saved": False}
+        authorize = getattr(self.authorization_manager, "authorize", None)
+        if not callable(authorize):
+            return {"status": "AUTHORIZATION_MANAGER_REQUIRED", "saved": False}
+        try:
+            authorization = authorize(principal_id, "provider.configure")
+        except Exception as exc:
+            return {"status": "AUTHORIZATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+            return {"status": "ACCESS_DENIED", "saved": False}
         prepared = self.prepare_candidate(provider)
         if prepared.get("prepared") is not True:
             return {"status": prepared.get("status", "CANDIDATE_BLOCKED"), "saved": False}
