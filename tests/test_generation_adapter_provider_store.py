@@ -110,6 +110,20 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
         self.assertEqual(result["status"], "INVALID_OUTPUT_PATH")
         self.assertIsNone(service.request)
 
+    def test_pathlike_conversion_exception_is_rejected(self):
+        class BrokenPath:
+            def __fspath__(self):
+                raise TypeError("untrusted path-like object")
+
+        service = CanonicalServiceStub()
+        adapter = GenerationAdapter(
+            provider_store_service=service,
+            provider_store_adapter=lambda **kwargs: {},
+        )
+        result = adapter.generate_image("prompt", BrokenPath())
+        self.assertEqual(result["status"], "INVALID_OUTPUT_PATH")
+        self.assertIsNone(service.request)
+
     def test_invalid_canonical_service_fails_closed(self):
         adapter = GenerationAdapter(provider_store_service=object(), provider_store_adapter=lambda **kwargs: {})
         result = adapter.generate_image("prompt", "/tmp/output.png")
