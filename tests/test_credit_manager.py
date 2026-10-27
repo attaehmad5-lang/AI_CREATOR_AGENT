@@ -289,6 +289,14 @@ class ProviderCreditManagerTests(unittest.TestCase):
             request_id="timeout-job", provider_id="image-provider", reason="TIMEOUT"
         )
         self.assertEqual(marked["status"], "OUTCOME_UNCERTAIN")
+        repeated = self.manager.mark_uncertain(
+            request_id="timeout-job", provider_id="image-provider", reason="UNKNOWN"
+        )
+        self.assertEqual(repeated["status"], "ALREADY_UNCERTAIN")
+        self.assertEqual(
+            self.manager.data["reservations"]["timeout-job"]["uncertainty_reason"],
+            "TIMEOUT",
+        )
         released = self.manager.release(request_id="timeout-job", provider_id="image-provider")
         self.assertEqual(released["status"], "OUTCOME_UNCERTAIN_RELEASE_BLOCKED")
         self.assertEqual(self.manager.usable_free_credits(unit="USD"), {"image-provider": 3.0})
