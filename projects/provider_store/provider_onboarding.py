@@ -57,6 +57,8 @@ class ProviderOnboardingWorkflow:
             return {"status": "SENSITIVE_METADATA_REJECTED", "prepared": False}
         category = candidate.get("category")
         connection_type = candidate.get("connection_type")
+        if not isinstance(candidate.get("subscription_required"), bool):
+            return {"status": "INVALID_SUBSCRIPTION_POLICY", "prepared": False}
         capabilities = candidate.get("capabilities")
         if not isinstance(category, str) or not category.strip():
             return {"status": "INVALID_CATEGORY", "prepared": False}
