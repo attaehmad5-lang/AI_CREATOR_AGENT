@@ -133,6 +133,19 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             self.assertEqual(result["status"], "MISMATCH")
             self.assertIn({"provider": "story_test", "field": "auth_type", "issue": "metadata_mismatch"}, result["differences"])
 
+    def test_production_readiness_report_matches_catalog_and_explains_locked_providers(self):
+        advanced = AdvancedProviderManager()
+        report = advanced.readiness_report()
+        self.assertEqual(report["catalog_consistency"], "MATCH")
+        self.assertEqual(report["providers_total"], 18)
+        self.assertEqual(report["providers_ready"], 0)
+        self.assertEqual(report["status"], "DEGRADED")
+        self.assertTrue(all(not item["ready"] for item in report["providers"]))
+        self.assertTrue(any("CATALOG_LOCKED" in item["blockers"] for item in report["providers"]))
+        encoded = json.dumps(report).casefold()
+        self.assertNotIn("api_key", encoded)
+        self.assertNotIn("token_value", encoded)
+
     def test_category_catalog_is_validated_and_returns_detached_records(self):
         advanced = AdvancedProviderManager()
         categories = advanced.list_categories()
