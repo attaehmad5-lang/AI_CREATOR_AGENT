@@ -134,6 +134,16 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
                     and advanced_record["official_api_url"].startswith("https://"),
                     "API provider lacks official docs URL: " + advanced_record["id"],
                 )
+                self.assertTrue(
+                    isinstance(advanced_record.get("allowed_hosts"), list)
+                    and advanced_record["allowed_hosts"],
+                    "API provider lacks an explicit host allowlist: " + advanced_record["id"],
+                )
+                self.assertTrue(
+                    isinstance(advanced_record.get("token_env"), str)
+                    and advanced_record["token_env"],
+                    "API provider lacks an environment credential reference: " + advanced_record["id"],
+                )
             canonical = main_by_id[advanced_record["id"]]
             for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required", "allowed_hosts", "token_env", "api_key_env", "credential_env", "official_api_url", "subscription_url", "zero_cost_allowed", "priority", "supported_models"):
                 self.assertEqual(
