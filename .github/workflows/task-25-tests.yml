@@ -34,7 +34,7 @@ jobs:
       - name: Run unit and regression tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
       - name: Run bounded catalog performance benchmark
-        run: python -m projects.provider_store.advanced.performance_benchmark --iterations 25 --max-seconds 15
+        run: python -m projects.provider_store.advanced.performance_benchmark --iterations 25 --workers 4 --max-seconds 15
       - name: Generate Advanced Provider Store report and source ZIP
         run: python -m projects.provider_store.advanced.release_report --output-dir build/advanced-provider-store-release
       - name: Upload Advanced Provider Store release artifacts
