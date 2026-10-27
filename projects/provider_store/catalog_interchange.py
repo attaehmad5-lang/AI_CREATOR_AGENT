@@ -75,7 +75,10 @@ def import_catalog(
     destination_path = Path(destination)
     if not isinstance(backup, bool):
         raise ValueError("backup must be a boolean")
-    candidate = _read_valid_catalog(source_path)
+    try:
+        candidate = _read_valid_catalog(source_path)
+    except ValueError:
+        return {"status": "CATALOG_IMPORT_INVALID_SOURCE", "imported": False}
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = destination_path.with_name(destination_path.name + ".lock")
     backup_path = destination_path.with_name(destination_path.name + ".bak")
