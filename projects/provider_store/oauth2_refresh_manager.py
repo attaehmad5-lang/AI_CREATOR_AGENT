@@ -38,6 +38,8 @@ class OAuth2RefreshTokenManager:
             raise ValueError("provider_configs must be a mapping")
         if not callable(request_token):
             raise ValueError("request_token must be callable")
+        if clock is not None and not callable(clock):
+            raise ValueError("clock must be callable")
         if refresh_token_sink is not None and not callable(refresh_token_sink):
             raise ValueError("refresh_token_sink must be callable")
         if (
@@ -188,7 +190,7 @@ class OAuth2RefreshTokenManager:
                             if config["refresh_token_rotation_required"]:
                                 raise RuntimeError("OAUTH_REFRESH_TOKEN_PERSISTENCE_FAILED") from None
                         else:
-                            if sink_result is False and config["refresh_token_rotation_required"]:
+                            if sink_result is not True and config["refresh_token_rotation_required"]:
                                 raise RuntimeError("OAUTH_REFRESH_TOKEN_PERSISTENCE_FAILED")
                     elif config["refresh_token_rotation_required"]:
                         raise RuntimeError("OAUTH_REFRESH_TOKEN_SINK_REQUIRED")
