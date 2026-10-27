@@ -120,6 +120,7 @@ class AdvancedProviderManager:
                 isinstance(item, str) and item.casefold() == wanted for item in capabilities
             ):
                 matches.append(provider)
+        matches.sort(key=lambda item: str(item.get("id", "")))
         return matches
 
     def supports_capability(self, provider_id: str, capability: str) -> bool:
