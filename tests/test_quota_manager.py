@@ -118,5 +118,20 @@ class ProviderQuotaManagerTests(unittest.TestCase):
             ProviderQuotaManager(self.path, limits=self.limits)
 
 
+    def test_uncertain_provider_outcome_keeps_quota_reserved_and_blocks_release(self):
+        reserved = self.manager.reserve(provider_id="image", request_id="timeout-job")
+        self.assertEqual(reserved["status"], "RESERVED")
+        marked = self.manager.mark_uncertain(
+            request_id="timeout-job", provider_id="image", reason="TIMEOUT"
+        )
+        self.assertEqual(marked["status"], "OUTCOME_UNCERTAIN")
+        released = self.manager.release(request_id="timeout-job", provider_id="image")
+        self.assertEqual(released["status"], "OUTCOME_UNCERTAIN_RELEASE_BLOCKED")
+        self.assertEqual(self.manager.usage(provider_id="image")["hourly"], 1)
+        record = self.manager.data["requests"]["timeout-job"]
+        self.assertEqual(record["status"], "RESERVED")
+        self.assertTrue(record["outcome_uncertain"])
+        self.assertEqual(record["uncertainty_reason"], "TIMEOUT")
+
 if __name__ == "__main__":
     unittest.main()
