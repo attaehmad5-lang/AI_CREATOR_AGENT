@@ -133,6 +133,18 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             self.assertEqual(result["status"], "MISMATCH")
             self.assertIn({"provider": "story_test", "field": "auth_type", "issue": "metadata_mismatch"}, result["differences"])
 
+    def test_advanced_capability_discovery_is_exact_case_insensitive_and_category_scoped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, advanced = self._manager(Path(tmp))
+            self.assertEqual([p["id"] for p in advanced.by_capability("STORY_GENERATION")], ["story_test", "story_disabled", "story_locked"])
+            self.assertEqual([p["id"] for p in advanced.by_capability("image_generation")], ["image_test"])
+            self.assertEqual([p["id"] for p in advanced.by_capability("story_generation", category="script_story")], ["story_test", "story_disabled", "story_locked"])
+            self.assertEqual(advanced.by_capability("story"), [])
+            self.assertEqual(advanced.by_capability(" "), [])
+            self.assertTrue(advanced.supports_capability("story_test", "Dialogue_Writing"))
+            self.assertFalse(advanced.supports_capability("story_test", "dialogue"))
+            self.assertFalse(advanced.supports_capability("missing", "story_generation"))
+
     def test_production_readiness_report_matches_catalog_and_explains_locked_providers(self):
         advanced = AdvancedProviderManager()
         report = advanced.readiness_report()
