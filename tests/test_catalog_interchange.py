@@ -32,13 +32,24 @@ class CatalogInterchangeTests(unittest.TestCase):
         target.write_text(json.dumps({"version": "3.0", "providers": []}), encoding="utf-8")
         imported = import_catalog(exported, target)
         self.assertTrue(imported["imported"])
-        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), json.loads(exported.read_text(encoding="utf-8")))
+        self.assertEqual(
+            json.loads(target.read_text(encoding="utf-8")),
+            json.loads(exported.read_text(encoding="utf-8")),
+        )
         self.assertTrue(Path(str(target) + ".bak").is_file())
-        self.assertEqual(json.loads(Path(str(target) + ".bak").read_text(encoding="utf-8"))["providers"], [])
+        self.assertEqual(
+            json.loads(Path(str(target) + ".bak").read_text(encoding="utf-8"))["providers"],
+            [],
+        )
 
     def test_invalid_source_does_not_mutate_destination(self):
         invalid = self.root / "invalid.json"
-        invalid.write_text(json.dumps({"version": "3.0", "providers": [{"id": "x", "api_key": "never-export"}]}), encoding="utf-8")
+        invalid.write_text(
+            json.dumps(
+                {"version": "3.0", "providers": [{"id": "x", "api_key": "never-export"}]}
+            ),
+            encoding="utf-8",
+        )
         target = self.root / "target.json"
         original = b'{"version":"3.0","providers":[]}\n'
         target.write_bytes(original)
@@ -48,7 +59,10 @@ class CatalogInterchangeTests(unittest.TestCase):
 
     def test_failed_atomic_write_does_not_leave_partial_target(self):
         target = self.root / "new-target.json"
-        with patch("projects.provider_store.catalog_interchange.atomic_replace_with_retry", side_effect=OSError("simulated replace failure")):
+        with patch(
+            "projects.provider_store.catalog_interchange.atomic_replace_with_retry",
+            side_effect=OSError("simulated replace failure"),
+        ):
             result = import_catalog(self.source, target, backup=False)
         self.assertFalse(result["imported"])
         self.assertFalse(target.exists())
