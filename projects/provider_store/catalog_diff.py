@@ -29,9 +29,7 @@ def diff_catalogs(
             if before.get(key) != after.get(key)
         )
         if changed_fields:
-            changed.append(
-                {"id": provider_id, "changed_fields": changed_fields}
-            )
+            changed.append({"id": provider_id, "changed_fields": changed_fields})
 
     return {
         "status": "CATALOG_DIFF_READY",
