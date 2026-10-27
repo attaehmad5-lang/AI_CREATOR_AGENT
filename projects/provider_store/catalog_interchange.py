@@ -31,9 +31,7 @@ _FORBIDDEN_CREDENTIAL_KEYS = {
 def _contains_credential_material(value: Any) -> bool:
     if isinstance(value, dict):
         for key, child in value.items():
-            normalized = "".join(
-                char for char in str(key).casefold() if char.isalnum()
-            )
+            normalized = "".join(char for char in str(key).casefold() if char.isalnum())
             if normalized in _FORBIDDEN_CREDENTIAL_KEYS:
                 return True
             if _contains_credential_material(child):
@@ -255,9 +253,7 @@ def list_catalog_snapshots(
             {"name": path.name, "provider_count": len(catalog["providers"])}
         )
     return {
-        "status": (
-            "CATALOG_HISTORY_LISTED" if snapshots else "CATALOG_HISTORY_EMPTY"
-        ),
+        "status": ("CATALOG_HISTORY_LISTED" if snapshots else "CATALOG_HISTORY_EMPTY"),
         "snapshots": snapshots,
     }
 
