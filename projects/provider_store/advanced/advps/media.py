@@ -106,10 +106,10 @@ def validate_media_metadata(
     """Validate provider-reported metadata; use validate_media_payload on actual bytes too."""
     if not isinstance(metadata, dict):
         raise ValidationError("media metadata must be an object")
-    if media_type not in MIME_BY_TYPE:
-        raise ValidationError(f"unsupported media type: {media_type}")
+    if not isinstance(media_type, str) or media_type not in MIME_BY_TYPE:
+        raise ValidationError("unsupported media type")
     mime_type = metadata.get("mime_type")
-    if mime_type not in MIME_BY_TYPE[media_type]:
+    if not isinstance(mime_type, str) or mime_type not in MIME_BY_TYPE[media_type]:
         raise SecurityError("MIME type is not allowed for requested media type")
     size = _nonnegative_int(metadata.get("size_bytes"), "size_bytes")
     max_bytes = _nonnegative_int(max_bytes, "max_bytes")
