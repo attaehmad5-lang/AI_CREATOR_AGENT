@@ -642,9 +642,9 @@ Implementation/evidence inspected: No passing evidence located for the complete 
 Remaining work: Run and record formatting, lint, type, coverage, build, wheel, clean extraction, dependency lock and SBOM checks.
 
 Feature 125: Clean ZIP Extraction Testing
-Status: UNVERIFIED
-Implementation/evidence inspected: No passing evidence located for the complete repository-wide gate
-Remaining work: Run and record formatting, lint, type, coverage, build, wheel, clean extraction, dependency lock and SBOM checks.
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40563450621
+Remaining work: Generated source ZIP passes CRC/integrity checks, SHA-256 manifest comparisons and clean extraction with expected files; full-app packaging remains separate.
 
 Feature 126: Reproducible Build Verification
 Status: UNVERIFIED
@@ -732,14 +732,14 @@ Implementation/evidence inspected: No PDF generator implemented
 Remaining work: Implement and validate PDF output with an approved dependency and Unicode-safe rendering.
 
 Feature 143: ZIP Package Generation
-Status: PARTIAL
-Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40560954116
-Remaining work: Source-only ZIP is generated and integrity-checked; final distributable package and clean extraction gate remain.
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40563450621
+Remaining work: Component source ZIP is generated from an explicit safe allowlist and includes the completion report and source manifest; production release publication remains open.
 
 Feature 144: Package File Manifest
-Status: PARTIAL
-Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40560954116
-Remaining work: SHA-256 manifest is emitted and archive member hashes are verified; reproducible-release verification remains.
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40563450621
+Remaining work: Per-file SHA-256 manifest is generated, archive membership is checked and each packaged source hash is compared to the manifest.
 
 Feature 145: Secret-Free Package Verification
 Status: PARTIAL
