@@ -189,6 +189,20 @@ class ProviderCapabilityGateTests(unittest.TestCase):
         self.assertEqual(result["passed"], 2)
         self.assertEqual(result["blocked"], 1)
 
+    def test_output_replace_failure_preserves_previous_status_and_cleans_temp_file(self):
+        from unittest.mock import patch
+
+        self.write_inputs()
+        self.module.OUTPUT.write_text('{"status":"PREVIOUS"}\\n', encoding="utf-8")
+        with patch.object(self.module.os, "replace", side_effect=OSError("simulated replace failure")):
+            with self.assertRaisesRegex(OSError, "simulated replace failure"):
+                self.module.main()
+        self.assertEqual(
+            self.module.OUTPUT.read_text(encoding="utf-8"),
+            '{"status":"PREVIOUS"}\\n',
+        )
+        self.assertEqual(list(self.directory.glob("gate.json.*.tmp")), [])
+
 
 class MasterSystemHealthTests(unittest.TestCase):
     def setUp(self):
