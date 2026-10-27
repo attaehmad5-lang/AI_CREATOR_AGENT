@@ -1774,6 +1774,15 @@ class ConnectionManagerTests(unittest.TestCase):
         metrics["calls"] = 999
         self.assertEqual(self.manager.discovery_metrics()["calls"], 0)
 
+    def test_discovery_metrics_count_corrupt_catalog_without_exposing_error_details(self):
+        self.catalog_path.write_text("{broken", encoding="utf-8")
+        self.assertEqual(self.manager.discover_providers(), [])
+        metrics = self.manager.discovery_metrics()
+        self.assertEqual(metrics["calls"], 1)
+        self.assertEqual(metrics["catalog_errors"], 1)
+        self.assertNotIn("broken", repr(metrics))
+        self.assertNotIn(str(self.catalog_path), repr(metrics))
+
 
 if __name__ == "__main__":
     unittest.main()
