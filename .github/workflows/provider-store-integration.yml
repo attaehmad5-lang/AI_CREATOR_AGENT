@@ -7,6 +7,7 @@ on:
       - "tests/test_provider_store_compat.py"
       - "tests/test_provider_service.py"
       - "tests/test_advanced_store_bridge.py"
+      - "tests/test_advps_core.py"
       - ".github/workflows/provider-store-integration.yml"
   push:
     branches:
@@ -47,7 +48,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Compile provider-store modules and integration tests
-        run: python -m compileall -q projects/provider_store tests/test_provider_store_compat.py tests/test_provider_service.py tests/test_advanced_store_bridge.py
+        run: python -m compileall -q projects/provider_store tests/test_provider_store_compat.py tests/test_provider_service.py tests/test_advanced_store_bridge.py tests/test_advps_core.py
 
       - name: Validate provider catalogs
         run: |
@@ -61,3 +62,6 @@ jobs:
 
       - name: Run advanced bridge contract tests
         run: python -m unittest discover -s tests -p "test_advanced_store_bridge.py" -v
+
+      - name: Run Advanced Provider Store core tests
+        run: python -m unittest discover -s tests -p "test_advps_core.py" -v
