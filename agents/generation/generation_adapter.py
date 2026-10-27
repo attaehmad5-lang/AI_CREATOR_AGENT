@@ -89,7 +89,11 @@ class GenerationAdapter:
         if not isinstance(output_path, (str, os.PathLike)):
             return {"status": "INVALID_OUTPUT_PATH", "executed": False}
         output_path = os.fspath(output_path)
-        if not output_path.strip() or "\x00" in output_path:
+        if (
+            not isinstance(output_path, str)
+            or not output_path.strip()
+            or "\x00" in output_path
+        ):
             return {"status": "INVALID_OUTPUT_PATH", "executed": False}
         if (
             isinstance(estimated_cost, bool)
