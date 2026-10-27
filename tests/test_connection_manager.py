@@ -1100,7 +1100,7 @@ class ConnectionManagerTests(unittest.TestCase):
             providers.append({
                 "id": f"page_{index}",
                 "name": f"Page {index}",
-                "category": "image",
+                "category": "pagination_test",
                 "auth_type": "NONE",
                 "connection_type": "LOCAL",
                 "enabled": True,
@@ -1108,9 +1108,9 @@ class ConnectionManagerTests(unittest.TestCase):
         for provider in providers:
             self.assertEqual(self.manager.register_provider(provider)["status"], "REGISTERED")
 
-        first = self.manager.discover_providers(category="image", limit=3, offset=0)
-        second = self.manager.discover_providers(category="image", limit=3, offset=3)
-        third = self.manager.discover_providers(category="image", limit=3, offset=6)
+        first = self.manager.discover_providers(category="pagination_test", limit=3, offset=0)
+        second = self.manager.discover_providers(category="pagination_test", limit=3, offset=3)
+        third = self.manager.discover_providers(category="pagination_test", limit=3, offset=6)
 
         self.assertEqual(len(first), 3)
         self.assertEqual(len(second), 3)
