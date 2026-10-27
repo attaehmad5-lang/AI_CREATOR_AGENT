@@ -4,6 +4,10 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.cost_policy import ProviderCostPolicy
+from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.quota_manager import ProviderQuotaManager
+from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.advanced.advanced_store_bridge import AdvancedStoreBridge
 from projects.provider_store.advanced.advanced_provider_manager import AdvancedProviderManager
 
@@ -124,6 +128,39 @@ class AdvancedStoreBridgeTests(unittest.TestCase):
         result = advanced.execute_request(**request)
         self.assertEqual(result, {"status": "COMPLETED", "executed": True})
         self.assertEqual(service.request, request)
+
+    def test_manager_handoff_uses_real_service_and_retains_ambiguous_reservations(self):
+        self._verify("image-cheap")
+        cost = ProviderCostPolicy(
+            self.temp.name + "/cost.json", project_budgets={"film": 10.0}
+        )
+        quota = ProviderQuotaManager(
+            self.temp.name + "/quota.json", limits={"image-cheap": {"daily": 10}}
+        )
+        router = ProviderRoutingManager(
+            self.manager, cost_policy=cost, quota_manager=quota
+        )
+        service = ProviderService(
+            self.manager, routing_manager=router,
+            cost_policy=cost, quota_manager=quota,
+        )
+        advanced = AdvancedProviderManager(
+            connection_manager=self.manager, provider_service=service
+        )
+
+        def uncertain_adapter(**kwargs):
+            raise TimeoutError("private provider endpoint")
+
+        result = advanced.execute_request(
+            category="image", project_id="film", request_id="bridge-ambiguous-1",
+            estimated_cost=1.0, paid_approved_providers={"image-cheap"},
+            adapter=uncertain_adapter, modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
+        self.assertTrue(result["reservations_retained"])
+        self.assertIn("bridge-ambiguous-1", cost.ledger["projects"]["film"]["reservations"])
+        self.assertEqual(quota.data["requests"]["bridge-ambiguous-1"]["status"], "RESERVED")
+        self.assertNotIn("private provider endpoint", repr(result))
 
     def test_advanced_manager_execution_fails_closed_without_service(self):
         advanced = AdvancedProviderManager(connection_manager=self.manager)
