@@ -27,6 +27,10 @@ class StoreCorruptError(AdvpsError):
     code = "store_corrupt"
 
 
+class JobCancelledError(AdvpsError):
+    code = "job_cancelled"
+
+
 class NotFoundError(AdvpsError):
     code = "not_found"
 
