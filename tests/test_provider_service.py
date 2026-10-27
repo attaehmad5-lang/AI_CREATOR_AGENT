@@ -23,6 +23,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.provider_trace_manager import ProviderTraceManager
 from projects.provider_store.provider_structured_logger import ProviderStructuredLogger
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
@@ -94,6 +95,27 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(event["outcome"], "OK")
         self.assertNotIn("never-log-this-token", encoded)
         self.assertNotIn("API_TOKEN", encoded)
+
+    def test_provider_verification_propagates_traceparent_and_records_span(self):
+        trace = ProviderTraceManager()
+        service = ProviderService(
+            self.connections,
+            health_manager=self.health,
+            trace_manager=trace,
+        )
+        traceparent = "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
+        result = service.verify_provider(
+            "image",
+            lambda provider, timeout_seconds: True,
+            traceparent=traceparent,
+        )
+        self.assertTrue(result["verified"])
+        snapshot = trace.snapshot()
+        self.assertEqual(snapshot["count"], 1)
+        self.assertEqual(snapshot["spans"][0]["trace_id"], "a" * 32)
+        self.assertEqual(snapshot["spans"][0]["parent_span_id"], "b" * 16)
+        self.assertEqual(snapshot["spans"][0]["outcome"], "OK")
+        self.assertEqual(snapshot["spans"][0]["attributes"]["provider_id"], "image")
 
     def test_builtin_http_provider_verification_updates_connection_and_health(self):
         class Response:
