@@ -96,6 +96,7 @@ The legacy generation adapter remains backward-compatible by default. To route g
 ```python
 from agents.execution.execution_gateway import ExecutionGateway
 from projects.provider_store.artifact_scanner import ClamAVArtifactScanner
+from projects.provider_store.provider_service import ProviderService
 
 # Build these from the deployment's reviewed provider catalog and policies:
 # connection_manager, routing_manager, cost_policy, quota_manager,
