@@ -287,9 +287,9 @@ Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider
 Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
 
 Feature 054: Error Normalization
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: provider_error_policy.py; retry_policy.py; tests/test_provider_error_policy.py; CI #40565486477
+Remaining work: Billing, credit exhaustion, auth, permission, rate-limit and transient failures map to normalized safe outcomes; malformed inputs and unknown raw error codes fail closed.
 
 Feature 055: Output Quality Validation
 Status: PARTIAL
