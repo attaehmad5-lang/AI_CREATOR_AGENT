@@ -62,9 +62,21 @@ class ProviderHealthManager:
             self.data = {"version": "1.0", "providers": {}}
             return
         try:
-            with self.state_path.open("r", encoding="utf-8") as stream:
-                loaded = json.load(stream)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            with self.state_path.open("rb") as stream:
+                initial_stat = os.fstat(stream.fileno())
+                if initial_stat.st_size > 4_000_000:
+                    raise ValueError("Provider health state exceeds the size limit")
+                payload = stream.read(4_000_001)
+                if len(payload) > 4_000_000 or stream.read(1):
+                    raise ValueError("Provider health state exceeds the size limit")
+                final_stat = os.fstat(stream.fileno())
+                if any(
+                    getattr(final_stat, field, None) != getattr(initial_stat, field, None)
+                    for field in ("st_size", "st_mtime_ns", "st_ctime_ns", "st_dev", "st_ino")
+                ):
+                    raise ValueError("Provider health state changed while being read")
+                loaded = json.loads(payload)
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
             raise ValueError("Invalid provider health state JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("providers", {}), dict):
             raise ValueError("Invalid provider health state")
