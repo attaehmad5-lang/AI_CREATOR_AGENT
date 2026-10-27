@@ -31,7 +31,9 @@ _FORBIDDEN_CREDENTIAL_KEYS = {
 def _contains_credential_material(value: Any) -> bool:
     if isinstance(value, dict):
         for key, child in value.items():
-            normalized = "".join(char for char in str(key).casefold() if char.isalnum())
+            normalized = "".join(
+                char for char in str(key).casefold() if char.isalnum()
+            )
             if normalized in _FORBIDDEN_CREDENTIAL_KEYS:
                 return True
             if _contains_credential_material(child):
@@ -51,7 +53,9 @@ def _read_valid_catalog(path: Path) -> dict[str, Any]:
     if result.get("valid") is not True:
         raise ValueError("catalog schema validation failed")
     if _contains_credential_material(catalog):
-        raise ValueError("catalog contains credential material and cannot be exported or imported")
+        raise ValueError(
+            "catalog contains credential material and cannot be exported or imported"
+        )
     return catalog
 
 
@@ -108,7 +112,10 @@ def import_catalog(
     try:
         candidate = _read_valid_catalog(source_path)
     except ValueError:
-        return {"status": "CATALOG_IMPORT_INVALID_SOURCE", "imported": False}
+        return {
+            "status": "CATALOG_IMPORT_INVALID_SOURCE",
+            "imported": False,
+        }
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = destination_path.with_name(destination_path.name + ".lock")
     backup_path = destination_path.with_name(destination_path.name + ".bak")
@@ -137,7 +144,10 @@ def import_catalog(
                     os.unlink(temp_backup)
                 except FileNotFoundError:
                     pass
-                return {"status": "CATALOG_BACKUP_FAILED", "imported": False}
+                        return {
+                    "status": "CATALOG_BACKUP_FAILED",
+                    "imported": False,
+                }
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{destination_path.name}.",
             suffix=".tmp",
@@ -179,8 +189,14 @@ def import_catalog(
                         os.fsync(stream.fileno())
                     atomic_replace_with_retry(restore_name, destination_path)
             except Exception:
-                return {"status": "CATALOG_IMPORT_ROLLBACK_FAILED", "imported": False}
-            return {"status": "CATALOG_IMPORT_FAILED_ROLLED_BACK", "imported": False}
+                return {
+                    "status": "CATALOG_IMPORT_ROLLBACK_FAILED",
+                    "imported": False,
+                }
+            return {
+                "status": "CATALOG_IMPORT_FAILED_ROLLED_BACK",
+                "imported": False,
+            }
     return {
         "status": "CATALOG_IMPORTED",
         "imported": True,
@@ -239,7 +255,9 @@ def list_catalog_snapshots(
             {"name": path.name, "provider_count": len(catalog["providers"])}
         )
     return {
-        "status": "CATALOG_HISTORY_LISTED" if snapshots else "CATALOG_HISTORY_EMPTY",
+        "status": (
+            "CATALOG_HISTORY_LISTED" if snapshots else "CATALOG_HISTORY_EMPTY"
+        ),
         "snapshots": snapshots,
     }
 
