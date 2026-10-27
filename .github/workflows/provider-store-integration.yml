@@ -67,5 +67,6 @@ jobs:
       - name: Run Advanced Provider Store core tests
         run: python -m unittest discover -s tests -p "test_advps_core.py" -v
 
-      - name: Run repository coverage gate for provider-store core
+      - name: Run repository coverage gate for provider-store core (Linux only)
+        if: runner.os == 'Linux'
         run: python projects/provider_store/advanced/tools_coverage.py 80
