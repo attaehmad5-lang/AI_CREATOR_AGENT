@@ -9,7 +9,7 @@ import time
 import uuid
 from typing import Any, Callable, Optional
 
-from .errors import NotFoundError, ValidationError
+from .errors import JobCancelledError, NotFoundError, ValidationError
 from .storage import AtomicJsonStore
 from .redact import redact_text
 
@@ -115,6 +115,16 @@ class JobManager:
         if job is None:
             raise NotFoundError(f"unknown job: {job_id}")
         return job
+
+    def is_cancelled(self, job_id: str) -> bool:
+        """Allow workers to cooperatively observe cancellation between safe checkpoints."""
+        job = self.get(job_id)
+        return job["status"] == "CANCELLED"
+
+    def check_cancelled(self, job_id: str) -> None:
+        """Raise a normalized cancellation signal for cooperative worker code."""
+        if self.is_cancelled(job_id):
+            raise JobCancelledError("job cancellation requested")
 
     def list(self, status: Optional[str] = None) -> list[dict]:
         if status is not None and status not in STATUSES:
