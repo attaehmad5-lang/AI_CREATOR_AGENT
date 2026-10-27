@@ -13,8 +13,6 @@ on:
       - "projects/provider_store/provider_service.py"
       - "projects/provider_store/artifact_scanner.py"
       - "projects/provider_store/oauth2_refresh_manager.py"
-      - "projects/provider_store/artifact_scanner.py"
-      - "projects/provider_store/oauth2_refresh_manager.py"
       - "projects/provider_store/provider_store_manager.py"
       - "projects/provider_store/provider_catalog.json"
       - "projects/provider_store/advanced/advanced_provider_catalog.json"
@@ -27,8 +25,6 @@ on:
       - "tests/test_generation_adapter_provider_store.py"
       - "tests/test_execution_gateway_provider_store.py"
       - "tests/test_provider_store_adversarial_input_smoke.py"
-      - "tests/test_artifact_scanner.py"
-      - "tests/test_oauth2_refresh_manager.py"
       - "tests/test_artifact_scanner.py"
       - "tests/test_oauth2_refresh_manager.py"
       - "tests/test_advps_core.py"
@@ -60,6 +56,10 @@ on:
       - "tests/test_provider_store_adversarial_input_smoke.py"
       - "tests/test_advps_core.py"
       - ".github/workflows/provider-store-integration.yml"
+      - "projects/provider_store/artifact_scanner.py"
+      - "projects/provider_store/oauth2_refresh_manager.py"
+      - "tests/test_artifact_scanner.py"
+      - "tests/test_oauth2_refresh_manager.py"
   workflow_dispatch:
 
 permissions:
