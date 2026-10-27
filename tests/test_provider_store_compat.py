@@ -117,6 +117,16 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
         self.assertEqual(len(advanced_ids), 18)
         self.assertTrue(advanced_ids.issubset(main_ids))
 
+        main_by_id = {p["id"]: p for p in json.loads(main_catalog.read_text(encoding="utf-8"))["providers"]}
+        advanced_records = json.loads(advanced_catalog.read_text(encoding="utf-8"))["providers"]
+        for advanced_record in advanced_records:
+            canonical = main_by_id[advanced_record["id"]]
+            for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required", "capabilities"):
+                self.assertEqual(
+                    advanced_record.get(field), canonical.get(field),
+                    "advanced catalog drift for " + advanced_record["id"] + " field " + field,
+                )
+
         with tempfile.TemporaryDirectory() as tmp:
             manager = ConnectionManager(main_catalog, Path(tmp) / "state.json")
             registry = UnifiedProviderRegistry(connection_manager=manager)
