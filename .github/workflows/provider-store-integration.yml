@@ -11,6 +11,7 @@ on:
       - "projects/provider_store/advanced/run_tests.sh"
       - "projects/provider_store/connection_manager.py"
       - "projects/provider_store/provider_service.py"
+      - "projects/provider_store/artifact_scanner.py"
       - "projects/provider_store/provider_store_manager.py"
       - "projects/provider_store/provider_catalog.json"
       - "projects/provider_store/advanced/advanced_provider_catalog.json"
@@ -23,6 +24,7 @@ on:
       - "tests/test_generation_adapter_provider_store.py"
       - "tests/test_execution_gateway_provider_store.py"
       - "tests/test_provider_store_adversarial_input_smoke.py"
+      - "tests/test_artifact_scanner.py"
       - "tests/test_advps_core.py"
       - ".github/workflows/provider-store-integration.yml"
   push:
@@ -81,7 +83,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Compile provider-store modules and integration tests
-        run: python -m compileall -q projects/provider_store tests/test_provider_store_compat.py tests/test_provider_service.py tests/test_advanced_store_bridge.py tests/test_advanced_store_execution_bridge.py tests/test_generation_adapter_provider_store.py tests/test_execution_gateway_provider_store.py tests/test_provider_store_adversarial_input_smoke.py tests/test_advps_core.py projects/provider_store/advanced/tools_coverage.py
+        run: python -m compileall -q projects/provider_store tests/test_provider_store_compat.py tests/test_provider_service.py tests/test_artifact_scanner.py tests/test_advanced_store_bridge.py tests/test_advanced_store_execution_bridge.py tests/test_generation_adapter_provider_store.py tests/test_execution_gateway_provider_store.py tests/test_provider_store_adversarial_input_smoke.py tests/test_advps_core.py projects/provider_store/advanced/tools_coverage.py
 
       - name: Validate provider catalogs
         run: |
@@ -95,6 +97,9 @@ jobs:
 
       - name: Run ProviderService security and lifecycle tests
         run: python -m unittest discover -s tests -p "test_provider_service.py" -v
+
+      - name: Run artifact scanner safety tests
+        run: python -m unittest discover -s tests -p "test_artifact_scanner.py" -v
 
       - name: Run provider-store compatibility regression tests
         run: python -m unittest discover -s tests -p "test_provider_store_compat.py" -v
