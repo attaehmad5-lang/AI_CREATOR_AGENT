@@ -16,6 +16,7 @@ class AdvancedProviderManager:
         *,
         catalog_path: str | None = None,
         state_path: str | None = None,
+        provider_service: Any | None = None,
     ) -> None:
         if connection_manager is not None and (catalog_path is not None or state_path is not None):
             raise ValueError("pass either connection_manager or explicit paths, not both")
@@ -24,6 +25,8 @@ class AdvancedProviderManager:
         )
         # Reuse exactly the same ConnectionManager; no duplicate catalog/state.
         self.bridge = AdvancedStoreBridge(self.store.manager)
+        # Execution is opt-in and always delegated to the canonical service.
+        self.provider_service = provider_service
 
     @property
     def catalog(self) -> dict[str, Any]:
@@ -55,6 +58,16 @@ class AdvancedProviderManager:
     def simulate_route(self, capability: str, **kwargs: Any) -> list[str]:
         """Return candidate IDs without making provider calls or spending credits."""
         return [provider["id"] for provider in self.route_candidates(capability, **kwargs)]
+
+    def execute_request(self, **request: Any) -> dict[str, Any]:
+        """Delegate live execution to the injected canonical ProviderService.
+
+        Candidate selection remains a dry run. No provider call is made when the
+        canonical service has not been explicitly injected.
+        """
+        if self.provider_service is None:
+            return {"status": "PROVIDER_SERVICE_UNAVAILABLE", "executed": False}
+        return self.bridge.execute_via_service(self.provider_service, **request)
 
     def status(self) -> dict[str, Any]:
         providers = self.list_providers()
