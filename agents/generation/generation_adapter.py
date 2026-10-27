@@ -33,11 +33,34 @@ class GenerationAdapter:
                 pass
 
     def status(self):
+        canonical_service_ready = callable(
+            getattr(self.provider_store_service, "execute_routed_request", None)
+        )
+        canonical_executor_ready = callable(self.provider_store_adapter)
+        canonical_execution_ready = canonical_service_ready and canonical_executor_ready
+
+        if canonical_execution_ready:
+            execution_readiness = "READY"
+            execution_mode = "CANONICAL"
+        elif self.provider_store_service is None:
+            # The legacy path may remain available for compatibility, but it is
+            # not proof that the canonical accounting/security boundary is wired.
+            execution_readiness = "LEGACY_MODE"
+            execution_mode = "LEGACY"
+        else:
+            execution_readiness = "BLOCKED"
+            execution_mode = "CANONICAL"
+
         return {
             "adapter": self.name,
             "version": self.version,
-            "providers": self.providers,
-            "status": "READY"
+            "providers": dict(self.providers),
+            "status": "READY",
+            "execution_mode": execution_mode,
+            "execution_readiness": execution_readiness,
+            "canonical_execution_ready": canonical_execution_ready,
+            "canonical_service_ready": canonical_service_ready,
+            "canonical_executor_ready": canonical_executor_ready,
         }
 
     def prepare_image_job(self, scene):
