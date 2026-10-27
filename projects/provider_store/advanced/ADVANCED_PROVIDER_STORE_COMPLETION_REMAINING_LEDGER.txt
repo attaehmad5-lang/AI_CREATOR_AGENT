@@ -453,8 +453,8 @@ Remaining work: Configuration/storage/recovery primitives exist; migration, cras
 
 Feature 087: Catalog Import/Export
 Status: COMPLETED
-Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py; CI #40576766499
-Completion evidence: Validated JSON export/import uses atomic replacement, schema validation, interprocess locking, backup and post-write verification. Injected write failure restores prior bytes or preserves an absent target. Cross-platform CI passed 471 tests on Ubuntu and Windows.
+Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py; CI #40576942629
+Completion evidence: Validated JSON export/import uses atomic replacement, schema validation, interprocess locking, backup and post-write verification. Injected write failure restores prior bytes or preserves an absent target. Cross-platform CI #40576942629 passed 471 tests on Ubuntu and Windows.
 
 Feature 088: Catalog Integrity Verification
 Status: COMPLETED
