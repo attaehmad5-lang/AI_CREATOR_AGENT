@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -70,6 +71,9 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                 self.assertNotIn("projects/provider_store/advanced_provider_catalog_backup.json", names)
                 self.assertIn("RELEASE_REPORT.json", names)
                 self.assertIn("SOURCE_MANIFEST.json", names)
+                for entry in manifest["files"]:
+                    digest = hashlib.sha256(archive.read(entry["path"])).hexdigest()
+                    self.assertEqual(digest, entry["sha256"])
 
 
 if __name__ == "__main__":
