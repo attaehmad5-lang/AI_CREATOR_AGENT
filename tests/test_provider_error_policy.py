@@ -16,6 +16,34 @@ class ProviderErrorPolicyTests(unittest.TestCase):
         )
         self.assertNotIn("retry_after_seconds", result)
 
+    def test_common_credit_and_budget_aliases_never_retry(self):
+        for code in (
+            "insufficient_balance",
+            "no_credits_remaining",
+            "credit_limit_exceeded",
+            "monthly_budget_exceeded",
+            "billing_limit_exceeded",
+        ):
+            with self.subTest(code=code):
+                result = classify_provider_error(429, provider_code=code, retry_after_seconds=20)
+                self.assertEqual(result["status"], "CREDITS_EXHAUSTED")
+                self.assertFalse(result["retryable"])
+                self.assertNotIn("retry_after_seconds", result)
+                self.assertNotIn(code, repr(result))
+
+    def test_common_billing_state_aliases_never_retry(self):
+        for code in (
+            "billing_not_active",
+            "payment_method_required",
+            "payment_failed",
+            "subscription_inactive",
+        ):
+            with self.subTest(code=code):
+                result = classify_provider_error(400, provider_code=code)
+                self.assertEqual(result["status"], "BILLING_ACTION_REQUIRED")
+                self.assertFalse(result["retryable"])
+                self.assertNotIn(code, repr(result))
+
     def test_payment_required_stops_without_retry(self):
         result = classify_provider_error(402)
         self.assertEqual(result["status"], "BILLING_ACTION_REQUIRED")
