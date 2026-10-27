@@ -36,6 +36,7 @@ class ProviderService:
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
         structured_logger: Any | None = None,
+        trace_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -60,6 +61,7 @@ class ProviderService:
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
             (structured_logger, "emit", "structured_logger"),
+            (trace_manager, "start_span", "trace_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -85,6 +87,33 @@ class ProviderService:
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
         self.structured_logger = structured_logger
+        self.trace_manager = trace_manager
+
+    def _start_provider_span(self, event: str, provider_id: str, traceparent: str | None) -> dict[str, Any] | None:
+        if self.trace_manager is None:
+            return None
+        try:
+            span = self.trace_manager.start_span(
+                event,
+                traceparent=traceparent,
+                attributes={"provider_id": provider_id},
+            )
+        except Exception:
+            return None
+        return span if isinstance(span, dict) and span.get("status") == "SPAN_STARTED" else None
+
+    def _finish_provider_span(self, span: dict[str, Any] | None, connection: dict[str, Any]) -> None:
+        if span is None or self.trace_manager is None:
+            return
+        try:
+            self.trace_manager.finish_span(
+                span,
+                outcome="OK" if connection.get("verified") is True else "ERROR",
+                duration_ms=connection.get("latency_ms"),
+            )
+        except Exception:
+            # Tracing must not alter provider verification outcomes.
+            return
 
     def _log_provider_event(self, event: str, provider_id: str, connection: dict[str, Any]) -> None:
         if self.structured_logger is None:
@@ -124,6 +153,7 @@ class ProviderService:
         timeout_seconds: float = 5.0,
         environ: dict[str, str] | None = None,
         principal_id: str | None = None,
+        traceparent: str | None = None,
     ) -> dict[str, Any]:
         """Verify connection using an injected provider-specific probe and record health."""
         authorization = self._authorize_operation(principal_id, "provider.verify")
@@ -132,6 +162,7 @@ class ProviderService:
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
                 "verified": False, "authorization": authorization,
             }
+        span = self._start_provider_span("provider.verify", provider_id, traceparent)
         try:
             connection = self.connection_manager.verify_connectivity(
                 provider_id, probe, timeout_seconds=timeout_seconds, environ=environ
@@ -154,6 +185,7 @@ class ProviderService:
                 )
             except Exception as exc:
                 health = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
+        self._finish_provider_span(span, connection)
         self._log_provider_event("provider.verify", provider_id, connection)
         return {
             "status": connection.get("status", "UNKNOWN"),
@@ -172,6 +204,7 @@ class ProviderService:
         opener: Any = None,
         max_response_bytes: int = 4096,
         principal_id: str | None = None,
+        traceparent: str | None = None,
     ) -> dict[str, Any]:
         """Verify a configured allowlisted HTTPS endpoint using the built-in safe probe.
 
@@ -205,6 +238,7 @@ class ProviderService:
             timeout_seconds=timeout_seconds,
             environ=environ,
             principal_id=principal_id,
+            traceparent=traceparent,
         )
 
     def verify_oauth_provider(
@@ -217,6 +251,7 @@ class ProviderService:
         opener: Any = None,
         max_response_bytes: int = 4096,
         principal_id: str | None = None,
+        traceparent: str | None = None,
     ) -> dict[str, Any]:
         """Verify a provider using an access token held only by an OAuth manager in memory.
 
@@ -271,6 +306,7 @@ class ProviderService:
             opener=opener,
             max_response_bytes=max_response_bytes,
             principal_id=principal_id,
+            traceparent=traceparent,
         )
 
     def verify_manual_provider(
@@ -281,6 +317,7 @@ class ProviderService:
         *,
         timeout_seconds: float = 5.0,
         principal_id: str | None = None,
+        traceparent: str | None = None,
     ) -> dict[str, Any]:
         """Verify an externally authorized account session and record safe health metadata."""
         authorization = self._authorize_operation(principal_id, "provider.verify")
@@ -289,6 +326,7 @@ class ProviderService:
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
                 "verified": False, "authorization": authorization,
             }
+        span = self._start_provider_span("provider.manual_verify", provider_id, traceparent)
         try:
             connection = self.connection_manager.verify_manual_connection(
                 provider_id, manual_session, probe, timeout_seconds=timeout_seconds
@@ -314,6 +352,7 @@ class ProviderService:
                     "status": "HEALTH_RECORD_FAILED", "saved": False,
                     "error_type": type(exc).__name__,
                 }
+        self._finish_provider_span(span, connection)
         self._log_provider_event("provider.manual_verify", provider_id, connection)
         return {
             "status": connection.get("status", "UNKNOWN"),
