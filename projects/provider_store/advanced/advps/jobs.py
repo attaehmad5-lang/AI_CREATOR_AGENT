@@ -156,8 +156,9 @@ class JobManager:
         return result
 
     def complete(self, job_id: str, worker_id: str, result_ref: str) -> dict:
-        if not isinstance(result_ref, str) or not result_ref.strip():
-            raise ValidationError("result_ref must be non-empty")
+        if (not isinstance(result_ref, str) or not result_ref.strip() or len(result_ref) > 2048
+                or redact_text(result_ref) != result_ref):
+            raise ValidationError("result_ref must be a bounded, secret-free reference")
         result = {}
 
         def op(state):
