@@ -171,7 +171,7 @@ jobs:
         run: python -m compileall -q .
 
       - name: Install dependencies needed by full repository tests
-        run: python -m pip install requests
+        run: python -m pip install requests beautifulsoup4
 
       - name: Run full repository unit test suite
         run: python -m unittest discover -s tests -v
