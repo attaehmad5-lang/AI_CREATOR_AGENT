@@ -9,6 +9,7 @@ class CanonicalServiceStub:
 
     def execute_routed_request(self, **request):
         self.request = request
+        request["adapter"](provider_id="hf", request_id=request["request_id"])
         return {"status": "PROVIDER_EXECUTION_SUCCEEDED", "executed": True, "provider": "hf"}
 
 
