@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -85,6 +86,18 @@ class GenerationAdapter:
             return {"status": "PROVIDER_EXECUTOR_UNAVAILABLE", "executed": False}
         if not isinstance(prompt, str) or not prompt.strip():
             return {"status": "INVALID_PROMPT", "executed": False}
+        if not isinstance(output_path, (str, os.PathLike)):
+            return {"status": "INVALID_OUTPUT_PATH", "executed": False}
+        output_path = os.fspath(output_path)
+        if not output_path.strip() or "\\x00" in output_path:
+            return {"status": "INVALID_OUTPUT_PATH", "executed": False}
+        if (
+            isinstance(estimated_cost, bool)
+            or not isinstance(estimated_cost, (int, float))
+            or not math.isfinite(estimated_cost)
+            or estimated_cost < 0
+        ):
+            return {"status": "INVALID_ESTIMATED_COST", "executed": False}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not isinstance(route_options, (dict, type(None))):
