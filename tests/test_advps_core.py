@@ -254,6 +254,10 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         completed = manager.complete(job["id"], "worker-1", "asset://result/123")
         self.assertEqual(completed["status"], "SUCCEEDED")
         self.assertEqual(manager.list("SUCCEEDED")[0]["id"], job["id"])
+        secret_result = manager.create("provider-a", "text_to_image", {"prompt": "secret-url-test"})
+        manager.claim(secret_result["id"], "worker-2", lease_seconds=10)
+        with self.assertRaises(ValidationError):
+            manager.complete(secret_result["id"], "worker-2", "https://store.example/result?token=supersecretvalue")
 
     def test_job_crash_recovery_retry_exhaustion_and_cancellation(self):
         now = [0.0]
