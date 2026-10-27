@@ -2,43 +2,45 @@
 
 ## Scope and truth boundary
 
-Tested the uploaded standalone package from a clean ZIP extraction at Python 3.13.13. The 37-file standalone archive remains separate from the repository's integrated bridge: it has not yet been copied in full into the repository source tree. No HTML/Java components are present in the archive.
+The original uploaded standalone archive was tested from a clean extraction at Python 3.13.13. It contained 37 entries. Its complete documentation/tooling/test directory has not been copied verbatim into the repository; the core source modules are now committed under `projects/provider_store/advanced/advps/`, alongside repository integration tests and a bridge backed by the canonical ConnectionManager. No HTML/Java components exist in the archive.
 
 ## Executed checks
 
-- Standalone archive extraction and integrity: PASS; 37 entries, `ZipFile.testzip()` returned no corrupt member.
-- Standalone unit/integration/concurrency suite: PASS; 99 tests, 0 failures, 0 errors, with `python -W error -m unittest discover -s tests -v`.
-- Standalone Python compileall: PASS for `advps` and `tests`.
-- Fixed coverage runner on the reviewed local archive: PASS; 825/828 lines = 99.6%, with 99 tests passing.
-- Repository integration CI with the advanced bridge tests: PASS on all four matrix combinations in run [40498815543](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40498815543): Ubuntu and Windows with Python 3.12 and 3.13. Each job compiled source/tests, validated provider catalog JSON, ran ProviderService security/lifecycle tests, compatibility tests, and the new advanced bridge contract tests.
-- Task 25 Provider Connection Manager CI: PASS on Ubuntu and Windows in run [40498815664](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40498815664).
-- New bridge tests cover verified-only routing, disabled-provider exclusion, priority/cost ordering, maximum-price behavior with unknown prices, region/capability filters, allow-listed metadata, detached snapshots, invalid routing options, and shared ConnectionManager identity.
-- Mutation/build combined runner for the standalone package: NOT VERIFIED; do not report this run as a pass.
-- Full repository suite: NOT RUN. CI ran the specified ProviderService, compatibility, and bridge contract suites rather than every repository test.
+- Original archive extraction/integrity: PASS; 37 entries and `ZipFile.testzip()` returned no corrupt member.
+- Original standalone package tests: PASS; 99 tests, 0 failures/errors.
+- Original fixed coverage runner: PASS; 825/828 lines = 99.6% on the local archive.
+- Current repository CI run [40500192570](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40500192570): PASS, all four matrix jobs (Ubuntu/Windows × Python 3.12/3.13). It compiles provider-store source/tests, validates catalog JSON, runs ProviderService security/lifecycle tests, compatibility regressions, bridge contract tests, and Advanced Provider Store core tests. Coverage tracing runs on Linux only; the Windows matrix still runs all functional tests.
+- Current repository coverage gate: PASS; 69 tests, 0 failures/errors, 734/899 executable lines = 81.6%, meeting the enforced 80% threshold.
+- Task 25 Provider Connection Manager run [40500197713](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40500197713): PASS on Ubuntu and Windows.
+- Core regression tests cover catalog registration/versioning/export/import/rollback, secret metadata rejection, finite numeric validation, atomic store checksum/backup/recovery, redacted hash-chained audit, explicit paid approval, quota/budget checks, idempotency-related behavior, ambiguous outcome retry/failover safety, circuit-breaker transitions, endpoint/redirect/size helpers, routing, and CLI smoke workflow.
 - Live provider/paid API calls: NOT made.
+- Full repository test suite and mutation/build/fuzz/load testing: NOT completed or not verified.
 
-## Integrated bridge behavior and boundaries
+## Integrated implementation
 
-The new `AdvancedStoreBridge` reads the existing canonical ConnectionManager. `AdvancedProviderManager` now exposes `route_candidates()` and `simulate_route()` without creating a second catalog/state store. It only produces dry-run candidates; live execution and usage finalization remain ProviderService responsibilities.
+- `advps/` contains normalized errors, atomic checksummed storage/recovery, redaction, hash-chained audit, catalog validation/versioning/import/export/diff/rollback, security endpoint helper checks, retry budget/circuit breaker, routing, accounting, and CLI.
+- `AdvancedStoreBridge` reads from the canonical ConnectionManager, only returns enabled and verified routing candidates, supports capability/region/priority/cost/price-ceiling filters, and exposes allow-listed detached metadata.
+- `AdvancedProviderManager` exposes `route_candidates()` and `simulate_route()` using the same ConnectionManager. This is dry-run selection, not live execution.
+- ProviderService remains responsible for real connection/auth flows, provider execution, usage finalization, quotas and billing reconciliation.
 
 ## Remaining release risks
 
-1. The full 37-file standalone package and its coverage-runner fix are not committed into the repository tree.
-2. The standalone package lacks a real HTTP client; SSRF, redirect and size checks remain helper validators rather than protections wired into actual network I/O.
+1. The original 37-file archive's full test/tooling/docs set is not all committed verbatim; repository-owned core tests replace some of that validation, but the original package's complete suite is not being run from the committed tree.
+2. The standalone package has no real HTTP transport; SSRF/redirect/size checks are helpers, not guarantees for actual network I/O.
 3. DNS validation is not pinned to the connected IP; DNS rebinding remains a risk for any future transport.
-4. Credential/OAuth storage and rotation, dynamic loader/runtime unload, live health probes/scheduling, and async job/cancellation/crash/stale-job recovery remain absent or unverified in the standalone package.
-5. Full media/codec validation, quality policies, mutation/build verification, fuzz/load/performance, macOS and the full repository suite remain absent or unverified.
-6. The bridge does not replace ProviderService execution, connection/auth flows, usage accounting, quotas or billing reconciliation.
+4. Credential/OAuth storage and rotation, dynamic provider loader/runtime unload, live health probes/scheduling, async job cancellation/crash/stale-job recovery, and full media/codec quality policies remain absent or unverified in the standalone core.
+5. Mutation/build verification, fuzz/load/performance tests, macOS and the full repository suite remain unverified.
+6. The bridge does not replace ProviderService execution, credentials, quotas, billing or connection/auth flows.
 
-## Required gates before release
+## Required gates before production release
 
-- Commit the full standalone source/tests into the repository, or explicitly retire that duplicate package and document the bridge as the chosen implementation scope.
-- Add/run cross-package regressions for authorization, ambiguous billing outcomes, quota/budget enforcement, redaction, rollback/recovery and concurrency.
-- Run the full repository suite and standalone suite from the committed tree.
+- Decide whether to import the remaining original archive tooling/tests/docs or retire them in favor of the repository-owned core implementation.
+- Add/run cross-package regressions for authorization, ambiguous billing outcomes, quota/budget enforcement, redaction, rollback/recovery, and concurrency.
+- Run the full repository suite.
 - Add any real transport only with redirect revalidation, connect-time DNS/IP pinning, timeouts, bounded bodies, TLS verification and secret-safe logs.
-- Run formatter, linter, type checker, security scanner, fuzz and load/performance checks.
+- Run mutation, security, fuzz, load/performance, packaging and supported-platform checks.
 - Review the exact diff and merge only when all applicable checks pass.
 
 ## Status
 
-**Integrated bridge CI: PASS (4/4 matrix jobs); Task 25 CI: PASS (2/2 OS jobs); standalone package tests: PASS (99/99 locally). Full 37-file package integration and production release: NOT COMPLETE / NOT VERIFIED.** No paid/live provider requests were made.
+**Repository core/bridge CI: PASS (4/4 matrix jobs); Task 25 CI: PASS (2/2 OS jobs); coverage gate: PASS (81.6%, 80% minimum); original standalone archive: PASS (99/99 tests, 99.6% local coverage). Full production release: NOT COMPLETE / NOT VERIFIED.** No paid/live provider requests were made.
