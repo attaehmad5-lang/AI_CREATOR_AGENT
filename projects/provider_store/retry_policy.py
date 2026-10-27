@@ -119,13 +119,12 @@ class RetryPolicy:
         error_classification = classify_provider_error(
             effective_status, provider_code=provider_code
         )
-        if error_classification.get("category") in {
-            "billing", "credits_exhausted", "authentication", "permission", "request",
-            "invalid_input",
-        }:
-            return RetryDecision(False, attempt, 0.0, "PROVIDER_ERROR_NON_RETRYABLE")
         if error_classification.get("category") in {"authentication", "permission"} or status_code in {401, 403}:
             return RetryDecision(False, attempt, 0.0, "AUTHORIZATION_FAILURE")
+        if error_classification.get("category") in {
+            "billing", "credits_exhausted", "request", "invalid_input",
+        }:
+            return RetryDecision(False, attempt, 0.0, "PROVIDER_ERROR_NON_RETRYABLE")
         explicit_rate_limit = error_classification.get("category") == "rate_limit"
         retryable_status = status_code == 429 or explicit_rate_limit or (status_code is not None and 500 <= status_code <= 599)
         retryable_exception = isinstance(exception, (TimeoutError, ConnectionError, OSError))
@@ -167,7 +166,7 @@ class RetryPolicy:
             return RetryDecision(False, attempt, 0.0, "INVALID_JITTER_SOURCE")
         delay = min(self.max_delay_seconds, exponential + jitter)
         header_delay = self._retry_after_seconds(retry_after)
-        if status_code == 429:
+        if status_code == 429 or explicit_rate_limit:
             if header_delay is not None:
                 # Never let an untrusted Retry-After value bypass the configured backoff cap.
                 delay = min(self.max_delay_seconds, max(delay, header_delay))
