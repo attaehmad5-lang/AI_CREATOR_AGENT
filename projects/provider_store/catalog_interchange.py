@@ -1,4 +1,5 @@
 """Validated JSON catalog import/export with atomic replacement and rollback."""
+
 from __future__ import annotations
 
 import json
@@ -51,7 +52,11 @@ def export_catalog(
         except FileNotFoundError:
             pass
         raise
-    return {"status": "CATALOG_EXPORTED", "exported": True, "provider_count": len(catalog["providers"])}
+    return {
+        "status": "CATALOG_EXPORTED",
+        "exported": True,
+        "provider_count": len(catalog["providers"]),
+    }
 
 
 def import_catalog(
@@ -74,10 +79,14 @@ def import_catalog(
     lock_path = destination_path.with_name(destination_path.name + ".lock")
     backup_path = destination_path.with_name(destination_path.name + ".bak")
     with interprocess_file_lock(lock_path):
-        original_bytes: bytes | None = destination_path.read_bytes() if destination_path.exists() else None
+        original_bytes: bytes | None = (
+            destination_path.read_bytes() if destination_path.exists() else None
+        )
         if backup and original_bytes is not None:
             fd_backup, temp_backup = tempfile.mkstemp(
-                prefix=f".{backup_path.name}.", suffix=".tmp", dir=destination_path.parent
+                prefix=f".{backup_path.name}.",
+                suffix=".tmp",
+                dir=destination_path.parent,
             )
             try:
                 with os.fdopen(fd_backup, "wb") as stream:
@@ -100,7 +109,9 @@ def import_catalog(
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(candidate, stream, ensure_ascii=False, indent=2, allow_nan=False)
+                json.dump(
+                candidate, stream, ensure_ascii=False, indent=2, allow_nan=False
+            )
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -122,7 +133,9 @@ def import_catalog(
                     destination_path.unlink(missing_ok=True)
                 else:
                     fd_restore, restore_name = tempfile.mkstemp(
-                        prefix=f".{destination_path.name}.restore.", suffix=".tmp", dir=destination_path.parent
+                        prefix=f".{destination_path.name}.restore.",
+                        suffix=".tmp",
+                        dir=destination_path.parent,
                     )
                     with os.fdopen(fd_restore, "wb") as stream:
                         stream.write(original_bytes)
@@ -132,4 +145,8 @@ def import_catalog(
             except Exception:
                 return {"status": "CATALOG_IMPORT_ROLLBACK_FAILED", "imported": False}
             return {"status": "CATALOG_IMPORT_FAILED_ROLLED_BACK", "imported": False}
-    return {"status": "CATALOG_IMPORTED", "imported": True, "provider_count": len(candidate["providers"])}
+    return {
+        "status": "CATALOG_IMPORTED",
+        "imported": True,
+        "provider_count": len(candidate["providers"]),
+    }
