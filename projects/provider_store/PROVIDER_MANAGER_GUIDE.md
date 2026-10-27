@@ -163,3 +163,7 @@ A successful result includes `"reproducible": true`, `"installed_import": true`,
 ## Structured provider events
 
 `ProviderStructuredLogger` emits JSON events from an injected standard-library `logging.Logger`. `ProviderService` accepts it as `structured_logger=...` and emits `provider.verify` / `provider.manual_verify` events with a bounded event/status code, outcome, provider ID, optional duration and safe error code. It does not log exception messages, endpoint URLs, request payloads, credentials or arbitrary dictionaries. A logging failure is deliberately non-fatal to provider verification. The current integration covers connection verification paths; it is not a replacement for full service-wide instrumentation or an external log collector.
+
+## Trace-context propagation
+
+`ProviderService` accepts an optional `trace_manager` and `traceparent` on provider verification calls. A valid W3C traceparent is propagated into a provider verification span, and the span is finished with a safe outcome and bounded attributes. Trace failures are non-fatal to verification. The recorder remains in-process and bounded; external OpenTelemetry/collector export and instrumentation of every provider-service method are not yet implemented.
