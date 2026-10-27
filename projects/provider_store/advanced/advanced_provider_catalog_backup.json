@@ -100,7 +100,7 @@
       "name": "Runway",
       "category": "advanced_image_editing",
       "status": "LOCKED",
-      "auth_type": "ACCOUNT",
+      "auth_type": "API_KEY_OR_ACCOUNT",
       "connection_type": "API_OR_ACCOUNT",
       "subscription_required": true,
       "enabled": false,
