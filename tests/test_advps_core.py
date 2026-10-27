@@ -254,6 +254,21 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         with self.assertRaises(SecurityError):
             validate_media_payload(b"not png", media_type="image", mime_type="image/png", max_bytes=100)
 
+    def test_media_validation_rejects_malformed_type_and_checksum_inputs(self):
+        png = b"\\x89PNG\\r\\n\\x1a\\n" + b"fake"
+        for bad_media_type in ([], {}, None, 7):
+            with self.subTest(media_type=type(bad_media_type).__name__):
+                with self.assertRaises(ValidationError):
+                    validate_media_payload(png, media_type=bad_media_type, mime_type="image/png", max_bytes=100)
+        with self.assertRaises(SecurityError):
+            validate_media_payload(png, media_type="image", mime_type=[], max_bytes=100)
+        with self.assertRaises(ValidationError):
+            validate_media_payload(png, media_type="image", mime_type="image/png", max_bytes=100, expected_sha256=123)
+        with self.assertRaises(ValidationError):
+            validate_media_metadata({"mime_type": [], "size_bytes": 10}, media_type="image", max_bytes=100)
+        with self.assertRaises(ValidationError):
+            validate_media_metadata({"mime_type": "image/png", "size_bytes": 10}, media_type=[], max_bytes=100)
+
     def test_media_metadata_enforces_duration_dimensions_and_quality(self):
         metadata = {
             "mime_type": "image/webp", "size_bytes": 2048, "width": 1920, "height": 1080,
