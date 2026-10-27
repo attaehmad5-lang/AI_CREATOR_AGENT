@@ -56,6 +56,20 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.assertIsNone(service.request)
 
+    def test_route_option_collision_is_rejected_before_execution(self):
+        service = CanonicalServiceStub()
+        adapter = GenerationAdapter(
+            provider_store_service=service,
+            provider_store_adapter=lambda **kwargs: {"started": False},
+        )
+        result = adapter.generate_image(
+            "prompt", "/tmp/output.png",
+            route_options={"project_id": "attacker-overrides-project"},
+        )
+        self.assertEqual(result["status"], "INVALID_ROUTE_OPTIONS")
+        self.assertFalse(result["executed"])
+        self.assertIsNone(service.request)
+
     def test_invalid_canonical_service_fails_closed(self):
         adapter = GenerationAdapter(provider_store_service=object(), provider_store_adapter=lambda **kwargs: {})
         result = adapter.generate_image("prompt", "/tmp/output.png")
