@@ -94,7 +94,7 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                     self.assertTrue((extracted_root / "RELEASE_REPORT.json").is_file())
                     self.assertEqual(
                         (extracted_root / "projects/provider_store/example.py").read_text(encoding="utf-8"),
-                        "VALUE = 1\\n",
+                        "VALUE = 1\n",
                     )
 
 
