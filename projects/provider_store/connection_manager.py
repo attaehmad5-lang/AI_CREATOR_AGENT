@@ -69,6 +69,15 @@ class ConnectionManager:
         if not isinstance(self.state.get("providers"), dict):
             raise ValueError("Invalid connection state schema: providers must be an object")
         self._lock = threading.RLock()
+        # Discovery telemetry is bounded, process-local, and never stores query values,
+        # provider payloads, credentials, or user-supplied strings.
+        self._discovery_metrics_lock = threading.Lock()
+        self._discovery_metrics = {
+            "calls": 0,
+            "invalid_inputs": 0,
+            "catalog_errors": 0,
+            "providers_returned": 0,
+        }
         # Runtime instances are intentionally process-local and never serialized.
         self._loaded_providers: dict[str, Any] = {}
 
@@ -788,7 +797,55 @@ class ConnectionManager:
         del self._loaded_providers[provider_id]
         return {"status": "UNLOADED", "provider": provider_id, "unloaded": True}
 
+    def discovery_metrics(self) -> dict[str, int]:
+        """Return a snapshot of bounded discovery counters without sensitive dimensions."""
+        with self._discovery_metrics_lock:
+            return dict(self._discovery_metrics)
+
     def discover_providers(
+        self,
+        *,
+        category: str | None = None,
+        capability: str | None = None,
+        enabled_only: bool = False,
+        include_deprecated: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Discover providers and record privacy-safe aggregate telemetry."""
+        with self._discovery_metrics_lock:
+            self._discovery_metrics["calls"] += 1
+        valid = (
+            (category is None or (isinstance(category, str) and bool(category.strip())))
+            and (capability is None or (isinstance(capability, str) and bool(capability.strip())))
+            and isinstance(enabled_only, bool)
+            and isinstance(include_deprecated, bool)
+            and not isinstance(limit, bool) and isinstance(limit, int) and 1 <= limit <= 500
+            and not isinstance(offset, bool) and isinstance(offset, int) and 0 <= offset <= 1_000_000
+        )
+        if not valid:
+            with self._discovery_metrics_lock:
+                self._discovery_metrics["invalid_inputs"] += 1
+            return []
+        try:
+            result = self._discover_providers_impl(
+                category=category,
+                capability=capability,
+                enabled_only=enabled_only,
+                include_deprecated=include_deprecated,
+                limit=limit,
+                offset=offset,
+            )
+        except Exception:
+            # Fail closed and never include exception text in telemetry.
+            with self._discovery_metrics_lock:
+                self._discovery_metrics["catalog_errors"] += 1
+            return []
+        with self._discovery_metrics_lock:
+            self._discovery_metrics["providers_returned"] += len(result)
+        return result
+
+    def _discover_providers_impl(
         self,
         *,
         category: str | None = None,
