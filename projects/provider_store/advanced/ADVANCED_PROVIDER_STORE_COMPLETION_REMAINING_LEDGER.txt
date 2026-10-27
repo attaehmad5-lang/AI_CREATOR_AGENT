@@ -297,19 +297,19 @@ Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider
 Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
 
 Feature 056: Media Integrity Validation
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: media_integrity_validator.py; tests/test_media_integrity_validator.py; CI #40560954116
+Remaining work: Truncated WAV rejection, bounded MP4 box validation, WebM EBML/segment checks and size/modality fail-closed behavior pass focused tests; full codec decoding remains outside this point.
 
 Feature 057: Image Metadata Validation
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: output_validator.py; tests/test_output_validator.py; CI #40560954116
+Remaining work: Valid image signatures return hash/metadata and mismatched signatures/extensions are rejected; decoder-level validation remains a separate limitation.
 
 Feature 058: Audio Metadata Validation
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: media_integrity_validator.py; tests/test_media_integrity_validator.py; CI #40560954116
+Remaining work: WAV duration/audio metadata extraction and truncated-audio rejection are covered by focused tests.
 
 Feature 059: Video Metadata Validation
 Status: PARTIAL
@@ -317,9 +317,9 @@ Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider
 Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
 
 Feature 060: Artifact Checksum Verification
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: output_validator.py; media_integrity_validator.py; tests/test_output_validator.py; CI #40560954116
+Remaining work: SHA-256 output hashes are produced and file growth/same-size mutation are detected during validation.
 
 Feature 061: Cost Estimation
 Status: PARTIAL
