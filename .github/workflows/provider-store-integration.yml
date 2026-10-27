@@ -91,7 +91,7 @@ jobs:
         run: python -m pip wheel --no-deps --wheel-dir wheelhouse projects/provider_store/advanced
 
       - name: Verify wheel artifact
-        run: python -c "from pathlib import Path; wheels=list(Path('wheelhouse').glob('advanced_provider_store-*.whl')); assert wheels, 'Advanced Provider Store wheel was not produced'; print('Wheel packaging: PASS')"
+        run: python -c "from pathlib import Path; wheels=list(Path('wheelhouse').glob('advanced_provider_store-*.whl')); assert wheels, 'Advanced Provider Store wheel was not produced'; print('Wheel packaging PASS')"
 
       - name: Run ProviderService security and lifecycle tests
         run: python -m unittest discover -s tests -p "test_provider_service.py" -v
