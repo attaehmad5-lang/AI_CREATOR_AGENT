@@ -300,6 +300,29 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         with self.assertRaises(SecurityError):
             transport.request("GET", "https://example.com", headers={"Host": "attacker.example"})
 
+    def test_secure_transport_strips_credentials_on_cross_origin_redirect(self):
+        calls = []
+        responses = [
+            _FakeResponse(302, {"Location": "https://other.example/final"}, b""),
+            _FakeResponse(200, {}, b"ok"),
+        ]
+        def resolver(host, port, type=None):
+            ip = "93.184.216.34" if host == "example.com" else "1.1.1.1"
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))]
+        def factory(host, port, pinned_ip, timeout, context):
+            return _FakeConnection(responses.pop(0), calls, host, port, pinned_ip)
+        transport = SecureHTTPTransport(resolver=resolver, connection_factory=factory)
+        result = transport.request(
+            "GET", "https://example.com/start",
+            headers={"Authorization": "Bearer secret-token", "X-API-Key": "secret-key", "Accept": "application/json"},
+        )
+        self.assertEqual(result["status"], 200)
+        self.assertIn("Authorization", calls[0][6])
+        self.assertIn("X-API-Key", calls[0][6])
+        self.assertNotIn("Authorization", calls[1][6])
+        self.assertNotIn("X-API-Key", calls[1][6])
+        self.assertEqual(calls[1][6]["Accept"], "application/json")
+
     def test_secure_transport_redirect_limit_and_post_to_get_semantics(self):
         calls = []
         responses = [
