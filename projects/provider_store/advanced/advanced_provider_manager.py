@@ -215,6 +215,30 @@ class AdvancedProviderManager:
             verified.append(provider)
         return verified
 
+    def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
+        """Load only an enabled advanced provider through the canonical lifecycle manager."""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "loaded": False}
+        catalog_status = provider.get("catalog_status", provider.get("status", "UNKNOWN"))
+        if provider.get("enabled") is not True:
+            return {"status": "DISABLED", "provider": provider_id, "loaded": False}
+        if isinstance(catalog_status, str) and catalog_status.upper() in {"LOCKED", "DEPRECATED", "DISABLED"}:
+            return {"status": "LOCKED" if catalog_status.upper() == "LOCKED" else catalog_status.upper(), "provider": provider_id, "loaded": False}
+        return self.store.manager.load_provider(provider_id, factory)
+
+    def unload_provider(self, provider_id: str) -> dict[str, Any]:
+        """Unload only an advanced provider; preserve canonical lifecycle cleanup semantics."""
+        if self.get_provider(provider_id) is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "unloaded": False}
+        return self.store.manager.unload_provider(provider_id)
+
+    def loaded_provider(self, provider_id: str) -> Any | None:
+        """Return the in-memory adapter only when the provider belongs to this advanced store."""
+        if self.get_provider(provider_id) is None:
+            return None
+        return self.store.manager.loaded_provider(provider_id)
+
     def provider_diagnostics(self, provider_id: str) -> dict[str, Any]:
         """Report catalog and live state separately without exposing credential values."""
         provider = self.get_provider(provider_id)
