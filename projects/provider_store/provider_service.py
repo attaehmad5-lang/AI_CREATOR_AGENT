@@ -35,6 +35,8 @@ class ProviderService:
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
+        artifact_scanner: Any | None = None,
+        require_artifact_scan: bool = False,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -58,6 +60,7 @@ class ProviderService:
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
+            (artifact_scanner, "scan", "artifact_scanner"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -81,7 +84,11 @@ class ProviderService:
         self.benchmark_manager = benchmark_manager
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
+        if not isinstance(require_artifact_scan, bool):
+            raise ValueError("require_artifact_scan must be boolean")
         self.media_integrity_validator = media_integrity_validator
+        self.artifact_scanner = artifact_scanner
+        self.require_artifact_scan = require_artifact_scan
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -659,6 +666,7 @@ class ProviderService:
             latency_ms = (time.monotonic() - started_at) * 1000
         output_validation = None
         media_integrity_result = None
+        artifact_scan_result = None
         quality_result = None
         quality_error = None
         final_success = reported_success
@@ -689,6 +697,23 @@ class ProviderService:
                         "valid": False,
                         "status": "MEDIA_INTEGRITY_VALIDATION_FAILED",
                     }
+            if isinstance(output_validation, dict) and output_validation.get("valid") is True:
+                if self.artifact_scanner is None:
+                    if self.require_artifact_scan:
+                        artifact_scan_result = {"clean": False, "status": "ARTIFACT_SCANNER_UNAVAILABLE"}
+                        output_validation = {"valid": False, "status": "ARTIFACT_SCANNER_UNAVAILABLE"}
+                else:
+                    try:
+                        artifact_scan_result = self.artifact_scanner.scan(
+                            final_path, modality=modality
+                        )
+                    except Exception as exc:
+                        artifact_scan_result = {
+                            "clean": False, "status": "ARTIFACT_SCAN_FAILED",
+                            "error_type": type(exc).__name__,
+                        }
+                    if not isinstance(artifact_scan_result, dict) or artifact_scan_result.get("clean") is not True:
+                        output_validation = {"valid": False, "status": "ARTIFACT_SCAN_REJECTED"}
             if not isinstance(output_validation, dict) or output_validation.get("valid") is not True:
                 final_success = False
                 output_error = "OUTPUT_VALIDATION_FAILED"
@@ -862,6 +887,7 @@ class ProviderService:
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "media_integrity": media_integrity_result,
+            "artifact_scan": artifact_scan_result,
             "quality": quality_result,
             "finalization": finalization,
             "metrics": metrics_result,
