@@ -73,9 +73,9 @@ def validate_media_payload(
     expected_sha256: Optional[str] = None,
 ) -> dict:
     """Validate bounded bytes and a basic file signature; deep codec scanning is out of scope."""
-    if media_type not in MIME_BY_TYPE:
-        raise ValidationError(f"unsupported media type: {media_type}")
-    if mime_type not in MIME_BY_TYPE[media_type]:
+    if not isinstance(media_type, str) or media_type not in MIME_BY_TYPE:
+        raise ValidationError("unsupported media type")
+    if not isinstance(mime_type, str) or mime_type not in MIME_BY_TYPE[media_type]:
         raise SecurityError("MIME type is not allowed for requested media type")
     max_bytes = _nonnegative_int(max_bytes, "max_bytes")
     if not isinstance(data, bytes):
@@ -85,8 +85,12 @@ def validate_media_payload(
     if not _signature_ok(data, mime_type):
         raise SecurityError("media bytes do not match declared MIME type")
     checksum = hashlib.sha256(data).hexdigest()
-    if expected_sha256 is not None and checksum.casefold() != expected_sha256.casefold():
-        raise SecurityError("media checksum mismatch")
+    if expected_sha256 is not None:
+        if (not isinstance(expected_sha256, str) or len(expected_sha256) != 64
+                or any(ch not in "0123456789abcdefABCDEF" for ch in expected_sha256)):
+            raise ValidationError("expected_sha256 must be a 64-character hexadecimal digest")
+        if checksum.casefold() != expected_sha256.casefold():
+            raise SecurityError("media checksum mismatch")
     return {"media_type": media_type, "mime_type": mime_type, "size_bytes": len(data), "sha256": checksum}
 
 
