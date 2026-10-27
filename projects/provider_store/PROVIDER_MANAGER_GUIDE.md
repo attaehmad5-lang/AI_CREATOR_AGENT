@@ -87,3 +87,38 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+
+## Canonical generation execution and artifact scanning
+
+The legacy generation adapter remains backward-compatible by default. To route generation through the canonical accounting and output-validation boundary, the application host must explicitly inject a configured `ProviderService` and a trusted provider executor into the gateway:
+
+```python
+from agents.execution.execution_gateway import ExecutionGateway
+from projects.provider_store.artifact_scanner import ClamAVArtifactScanner
+
+# Build these from the deployment's reviewed provider catalog and policies:
+# connection_manager, routing_manager, cost_policy, quota_manager,
+# output_validator, and trusted_provider_executor.
+artifact_scanner = ClamAVArtifactScanner(
+    timeout_seconds=30,
+    max_file_size_bytes=1_000_000_000,
+)
+provider_service = ProviderService(
+    connection_manager,
+    routing_manager=routing_manager,
+    cost_policy=cost_policy,
+    quota_manager=quota_manager,
+    output_validator=output_validator,
+    artifact_scanner=artifact_scanner,
+    require_artifact_scan=True,
+)
+gateway = ExecutionGateway(
+    provider_store_service=provider_service,
+    provider_store_adapter=trusted_provider_executor,
+)
+```
+
+The trusted executor must map the selected canonical `provider_id` to an explicitly registered provider implementation and return the documented execution contract (`started`, `success`, charge/credit outcome, actual cost, and output path). It must not choose a different provider or perform its own retries. Configure paid approval, budget limits, quota limits, authorization, and data-handling policy explicitly; the code intentionally does not invent these business policies.
+
+Install ClamAV and keep its signature database updated on the host before enabling required scanning. The adapter uses a no-shell subprocess call, a time limit, a maximum artifact size, and sanitized results. If ClamAV is missing, times out, or reports an infected artifact, a service configured with `require_artifact_scan=True` rejects the output. Unit tests inject a fake scanner runner; they do not prove that a real ClamAV installation or provider account is operational.
