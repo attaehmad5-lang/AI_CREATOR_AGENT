@@ -26,6 +26,7 @@ class PdfReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = write_pdf_report(Path(directory) / "report.pdf", report)
             data = path.read_bytes()
+            self.assertTrue(path.is_file())
         self.assertTrue(data.startswith(b"%PDF-1.4"))
         self.assertTrue(data.rstrip().endswith(b"%%EOF"))
         self.assertGreater(len(data), 500)
@@ -35,8 +36,8 @@ class PdfReportTests(unittest.TestCase):
     def test_empty_ledger_still_produces_pdf(self):
         with tempfile.TemporaryDirectory() as directory:
             path = write_pdf_report(Path(directory) / "empty.pdf", {})
-        self.assertTrue(path.is_file())
-        self.assertTrue(path.read_bytes().startswith(b"%PDF-1.4"))
+            self.assertTrue(path.is_file())
+            self.assertTrue(path.read_bytes().startswith(b"%PDF-1.4"))
 
 
 if __name__ == "__main__":
