@@ -128,6 +128,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
     archive = output_dir / "advanced_provider_store_source.zip"
     archive_checksum = output_dir / "advanced_provider_store_source.zip.sha256"
     pdf_report = output_dir / "advanced_provider_store_report.pdf"
+    sbom_json = output_dir / "advanced_provider_store_sbom.spdx.json"
     report_json.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     try:
         from .pdf_report import write_pdf_report
@@ -158,18 +159,53 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
         "excluded": ["runtime state", "environment files", "backups", "credentials/secrets", "caches", "test fixtures"],
     }
     manifest_json.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    sbom = {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": "AI_CREATOR_AGENT Advanced Provider Store source bundle",
+        "documentNamespace": "https://spdx.org/spdxdocs/ai-creator-agent-provider-store-" + _sha256(manifest_json.read_bytes()),
+        "creationInfo": {
+            "creators": ["Tool: AI_CREATOR_AGENT-release_report"],
+            "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "comment": "Generated from source-file hashes; license conclusions are intentionally not inferred.",
+        },
+        "packages": [{
+            "name": "AI_CREATOR_AGENT-Advanced-Provider-Store",
+            "SPDXID": "SPDXRef-Package-AdvancedProviderStore",
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": True,
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "copyrightText": "NOASSERTION",
+        }],
+        "files": [{
+            "fileName": entry["path"],
+            "SPDXID": "SPDXRef-File-" + str(index + 1),
+            "checksums": [{"algorithm": "SHA256", "checksumValue": entry["sha256"]}],
+            "licenseConcluded": "NOASSERTION",
+            "copyrightText": "NOASSERTION",
+        } for index, entry in enumerate(manifest_entries)],
+        "relationships": [{
+            "spdxElementId": "SPDXRef-DOCUMENT",
+            "relationshipType": "DESCRIBES",
+            "relatedSpdxElement": "SPDXRef-Package-AdvancedProviderStore",
+        }],
+    }
+    sbom_json.write_text(json.dumps(sbom, indent=2, ensure_ascii=False) + "\\n", encoding="utf-8")
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for relative, data in payloads:
             zf.writestr(relative, data)
         zf.writestr("RELEASE_REPORT.json", report_json.read_bytes())
         zf.writestr("SOURCE_MANIFEST.json", manifest_json.read_bytes())
+        zf.writestr("SBOM.spdx.json", sbom_json.read_bytes())
         zf.write(pdf_report, "ADVANCED_PROVIDER_STORE_REPORT.pdf")
     with zipfile.ZipFile(archive, "r") as zf:
         bad_member = zf.testzip()
         if bad_member is not None:
             raise ValueError(f"ZIP integrity check failed at {bad_member}")
         archived = set(zf.namelist())
-        expected = {name for name, _ in payloads} | {"RELEASE_REPORT.json", "SOURCE_MANIFEST.json", "ADVANCED_PROVIDER_STORE_REPORT.pdf"}
+        expected = {name for name, _ in payloads} | {"RELEASE_REPORT.json", "SOURCE_MANIFEST.json", "SBOM.spdx.json", "ADVANCED_PROVIDER_STORE_REPORT.pdf"}
         if archived != expected:
             raise ValueError("ZIP file list does not match the verified manifest")
         for entry in manifest_entries:
@@ -190,6 +226,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
         "report_markdown": str(report_md),
         "report_pdf": str(pdf_report),
         "manifest": str(manifest_json),
+        "sbom": str(sbom_json),
         "archive_sha256": archive_digest,
         "archive_checksum": str(archive_checksum),
         "zip_integrity": "PASS",
