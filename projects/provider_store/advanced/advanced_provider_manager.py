@@ -234,6 +234,50 @@ class AdvancedProviderManager:
             "credential_present": credentials.get("credential_present") is True,
         }
 
+    def readiness_report(self) -> dict[str, Any]:
+        """Return actionable readiness blockers for every advanced provider, without secrets."""
+        providers = self.list_providers()
+        consistency = self.catalog_consistency()
+        entries: list[dict[str, Any]] = []
+        for provider in providers:
+            provider_id = provider.get("id")
+            if not isinstance(provider_id, str) or not provider_id:
+                continue
+            state = self.store.manager.get_state(provider_id)
+            credential = self.store.manager.credential_status(provider_id)
+            catalog_status = provider.get("catalog_status", provider.get("status", "UNKNOWN"))
+            enabled = provider.get("enabled") is True
+            runtime_verified = state.get("status") == "CONNECTED" and state.get("verified") is True
+            blockers: list[str] = []
+            if not enabled:
+                blockers.append("PROVIDER_DISABLED")
+            if isinstance(catalog_status, str) and catalog_status.upper() in {"LOCKED", "DEPRECATED", "DISABLED"}:
+                blockers.append("CATALOG_" + catalog_status.upper())
+            if credential.get("status") not in {"CREDENTIALS_PRESENT", "NO_CREDENTIAL_REQUIRED"}:
+                blockers.append("CREDENTIAL_" + str(credential.get("status", "UNKNOWN")))
+            if not runtime_verified:
+                blockers.append("CONNECTION_NOT_VERIFIED")
+            entries.append({
+                "provider": provider_id,
+                "category": provider.get("category"),
+                "enabled": enabled,
+                "catalog_status": catalog_status,
+                "runtime_status": state.get("status", "UNKNOWN"),
+                "runtime_verified": runtime_verified,
+                "credential_status": credential.get("status", "UNKNOWN"),
+                "ready": not blockers,
+                "blockers": blockers,
+            })
+        ready_count = sum(1 for item in entries if item["ready"])
+        return {
+            "status": "READY" if entries and ready_count == len(entries) and consistency["status"] == "MATCH" else "DEGRADED",
+            "providers_total": len(entries),
+            "providers_ready": ready_count,
+            "catalog_consistency": consistency["status"],
+            "catalog_differences": consistency["differences"],
+            "providers": entries,
+        }
+
     def status(self) -> dict[str, Any]:
         providers = self.list_providers()
         enabled = sum(1 for provider in providers if provider.get("enabled") is True)
