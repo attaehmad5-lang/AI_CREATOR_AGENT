@@ -35,6 +35,7 @@ class ProviderService:
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
+        structured_logger: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -58,6 +59,7 @@ class ProviderService:
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
+            (structured_logger, "emit", "structured_logger"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -82,6 +84,24 @@ class ProviderService:
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
+        self.structured_logger = structured_logger
+
+    def _log_provider_event(self, event: str, provider_id: str, connection: dict[str, Any]) -> None:
+        if self.structured_logger is None:
+            return
+        verified = connection.get("verified") is True
+        try:
+            self.structured_logger.emit(
+                event,
+                provider_id=provider_id,
+                status=str(connection.get("status", "UNKNOWN")),
+                outcome="OK" if verified else "ERROR",
+                duration_ms=connection.get("latency_ms"),
+                error_code=None if verified else str(connection.get("status", "UNKNOWN")),
+            )
+        except Exception:
+            # Diagnostics must never change provider verification behavior.
+            return
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -134,6 +154,7 @@ class ProviderService:
                 )
             except Exception as exc:
                 health = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
+        self._log_provider_event("provider.verify", provider_id, connection)
         return {
             "status": connection.get("status", "UNKNOWN"),
             "provider": provider_id,
@@ -293,6 +314,7 @@ class ProviderService:
                     "status": "HEALTH_RECORD_FAILED", "saved": False,
                     "error_type": type(exc).__name__,
                 }
+        self._log_provider_event("provider.manual_verify", provider_id, connection)
         return {
             "status": connection.get("status", "UNKNOWN"),
             "provider": provider_id,
