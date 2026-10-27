@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -163,7 +163,7 @@ def create_catalog_snapshot(
     catalog = _read_valid_catalog(Path(source))
     history_path = Path(history_directory)
     history_path.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     for sequence in range(1000):
         suffix = f"-{sequence:03d}" if sequence else ""
         snapshot = history_path / f"catalog-{timestamp}{suffix}.json"
@@ -217,7 +217,11 @@ def restore_catalog_snapshot(
 ) -> dict[str, Any]:
     """Restore a validated snapshot through the atomic import/backup path."""
     snapshot_path = Path(snapshot)
-    if not snapshot_path.is_file() or not snapshot_path.name.startswith("catalog-"):
+    if (
+        not snapshot_path.is_file()
+        or not snapshot_path.name.startswith("catalog-")
+        or snapshot_path.suffix != ".json"
+    ):
         raise ValueError("snapshot must be an existing catalog-*.json file")
     _read_valid_catalog(snapshot_path)
     result = import_catalog(snapshot_path, destination, backup=True)
