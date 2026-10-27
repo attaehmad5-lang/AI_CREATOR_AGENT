@@ -453,8 +453,8 @@ Remaining work: Configuration/storage/recovery primitives exist; migration, cras
 
 Feature 087: Catalog Import/Export
 Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
-Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py
+Remaining work: Validated JSON export and import use atomic replacement, an interprocess lock, backup, post-write validation and rollback. Round-trip, malformed/secret-bearing input and injected-write-failure tests are awaiting the latest cross-platform CI result.
 
 Feature 088: Catalog Integrity Verification
 Status: COMPLETED
@@ -468,8 +468,8 @@ Remaining work: Metadata drift is detected and reported; safe automated diff app
 
 Feature 090: Catalog Rollback
 Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
-Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py
+Remaining work: Failed catalog import restores prior bytes atomically; failure-injection coverage is awaiting CI. A user-facing versioned catalog history/rollback command remains.
 
 Feature 091: Backup Management
 Status: PARTIAL
