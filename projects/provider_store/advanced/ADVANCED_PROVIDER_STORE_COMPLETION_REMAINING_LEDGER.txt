@@ -597,9 +597,9 @@ Implementation/evidence inspected: advanced/performance_benchmark.py; tests/test
 Remaining work: CI runs a bounded 25-iteration catalog-integrity benchmark with a 15-second budget and reports throughput/counts. Provider request/generation latency and representative production workload baselines remain unmeasured.
 
 Feature 116: Load Testing
-Status: NOT STARTED
-Implementation/evidence inspected: No reproducible performance/load benchmark evidence located
-Remaining work: Add bounded benchmark scripts and CI-safe thresholds after baseline workloads are defined.
+Status: PARTIAL
+Implementation/evidence inspected: advanced/performance_benchmark.py; tests/test_provider_store_performance_benchmark.py; .github/workflows/task-25-tests.yml
+Remaining work: CI exercises 25 concurrent offline catalog-integrity validations with four workers and a 15-second budget. Provider API throughput, queue saturation, streaming and live-generation load remain untested.
 
 Feature 117: Cross-Platform Testing
 Status: COMPLETED
