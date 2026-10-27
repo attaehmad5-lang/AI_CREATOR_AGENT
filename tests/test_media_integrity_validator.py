@@ -63,6 +63,19 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         bad.write_bytes(b"\x1a\x45\xdf\xa3")
         self.assertEqual(self.validator.validate(bad, modality="video")["status"], "WEBM_SEGMENT_MISSING")
 
+    def test_malformed_arguments_fail_closed_without_raising(self):
+        for modality in (None, [], {}, 1):
+            with self.subTest(modality=modality):
+                result = self.validator.validate("unused.wav", modality=modality)
+                self.assertEqual(result["status"], "UNSUPPORTED_MEDIA_MODALITY")
+                self.assertFalse(result["valid"])
+
+        for path in (None, 1, object(), ""):
+            with self.subTest(path_type=type(path).__name__):
+                result = self.validator.validate(path, modality="audio")
+                self.assertEqual(result["status"], "INVALID_MEDIA_PATH")
+                self.assertFalse(result["valid"])
+
     def test_unsupported_modality_and_size_limit_fail_closed(self):
         path = self.root / "unknown.bin"
         path.write_bytes(b"x" * 3000)
