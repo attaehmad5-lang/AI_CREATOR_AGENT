@@ -33,6 +33,32 @@ class PdfReportTests(unittest.TestCase):
         self.assertIn(b"startxref", data)
         self.assertIn(b"Provider Catalog Management", data)
 
+    def test_preserves_winansi_text_and_escapes_pdf_delimiters(self):
+        report = {
+            "completion_status": "INCOMPLETE",
+            "points_completed": 0,
+            "points_total": 150,
+            "points_remaining": 150,
+            "release_ready": False,
+            "live_provider_verification": "NOT_CLAIMED",
+            "status_counts": {},
+            "ledger": [{
+                "id": 1,
+                "feature": "Café (vision) \\ model",
+                "status": "PARTIAL",
+                "evidence": "Résumé – naïve",
+                "remaining": "Check emoji 🚀 fallback",
+            }],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            data = write_pdf_report(Path(directory) / "unicode.pdf", report).read_bytes()
+        self.assertIn(b"/Encoding /WinAnsiEncoding", data)
+        self.assertIn(b"Caf\\351", data)
+        self.assertIn(b"\\(vision\\)", data)
+        self.assertIn(b"R\\351sum\\351", data)
+        self.assertIn(b"?", data)
+        self.assertTrue(data.rstrip().endswith(b"%%EOF"))
+
     def test_empty_ledger_still_produces_pdf(self):
         with tempfile.TemporaryDirectory() as directory:
             path = write_pdf_report(Path(directory) / "empty.pdf", {})
