@@ -52,23 +52,28 @@ class CatalogInterchangeTests(unittest.TestCase):
             [],
         )
 
-    def test_invalid_source_does_not_mutate_destination(self):
+    def test_credential_bearing_source_is_rejected_without_mutation(self):
         invalid = self.root / "invalid.json"
-        invalid.write_text(
-            json.dumps(
-                {
-                    "version": "3.0",
-                    "providers": [{"id": "x", "api_key": "never-export"}],
-                }
-            ),
-            encoding="utf-8",
-        )
+        catalog = json.loads(self.source.read_text(encoding="utf-8"))
+        catalog["providers"][0]["api_key"] = "never-export"
+        invalid.write_text(json.dumps(catalog), encoding="utf-8")
         target = self.root / "target.json"
         original = b'{"version":"3.0","providers":[]}\n'
         target.write_bytes(original)
-        with self.assertRaises(ValueError):
-            import_catalog(invalid, target)
+        result = import_catalog(invalid, target)
+        self.assertEqual(result["status"], "CATALOG_IMPORT_INVALID_SOURCE")
+        self.assertFalse(result["imported"])
         self.assertEqual(target.read_bytes(), original)
+
+    def test_export_refuses_credential_bearing_catalog(self):
+        catalog = json.loads(self.source.read_text(encoding="utf-8"))
+        catalog["providers"][0]["nested"] = {"refresh_token": "do-not-export"}
+        secret_source = self.root / "secret-source.json"
+        secret_source.write_text(json.dumps(catalog), encoding="utf-8")
+        target = self.root / "secret-export.json"
+        with self.assertRaisesRegex(ValueError, "credential material"):
+            export_catalog(secret_source, target)
+        self.assertFalse(target.exists())
 
     def test_failed_atomic_write_does_not_leave_partial_target(self):
         target = self.root / "new-target.json"
