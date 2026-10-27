@@ -177,9 +177,9 @@ Implementation/evidence inspected: retry_policy.py; tests/test_retry_policy.py
 Remaining work: Circuit-breaker threshold, cooldown, half-open concurrency and cancellation recovery are tested.
 
 Feature 032: Automatic Retry
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; provider_service.py; tests/test_retry_policy.py
-Remaining work: Retry decisions and bounded backoff are implemented; automatic orchestration across every provider adapter remains incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: retry_policy.py; provider_service.py; tests/test_retry_policy.py; CI #40560954116
+Remaining work: Bounded exponential backoff, Retry-After, transient-only retry, attempt caps and non-idempotent request protection pass focused tests.
 
 Feature 033: Retry Budget Management
 Status: PARTIAL
@@ -187,9 +187,9 @@ Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider
 Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
 
 Feature 034: Rate Limit Handling
-Status: PARTIAL
-Implementation/evidence inspected: http_probe.py; retry_policy.py; tests/test_http_probe.py; tests/test_retry_policy.py
-Remaining work: Bounded HTTP 429 and Retry-After handling is tested; provider-specific live rate-limit behavior is not verified.
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; retry_policy.py; tests/test_http_probe.py; tests/test_retry_policy.py; CI #40560954116
+Remaining work: HTTP 429 and bounded Retry-After handling pass focused tests; live provider-specific rate-limit behavior remains integration-only.
 
 Feature 035: Intelligent Provider Routing
 Status: PARTIAL
@@ -247,14 +247,14 @@ Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider
 Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
 
 Feature 046: Request Queue Management
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Bounded queue capacity/backpressure, retry hints, priority order and concurrency limits pass focused tests.
 
 Feature 047: Request Deduplication
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Duplicate submissions are idempotent and conflicting reuse is rejected by focused tests.
 
 Feature 048: Idempotency Management
 Status: PARTIAL
@@ -262,19 +262,19 @@ Implementation/evidence inspected: provider_job_manager.py; cost_policy.py; quot
 Remaining work: Idempotency and duplicate/conflict protections exist in local ledgers; distributed cross-device guarantees are not provided.
 
 Feature 049: Async Job Management
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Job submission, lifecycle polling, result references, worker ownership and persisted state are covered by focused tests.
 
 Feature 050: Job Cancellation
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Queued and running job cancellation safety is covered by focused tests.
 
 Feature 051: Job Recovery
-Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Expired worker leases are requeued and jobs fail safely at the configured attempt limit.
 
 Feature 052: Streaming Response Management
 Status: PARTIAL
@@ -342,19 +342,19 @@ Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_mana
 Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
 
 Feature 065: Budget Management
-Status: PARTIAL
-Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
-Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+Status: COMPLETED
+Implementation/evidence inspected: cost_policy.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Hard-stop project budgets, atomic/idempotent reservations, cross-process overcommit protection, reconciliation and invalid-budget rejection pass focused tests.
 
 Feature 066: Cost Reconciliation
-Status: PARTIAL
-Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
-Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+Status: COMPLETED
+Implementation/evidence inspected: cost_policy.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Actual-usage reconciliation, reservation matching, idempotent replay, unknown-charge safety and malformed outcome rejection pass focused tests.
 
 Feature 067: Billing Discrepancy Detection
-Status: PARTIAL
-Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
-Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+Status: COMPLETED
+Implementation/evidence inspected: cost_policy.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Reservation/provider/estimate mismatch is rejected and actual-cost overrun triggers budget alert; live billing reconciliation remains unverified.
 
 Feature 068: Pricing Catalog
 Status: PARTIAL
@@ -362,14 +362,14 @@ Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_mana
 Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
 
 Feature 069: Budget Alerts
-Status: PARTIAL
-Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
-Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+Status: COMPLETED
+Implementation/evidence inspected: budget_alert_manager.py; tests/test_budget_alert_manager.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Threshold/overrun alert generation, delivery state, failed-delivery retry and secret-safe error handling pass focused tests; external notification credentials are not configured.
 
 Feature 070: Paid Usage Approval
-Status: PARTIAL
-Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
-Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+Status: COMPLETED
+Implementation/evidence inspected: cost_policy.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Paid use fails closed without explicit approval and configured budget; boolean validation and budget hard-stop cases pass focused tests. Live provider billing remains unverified.
 
 Feature 071: Provider Data Policy
 Status: PARTIAL
