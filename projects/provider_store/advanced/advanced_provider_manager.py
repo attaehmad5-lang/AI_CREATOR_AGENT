@@ -103,6 +103,35 @@ class AdvancedProviderManager:
             if provider.get("category") == category
         ]
 
+    def by_capability(self, capability: str, *, category: str | None = None) -> list[dict[str, Any]]:
+        """Find advanced providers by exact declared capability, optionally within a category."""
+        if not isinstance(capability, str) or not capability.strip():
+            return []
+        wanted = capability.strip().casefold()
+        wanted_category = category.strip() if isinstance(category, str) else None
+        if category is not None and (not isinstance(category, str) or not category.strip()):
+            return []
+        matches: list[dict[str, Any]] = []
+        for provider in self.list_providers():
+            if wanted_category is not None and provider.get("category") != wanted_category:
+                continue
+            capabilities = provider.get("capabilities", [])
+            if isinstance(capabilities, list) and any(
+                isinstance(item, str) and item.casefold() == wanted for item in capabilities
+            ):
+                matches.append(provider)
+        return matches
+
+    def supports_capability(self, provider_id: str, capability: str) -> bool:
+        if not isinstance(capability, str) or not capability.strip():
+            return False
+        provider = self.get_provider(provider_id)
+        capabilities = provider.get("capabilities", []) if provider else []
+        return isinstance(capabilities, list) and any(
+            isinstance(item, str) and item.casefold() == capability.strip().casefold()
+            for item in capabilities
+        )
+
     def catalog_consistency(self) -> dict[str, Any]:
         """Compare the legacy advanced catalog with the canonical runtime catalog."""
         try:
