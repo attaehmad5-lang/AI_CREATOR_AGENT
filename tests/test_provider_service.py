@@ -399,6 +399,14 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(retry["retry"])
         self.assertEqual(retry["reason"], "TRANSIENT_HTTP_FAILURE")
 
+    def test_explicit_provider_rate_limit_code_reaches_retry_policy(self):
+        retry = self.service.retry_decision(
+            attempt=1, status_code=400, provider_code="rate_limit_exceeded",
+            idempotent=True,
+        )
+        self.assertTrue(retry["retry"])
+        self.assertEqual(retry["reason"], "RATE_LIMIT_BACKOFF")
+
     def test_malformed_retry_policy_response_fails_closed_without_truthy_coercion(self):
         class MalformedPolicy:
             def decide(self, **failure):
