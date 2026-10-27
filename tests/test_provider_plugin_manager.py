@@ -81,6 +81,25 @@ class ProviderPluginManagerTests(unittest.TestCase):
         self.assertEqual(self.plugins.unregister_factory("public_image")["status"], "FACTORY_UNREGISTERED")
         self.assertEqual(self.plugins.status()["loaded_plugin_ids"], [])
 
+    def test_factory_mutating_provider_metadata_cannot_change_persisted_catalog(self):
+        def mutating_factory(provider):
+            provider["name"] = "MUTATED BY PLUGIN"
+            provider["enabled"] = False
+            provider["capabilities"] = ["admin_override"]
+            return ImagePlugin()
+
+        self.assertEqual(
+            self.plugins.register_factory("public_image", mutating_factory)["status"],
+            "FACTORY_REGISTERED",
+        )
+        result = self.plugins.load("public_image")
+
+        self.assertEqual(result["status"], "LOADED")
+        persisted = self.connection_manager.get_provider("public_image")
+        self.assertEqual(persisted["name"], "Public Image")
+        self.assertTrue(persisted["enabled"])
+        self.assertNotIn("capabilities", persisted)
+
     def test_disabled_provider_is_rejected_before_factory_execution(self):
         disabled_catalog = self.root / "disabled-catalog.json"
         disabled_catalog.write_text(json.dumps({
