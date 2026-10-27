@@ -1,6 +1,7 @@
 """Allowlisted provider runtime with interface checks, in-flight tracking and safe unload."""
 from __future__ import annotations
 
+import math
 import threading
 import time
 from typing import Any, Callable, Optional
@@ -21,12 +22,18 @@ class ProviderRuntime:
     def register_factory(self, provider_id: str, factory: Callable[[dict], Any]) -> None:
         if not isinstance(provider_id, str) or not provider_id.strip() or not callable(factory):
             raise ValidationError("provider_id and factory are required")
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            raise ValidationError("provider_id must be non-empty")
         with self._condition:
+            if provider_id in self._draining:
+                raise ValidationError("provider is currently draining")
             if provider_id in self._instances:
                 raise ValidationError("cannot replace a factory while provider is loaded")
             self._factories[provider_id] = factory
 
     def load(self, provider_id: str, config: Optional[dict] = None) -> dict:
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            raise ValidationError("provider_id must be non-empty")
         config = {} if config is None else config
         if not isinstance(config, dict):
             raise ValidationError("provider config must be an object")
@@ -60,8 +67,8 @@ class ProviderRuntime:
             }
 
     def invoke(self, provider_id: str, operation: str, *args: Any, **kwargs: Any) -> Any:
-        if not isinstance(operation, str) or not operation or operation.startswith("_"):
-            raise ValidationError("operation must be a public method name")
+        if operation not in {"generate", "health_check"}:
+            raise ValidationError("operation must be generate or health_check")
         with self._condition:
             instance = self._instances.get(provider_id)
             if instance is None:
@@ -80,8 +87,9 @@ class ProviderRuntime:
                 self._condition.notify_all()
 
     def unload(self, provider_id: str, timeout: float = 0.0) -> dict:
-        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout < 0:
-            raise ValidationError("timeout must be >= 0")
+        if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                or not math.isfinite(timeout) or timeout < 0):
+            raise ValidationError("timeout must be finite and >= 0")
         deadline = time.monotonic() + float(timeout)
         with self._condition:
             instance = self._instances.get(provider_id)
@@ -97,8 +105,12 @@ class ProviderRuntime:
                 self._condition.wait(remaining)
             self._instances.pop(provider_id, None)
             self._inflight.pop(provider_id, None)
-            self._draining.discard(provider_id)
-        close = getattr(instance, "close", None)
-        if callable(close):
-            close()
+        try:
+            close = getattr(instance, "close", None)
+            if callable(close):
+                close()
+        finally:
+            with self._condition:
+                self._draining.discard(provider_id)
+                self._condition.notify_all()
         return {"provider_id": provider_id, "loaded": False, "already_unloaded": False}
