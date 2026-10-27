@@ -189,7 +189,7 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             self.assertEqual(report["providers_total"], 3)
             story = next(item for item in report["providers"] if item["provider"] == "story_test")
             self.assertIn("CONNECTION_NOT_VERIFIED", story["blockers"])
-            self.assertIn("CREDENTIAL_MANUAL_CONNECTION_REQUIRED", story["blockers"])
+            self.assertEqual(story["credential_status"], "NO_CREDENTIAL_REQUIRED")
             locked = next(item for item in report["providers"] if item["provider"] == "story_locked")
             self.assertIn("CATALOG_LOCKED", locked["blockers"])
             self.assertFalse(locked["ready"])
