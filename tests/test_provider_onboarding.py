@@ -119,7 +119,11 @@ class ProviderOnboardingTests(unittest.TestCase):
             stored = manager.get_provider("onboarding_test_provider")
             self.assertIsNotNone(stored)
             self.assertFalse(stored["enabled"])
-            self.assertEqual(stored["status"], "LOCKED")
+            catalog_record = next(
+                item for item in manager.catalog["providers"]
+                if item.get("id") == "onboarding_test_provider"
+            )
+            self.assertEqual(catalog_record["status"], "LOCKED")
 
     def test_invalid_candidate_and_existing_provider_are_not_persisted(self):
         self.assertFalse(self.workflow.register_candidate(dict(self.provider, official_api_url="http://bad.test"))["saved"])
