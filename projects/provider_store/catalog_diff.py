@@ -1,4 +1,5 @@
 """Safe, dry-run-first catalog diff and application helpers."""
+
 from __future__ import annotations
 
 from pathlib import Path
