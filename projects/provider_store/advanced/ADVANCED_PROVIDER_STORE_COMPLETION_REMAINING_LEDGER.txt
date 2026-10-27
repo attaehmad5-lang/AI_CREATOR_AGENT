@@ -617,9 +617,9 @@ Implementation/evidence inspected: No passing evidence located for the complete 
 Remaining work: Run and record formatting, lint, type, coverage, build, wheel, clean extraction, dependency lock and SBOM checks.
 
 Feature 120: Linting
-Status: UNVERIFIED
-Implementation/evidence inspected: No passing evidence located for the complete repository-wide gate
-Remaining work: Run and record formatting, lint, type, coverage, build, wheel, clean extraction, dependency lock and SBOM checks.
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; Ruff 0.14.2; focused provider-store modules/tests; CI #40575225305
+Remaining work: Pinned Ruff lint gate covers catalog interchange, config lifecycle, PDF/benchmark code and focused tests; Ubuntu passed. Repository-wide linting remains unverified.
 
 Feature 121: Static Type Checking
 Status: UNVERIFIED
