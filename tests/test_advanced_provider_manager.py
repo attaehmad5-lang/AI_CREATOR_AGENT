@@ -262,6 +262,20 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             self.assertEqual(advanced.unload_provider("core_only")["status"], "NOT_FOUND")
             self.assertIsNone(advanced.loaded_provider("core_only"))
 
+    def test_readiness_report_fails_closed_when_category_catalog_is_invalid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            connection, _ = self._manager(root)
+            categories = root / "invalid_categories.json"
+            categories.write_text('{"categories":[]}', encoding="utf-8")
+            advanced = AdvancedProviderManager(
+                connection_manager=connection,
+                categories_path=str(categories),
+            )
+            report = advanced.readiness_report()
+            self.assertEqual(report["category_catalog_status"], "INVALID_CATEGORY_CATALOG")
+            self.assertEqual(report["status"], "DEGRADED")
+
     def test_readiness_report_never_contains_raw_credentials(self):
         with tempfile.TemporaryDirectory() as tmp:
             _, advanced = self._manager(Path(tmp))
