@@ -103,6 +103,18 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             self.assertEqual(advanced.list_verified_enabled_providers("  "), [])
             self.assertEqual(advanced.list_verified_enabled_providers(123), [])
 
+    def test_completion_ledger_contains_150_unique_feature_rows(self):
+        ledger = (
+            Path(__file__).resolve().parents[1]
+            / "projects" / "provider_store" / "advanced"
+            / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md"
+        )
+        content = ledger.read_text(encoding="utf-8")
+        import re
+        rows = re.findall(r"^\| (\d{3}) \| .+? \| (PARTIAL|NOT STARTED|UNVERIFIED|COMPLETED|BLOCKED) \|", content, re.MULTILINE)
+        self.assertEqual(len(rows), 150)
+        self.assertEqual([int(feature_id) for feature_id, _ in rows], list(range(1, 151)))
+
     def test_diagnostics_never_returns_credential_values(self):
         with tempfile.TemporaryDirectory() as tmp:
             _, advanced = self._manager(Path(tmp))
