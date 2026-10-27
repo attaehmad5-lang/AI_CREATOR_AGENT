@@ -162,6 +162,11 @@ class AdvancedProviderManagerTests(unittest.TestCase):
         rows = re.findall(r"^\| (\d{3}) \| .+? \| (PARTIAL|NOT STARTED|UNVERIFIED|COMPLETED|BLOCKED) \|", content, re.MULTILINE)
         self.assertEqual(len(rows), 150)
         self.assertEqual([int(feature_id) for feature_id, _ in rows], list(range(1, 151)))
+        text_ledger = ledger.with_name("ADVANCED_PROVIDER_STORE_COMPLETION_REMAINING_LEDGER.txt")
+        text_content = text_ledger.read_text(encoding="utf-8")
+        text_ids = re.findall(r"^Feature (\d{3}): .+$", text_content, re.MULTILINE)
+        self.assertEqual(text_ids, [f"{feature_id:03d}" for feature_id in range(1, 151)])
+        self.assertEqual(len(re.findall(r"^Status: (PARTIAL|NOT STARTED|UNVERIFIED|COMPLETED|BLOCKED)$", text_content, re.MULTILINE)), 150)
 
     def test_diagnostics_never_returns_credential_values(self):
         with tempfile.TemporaryDirectory() as tmp:
