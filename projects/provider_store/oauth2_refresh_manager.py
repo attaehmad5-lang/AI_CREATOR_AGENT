@@ -127,7 +127,15 @@ class OAuth2RefreshTokenManager:
             if config is None:
                 raise RuntimeError("OAUTH_PROVIDER_NOT_CONFIGURED")
             cached = self._access_tokens.get(provider_id)
-            now = self.clock()
+            try:
+                now = self.clock()
+            except Exception:
+                raise RuntimeError("OAUTH_CLOCK_FAILED") from None
+            if (
+                not isinstance(now, (int, float)) or isinstance(now, bool)
+                or not math.isfinite(now)
+            ):
+                raise RuntimeError("OAUTH_CLOCK_INVALID")
             if cached is not None and cached[1] > now + self.expiry_skew_seconds:
                 return cached[0]
 
@@ -179,6 +187,8 @@ class OAuth2RefreshTokenManager:
                 raise RuntimeError("OAUTH_TOKEN_RESPONSE_INVALID")
 
             rotated = response.get("refresh_token")
+            if rotated is None and config["refresh_token_rotation_required"]:
+                raise RuntimeError("OAUTH_REFRESH_TOKEN_ROTATION_REQUIRED")
             if rotated is not None:
                 if not self._secret(rotated):
                     raise RuntimeError("OAUTH_REFRESH_TOKEN_INVALID")
