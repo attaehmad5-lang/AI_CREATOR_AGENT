@@ -35,7 +35,7 @@ The full original 37-entry archive's documentation/tooling/test set has not been
 
 - Original archive: 99 tests passed; fixed local coverage runner 825/828 = 99.6%; 37-entry ZIP integrity passed.
 - Repository CI [40500716692](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40500716692): all four matrix jobs passed (Ubuntu/Windows × Python 3.12/3.13); core, bridge, ProviderService and compatibility suites passed.
-- Core coverage: 86 tests, 0 failures/errors; 1338/1604 executable lines = 83.4%, above the enforced 80% minimum.
+- Core coverage: 89 tests, 0 failures/errors; 1465/1777 executable lines = 82.4%, above the enforced 80% minimum.
 - Task 25 CI [40502407747](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40502407747): Ubuntu and Windows passed.
 - Live paid/provider requests were not made.
 
@@ -54,6 +54,10 @@ The full original 37-entry archive's documentation/tooling/test set has not been
 3. Add/run cross-package regressions for authorization, ambiguous billing outcomes, quota/budget enforcement, redaction, rollback/recovery, and concurrency.
 4. Run the full repository suite plus mutation/build/security/fuzz/load checks.
 5. Review the exact diff and merge only after all applicable checks pass.
+
+## Full repository regression
+
+- Latest full repository gate [40503135494](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40503135494): compileall and all 464 unit tests passed on Ubuntu/Python 3.13.
 
 ## Status
 
