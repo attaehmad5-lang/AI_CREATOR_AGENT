@@ -43,12 +43,16 @@ class ProviderHealthScheduler:
         self._lock = threading.RLock()
         self._probes: dict[str, Callable[..., Any]] = {}
         self._next_due: dict[str, float] = {}
+        self._intervals: dict[str, float] = {}
 
     @staticmethod
     def _positive_number(value: Any, name: str) -> float:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"{name} must be a positive finite number")
-        number = float(value)
+        try:
+            number = float(value)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a positive finite number") from exc
         if not math.isfinite(number) or number <= 0:
             raise ValueError(f"{name} must be a positive finite number")
         return number
@@ -72,11 +76,14 @@ class ProviderHealthScheduler:
         with self._lock:
             if provider_id not in self._probes and len(self._probes) >= self.max_providers:
                 return {"status": "SCHEDULER_CAPACITY_REACHED", "registered": False}
+            try:
+                due_at = float(self.clock())
+            except (OverflowError, TypeError, ValueError):
+                return {"status": "INVALID_CLOCK", "registered": False}
+            if not math.isfinite(due_at):
+                return {"status": "INVALID_CLOCK", "registered": False}
             self._probes[provider_id] = probe
-            self._next_due[provider_id] = float(self.clock())
-            # Per-provider intervals are stored separately from global defaults.
-            if not hasattr(self, "_intervals"):
-                self._intervals: dict[str, float] = {}
+            self._next_due[provider_id] = due_at
             self._intervals[provider_id] = interval
         return {"status": "PROBE_SCHEDULED", "registered": True, "provider": provider_id}
 
@@ -92,7 +99,10 @@ class ProviderHealthScheduler:
     def run_due(self, *, max_checks: int = 20) -> dict[str, Any]:
         if isinstance(max_checks, bool) or not isinstance(max_checks, int) or not 1 <= max_checks <= 1000:
             return {"status": "INVALID_CHECK_LIMIT", "checks": []}
-        now = float(self.clock())
+        try:
+            now = float(self.clock())
+        except (OverflowError, TypeError, ValueError):
+            return {"status": "INVALID_CLOCK", "checks": []}
         if not math.isfinite(now):
             return {"status": "INVALID_CLOCK", "checks": []}
         with self._lock:
