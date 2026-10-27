@@ -255,7 +255,7 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
             validate_media_payload(b"not png", media_type="image", mime_type="image/png", max_bytes=100)
 
     def test_media_validation_rejects_malformed_type_and_checksum_inputs(self):
-        png = b"\\x89PNG\\r\\n\\x1a\\n" + b"fake"
+        png = b"\x89PNG\r\n\x1a\n" + b"fake"
         for bad_media_type in ([], {}, None, 7):
             with self.subTest(media_type=type(bad_media_type).__name__):
                 with self.assertRaises(ValidationError):
