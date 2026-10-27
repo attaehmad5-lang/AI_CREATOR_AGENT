@@ -195,6 +195,26 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             self.assertFalse(locked["ready"])
             self.assertEqual(report["catalog_consistency"], "MISMATCH")
 
+    def test_advanced_facade_loads_and_unloads_valid_runtime_adapter(self):
+        class StoryAdapter:
+            def __init__(self):
+                self.closed = False
+            def generate_text(self, prompt):
+                return "generated: " + prompt
+            def close(self):
+                self.closed = True
+        with tempfile.TemporaryDirectory() as tmp:
+            _, advanced = self._manager(Path(tmp))
+            adapter = StoryAdapter()
+            loaded = advanced.load_provider("story_test", lambda provider: adapter)
+            self.assertEqual(loaded["status"], "LOADED")
+            self.assertIs(advanced.loaded_provider("story_test"), adapter)
+            self.assertEqual(adapter.generate_text("hello"), "generated: hello")
+            unloaded = advanced.unload_provider("story_test")
+            self.assertTrue(unloaded["unloaded"])
+            self.assertTrue(adapter.closed)
+            self.assertIsNone(advanced.loaded_provider("story_test"))
+
     def test_advanced_facade_blocks_disabled_and_locked_provider_loads(self):
         with tempfile.TemporaryDirectory() as tmp:
             _, advanced = self._manager(Path(tmp))
