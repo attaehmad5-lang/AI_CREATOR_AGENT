@@ -121,11 +121,16 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
         advanced_records = json.loads(advanced_catalog.read_text(encoding="utf-8"))["providers"]
         for advanced_record in advanced_records:
             canonical = main_by_id[advanced_record["id"]]
-            for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required", "capabilities"):
+            for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required"):
                 self.assertEqual(
                     advanced_record.get(field), canonical.get(field),
                     "advanced catalog drift for " + advanced_record["id"] + " field " + field,
                 )
+            self.assertEqual(
+                sorted(advanced_record.get("capabilities", [])),
+                sorted(canonical.get("capabilities", [])),
+                "advanced catalog capability drift for " + advanced_record["id"],
+            )
 
         with tempfile.TemporaryDirectory() as tmp:
             manager = ConnectionManager(main_catalog, Path(tmp) / "state.json")
