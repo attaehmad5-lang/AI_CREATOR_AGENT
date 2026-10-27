@@ -43,6 +43,17 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "each point ID"):
                 read_ledger(ledger)
 
+    def test_source_package_fails_closed_on_private_key_material(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            provider_root = root / "projects" / "provider_store"
+            advanced = provider_root / "advanced"
+            advanced.mkdir(parents=True)
+            (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(_ledger_text(), encoding="utf-8")
+            (provider_root / "unsafe_key.md").write_text("-----BEGIN PRIVATE KEY-----\\nnot-a-real-key\\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "private-key material"):
+                write_release_artifacts(root / "build", repo_root=root)
+
     def test_source_zip_has_manifest_hashes_and_excludes_runtime_secret_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
