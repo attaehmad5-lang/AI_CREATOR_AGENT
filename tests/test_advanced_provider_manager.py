@@ -98,7 +98,7 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             connection.verify_connectivity("story_locked", lambda provider, **kwargs: True)
             self.assertEqual(
                 [p["id"] for p in advanced.list_verified_enabled_providers()],
-                ["image_test", "story_test"],
+                ["story_test", "image_test"],
             )
             self.assertEqual(
                 [p["id"] for p in advanced.list_verified_enabled_providers("image_generation")],
@@ -213,7 +213,7 @@ class AdvancedProviderManagerTests(unittest.TestCase):
             _, advanced = self._manager(Path(tmp))
             report = advanced.readiness_report()
             self.assertEqual(report["status"], "DEGRADED")
-            self.assertEqual(report["providers_total"], 3)
+            self.assertEqual(report["providers_total"], 4)
             story = next(item for item in report["providers"] if item["provider"] == "story_test")
             self.assertIn("CONNECTION_NOT_VERIFIED", story["blockers"])
             self.assertEqual(story["credential_status"], "NO_CREDENTIAL_REQUIRED")
