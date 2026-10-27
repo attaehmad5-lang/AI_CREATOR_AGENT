@@ -291,6 +291,12 @@ class ConnectionManager:
                         errors.append(f"providers[{index}].connection_type is unsupported")
                     if "enabled" in provider and not isinstance(provider["enabled"], bool):
                         errors.append(f"providers[{index}].enabled must be boolean")
+                    if "priority" in provider and (
+                        isinstance(provider["priority"], bool)
+                        or not isinstance(provider["priority"], int)
+                        or not -1000 <= provider["priority"] <= 1000
+                    ):
+                        errors.append(f"providers[{index}].priority must be an integer from -1000 to 1000")
                     if "allowed_hosts" in provider:
                         hosts = provider["allowed_hosts"]
                         if not isinstance(hosts, list) or not hosts or len(hosts) > 100:
@@ -840,7 +846,12 @@ class ConnectionManager:
             discovered.append(dict(provider))
         # Stable ordering makes page boundaries deterministic across calls for
         # an unchanged catalog; never return more than the validated page limit.
-        discovered.sort(key=lambda item: str(item.get("id", "")))
+        discovered.sort(
+            key=lambda item: (
+                -item.get("priority", 0),
+                str(item.get("id", "")),
+            )
+        )
         return discovered[offset:offset + limit]
 
     def register_provider(
