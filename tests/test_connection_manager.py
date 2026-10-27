@@ -1119,6 +1119,45 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
         self.assertEqual(ids, sorted(ids))
 
+    def test_discovery_ranks_by_validated_priority_then_provider_id(self):
+        providers = [
+            ("rank_z", 20),
+            ("rank_b", 50),
+            ("rank_a", 50),
+            ("rank_low", -10),
+        ]
+        for provider_id, priority in providers:
+            result = self.manager.register_provider({
+                "id": provider_id,
+                "name": provider_id,
+                "category": "ranking_test",
+                "auth_type": "NONE",
+                "connection_type": "LOCAL",
+                "enabled": True,
+                "priority": priority,
+            })
+            self.assertEqual(result["status"], "REGISTERED")
+
+        results = self.manager.discover_providers(category="ranking_test")
+        self.assertEqual(
+            [item["id"] for item in results],
+            ["rank_a", "rank_b", "rank_z", "rank_low"],
+        )
+
+    def test_catalog_rejects_invalid_provider_priority(self):
+        for priority in (True, 1001, -1001, 1.5, "10"):
+            with self.subTest(priority=priority):
+                result = self.manager.register_provider({
+                    "id": f"bad_priority_{str(priority).replace('.', '_')}",
+                    "name": "Bad priority",
+                    "category": "ranking_test",
+                    "auth_type": "NONE",
+                    "connection_type": "LOCAL",
+                    "priority": priority,
+                })
+                self.assertEqual(result["status"], "INVALID_PROVIDER_SCHEMA")
+                self.assertFalse(result["saved"])
+
     def test_discovery_rejects_invalid_pagination_arguments(self):
         for kwargs in (
             {"limit": 0}, {"limit": 501}, {"limit": True}, {"limit": "10"},
