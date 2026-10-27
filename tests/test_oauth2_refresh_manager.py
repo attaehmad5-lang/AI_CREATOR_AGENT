@@ -99,6 +99,27 @@ class OAuth2RefreshTokenManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "OAUTH_REFRESH_TOKEN_PERSISTENCE_FAILED"):
             manager_with_unconfirmed_sink.get_access_token("provider-a")
 
+    def test_required_rotation_rejects_response_without_new_refresh_token(self):
+        manager = OAuth2RefreshTokenManager(
+            {"provider-a": config(refresh_token_rotation_required=True)},
+            request_token=lambda *args, **kwargs: {
+                "access_token": "access-token", "token_type": "Bearer", "expires_in": 300,
+            },
+            environ=environment(),
+            refresh_token_sink=lambda provider_id, token: True,
+        )
+        with self.assertRaisesRegex(RuntimeError, "OAUTH_REFRESH_TOKEN_ROTATION_REQUIRED"):
+            manager.get_access_token("provider-a")
+
+    def test_invalid_clock_result_fails_closed(self):
+        manager = OAuth2RefreshTokenManager(
+            {"provider-a": config()},
+            request_token=lambda *args, **kwargs: self.fail("token request must not run"),
+            environ=environment(), clock=lambda: float("nan"),
+        )
+        with self.assertRaisesRegex(RuntimeError, "OAUTH_CLOCK_INVALID"):
+            manager.get_access_token("provider-a")
+
     def test_basic_client_auth_and_token_invalidation(self):
         calls = []
         manager = OAuth2RefreshTokenManager(
