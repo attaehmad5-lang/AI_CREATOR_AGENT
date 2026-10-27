@@ -140,6 +140,17 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             self.assertEqual(len(advanced.list_providers()), 18)
             self.assertEqual(registry.status()["advanced_providers"], 18)
 
+    def test_advanced_provider_capabilities_are_declared_by_their_category(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "advanced"
+        categories = json.loads((root / "advanced_categories.json").read_text(encoding="utf-8"))["categories"]
+        providers = json.loads((root / "advanced_provider_catalog.json").read_text(encoding="utf-8"))["providers"]
+        self.assertEqual(len(providers), 18)
+        for provider in providers:
+            with self.subTest(provider=provider["id"]):
+                self.assertIn(provider["category"], categories)
+                declared = set(categories[provider["category"]]["capabilities"])
+                self.assertTrue(set(provider.get("capabilities", [])).issubset(declared))
+
     def test_store_facade_rejects_mixed_manager_and_path_arguments(self):
         with self.assertRaises(ValueError):
             ProviderStoreManager(
