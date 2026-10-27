@@ -66,6 +66,8 @@ class ProviderService:
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
                 raise ValueError(f"{label} does not support {method}")
+        if trace_manager is not None and not callable(getattr(trace_manager, "finish_span", None)):
+            raise ValueError("trace_manager does not support finish_span")
         self.connection_manager = connection_manager
         self.routing_manager = routing_manager
         self.health_manager = health_manager
