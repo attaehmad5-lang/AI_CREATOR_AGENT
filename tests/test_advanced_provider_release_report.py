@@ -71,6 +71,9 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             self.assertEqual(result["zip_integrity"], "PASS")
             self.assertEqual(result["completion_status"], "INCOMPLETE")
             self.assertGreaterEqual(result["files_packaged"], 3)
+            checksum_text = Path(result["archive_checksum"]).read_text(encoding="ascii").split()
+            self.assertEqual(checksum_text[0], hashlib.sha256(Path(result["archive"]).read_bytes()).hexdigest())
+            self.assertEqual(checksum_text[1], Path(result["archive"]).name)
             manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
             paths = {entry["path"] for entry in manifest["files"]}
             self.assertIn("projects/provider_store/provider_status_manager.py", paths)
