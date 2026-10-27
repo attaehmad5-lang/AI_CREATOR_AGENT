@@ -92,7 +92,9 @@ class CatalogInterchangeTests(unittest.TestCase):
         self.assertEqual(listing["snapshots"][0]["name"], snapshot_path.name)
 
         target = self.root / "active.json"
-        target.write_text(json.dumps({"version": "3.0", "providers": []}), encoding="utf-8")
+        target.write_text(
+            json.dumps({"version": "3.0", "providers": []}), encoding="utf-8"
+        )
         restored = restore_catalog_snapshot(snapshot_path, target)
         self.assertTrue(restored["restored"])
         self.assertEqual(
@@ -103,7 +105,9 @@ class CatalogInterchangeTests(unittest.TestCase):
 
     def test_snapshot_listing_ignores_invalid_files_and_empty_history_is_safe(self):
         history = self.root / "history"
-        self.assertEqual(list_catalog_snapshots(history)["status"], "CATALOG_HISTORY_EMPTY")
+        self.assertEqual(
+            list_catalog_snapshots(history)["status"], "CATALOG_HISTORY_EMPTY"
+        )
         history.mkdir()
         (history / "catalog-broken.json").write_text("{bad", encoding="utf-8")
         self.assertEqual(list_catalog_snapshots(history)["snapshots"], [])
