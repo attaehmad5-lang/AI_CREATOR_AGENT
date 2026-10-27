@@ -91,6 +91,14 @@ class GenerationAdapter:
             return {"status": "INVALID_ROUTE_OPTIONS", "executed": False}
         if not isinstance(adapter_options, (dict, type(None))):
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
+        reserved_route_keys = {
+            "category", "project_id", "request_id", "estimated_cost",
+            "estimated_cost_unit", "adapter", "modality", "principal_id",
+            "data_categories", "retention_days", "provider_training_use",
+            "user_training_consent", "output_path", "adapter_options",
+        }
+        if any(key in reserved_route_keys for key in (route_options or {})):
+            return {"status": "INVALID_ROUTE_OPTIONS", "executed": False}
         if request_id is None:
             request_id = "generation-" + uuid4().hex
         if not isinstance(request_id, str) or not request_id.strip():
