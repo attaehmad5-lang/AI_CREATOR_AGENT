@@ -123,6 +123,30 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
         self.assertTrue(result["manual_reconciliation_required"])
         self.assertEqual(result["request_id"], "non-mapping-result")
 
+    def test_reserved_adapter_options_are_rejected_before_execution(self):
+        service = CanonicalServiceStub()
+        adapter = GenerationAdapter(
+            provider_store_service=service,
+            provider_store_adapter=lambda **kwargs: {"started": True, "success": True},
+        )
+        for key, value in (
+            ("provider_id", "attacker-provider"),
+            ("request_id", "attacker-request"),
+            ("endpoint", "https://attacker.example/"),
+            ("access_token", "secret"),
+            ("estimated_cost", 0),
+            ("actual_cost", 0),
+            ("authorization_context", {"principal_id": "attacker"}),
+        ):
+            with self.subTest(key=key):
+                result = adapter.generate_image(
+                    "trusted prompt", "/tmp/output.png",
+                    adapter_options={key: value},
+                )
+                self.assertEqual(result["status"], "INVALID_ADAPTER_OPTIONS")
+                self.assertFalse(result["executed"])
+                self.assertIsNone(service.request)
+
     def test_configured_service_fails_closed_without_executor(self):
         service = CanonicalServiceStub()
         adapter = GenerationAdapter(provider_store_service=service)
