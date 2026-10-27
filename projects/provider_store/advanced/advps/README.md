@@ -5,7 +5,7 @@ routing simulation/execution through injected callbacks, bounded HTTPS
 transport, environment-backed credential references, provider health/probe
 leases, retry/circuit-breaker policy, atomic local JSON storage, tamper-evident
 audit logs, explicit paid-usage approval, quotas, budgets, idempotency, job
-lifecycle/leases/recovery, and backup/recovery.
+lifecycle/leases/recovery, allowlisted provider runtime load/unload, and backup/recovery.
 
 ## Safety boundaries
 
@@ -27,6 +27,9 @@ lifecycle/leases/recovery, and backup/recovery.
 - `HealthRegistry` records sanitized outcomes, schedules due probes, manages
   probe leases, failure thresholds, backoff and latency EWMA. The host must supply
   actual probe callbacks and worker execution.
+- `ProviderRuntime` only loads trusted factories registered by application code,
+  checks the `generate` interface, tracks in-flight calls and drains before unload.
+  It never imports a module path from untrusted catalog data.
 - `JobManager` persists job metadata, hashed idempotency keys, leases, attempts,
   cancellation state and stale-lease recovery. It does not store payloads or
   credentials, and it does not itself interrupt an executing worker process.
