@@ -90,7 +90,7 @@ class GenerationAdapterProviderStoreTests(unittest.TestCase):
             provider_store_service=service,
             provider_store_adapter=lambda **kwargs: {},
         )
-        for invalid in ("", "   ", "bad\\x00path", None):
+        for invalid in ("", "   ", "bad\x00path", None):
             with self.subTest(output_path=repr(invalid)):
                 result = adapter.generate_image("prompt", invalid)
                 self.assertEqual(result["status"], "INVALID_OUTPUT_PATH")
