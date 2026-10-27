@@ -97,7 +97,7 @@ class AdvancedProviderStoreCoreTests(unittest.TestCase):
         accounting.set_budget(1.0)
         with self.assertRaises(PaidUsageNotApprovedError):
             accounting.reserve_and_record("p", "m", 1, 0.6, key="k1")
-        accounting.approve_paid("p", 0.8)
+        accounting.approve_paid("p", 2.0)
         accounting.reserve_and_record("p", "m", 1, 0.6, key="k1")
         with self.assertRaises(BudgetExceededError):
             accounting.reserve_and_record("p", "m", 1, 0.5, key="k2")
