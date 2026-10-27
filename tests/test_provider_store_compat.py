@@ -125,11 +125,11 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
         backup_by_id = {p["id"]: p for p in backup_records}
         for advanced_record in advanced_records:
             backup_record = backup_by_id[advanced_record["id"]]
-            for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required"):
+            for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required", "allowed_hosts", "token_env", "api_key_env", "credential_env", "official_api_url", "subscription_url", "zero_cost_allowed", "priority", "supported_models"):
                 self.assertEqual(advanced_record.get(field), backup_record.get(field), "advanced backup drift for " + advanced_record["id"] + " field " + field)
             self.assertEqual(sorted(advanced_record.get("capabilities", [])), sorted(backup_record.get("capabilities", [])))
             canonical = main_by_id[advanced_record["id"]]
-            for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required"):
+            for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required", "allowed_hosts", "token_env", "api_key_env", "credential_env", "official_api_url", "subscription_url", "zero_cost_allowed", "priority", "supported_models"):
                 self.assertEqual(
                     advanced_record.get(field), canonical.get(field),
                     "advanced catalog drift for " + advanced_record["id"] + " field " + field,
