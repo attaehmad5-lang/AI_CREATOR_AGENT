@@ -10,6 +10,7 @@ import math
 import os
 import re
 import ssl
+import unicodedata
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPSHandler, HTTPRedirectHandler, Request, build_opener
@@ -117,7 +118,7 @@ class ProviderJSONBalanceProbe:
             return {"status": "INVALID_PROVIDER", "verified": False}
         token = self.environ.get(self.token_env)
         if not isinstance(token, str) or not token.strip() or len(token) > 16384 or any(
-            ord(char) < 32 or ord(char) == 127 for char in token
+            unicodedata.category(char) == "Cc" for char in token
         ):
             return {"status": "CREDENTIAL_MISSING_OR_INVALID", "provider": provider_id, "verified": False}
         headers = {"Accept": "application/json", "User-Agent": "AI_CREATOR_AGENT-BalanceProbe/1.0"}
