@@ -158,8 +158,8 @@ Remaining work: JSON event logging is integrated into provider verification/manu
 
 Feature 028: Distributed Tracing
 Status: PARTIAL
-Implementation/evidence inspected: provider_trace_manager.py; tests/test_provider_trace_manager.py; CI #40564559062
-Remaining work: W3C traceparent validation/propagation, parent linkage, bounded span history and secret-safe attributes are tested; provider-service instrumentation and external trace export remain.
+Implementation/evidence inspected: provider_trace_manager.py; provider_service.py; tests/test_provider_trace_manager.py; tests/test_provider_service.py; CI #40584377034
+Remaining work: W3C traceparent is propagated into provider verification spans, outcomes are recorded with safe attributes, and tracing failures are non-fatal; full service-wide instrumentation and external trace export remain pending CI.
 
 Feature 029: Incident Management
 Status: COMPLETED
