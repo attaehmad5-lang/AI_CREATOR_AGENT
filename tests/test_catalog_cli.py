@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.catalog_cli import main
+from projects.provider_store.provider_audit_log import ProviderAuditLog
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +90,40 @@ class CatalogCliTests(unittest.TestCase):
         self.assertTrue(applied["applied"])
         self.assertEqual(len(applied["deleted"]), 2)
         self.assertEqual(len(list(history.glob("catalog-*.json"))), 1)
+
+    def test_audit_option_records_catalog_operation_with_hash_chain(self):
+        destination = self.root / "audited-export.json"
+        audit_path = self.root / "catalog-audit.jsonl"
+        code, result = self.invoke(
+            "export", self.current, destination, "--audit-log", audit_path
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue(result["exported"])
+        self.assertTrue(result["audit"]["saved"])
+        chain = ProviderAuditLog(audit_path).verify_chain()
+        self.assertTrue(chain["valid"])
+        self.assertEqual(chain["count"], 2)
+        events = [
+            json.loads(line)["event"]
+            for line in audit_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events, ["catalog.export.started", "catalog.export.completed"])
+
+    def test_audit_write_failure_blocks_catalog_mutation(self):
+        destination = self.root / "must-not-exist.json"
+        target = self.root / "audit-target.jsonl"
+        target.write_text("", encoding="utf-8")
+        audit_link = self.root / "audit-link.jsonl"
+        try:
+            audit_link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation is unavailable on this platform")
+        code, result = self.invoke(
+            "export", self.current, destination, "--audit-log", audit_link
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(result["status"], "AUDIT_LOG_REQUIRED")
+        self.assertFalse(destination.exists())
 
     def test_export_command_creates_valid_catalog(self):
         destination = self.root / "exported" / "catalog.json"
