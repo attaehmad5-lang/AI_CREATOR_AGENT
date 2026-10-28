@@ -748,10 +748,9 @@ Implementation/evidence inspected: provider_store modules; test_provider_store_c
 Remaining work: Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains.
 
 Feature 148: Error Diagnostics
-Status: PARTIAL
-Implementation/evidence inspected: provider_store modules; advanced/advanced_provider_manager.py; tests/test_advanced_provider_manager.py; CI #40560954116
-Remaining work: Secret-free readiness report identifies category-catalog validity, catalog consistency, enablement, credential and verified-connectivity blockers; broader normalized error taxonomy remains.
-
+Status: COMPLETED
+Implementation/evidence inspected: advanced/advanced_provider_manager.py; provider_error_policy.py; tests/test_advanced_provider_manager.py; tests/test_provider_error_policy.py
+Remaining work: Secret-free readiness diagnostics and normalized error taxonomy cover catalog, connectivity, billing, exhausted credits, authentication, permissions, rate limits, transient errors, rejected requests and unknown outcomes without echoing raw provider codes/bodies.
 Feature 149: Recovery Diagnostics
 Status: PARTIAL
 Implementation/evidence inspected: provider_store modules; test_provider_store_compat.py; regression tests
