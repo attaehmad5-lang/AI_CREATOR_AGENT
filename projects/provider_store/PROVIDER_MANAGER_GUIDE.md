@@ -140,7 +140,7 @@ The `apply` command is a dry run unless `--apply` is supplied. Removing provider
 
 ## Release evidence and SBOM
 
-The release-report command creates JSON, Markdown and PDF status reports, a source-only ZIP, a SHA-256 source manifest/checksum sidecar, and an SPDX 2.3 JSON SBOM containing source-file SHA-256 hashes. Before packaging, it rejects private-key blocks and high-confidence GitHub, OpenAI-style, AWS and Slack token patterns in eligible source payloads. License and copyright conclusions are recorded as `NOASSERTION`, not guessed. The report remains `INCOMPLETE` until all 150 acceptance points are completed. These offline checks do not prove live provider connectivity, real account credits, or billable generation.
+The release-report command creates JSON, Markdown and PDF status reports, a source-only ZIP, a SHA-256 source manifest/checksum sidecar, and an SPDX 2.3 JSON SBOM containing source-file SHA-256 hashes. Before packaging, it rejects private-key blocks and high-confidence GitHub, OpenAI-style/Anthropic, Google, Hugging Face, Replicate, AWS and Slack token patterns in eligible source payloads. License and copyright conclusions are recorded as `NOASSERTION`, not guessed. The report remains `INCOMPLETE` until all 150 acceptance points are completed. These offline checks do not prove live provider connectivity, real account credits, or billable generation.
 
 To explicitly enforce the completion ledger as a release gate, run:
 
