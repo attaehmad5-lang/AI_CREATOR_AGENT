@@ -133,10 +133,12 @@ python -m projects.provider_store.catalog_cli export projects/provider_store/pro
 python -m projects.provider_store.catalog_cli import /path/to/export.json projects/provider_store/provider_catalog.json
 python -m projects.provider_store.catalog_cli snapshot projects/provider_store/provider_catalog.json /path/to/catalog-history
 python -m projects.provider_store.catalog_cli history /path/to/catalog-history
+python -m projects.provider_store.catalog_cli prune /path/to/catalog-history --keep 20
+python -m projects.provider_store.catalog_cli prune /path/to/catalog-history --keep 20 --apply
 python -m projects.provider_store.catalog_cli restore /path/to/catalog-history/catalog-TIMESTAMP.json projects/provider_store/provider_catalog.json
 ```
 
-The `apply` command is a dry run unless `--apply` is supplied. Removing providers additionally requires `--allow-removals`; the CLI never prints provider field values in a diff. Import and restore validate schema, use an interprocess lock, keep a backup by default, verify the written catalog, and attempt rollback on failure. Snapshots are immutable timestamped JSON files; history output contains filenames and provider counts only. Catalog export/import rejects embedded credential material. Review the diff and preserve a separate backup before any intentional destructive change.
+The `apply` command is a dry run unless `--apply` is supplied. Removing providers additionally requires `--allow-removals`; the CLI never prints provider field values in a diff. Import and restore validate schema, use an interprocess lock, keep a backup by default, verify the written catalog, and attempt rollback on failure. Snapshots are immutable timestamped JSON files; history output contains filenames and provider counts only. The `prune` command previews retention changes by default and only deletes old valid snapshots when `--apply` is explicit; invalid files and symlinks are skipped, and `--keep` must preserve at least one valid snapshot. Catalog export/import rejects embedded credential material. Review the diff and preserve a separate backup before any intentional destructive change.
 
 ## Release evidence and SBOM
 
