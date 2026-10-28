@@ -102,6 +102,71 @@ class RoutingSimulationTests(unittest.TestCase):
         )
         self.assertEqual(next_route["provider"], "fallback")
 
+    def test_paid_dry_run_does_not_reserve_cost_or_quota(self):
+        class CostStub:
+            def __init__(self):
+                self.reservations = []
+
+            def evaluate_request(self, provider, **kwargs):
+                return {"allowed": True, "billing_mode": "PAID_APPROVED"}
+
+            def reserve_usage(self, **kwargs):
+                self.reservations.append(kwargs)
+                return {"status": "RESERVED"}
+
+        cost = CostStub()
+        router = ProviderRoutingManager(
+            self.connections,
+            cost_policy=cost,
+            quota_manager=self.quota,
+        )
+        result = router.route(
+            category="image",
+            project_id="demo",
+            request_id="paid-preview",
+            estimated_cost=2.5,
+            paid_approved_providers={"primary"},
+            dry_run=True,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["status"], "ROUTE_SIMULATED")
+        self.assertEqual(result["billing_mode"], "PAID_APPROVED")
+        self.assertEqual(result["would_reserve"], ["cost", "quota"])
+        self.assertEqual(cost.reservations, [])
+        self.assertEqual(self.quota.calls, [])
+
+    def test_free_credit_dry_run_does_not_reserve_credits_or_quota(self):
+        class CreditStub:
+            def __init__(self):
+                self.reservations = []
+
+            def usable_free_credits(self, unit=None):
+                return {"primary": 5.0, "fallback": 5.0}
+
+            def reserve(self, **kwargs):
+                self.reservations.append(kwargs)
+                return {"status": "RESERVED"}
+
+        credits = CreditStub()
+        router = ProviderRoutingManager(
+            self.connections,
+            quota_manager=self.quota,
+            credit_manager=credits,
+        )
+        result = router.route(
+            category="image",
+            project_id="demo",
+            request_id="credit-preview",
+            estimated_cost=2.5,
+            dry_run=True,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["status"], "ROUTE_SIMULATED")
+        self.assertEqual(result["billing_mode"], "FREE_CREDITS")
+        self.assertEqual(result["would_reserve"], ["credits", "quota"])
+        self.assertEqual(credits.reservations, [])
+        self.assertEqual(self.quota.calls, [])
+
     def test_invalid_dry_run_flag_fails_closed(self):
         result = self.router.route(category="image", project_id="demo", dry_run="yes")
         self.assertFalse(result["allowed"])
