@@ -69,6 +69,27 @@ class CatalogCliTests(unittest.TestCase):
         self.assertTrue(Path(str(self.current) + ".bak").is_file())
         self.assertEqual(json.loads(self.current.read_text(encoding="utf-8"))["version"], self.catalog["version"])
 
+    def test_prune_command_is_preview_only_until_apply_is_explicit(self):
+        history = self.root / "history"
+        history.mkdir()
+        for day in range(1, 4):
+            (history / f"catalog-2026010{day}T000000000000Z.json").write_bytes(
+                self.current.read_bytes()
+            )
+        original = sorted(path.name for path in history.glob("catalog-*.json"))
+
+        code, preview = self.invoke("prune", history, "--keep", "1")
+        self.assertEqual(code, 0)
+        self.assertFalse(preview["applied"])
+        self.assertEqual(len(preview["would_delete"]), 2)
+        self.assertEqual(sorted(path.name for path in history.glob("catalog-*.json")), original)
+
+        code, applied = self.invoke("prune", history, "--keep", "1", "--apply")
+        self.assertEqual(code, 0)
+        self.assertTrue(applied["applied"])
+        self.assertEqual(len(applied["deleted"]), 2)
+        self.assertEqual(len(list(history.glob("catalog-*.json"))), 1)
+
     def test_export_command_creates_valid_catalog(self):
         destination = self.root / "exported" / "catalog.json"
         code, result = self.invoke("export", self.current, destination)
