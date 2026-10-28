@@ -79,8 +79,8 @@ Remaining work: Catalog/lifecycle foundations exist; individual acceptance cover
 
 Feature 012: Provider Adapter System
 Status: PARTIAL
-Implementation/evidence inspected: provider_adapter_registry.py; tests/test_provider_adapter_registry.py; provider_service.py; tests/test_provider_service.py
-Remaining work: Thread-safe runtime adapter registration, modality/model allowlists, disabled/unverified dispatch gates, reserved-option protection and sanitized adapter failure handling are implemented with deterministic contract tests. Vendor-specific generation adapters and authorized live API validation remain.
+Implementation/evidence inspected: provider_adapter_registry.py; tests/test_provider_adapter_registry.py; provider_service.py; tests/test_provider_service.py; CI #40720509533
+Remaining work: Thread-safe runtime adapter registration, modality/model allowlists, enabled+verified dispatch gates and a callable bridge into ProviderService routed execution are implemented. Adapter exceptions are marked outcome-unknown and indicate reservations must be retained. Python 3.10–3.12 compilation, unit/regression tests and wheel installation passed in CI #40720509533. Vendor-specific generation adapters and authorized live API validation remain.
 
 Feature 013: API Key Authentication
 Status: COMPLETED
