@@ -170,6 +170,34 @@ A successful result includes `"reproducible": true`, `"installed_import": true`,
 
 `ProviderOutageDetector` converts verified `ProviderHealthManager` evidence into deduplicated `ProviderIncidentManager` incidents for unhealthy or stale providers. Once fresh healthy evidence is recorded, it resolves matching open health incidents. No evidence, recovering state, slow response, or invalid health policy does not get mislabeled as a confirmed outage. Both components are tested with injected clocks and local state files; these tests do not claim live provider uptime.
 
+## Runtime generation adapter registry
+
+\`ProviderAdapterRegistry\` is the runtime binding layer for application-supplied provider generation callables. It does not invent vendor API implementations or claim live connectivity. Register an adapter only for a catalog provider; dispatch requires the provider to be enabled and its connection state to be verified.
+
+\`\`\`python
+from projects.provider_store.provider_adapter_registry import ProviderAdapterRegistry
+
+registry = ProviderAdapterRegistry(connection_manager)
+registry.register(
+    "image-provider",
+    vendor_adapter,
+    modalities=("image",),
+    model_ids=("image-model-v1",),
+)
+adapter = registry.as_callable("image-provider", modality="image", model_id="image-model-v1")
+result = provider_service.execute_routed_request(
+    category="image",
+    project_id="project-123",
+    request_id="request-123",
+    estimated_cost=0.0,
+    modality="image",
+    adapter=adapter,
+    output_path="generated.png",
+)
+\`\`\`
+
+The example assumes the application has already configured \`connection_manager\`, \`provider_service\`, and \`vendor_adapter\`; those names are application-owned. Registry checks and policy rejections return an explicit not-started result before calling the vendor adapter. Exceptions from a vendor adapter propagate to \`ProviderService\`, which conservatively retains reservations when the provider request may have started. Listing adapters exposes provider IDs and capability declarations, never callable objects or credentials. Unit tests use injected stubs and do not prove a real provider API is reachable.
+
 ## Structured provider events
 
 `ProviderStructuredLogger` emits JSON events from an injected standard-library `logging.Logger`. `ProviderService` accepts it as `structured_logger=...` and emits `provider.verify` / `provider.manual_verify` events with a bounded event/status code, outcome, provider ID, optional duration and safe error code. It does not log exception messages, endpoint URLs, request payloads, credentials or arbitrary dictionaries. A logging failure is deliberately non-fatal to provider verification. The current integration covers connection verification paths; it is not a replacement for full service-wide instrumentation or an external log collector.
