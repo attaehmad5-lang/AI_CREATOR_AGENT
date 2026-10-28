@@ -69,9 +69,9 @@ def build_parser() -> argparse.ArgumentParser:
     restore.add_argument("destination", type=Path)
 
     prune = subparsers.add_parser(
-    _add_audit_option(prune)
         "prune", help="preview old-snapshot retention; deletion requires --apply"
     )
+    _add_audit_option(prune)
     prune.add_argument("history_directory", type=Path)
     prune.add_argument("--keep", type=int, default=20)
     prune.add_argument("--apply", action="store_true", dest="apply_changes")
