@@ -23,6 +23,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.provider_adapter_registry import ProviderAdapterRegistry
 from projects.provider_store.provider_trace_manager import ProviderTraceManager
 from projects.provider_store.provider_structured_logger import ProviderStructuredLogger
 from projects.provider_store.quota_manager import ProviderQuotaManager
@@ -530,6 +531,44 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["output"]["valid"])
         self.assertTrue(result["finalization"]["finalized"])
         self.assertEqual(result["provider"], "image")
+
+    def test_routed_execution_dispatches_through_verified_adapter_registry(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        registry = ProviderAdapterRegistry(self.connections)
+        calls = []
+
+        def adapter(**kwargs):
+            calls.append(kwargs)
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": kwargs["output_path"],
+            }
+
+        self.assertTrue(registry.register("image", adapter, modalities=("image",))["registered"])
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            health_manager=self.health,
+            output_validator=self.validator,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+        )
+        output_path = self.root / "registry-dispatch.png"
+        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="registry-dispatch",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=registry.as_callable("image", modality="image"),
+            modality="image",
+            adapter_options={"output_path": str(output_path)},
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["provider_id"], "image")
+        self.assertEqual(calls[0]["request_id"], "registry-dispatch")
+        self.assertTrue(result["finalization"]["finalized"])
 
     def test_routed_execution_emits_secret_safe_log_and_trace_span(self):
         router = ProviderRoutingManager(
