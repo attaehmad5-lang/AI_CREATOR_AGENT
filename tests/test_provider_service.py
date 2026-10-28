@@ -606,6 +606,52 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(calls[0]["request_id"], "registry-dispatch")
         self.assertTrue(result["finalization"]["finalized"])
 
+    def test_routed_model_selection_reaches_registry_adapter(self):
+        catalog = self.root / "model-routed-catalog.json"
+        state = self.root / "model-routed-state.json"
+        catalog.write_text(json.dumps({"providers": [{
+            "id": "image", "name": "Image", "category": "image",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "zero_cost_allowed": True,
+            "supported_models": [{"id": "image-v1", "versions": ["1"]}],
+        }]}), encoding="utf-8")
+        state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        manager = ConnectionManager(catalog, state)
+        self.assertTrue(manager.verify_connectivity(
+            "image", lambda provider, **kwargs: {"ok": True}
+        )["verified"])
+        cost = ProviderCostPolicy(self.root / "model-routed-cost.json", project_budgets={"film": 10.0})
+        quota = ProviderQuotaManager(self.root / "model-routed-quota.json", limits={"image": {"daily": 10}})
+        router = ProviderRoutingManager(manager, cost_policy=cost, quota_manager=quota)
+        registry = ProviderAdapterRegistry(manager)
+        calls = []
+
+        def adapter(**kwargs):
+            calls.append(kwargs)
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": kwargs["output_path"],
+            }
+
+        self.assertTrue(registry.register(
+            "image", adapter, modalities=("image",), model_ids=("image-v1",)
+        )["registered"])
+        service = ProviderService(
+            manager, routing_manager=router, health_manager=ProviderHealthManager(self.root / "model-routed-health.json"),
+            output_validator=self.validator, cost_policy=cost, quota_manager=quota,
+        )
+        output_path = self.root / "model-routed.png"
+        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="model-routed",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=registry.as_callable("image", modality="image"),
+            modality="image", model="image-v1", model_version="1",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(calls[0]["model_id"], "image-v1")
+        self.assertEqual(calls[0]["provider_id"], "image")
+
     def test_routed_execution_emits_secret_safe_log_and_trace_span(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
