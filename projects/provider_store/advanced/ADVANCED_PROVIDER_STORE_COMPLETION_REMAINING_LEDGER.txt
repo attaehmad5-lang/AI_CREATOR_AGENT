@@ -53,8 +53,8 @@ Remaining work: Enable/disable state, unload-on-disable, candidate catalog valid
 
 Feature 007: Provider Metadata Management
 Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py
-Remaining work: Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain.
+Implementation/evidence inspected: connection_manager.py:update_provider_metadata; tests/test_provider_metadata_update.py; tests/test_provider_store_compat.py
+Remaining work: Atomic schema-validated descriptive metadata updates are implemented with tests for persistence, invalid/control-character values, unknown providers and injected write failure. Cross-platform CI verification pending; vendor adapter completeness remains separate.
 
 Feature 008: Provider Interface Contracts
 Status: COMPLETED
