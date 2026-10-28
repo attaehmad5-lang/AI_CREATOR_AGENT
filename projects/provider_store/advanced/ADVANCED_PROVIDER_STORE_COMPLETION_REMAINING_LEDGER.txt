@@ -509,8 +509,8 @@ Remaining work: Expired worker leases are detected, requeued, and bounded by con
 
 Feature 098: Audit Logging
 Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
-Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+Implementation/evidence inspected: provider_audit_log.py; tests/test_provider_audit_log.py; provider_service.py; tests/test_provider_service.py; interprocess_lock.py; CI #40722792917
+Remaining work: An allowlisted append-only JSONL audit log uses SHA-256 hash chaining, interprocess locking, a size limit, and fail-closed handling for tampering/truncation/symlinks. Provider verification and routed execution are integrated; Ubuntu/Windows CI passed tests, lint, focused type/coverage gates, and artifact generation. Catalog/config mutations across every manager and external audit shipping remain.
 
 Feature 099: CLI Management
 Status: COMPLETED
