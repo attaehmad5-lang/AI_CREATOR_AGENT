@@ -145,6 +145,27 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
             risky(provider_id="test-image", request_id="req-ambiguous")
         # The callable does not misrepresent an exception as a safe no-start outcome.
 
+    def test_service_callable_uses_routed_model_and_enforces_allowlist(self):
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        self.registry.register(
+            "test-image", self.adapter, modalities=("image",), model_ids=("image-v1",)
+        )
+        dispatch = self.registry.as_callable("test-image", modality="image")
+        accepted = dispatch(
+            provider_id="test-image", request_id="req-model-ok", model_id="image-v1"
+        )
+        self.assertTrue(accepted["started"])
+        self.assertEqual(self.calls[0]["model_id"], "image-v1")
+
+        rejected = dispatch(
+            provider_id="test-image", request_id="req-model-denied", model_id="not-allowed"
+        )
+        self.assertFalse(rejected["started"])
+        self.assertEqual(rejected["error_code"], "MODEL_UNSUPPORTED")
+        self.assertEqual(len(self.calls), 1)
+
     def test_registration_validation_listing_and_unregistration(self):
         self.assertEqual(
             self.registry.register("missing", self.adapter, modalities=("image",))["status"],
