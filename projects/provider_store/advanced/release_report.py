@@ -101,6 +101,22 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+_SECRET_PATTERNS = (
+    ("GitHub access token", re.compile(rb"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
+    ("OpenAI-style API key", re.compile(rb"\bsk-[A-Za-z0-9_-]{24,}\b")),
+    ("AWS access key ID", re.compile(rb"\bAKIA[0-9A-Z]{16}\b")),
+    ("Slack access token", re.compile(rb"\bxox[baprs]-[A-Za-z0-9-]{20,}\b")),
+    ("private-key block", re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+)
+
+
+def _scan_release_payload(relative: str, data: bytes) -> None:
+    """Reject high-confidence credential material before any source enters a release."""
+    for label, pattern in _SECRET_PATTERNS:
+        if pattern.search(data):
+            raise ValueError(f"{label} detected in eligible source file: {relative}")
+
+
 def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) -> dict[str, Any]:
     """Write JSON/Markdown evidence, source manifest, and a source-only ZIP."""
     root = (repo_root or _repo_root()).resolve()
@@ -114,13 +130,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
     for path in files:
         relative = path.relative_to(root).as_posix()
         data = path.read_bytes()
-        # Fail closed on private-key material; don't copy it into a release archive.
-        private_key_markers = (
-            b"-----BEGIN " + b"PRIVATE KEY-----",
-            b"-----BEGIN " + b"RSA PRIVATE KEY-----",
-        )
-        if any(marker in data for marker in private_key_markers):
-            raise ValueError(f"private-key material detected in eligible source file: {relative}")
+        _scan_release_payload(relative, data)
         manifest_entries.append({"path": relative, "size_bytes": len(data), "sha256": _sha256(data)})
         payloads.append((relative, data))
 
