@@ -17,6 +17,10 @@ class GenerateApiReferenceTests(unittest.TestCase):
                 '    return str(value)\n'
                 'def _private_call():\n'
                 '    pass\n'
+                'async def async_public(value):\n'
+                '    return value\n'
+                'class Undocumented:\n'
+                '    pass\n'
                 'class PublicManager:\n'
                 '    """Manage a sample."""\n'
                 '    def execute(self, enabled: bool=True) -> None:\n'
@@ -29,6 +33,8 @@ class GenerateApiReferenceTests(unittest.TestCase):
             second = render_api_reference(root)
             self.assertEqual(first, second)
             self.assertIn("public_call(value: int) -> str", first)
+            self.assertIn("async def async_public(value)", first)
+            self.assertIn("class Undocumented", first)
             self.assertIn("class PublicManager", first)
             self.assertIn("execute(self, enabled: bool = True) -> None", first)
             self.assertNotIn("_private_call", first)
@@ -44,6 +50,19 @@ class GenerateApiReferenceTests(unittest.TestCase):
             self.assertEqual(main(["--package-root", str(root), "--output", str(output), "--check"]), 0)
             output.write_text("stale", encoding="utf-8")
             self.assertEqual(main(["--package-root", str(root), "--output", str(output), "--check"]), 1)
+
+    def test_invalid_python_source_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "provider_store"
+            root.mkdir()
+            (root / "broken.py").write_text("def broken(:\\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "cannot parse"):
+                render_api_reference(root)
+
+    def test_main_returns_error_for_missing_package_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "missing"
+            self.assertEqual(main(["--package-root", str(missing)]), 2)
 
     def test_missing_package_root_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
