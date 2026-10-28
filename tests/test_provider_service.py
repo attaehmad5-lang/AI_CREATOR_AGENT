@@ -647,6 +647,7 @@ class ProviderServiceTests(unittest.TestCase):
             estimated_cost=0.0, output_path=str(output_path),
             adapter=registry.as_callable("image", modality="image"),
             modality="image", model="image-v1", model_version="1",
+            adapter_options={"output_path": str(output_path)},
         )
         self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
         self.assertEqual(calls[0]["model_id"], "image-v1")
