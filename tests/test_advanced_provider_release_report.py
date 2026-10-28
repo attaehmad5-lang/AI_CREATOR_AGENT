@@ -5,7 +5,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from projects.provider_store.advanced.release_report import build_release_report, read_ledger, write_release_artifacts
+from projects.provider_store.advanced.release_report import build_release_report, main, read_ledger, write_release_artifacts
 
 
 def _ledger_text(count=150):
@@ -42,6 +42,34 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             ledger.write_text(_ledger_text().replace("| 150 | Feature 150", "| 149 | Feature 150"), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "each point ID"):
                 read_ledger(ledger)
+
+    def test_require_complete_cli_blocks_incomplete_release(self):
+        from unittest.mock import patch
+
+        incomplete = {
+            "completion_status": "INCOMPLETE",
+            "zip_integrity": "PASS",
+            "points_completed": 88,
+            "points_total": 150,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("projects.provider_store.advanced.release_report.write_release_artifacts", return_value=incomplete):
+                with patch("sys.argv", ["release_report", "--output-dir", tmp, "--require-complete"]):
+                    self.assertEqual(main(), 2)
+
+    def test_incomplete_report_remains_valid_without_release_gate_flag(self):
+        from unittest.mock import patch
+
+        incomplete = {
+            "completion_status": "INCOMPLETE",
+            "zip_integrity": "PASS",
+            "points_completed": 88,
+            "points_total": 150,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("projects.provider_store.advanced.release_report.write_release_artifacts", return_value=incomplete):
+                with patch("sys.argv", ["release_report", "--output-dir", tmp]):
+                    self.assertEqual(main(), 0)
 
     def test_source_package_fails_closed_on_private_key_material(self):
         with tempfile.TemporaryDirectory() as tmp:
