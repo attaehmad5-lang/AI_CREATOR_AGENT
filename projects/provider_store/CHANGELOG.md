@@ -14,7 +14,7 @@ Changes are recorded here by release intent. This file does not imply a publishe
 - Bounded poll-driven health scheduler with injected probes and explicit timeout propagation.
 - Outage detector that opens/deduplicates incidents for unhealthy or stale health evidence and resolves them after verified recovery.
 - Secret-safe structured JSON event logging integrated into provider connection and manual verification paths.
-- Pre-package secret scanning for high-confidence GitHub, OpenAI-style, AWS and Slack token patterns, in addition to private-key blocks.
+- Pre-package secret scanning for high-confidence GitHub, OpenAI-style/Anthropic, Google, Hugging Face, Replicate, AWS and Slack token patterns, in addition to private-key blocks.
 - Strict `--require-complete` release-report mode and a manual/tag-triggered Advanced Provider Store release gate that blocks artifact upload until all 150 acceptance points pass.
 
 ### Fixed
