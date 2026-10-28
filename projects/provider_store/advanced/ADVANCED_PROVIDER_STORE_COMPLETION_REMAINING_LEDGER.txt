@@ -13,6 +13,7 @@ BLOCKED = cannot proceed; exact reason must be recorded.
 VERIFICATION FACTS
 - Repository: attaehmad5-lang/AI_CREATOR_AGENT
 - Advanced catalog: 18 entries; canonical catalog: 54 entries; field-by-field metadata and category-capability consistency tests pass.
+- Latest verified feature test run #40720509533 passed 539 unit/regression tests on Ubuntu with Python 3.10, 3.11 and 3.12, including model catalog discovery, safe metadata updates and retry-budget tests.
 - Latest verified feature test run #40720073343 passed 536 unit/regression tests on Ubuntu/Python 3.10, 3.11 and 3.12. The last verified cross-platform run #40708674436 passed compilation, catalog JSON validation, all 501 unit/regression tests, Ruff lint/format gates, focused mypy checks, 83% focused source coverage, structured logging, health scheduling/outage recovery tests, reproducible isolated wheel builds, clean-target installation, package-data import, and source ZIP/SBOM generation. High-entropy credential-field leak-injection tests passed on Ubuntu and Windows; the source-derived API-reference generator and deterministic fuzz regressions were added afterward and are awaiting CI verification.
 - Passing evidence includes advanced capability/lifecycle/readiness tests, invalid category-catalog rejection, incident lifecycle, HMAC webhook/replay, provider authorization, OAuth/API-key safeguards, routing/quotas/budgets, media integrity, trace-context primitives, ledger/report validation, private-key fail-closed checks, clean ZIP extraction, per-file hashes and ZIP checksum sidecar verification.
 - CI generated and uploaded Linux and Windows report/package artifacts (source ZIP, JSON/Markdown/PDF report, source manifest, SPDX 2.3 source-file SBOM and ZIP checksum sidecar); PDF/SBOM rendering and ZIP inclusion are covered by focused tests. The report correctly stays INCOMPLETE until all 150 points are completed.
@@ -183,8 +184,8 @@ Remaining work: Bounded exponential backoff, Retry-After, transient-only retry, 
 
 Feature 033: Retry Budget Management
 Status: PARTIAL
-Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Implementation/evidence inspected: retry_policy.py:RetryPolicy, RetryBudget; tests/test_retry_policy.py; routing_manager.py; CI #40720509533
+Remaining work: A thread-safe token-bucket retry budget now supports bounded capacity/refill, validated costs, capped refunds, deterministic clock injection and retry-decision gating. Refill/exhaustion, invalid inputs and concurrent consumption passed within 539 tests on Python 3.10/3.11/3.12. End-to-end integration into every modality and production workload tuning remain.
 
 Feature 034: Rate Limit Handling
 Status: COMPLETED
