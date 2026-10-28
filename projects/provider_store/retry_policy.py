@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import random
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -226,3 +227,118 @@ class CircuitBreaker:
                 self.opened_at = self.clock()
             self._half_open_probe_in_flight = False
             return self._state_unlocked()
+
+
+class RetryBudget:
+    """Thread-safe token budget that caps retry volume without sleeping or making requests.
+
+    One instance represents one budget scope (for example, one provider or one process).
+    Callers should consume only after RetryPolicy has classified a failure as retryable.
+    """
+
+    def __init__(
+        self,
+        *,
+        capacity: float = 10.0,
+        refill_rate_per_second: float = 1.0,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        checked_capacity = finite_number(capacity, minimum=0)
+        checked_rate = finite_number(refill_rate_per_second, minimum=0)
+        if checked_capacity is None or checked_capacity <= 0:
+            raise ValueError("capacity must be a finite positive number")
+        if checked_rate is None:
+            raise ValueError("refill_rate_per_second must be a finite non-negative number")
+        if clock is not None and not callable(clock):
+            raise ValueError("clock must be callable")
+        self.capacity = checked_capacity
+        self.refill_rate_per_second = checked_rate
+        self.clock = clock or time.monotonic
+        now = self._read_clock()
+        self._tokens = self.capacity
+        self._last_refill = now
+        self._lock = threading.Lock()
+
+    def _read_clock(self) -> float:
+        try:
+            value = self.clock()
+        except Exception as exc:
+            raise ValueError("retry budget clock failed") from exc
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+        ):
+            raise ValueError("retry budget clock must return a finite number")
+        return float(value)
+
+    def _refill_locked(self) -> None:
+        now = self._read_clock()
+        if now <= self._last_refill:
+            return
+        elapsed = now - self._last_refill
+        self._tokens = min(
+            self.capacity,
+            self._tokens + elapsed * self.refill_rate_per_second,
+        )
+        self._last_refill = now
+
+    def snapshot(self) -> dict[str, float]:
+        with self._lock:
+            self._refill_locked()
+            return {
+                "capacity": self.capacity,
+                "available": self._tokens,
+                "refill_rate_per_second": self.refill_rate_per_second,
+            }
+
+    def consume(self, cost: float = 1.0) -> dict[str, Any]:
+        checked_cost = finite_number(cost, minimum=0)
+        if checked_cost is None or checked_cost <= 0 or checked_cost > self.capacity:
+            return {
+                "allowed": False,
+                "status": "INVALID_RETRY_BUDGET_COST",
+                "retry_after_seconds": None,
+            }
+        with self._lock:
+            self._refill_locked()
+            if self._tokens >= checked_cost:
+                self._tokens -= checked_cost
+                return {
+                    "allowed": True,
+                    "status": "RETRY_BUDGET_GRANTED",
+                    "remaining": self._tokens,
+                    "retry_after_seconds": 0.0,
+                }
+            deficit = checked_cost - self._tokens
+            retry_after = (
+                deficit / self.refill_rate_per_second
+                if self.refill_rate_per_second > 0
+                else None
+            )
+            return {
+                "allowed": False,
+                "status": "RETRY_BUDGET_EXHAUSTED",
+                "remaining": self._tokens,
+                "retry_after_seconds": retry_after,
+            }
+
+    def refund(self, cost: float = 1.0) -> dict[str, Any]:
+        checked_cost = finite_number(cost, minimum=0)
+        if checked_cost is None or checked_cost <= 0:
+            return {"refunded": False, "status": "INVALID_RETRY_BUDGET_COST"}
+        with self._lock:
+            self._refill_locked()
+            self._tokens = min(self.capacity, self._tokens + checked_cost)
+            return {
+                "refunded": True,
+                "status": "RETRY_BUDGET_REFUNDED",
+                "remaining": self._tokens,
+            }
+
+    def consume_decision(self, decision: RetryDecision) -> dict[str, Any]:
+        if not isinstance(decision, RetryDecision):
+            return {"allowed": False, "status": "INVALID_RETRY_DECISION"}
+        if not decision.retry:
+            return {"allowed": False, "status": "RETRY_NOT_RECOMMENDED"}
+        return self.consume()
