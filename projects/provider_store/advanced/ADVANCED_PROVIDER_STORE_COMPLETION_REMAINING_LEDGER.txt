@@ -669,7 +669,7 @@ Remaining work: Cross-platform tests/build/report artifacts run in CI. A dedicat
 Feature 130: Automated Release Gates
 Status: PARTIAL
 Implementation/evidence inspected: .github/workflows/advanced-provider-store-release-gate.yml; advanced/release_report.py; tests/test_advanced_provider_release_report.py
-Remaining work: --require-complete returns exit code 2 unless every acceptance point is COMPLETED. The manual/tag workflow runs compile/catalog/regression gates and blocks artifact upload for incomplete ledgers; release execution remains blocked until criteria pass.
+Remaining work: --require-complete returns exit code 2 unless every acceptance point is COMPLETED. Strict-versus-normal report behavior passed tests in cross-platform CI #40704591050. The manual/tag workflow runs compile/catalog/regression gates and blocks artifact upload for incomplete ledgers; release execution remains blocked until criteria pass.
 
 Feature 131: Release Asset Management
 Status: PARTIAL
@@ -744,7 +744,7 @@ Remaining work: Per-file SHA-256 manifest is generated, archive membership is ch
 Feature 145: Secret-Free Package Verification
 Status: PARTIAL
 Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; PROVIDER_MANAGER_GUIDE.md
-Remaining work: Allowlist plus pre-package scanning rejects private-key blocks and high-confidence GitHub, OpenAI-style, AWS and Slack token patterns. Leak-injection tests/latest cross-platform CI are pending; broader entropy scanning and final ZIP audit remain.
+Remaining work: Allowlist plus pre-package scanning rejects private-key blocks and high-confidence GitHub, OpenAI-style, AWS and Slack token patterns. Focused leak-injection tests passed in cross-platform CI #40704591050; broader entropy scanning and final release ZIP audit remain.
 
 Feature 146: Backward Compatibility
 Status: PARTIAL
