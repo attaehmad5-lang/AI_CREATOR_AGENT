@@ -528,9 +528,8 @@ Remaining work: Catalog apply is dry-run by default and tested; other manager wo
 
 Feature 102: Routing Policy Simulation
 Status: PARTIAL
-Implementation/evidence inspected: routing_manager.py; catalog_diff.py; catalog_cli.py; tests/test_catalog_cli.py
-Remaining work: Catalog diff/apply simulation is dry-run-first; full routing-policy simulation across quotas, budgets, health and fallback combinations remains.
-
+Implementation/evidence inspected: routing_manager.py; tests/test_routing_simulation.py; PROVIDER_STORE_API_REFERENCE.md
+Remaining work: route(dry_run=True) returns ROUTE_SIMULATED with selected provider, policy decisions, estimated cost and would_reserve fields. Tests verify no quota mutation, no round-robin cursor advance, and no paid-cost or free-credit reservation. A complete policy-matrix report covering quota/budget/health/fallback combinations remains.
 Feature 103: Provider Benchmarking
 Status: COMPLETED
 Implementation/evidence inspected: provider_benchmark_manager.py; tests/test_provider_benchmark_manager.py; CI #40560954116
