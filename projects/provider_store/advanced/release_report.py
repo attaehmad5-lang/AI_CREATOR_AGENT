@@ -133,7 +133,7 @@ def _scan_release_payload(relative: str, data: bytes) -> None:
     """Reject known token formats and high-entropy values assigned to credential fields."""
     for label, pattern in _SECRET_PATTERNS:
         if pattern.search(data):
-            raise ValueError(f"{label} detected in eligible source file: {relative}")
+            raise ValueError(f"{label} detected in release payload: {relative}")
     for match in _CREDENTIAL_ASSIGNMENT.finditer(data):
         candidate = match.group(1).rstrip(b"\"';,)")
         if len(candidate) >= 32 and _shannon_entropy(candidate) >= 3.7:
