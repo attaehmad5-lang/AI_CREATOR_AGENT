@@ -115,8 +115,13 @@ class ProviderAdapterRegistry:
         if entry["model_ids"] is not None and model_id not in entry["model_ids"]:
             return {"status": "MODEL_UNSUPPORTED", "resolved": False}
         catalog_models = provider.get("supported_models")
-        if model_id is not None and isinstance(catalog_models, list) and catalog_models and model_id not in catalog_models:
-            return {"status": "MODEL_NOT_IN_CATALOG", "resolved": False}
+        if model_id is not None and isinstance(catalog_models, list) and catalog_models:
+            catalog_model_ids = {
+                item.get("id") for item in catalog_models
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            }
+            if model_id not in catalog_model_ids:
+                return {"status": "MODEL_NOT_IN_CATALOG", "resolved": False}
         return {"status": "ADAPTER_RESOLVED", "resolved": True, "adapter": entry["adapter"], "provider_id": provider_id}
 
     def execute(
