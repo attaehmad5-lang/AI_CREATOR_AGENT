@@ -166,16 +166,10 @@ class CatalogInterchangeTests(unittest.TestCase):
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
 
-        listed = __import__(
-            "projects.provider_store.catalog_interchange",
-            fromlist=["list_catalog_snapshots"],
-        ).list_catalog_snapshots(history)
+        listed = list_catalog_snapshots(history)
         self.assertEqual(listed["snapshots"], [])
         with self.assertRaisesRegex(ValueError, "snapshot must be an existing"):
-            __import__(
-                "projects.provider_store.catalog_interchange",
-                fromlist=["restore_catalog_snapshot"],
-            ).restore_catalog_snapshot(link, self.root / "destination.json")
+            restore_catalog_snapshot(link, self.root / "destination.json")
 
     def test_snapshot_creation_rejects_symlinked_history_directory(self):
         real_history = self.root / "real-history"
@@ -185,8 +179,6 @@ class CatalogInterchangeTests(unittest.TestCase):
             linked_history.symlink_to(real_history, target_is_directory=True)
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
-        from projects.provider_store.catalog_interchange import create_catalog_snapshot
-
         with self.assertRaisesRegex(ValueError, "history directory must not be a symlink"):
             create_catalog_snapshot(self.source, linked_history)
 
