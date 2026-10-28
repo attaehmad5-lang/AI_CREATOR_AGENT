@@ -587,8 +587,8 @@ Remaining work: Unit/regression/security/concurrency tests exist; not all integr
 
 Feature 114: Fuzz Testing
 Status: PARTIAL
-Implementation/evidence inspected: tests/test_provider_store_fuzz_regressions.py; connection_manager.py; provider_trace_manager.py; .github/workflows/task-25-tests.yml
-Remaining work: Deterministic seeded fuzz-regression tests exercise 500 JSON-like provider catalog candidates and 1,000 arbitrary traceparent strings, requiring safe results without exceptions. Broader parser/property-based and live/network failure fuzzing remain.
+Implementation/evidence inspected: tests/test_provider_store_fuzz_regressions.py; connection_manager.py; provider_trace_manager.py; CI #40712713627
+Remaining work: Deterministic seeded fuzz-regression coverage for 500 JSON-like provider catalog candidates and 1,000 arbitrary traceparent strings passed on Ubuntu and Windows in CI #40712713627. Broader parser/property-based fuzzing and live/network failure fuzzing remain.
 Feature 115: Performance Testing
 Status: PARTIAL
 Implementation/evidence inspected: advanced/performance_benchmark.py; tests/test_provider_store_performance_benchmark.py; .github/workflows/task-25-tests.yml
@@ -689,9 +689,9 @@ Status: COMPLETED
 Implementation/evidence inspected: projects/provider_store/CHANGELOG.md
 Remaining work: Versioned Unreleased entry documents implemented catalog, health, release, security and quality-gate changes without implying a published release.
 Feature 135: API Documentation
-Status: PARTIAL
-Implementation/evidence inspected: projects/provider_store/PROVIDER_STORE_API_REFERENCE.md; projects/provider_store/generate_api_reference.py; tests/test_generate_provider_store_api_reference.py; provider-store CI/release workflows
-Remaining work: Operational API/CLI reference is written. Deterministic AST-based API generator and tests are added; CI generates a source-derived API index into the release bundle. Await cross-platform CI verification before closing this point.
+Status: COMPLETED
+Implementation/evidence inspected: PROVIDER_STORE_API_REFERENCE.md; generate_api_reference.py; tests/test_generate_provider_store_api_reference.py; CI #40712713627
+Remaining work: Operational API/CLI reference plus deterministic AST-based public declaration/docstring index are generated and packaged in CI. Generator determinism, stale-reference detection, malformed-source handling and API symbol filtering passed cross-platform CI.
 Feature 136: Architecture Documentation
 Status: COMPLETED
 Implementation/evidence inspected: projects/provider_store/PROVIDER_STORE_ARCHITECTURE.md; projects/provider_store/PROVIDER_MANAGER_GUIDE.md
@@ -734,8 +734,8 @@ Remaining work: Per-file SHA-256 manifest is generated, archive membership is ch
 
 Feature 145: Secret-Free Package Verification
 Status: PARTIAL
-Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; PROVIDER_MANAGER_GUIDE.md
-Remaining work: Explicit allowlist, known token/private-key patterns and Shannon-entropy screening for long credential-field assignments fail closed without printing secret values. Leak-injection tests cover common provider token formats and generic high-entropy api_key values. Final generated release ZIP audit and broader heuristic validation remain.
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; PROVIDER_MANAGER_GUIDE.md; CI #40712713627
+Remaining work: Explicit allowlist, known-token/private-key patterns and Shannon-entropy screening for long values assigned to credential-like fields fail closed without printing values. Provider-token and generic high-entropy api_key leak-injection tests passed cross-platform in CI #40712713627. Final generated release ZIP audit and broader heuristic validation remain.
 Feature 146: Backward Compatibility
 Status: PARTIAL
 Implementation/evidence inspected: provider_store modules; test_provider_store_compat.py; regression tests
