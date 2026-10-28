@@ -51,8 +51,18 @@ def _contains_credential_material(value: Any) -> bool:
     if isinstance(value, dict):
         for key, child in value.items():
             normalized = "".join(char for char in str(key).casefold() if char.isalnum())
-            if normalized in _FORBIDDEN_CREDENTIAL_KEYS or normalized.endswith(
-                _CREDENTIAL_KEY_SUFFIXES
+            env_reference = (
+                normalized.endswith("env")
+                and isinstance(child, str)
+                and child.isidentifier()
+                and child.isupper()
+            )
+            if not env_reference and (
+                normalized in _FORBIDDEN_CREDENTIAL_KEYS
+                or normalized.startswith(
+                    ("privatekey", "secret", "password", "credential", "authorization", "bearer")
+                )
+                or normalized.endswith(_CREDENTIAL_KEY_SUFFIXES)
             ):
                 return True
             if _contains_credential_material(child):
