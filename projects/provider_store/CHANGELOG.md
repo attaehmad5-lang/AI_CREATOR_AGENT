@@ -16,6 +16,7 @@ Changes are recorded here by release intent. This file does not imply a publishe
 - Secret-safe structured JSON event logging integrated into provider connection and manual verification paths.
 - Pre-package secret scanning for high-confidence GitHub, OpenAI-style/Anthropic, Google, Hugging Face, Replicate, AWS and Slack token patterns, in addition to private-key blocks.
 - Strict `--require-complete` release-report mode and a manual/tag-triggered Advanced Provider Store release gate that blocks artifact upload until all 150 acceptance points pass.
+- Dry-run-first catalog snapshot retention with explicit `--apply` deletion, validated snapshot filtering, symlink skipping, and retention-bound validation.
 
 ### Fixed
 - Preserve original configuration bytes and temporary-file cleanup when config migration replacement fails.
