@@ -106,6 +106,22 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "detected in eligible source file"):
                     write_release_artifacts(root / "build", repo_root=root)
 
+    def test_source_package_fails_closed_on_high_entropy_credential_assignment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            provider_root = root / "projects" / "provider_store"
+            advanced = provider_root / "advanced"
+            advanced.mkdir(parents=True)
+            (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(
+                _ledger_text(), encoding="utf-8"
+            )
+            random_value = "Q7mN2xV9pL4kR8tY3wA6cD1fH5jK0sB7"
+            (provider_root / "unsafe_config.py").write_text(
+                f'api_key = "{random_value}"\\n', encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ValueError, "high-entropy credential-like value"):
+                write_release_artifacts(root / "build", repo_root=root)
+
     def test_source_zip_has_manifest_hashes_and_excludes_runtime_secret_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
