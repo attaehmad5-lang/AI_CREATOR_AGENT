@@ -13,7 +13,7 @@ BLOCKED = cannot proceed; exact reason must be recorded.
 VERIFICATION FACTS
 - Repository: attaehmad5-lang/AI_CREATOR_AGENT
 - Advanced catalog: 18 entries; canonical catalog: 54 entries; field-by-field metadata and category-capability consistency tests pass.
-- Latest verified cross-platform run #40708674436 passed compilation, catalog JSON validation, all 501 unit/regression tests, Ruff lint/format gates, focused mypy checks, 83% focused source coverage, structured logging, health scheduling/outage recovery tests, reproducible isolated wheel builds, clean-target installation, package-data import, and source ZIP/SBOM generation. High-entropy credential-field leak-injection tests passed on Ubuntu and Windows; the source-derived API-reference generator and deterministic fuzz regressions were added afterward and are awaiting CI verification.
+- Latest verified feature test run #40720073343 passed 536 unit/regression tests on Ubuntu/Python 3.10, 3.11 and 3.12. The last verified cross-platform run #40708674436 passed compilation, catalog JSON validation, all 501 unit/regression tests, Ruff lint/format gates, focused mypy checks, 83% focused source coverage, structured logging, health scheduling/outage recovery tests, reproducible isolated wheel builds, clean-target installation, package-data import, and source ZIP/SBOM generation. High-entropy credential-field leak-injection tests passed on Ubuntu and Windows; the source-derived API-reference generator and deterministic fuzz regressions were added afterward and are awaiting CI verification.
 - Passing evidence includes advanced capability/lifecycle/readiness tests, invalid category-catalog rejection, incident lifecycle, HMAC webhook/replay, provider authorization, OAuth/API-key safeguards, routing/quotas/budgets, media integrity, trace-context primitives, ledger/report validation, private-key fail-closed checks, clean ZIP extraction, per-file hashes and ZIP checksum sidecar verification.
 - CI generated and uploaded Linux and Windows report/package artifacts (source ZIP, JSON/Markdown/PDF report, source manifest, SPDX 2.3 source-file SBOM and ZIP checksum sidecar); PDF/SBOM rendering and ZIP inclusion are covered by focused tests. The report correctly stays INCOMPLETE until all 150 points are completed.
 - No provider credentials were supplied or used. No live generation, credit balance, or billing test is claimed.
@@ -53,8 +53,8 @@ Remaining work: Enable/disable state, unload-on-disable, candidate catalog valid
 
 Feature 007: Provider Metadata Management
 Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py:update_provider_metadata; tests/test_provider_metadata_update.py; tests/test_provider_store_compat.py
-Remaining work: Atomic schema-validated descriptive metadata updates are implemented with tests for persistence, invalid/control-character values, unknown providers and injected write failure. Cross-platform CI verification pending; vendor adapter completeness remains separate.
+Implementation/evidence inspected: connection_manager.py:update_provider_metadata; tests/test_provider_metadata_update.py; tests/test_provider_store_compat.py; CI #40720073343
+Remaining work: Atomic schema-validated descriptive metadata updates reject identity/capability/credential edits and unsafe URLs. Persistence, invalid tags/control characters, URL validation, unknown-provider and injected-write-failure tests passed as part of 536 tests on Python 3.10, 3.11 and 3.12. Vendor adapter completeness remains separate.
 
 Feature 008: Provider Interface Contracts
 Status: COMPLETED
@@ -63,8 +63,8 @@ Remaining work: Modality callable contracts and load-time contract rejection are
 
 Feature 009: Model Catalog Management
 Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py
-Remaining work: Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain.
+Implementation/evidence inspected: model_catalog.py; tests/test_model_catalog.py; connection_manager.py; CI #40720073343
+Remaining work: Deterministic exact-match discovery, provider/capability filters, disabled-provider opt-in, stable sorting and credential-bearing/malformed record exclusion passed within the 536-test Python 3.10/3.11/3.12 run. Catalog results are not live availability; vendor-specific runtime adapters remain incomplete.
 
 Feature 010: Capability Management
 Status: COMPLETED
