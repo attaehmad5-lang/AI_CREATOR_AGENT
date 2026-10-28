@@ -172,9 +172,9 @@ A successful result includes `"reproducible": true`, `"installed_import": true`,
 
 ## Runtime generation adapter registry
 
-\`ProviderAdapterRegistry\` is the runtime binding layer for application-supplied provider generation callables. It does not invent vendor API implementations or claim live connectivity. Register an adapter only for a catalog provider; dispatch requires the provider to be enabled and its connection state to be verified.
+`ProviderAdapterRegistry` is the runtime binding layer for application-supplied provider generation callables. It does not invent vendor API implementations or claim live connectivity. Register an adapter only for a catalog provider; dispatch requires the provider to be enabled and its connection state to be verified.
 
-\`\`\`python
+```python
 from projects.provider_store.provider_adapter_registry import ProviderAdapterRegistry
 
 registry = ProviderAdapterRegistry(connection_manager)
@@ -194,9 +194,9 @@ result = provider_service.execute_routed_request(
     adapter=adapter,
     output_path="generated.png",
 )
-\`\`\`
+```
 
-The example assumes the application has already configured \`connection_manager\`, \`provider_service\`, and \`vendor_adapter\`; those names are application-owned. Registry checks and policy rejections return an explicit not-started result before calling the vendor adapter. Exceptions from a vendor adapter propagate to \`ProviderService\`, which conservatively retains reservations when the provider request may have started. Listing adapters exposes provider IDs and capability declarations, never callable objects or credentials. Unit tests use injected stubs and do not prove a real provider API is reachable.
+The example assumes the application has already configured `connection_manager`, `provider_service`, and `vendor_adapter`; those names are application-owned. Registry checks and policy rejections return an explicit not-started result before calling the vendor adapter. Exceptions from a vendor adapter propagate to `ProviderService`, which conservatively retains reservations when the provider request may have started. Listing adapters exposes provider IDs and capability declarations, never callable objects or credentials. Unit tests use injected stubs and do not prove a real provider API is reachable.
 
 ## Structured provider events
 
