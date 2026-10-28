@@ -550,7 +550,7 @@ class ProviderServiceTests(unittest.TestCase):
             trace_manager=trace,
         )
         output_path = self.root / "traced.png"
-        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
         traceparent = "00-" + "c" * 32 + "-" + "d" * 16 + "-01"
         result = service.execute_routed_request(
             category="image",
@@ -609,7 +609,7 @@ class ProviderServiceTests(unittest.TestCase):
             trace_manager=BrokenTrace(),
         )
         output_path = self.root / "telemetry-failure.png"
-        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="telemetry-failure",
             estimated_cost=0.0, output_path=str(output_path),
