@@ -15,24 +15,45 @@ from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 _FORBIDDEN_CREDENTIAL_KEYS = {
     "apikey",
+    "accesskey",
+    "apisecret",
     "apitoken",
     "accesstoken",
     "refreshtoken",
+    "sessiontoken",
     "clientsecret",
+    "secret",
+    "secretkey",
+    "token",
     "password",
     "credential",
     "credentials",
     "privatekey",
     "authorization",
+    "bearer",
     "bearertoken",
 }
+_CREDENTIAL_KEY_SUFFIXES = (
+    "apikey",
+    "accesskey",
+    "secret",
+    "secretkey",
+    "token",
+    "password",
+    "credential",
+    "credentials",
+    "privatekey",
+    "authorization",
+)
 
 
 def _contains_credential_material(value: Any) -> bool:
     if isinstance(value, dict):
         for key, child in value.items():
             normalized = "".join(char for char in str(key).casefold() if char.isalnum())
-            if normalized in _FORBIDDEN_CREDENTIAL_KEYS:
+            if normalized in _FORBIDDEN_CREDENTIAL_KEYS or normalized.endswith(
+                _CREDENTIAL_KEY_SUFFIXES
+            ):
                 return True
             if _contains_credential_material(child):
                 return True
