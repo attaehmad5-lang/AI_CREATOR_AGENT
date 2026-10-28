@@ -1,0 +1,37 @@
+name: Advanced Provider Store Release Gate
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "advanced-provider-store-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release-readiness:
+    name: Enforce ledger and build verified release bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact release ref
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Compile provider store and tests
+        run: python -m compileall -q projects/provider_store tests
+      - name: Validate all provider catalog JSON
+        run: python -c "import json; from pathlib import Path; [json.loads(p.read_text(encoding='utf-8')) for p in Path('projects/provider_store').rglob('*.json')]"
+      - name: Run provider-store regression tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+      - name: Enforce all 150 ledger points before release
+        run: python -m projects.provider_store.advanced.release_report --output-dir build/advanced-provider-store-release --require-complete
+      - name: Upload verified release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: advanced-provider-store-release
+          path: build/advanced-provider-store-release/
+          if-no-files-found: error
