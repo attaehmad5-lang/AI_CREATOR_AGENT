@@ -418,8 +418,8 @@ Remaining work: HTTP response reads are bounded and output validation rejects mi
 
 Feature 080: Dependency Security Scanning
 Status: PARTIAL
-Implementation/evidence inspected: .github/workflows/task-25-tests.yml; pip-audit==2.9.0; pyproject.toml
-Remaining work: CI installs pinned pip-audit and audits the installed CI environment; runtime dependencies are empty and build-tool pins are declared in pyproject.toml. Cross-platform audit verification, a committed transitive toolchain lock with hashes, repository-wide dependency scanning and privacy review remain.
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; pip-audit==2.9.0; pyproject.toml; CI #40715403931
+Remaining work: Pinned pip-audit passes on Ubuntu and Windows; runtime dependencies are empty and build-tool pins are declared. Transitive toolchain lock hashes, repository-wide dependency inventory/scanning and privacy review remain.
 
 Feature 081: Provider Configuration Management
 Status: PARTIAL
@@ -605,9 +605,9 @@ Implementation/evidence inspected: .github/workflows/task-25-tests.yml
 Remaining work: Python 3.13 test suite passes on Ubuntu and Windows; other runtimes such as Pydroid remain unverified.
 
 Feature 118: Python Version Compatibility
-Status: PARTIAL
-Implementation/evidence inspected: .github/workflows/task-25-tests.yml; PROVIDER_MANAGER_GUIDE.md
-Remaining work: Python 3.13 CI on Ubuntu and Windows is configured; other Python versions and mobile/Pydroid are not verified.
+Status: COMPLETED
+Implementation/evidence inspected: .github/workflows/provider-store-python-compatibility.yml; .github/workflows/task-25-tests.yml; CI #40715403928; CI #40715403931
+Remaining work: Full tests, catalog JSON validation, reproducible wheel build and clean-target install pass on Python 3.10, 3.11 and 3.12 on Ubuntu; Python 3.13 passes full cross-platform CI on Ubuntu and Windows. Mobile/Pydroid is not claimed by this repository CI.
 
 Feature 119: Code Formatting Checks
 Status: PARTIAL
@@ -733,9 +733,9 @@ Implementation/evidence inspected: advanced/release_report.py; tests/test_advanc
 Remaining work: Per-file SHA-256 manifest is generated, archive membership is checked and each packaged source hash is compared to the manifest.
 
 Feature 145: Secret-Free Package Verification
-Status: PARTIAL
-Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; PROVIDER_MANAGER_GUIDE.md; CI #40712713627
-Remaining work: Explicit allowlist, known-token/private-key patterns and Shannon-entropy screening for long values assigned to credential-like fields fail closed without printing values. Provider-token and generic high-entropy api_key leak-injection tests passed cross-platform in CI #40712713627. Final generated release ZIP audit and broader heuristic validation remain.
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40715403931
+Remaining work: Explicit source allowlist, known-token/private-key patterns, quoted credential-assignment entropy screening, nonliteral-expression false-positive regression and final generated ZIP payload scanning passed cross-platform CI. Verified source ZIP, manifest, SPDX SBOM, PDF and checksum artifacts were generated/uploaded. Heuristic scanning cannot mathematically guarantee that arbitrary secrets are absent.
 Feature 146: Backward Compatibility
 Status: PARTIAL
 Implementation/evidence inspected: provider_store modules; test_provider_store_compat.py; regression tests
