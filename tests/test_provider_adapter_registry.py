@@ -119,6 +119,30 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         self.assertEqual(invalid["status"], "ADAPTER_RESPONSE_INVALID")
         self.assertNotIn("unexpected", json.dumps(invalid))
 
+    def test_service_callable_fails_closed_before_dispatch_and_propagates_adapter_errors(self):
+        self.registry.register("test-image", self.adapter, modalities=("image",))
+        blocked = self.registry.as_callable("test-image", modality="image")
+        not_verified = blocked(provider_id="test-image", request_id="req-before-verify")
+        self.assertFalse(not_verified["started"])
+        self.assertEqual(self.calls, [])
+
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        success = blocked(provider_id="test-image", request_id="req-callable")
+        self.assertTrue(success["started"])
+        self.assertEqual(self.calls[0]["request_id"], "req-callable")
+
+        self.registry.register(
+            "test-image",
+            lambda **kwargs: (_ for _ in ()).throw(RuntimeError("ambiguous vendor failure")),
+            modalities=("image",), replace=True,
+        )
+        risky = self.registry.as_callable("test-image", modality="image")
+        with self.assertRaisesRegex(RuntimeError, "ambiguous vendor failure"):
+            risky(provider_id="test-image", request_id="req-ambiguous")
+        # The callable does not misrepresent an exception as a safe no-start outcome.
+
     def test_registration_validation_listing_and_unregistration(self):
         self.assertEqual(
             self.registry.register("missing", self.adapter, modalities=("image",))["status"],
