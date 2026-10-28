@@ -515,6 +515,117 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        traceparent: str | None = None,
+        **route_options: Any,
+    ) -> dict[str, Any]:
+        """Run one routed attempt and add non-fatal, secret-safe operation telemetry."""
+        started_at = time.monotonic()
+        span = None
+        if self.trace_manager is not None:
+            try:
+                candidate = self.trace_manager.start_span(
+                    "provider.execute",
+                    traceparent=traceparent,
+                    attributes={"category": category, "request_id": request_id},
+                )
+                if isinstance(candidate, dict) and candidate.get("status") == "SPAN_STARTED":
+                    span = candidate
+            except Exception:
+                span = None
+        try:
+            result = self._execute_routed_request_impl(
+                category=category,
+                project_id=project_id,
+                request_id=request_id,
+                estimated_cost=estimated_cost,
+                adapter=adapter,
+                modality=modality,
+                principal_id=principal_id,
+                data_categories=data_categories,
+                retention_days=retention_days,
+                provider_training_use=provider_training_use,
+                user_training_consent=user_training_consent,
+                output_path=output_path,
+                estimated_cost_unit=estimated_cost_unit,
+                adapter_options=adapter_options,
+                **route_options,
+            )
+        except Exception as exc:
+            duration_ms = max(0.0, (time.monotonic() - started_at) * 1000.0)
+            self._finish_operation_span(span, "ERROR", duration_ms)
+            self._log_operation_event(
+                "provider.execute", category, request_id,
+                "EXECUTION_SERVICE_EXCEPTION", "ERROR", duration_ms,
+                type(exc).__name__,
+            )
+            raise
+        duration_ms = max(0.0, (time.monotonic() - started_at) * 1000.0)
+        status = result.get("status", "UNKNOWN") if isinstance(result, dict) else "INVALID_SERVICE_RESULT"
+        success = status == "EXECUTION_SUCCEEDED"
+        self._finish_operation_span(span, "OK" if success else "ERROR", duration_ms)
+        self._log_operation_event(
+            "provider.execute",
+            result.get("provider") if isinstance(result, dict) else category,
+            request_id,
+            status,
+            "OK" if success else "ERROR",
+            duration_ms,
+            None if success else status,
+        )
+        return result
+
+    def _finish_operation_span(
+        self, span: dict[str, Any] | None, outcome: str, duration_ms: float
+    ) -> None:
+        if span is None or self.trace_manager is None:
+            return
+        try:
+            self.trace_manager.finish_span(span, outcome=outcome, duration_ms=duration_ms)
+        except Exception:
+            return
+
+    def _log_operation_event(
+        self,
+        event: str,
+        provider_id: Any,
+        request_id: Any,
+        status: str,
+        outcome: str,
+        duration_ms: float,
+        error_code: str | None,
+    ) -> None:
+        if self.structured_logger is None:
+            return
+        try:
+            self.structured_logger.emit(
+                event,
+                provider_id=provider_id if isinstance(provider_id, str) else None,
+                request_id=request_id if isinstance(request_id, str) else None,
+                status=status if re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", status) else "UNKNOWN",
+                outcome=outcome,
+                duration_ms=duration_ms,
+                error_code=error_code,
+            )
+        except Exception:
+            return
+
+    def _execute_routed_request_impl(
+        self,
+        *,
+        category: str,
+        project_id: str,
+        request_id: str,
+        estimated_cost: float,
+        adapter: Any,
+        modality: str,
+        principal_id: str | None = None,
+        data_categories: tuple[str, ...] | list[str] = ("user_content",),
+        retention_days: int = 0,
+        provider_training_use: bool = False,
+        user_training_consent: bool = False,
+        output_path: Any = None,
+        estimated_cost_unit: str = "USD",
+        adapter_options: dict[str, Any] | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
