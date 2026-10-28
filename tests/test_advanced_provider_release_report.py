@@ -51,8 +51,28 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             advanced.mkdir(parents=True)
             (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(_ledger_text(), encoding="utf-8")
             (provider_root / "unsafe_key.md").write_text("-----BEGIN PRIVATE KEY-----\\nnot-a-real-key\\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "private-key material"):
+            with self.assertRaisesRegex(ValueError, "private-key block"):
                 write_release_artifacts(root / "build", repo_root=root)
+
+    def test_source_package_fails_closed_on_high_confidence_provider_tokens(self):
+        fixtures = (
+            ("github-token.py", "TOKEN = \"ghp_" + "A" * 36 + "\"\\n"),
+            ("api-token.py", "TOKEN = \"sk-" + "B" * 32 + "\"\\n"),
+            ("aws-key.py", "TOKEN = \"AKIA" + "A" * 16 + "\"\\n"),
+            ("slack-token.py", "TOKEN = \"xoxb-" + "C" * 28 + "\"\\n"),
+        )
+        for filename, contents in fixtures:
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                provider_root = root / "projects" / "provider_store"
+                advanced = provider_root / "advanced"
+                advanced.mkdir(parents=True)
+                (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(
+                    _ledger_text(), encoding="utf-8"
+                )
+                (provider_root / filename).write_text(contents, encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "detected in eligible source file"):
+                    write_release_artifacts(root / "build", repo_root=root)
 
     def test_source_zip_has_manifest_hashes_and_excludes_runtime_secret_files(self):
         with tempfile.TemporaryDirectory() as tmp:
