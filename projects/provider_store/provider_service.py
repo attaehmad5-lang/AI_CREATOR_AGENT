@@ -743,6 +743,10 @@ class ProviderService:
                 }
 
         options = dict(adapter_options or {})
+        selected_model_id = route.get("model_id")
+        if isinstance(selected_model_id, str) and selected_model_id.strip():
+            # The routing decision is authoritative; adapter options cannot spoof it.
+            options["model_id"] = selected_model_id
         options["provider_id"] = provider_id
         options["request_id"] = request_id
         started_at = time.monotonic()
