@@ -12,6 +12,7 @@ from .catalog_interchange import (
     export_catalog,
     import_catalog,
     list_catalog_snapshots,
+    prune_catalog_snapshots,
     restore_catalog_snapshot,
 )
 
@@ -49,6 +50,13 @@ def build_parser() -> argparse.ArgumentParser:
     restore = subparsers.add_parser("restore", help="restore a named validated snapshot")
     restore.add_argument("snapshot", type=Path)
     restore.add_argument("destination", type=Path)
+
+    prune = subparsers.add_parser(
+        "prune", help="preview old-snapshot retention; deletion requires --apply"
+    )
+    prune.add_argument("history_directory", type=Path)
+    prune.add_argument("--keep", type=int, default=20)
+    prune.add_argument("--apply", action="store_true", dest="apply_changes")
     return parser
 
 
@@ -75,6 +83,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = list_catalog_snapshots(args.history_directory)
         elif args.command == "restore":
             result = restore_catalog_snapshot(args.snapshot, args.destination)
+        elif args.command == "prune":
+            result = prune_catalog_snapshots(
+                args.history_directory, keep=args.keep, apply=args.apply_changes
+            )
         else:
             parser.error("unsupported command")
             return 2
