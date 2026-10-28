@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 
-def _doc(node: ast.AST) -> str:
+def _doc(node: ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     value = ast.get_docstring(node, clean=True)
     return " ".join(value.split()) if value else ""
 
