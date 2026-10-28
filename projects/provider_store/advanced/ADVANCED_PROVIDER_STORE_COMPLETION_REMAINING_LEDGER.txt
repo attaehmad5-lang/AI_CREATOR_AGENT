@@ -79,8 +79,8 @@ Remaining work: Catalog/lifecycle foundations exist; individual acceptance cover
 
 Feature 012: Provider Adapter System
 Status: PARTIAL
-Implementation/evidence inspected: provider_adapter_registry.py; tests/test_provider_adapter_registry.py; provider_service.py; tests/test_provider_service.py; CI #40721830003
-Remaining work: Runtime adapter registration, modality/model allowlists, enabled+verified dispatch gates, routed-model propagation, and safe ambiguous-outcome handling are covered by deterministic tests. Ubuntu/Windows CI #40721830003 passed focused lint/type/coverage and release packaging gates. Vendor-specific generation adapters and authorized live API validation remain.
+Implementation/evidence inspected: provider_adapter_registry.py; tests/test_provider_adapter_registry.py; provider_service.py; tests/test_provider_service.py; CI #40722792917
+Remaining work: Runtime adapter registration, modality/model allowlists, enabled+verified dispatch gates, routed-model propagation and safe ambiguous-outcome handling are covered by deterministic tests. Ubuntu/Windows CI #40722792917 passed 549 tests plus focused lint/type/coverage and release packaging gates. Vendor-specific generation adapters and authorized live API validation remain.
 
 Feature 013: API Key Authentication
 Status: COMPLETED
