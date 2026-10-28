@@ -146,8 +146,11 @@ class ProviderAdapterRegistry:
 
         def invoke(**options: Any) -> Any:
             request_id = options.get("request_id")
+            requested_model_id = options.get("model_id", model_id)
             if (
                 options.get("provider_id") != provider_id
+                or options.get("modality", modality) != modality
+                or (model_id is not None and requested_model_id not in (None, model_id))
                 or not isinstance(request_id, str)
                 or not _IDENTIFIER.fullmatch(request_id)
             ):
@@ -158,7 +161,10 @@ class ProviderAdapterRegistry:
                     "credit_outcome": "not_used",
                     "error_code": "ADAPTER_CONTRACT_REJECTED",
                 }
-            resolved = self.resolve(provider_id, modality=modality, model_id=model_id)
+            effective_model_id = model_id if model_id is not None else requested_model_id
+            resolved = self.resolve(
+                provider_id, modality=modality, model_id=effective_model_id
+            )
             if resolved.get("resolved") is not True:
                 return {
                     "started": False,
@@ -175,7 +181,7 @@ class ProviderAdapterRegistry:
                 provider_id=provider_id,
                 modality=modality,
                 request_id=request_id,
-                model_id=model_id,
+                model_id=effective_model_id,
                 **adapter_options,
             )
 
