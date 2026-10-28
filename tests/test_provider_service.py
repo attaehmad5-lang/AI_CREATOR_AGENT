@@ -641,7 +641,7 @@ class ProviderServiceTests(unittest.TestCase):
             output_validator=self.validator, cost_policy=cost, quota_manager=quota,
         )
         output_path = self.root / "model-routed.png"
-        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="model-routed",
             estimated_cost=0.0, output_path=str(output_path),
