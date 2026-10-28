@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from projects.provider_store.catalog_interchange import (
     _contains_credential_material,
+    _contains_credential_material,
     create_catalog_snapshot,
     export_catalog,
     import_catalog,
@@ -183,6 +184,28 @@ class CatalogInterchangeTests(unittest.TestCase):
             ValueError, "history directory must not be a symlink"
         ):
             create_catalog_snapshot(self.source, linked_history)
+
+    def test_credential_material_key_detection_covers_variants_but_allows_env_refs(self):
+        for record in (
+            {"secret_key": "value"},
+            {"provider_api_token": "value"},
+            {"auth": {"access_key": "value"}},
+            {"clientSecret": "value"},
+            {"refresh_token": "value"},
+            {"private_key_pem": "value"},
+        ):
+            with self.subTest(record=record):
+                self.assertTrue(_contains_credential_material(record))
+
+        self.assertFalse(
+            _contains_credential_material(
+                {
+                    "api_key_env": "OPENAI_API_KEY",
+                    "token_env": "PROVIDER_TOKEN",
+                    "credential_env": "PROVIDER_CREDENTIAL",
+                }
+            )
+        )
 
     def test_export_refuses_malformed_json(self):
         invalid = self.root / "broken.json"
