@@ -139,7 +139,9 @@ class CatalogInterchangeTests(unittest.TestCase):
         self.assertFalse(preview["applied"])
         self.assertEqual(len(preview["would_delete"]), 2)
         self.assertEqual(preview["deleted"], [])
-        self.assertTrue(all((history / name).is_file() for name in preview["would_delete"]))
+        self.assertTrue(
+            all((history / name).is_file() for name in preview["would_delete"])
+        )
         self.assertTrue(invalid.is_file())
 
         applied = prune_catalog_snapshots(history, keep=2, apply=True)
