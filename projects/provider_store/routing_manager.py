@@ -150,12 +150,15 @@ class ProviderRoutingManager:
         max_benchmark_p95_latency_ms: float | None = None,
         allow_low_confidence_fallback: bool = True,
         required_region: str | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Return the first policy-compliant provider and the decisions that led to it."""
+        """Return a policy-compliant provider; dry-run previews without reserving resources."""
         if not isinstance(category, str) or not category.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_REQUIRED"}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
+        if not isinstance(dry_run, bool):
+            return {"allowed": False, "status": "INVALID_DRY_RUN_FLAG"}
         if required_region is not None and (
             not isinstance(required_region, str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", required_region)
@@ -560,7 +563,8 @@ class ProviderRoutingManager:
             candidates.sort(key=self._priority)
             with self._lock:
                 start = self._round_robin_counters.get(category.strip().casefold(), 0) % len(candidates)
-                self._round_robin_counters[category.strip().casefold()] = start + 1
+                if not dry_run:
+                    self._round_robin_counters[category.strip().casefold()] = start + 1
             candidates = candidates[start:] + candidates[:start]
         else:
             candidates.sort(key=self._priority)
@@ -616,6 +620,43 @@ class ProviderRoutingManager:
                     decisions.append({"provider": provider_id, "status": status})
                     continue
                 billing_mode = decision.get("billing_mode")
+
+            if dry_run:
+                would_reserve = []
+                if billing_mode == "FREE_CREDITS":
+                    would_reserve.append("credits")
+                if billing_mode == "PAID_APPROVED" and self.cost_policy is not None:
+                    would_reserve.append("cost")
+                if self.quota_manager is not None:
+                    would_reserve.append("quota")
+                result = {
+                    "allowed": True,
+                    "status": "ROUTE_SIMULATED",
+                    "dry_run": True,
+                    "provider": provider_id,
+                    "category": category.strip(),
+                    "strategy": selected_strategy,
+                    "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
+                    "model": model,
+                    "model_version": model_version,
+                    "required_region": required_region,
+                    "estimated_cost": cost,
+                    "estimated_cost_unit": estimated_cost_unit.strip(),
+                    "billing_mode": billing_mode,
+                    "would_reserve": would_reserve,
+                    "prior_decisions": decisions,
+                }
+                if confidence_status is not None:
+                    result["confidence_routing_status"] = confidence_status
+                if confidence_evidence is not None:
+                    result["benchmark_evidence"] = {
+                        "sample_count": confidence_evidence.get("sample_count"),
+                        "success_rate": confidence_evidence.get("success_rate"),
+                        "p95_latency_ms": confidence_evidence.get("p95_latency_ms"),
+                        "avg_cost_per_success": confidence_evidence.get("avg_cost_per_success"),
+                        "avg_quality_score": confidence_evidence.get("avg_quality_score"),
+                    }
+                return result
 
             cost_reserved = False
             cost_reservation_created = False
