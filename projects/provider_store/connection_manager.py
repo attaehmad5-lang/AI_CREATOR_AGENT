@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import urlsplit
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .safe_numbers import finite_number
@@ -573,6 +574,18 @@ class ConnectionManager:
                 or any(unicodedata.category(char) in {"Cc", "Cs"} for char in value)
             ):
                 return {"status": "INVALID_METADATA", "saved": False}
+            elif key in {"website", "docs_url", "logo_url", "support_url"}:
+                try:
+                    parsed_url = urlsplit(value)
+                    if (
+                        parsed_url.scheme not in {"http", "https"}
+                        or not parsed_url.hostname
+                        or parsed_url.username is not None
+                        or parsed_url.password is not None
+                    ):
+                        return {"status": "INVALID_METADATA_URL", "saved": False}
+                except ValueError:
+                    return {"status": "INVALID_METADATA_URL", "saved": False}
 
         with self._catalog_transaction():
             providers = self._list_providers_unlocked()
