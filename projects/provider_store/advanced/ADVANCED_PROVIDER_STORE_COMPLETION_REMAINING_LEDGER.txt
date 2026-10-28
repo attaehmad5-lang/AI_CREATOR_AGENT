@@ -418,7 +418,8 @@ Remaining work: HTTP response reads are bounded and output validation rejects mi
 
 Feature 080: Dependency Security Scanning
 Status: PARTIAL
-Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; related tests
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; pip-audit==2.9.0; pyproject.toml
+Remaining work: CI installs a pinned pip-audit and audits the installed CI environment. Await the cross-platform audit result; transitive toolchain lock/hash enforcement remains open.
 Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
 
 Feature 081: Provider Configuration Management
