@@ -626,7 +626,7 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertTrue(verified["verified"])
         output_path = self.root / "audit-generated.png"
-        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="audit-request",
             estimated_cost=0.0, output_path=str(output_path),
