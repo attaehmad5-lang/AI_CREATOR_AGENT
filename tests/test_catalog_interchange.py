@@ -184,7 +184,9 @@ class CatalogInterchangeTests(unittest.TestCase):
         ):
             create_catalog_snapshot(self.source, linked_history)
 
-    def test_credential_material_key_detection_covers_variants_but_allows_env_refs(self):
+    def test_credential_material_key_detection_covers_variants_but_allows_env_refs(
+        self,
+    ):
         for record in (
             {"secret_key": "value"},
             {"provider_api_token": "value"},
