@@ -716,10 +716,9 @@ Implementation/evidence inspected: ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md;
 Remaining work: Both 150-row ledgers are present and their IDs/status rows are validated by regression tests.
 
 Feature 141: Test Report Generation
-Status: PARTIAL
-Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40560954116
-Remaining work: JSON and Markdown reports are generated from the canonical ledger; final report remains incomplete until all 150 points pass.
-
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py
+Remaining work: Ledger-derived JSON/Markdown/PDF reports, status counts, source manifest and source ZIP are generated; incomplete reports are supported separately from strict release-gate mode.
 Feature 142: PDF Report Generation
 Status: UNVERIFIED
 Implementation/evidence inspected: No PDF generator implemented
