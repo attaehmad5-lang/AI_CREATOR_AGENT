@@ -17,7 +17,7 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
             {
                 "id": "test-image", "name": "Test Image", "category": "image",
                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
-                "supported_models": ["image-v1"],
+                "supported_models": [{"id": "image-v1"}],
             },
             {
                 "id": "disabled-image", "name": "Disabled Image", "category": "image",
