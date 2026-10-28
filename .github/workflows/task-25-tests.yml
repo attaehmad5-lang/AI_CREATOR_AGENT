@@ -58,6 +58,8 @@ jobs:
           projects/provider_store/catalog_interchange.py
           projects/provider_store/catalog_diff.py
           projects/provider_store/advanced/performance_benchmark.py
+          projects/provider_store/generate_api_reference.py
+          tests/test_generate_provider_store_api_reference.py
           tests/test_catalog_interchange.py
           tests/test_catalog_diff.py
           tests/test_provider_store_performance_benchmark.py
@@ -67,6 +69,8 @@ jobs:
           projects/provider_store/catalog_interchange.py
           projects/provider_store/catalog_diff.py
           projects/provider_store/advanced/performance_benchmark.py
+          projects/provider_store/generate_api_reference.py
+          tests/test_generate_provider_store_api_reference.py
           tests/test_catalog_interchange.py
           tests/test_catalog_diff.py
           tests/test_provider_store_performance_benchmark.py
