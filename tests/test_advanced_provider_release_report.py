@@ -107,20 +107,33 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                     write_release_artifacts(root / "build", repo_root=root)
 
     def test_source_package_fails_closed_on_high_entropy_credential_assignment(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            provider_root = root / "projects" / "provider_store"
-            advanced = provider_root / "advanced"
-            advanced.mkdir(parents=True)
-            (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(
-                _ledger_text(), encoding="utf-8"
-            )
-            random_value = "Q7mN2xV9pL4kR8tY3wA6cD1fH5jK0sB7"
-            (provider_root / "unsafe_config.py").write_text(
-                f'api_key = "{random_value}"\\n', encoding="utf-8"
-            )
-            with self.assertRaisesRegex(ValueError, "high-entropy credential-like value"):
-                write_release_artifacts(root / "build", repo_root=root)
+        random_value = "Q7mN2xV9pL4kR8tY3wA6cD1fH5jK0sB7"
+        fixtures = (
+            ("api_key", "api_key"),
+            ("private_key_pem", "private_key_pem"),
+            ("api_secret", "api_secret"),
+            ("provider_api_token", "provider_api_token"),
+            ("credentials", "credentials"),
+            ("refresh_token", "refresh_token"),
+            ("bearer_token", "bearer_token"),
+            ("api_key_env", "api_key_env"),
+        )
+        for filename, key in fixtures:
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                provider_root = root / "projects" / "provider_store"
+                advanced = provider_root / "advanced"
+                advanced.mkdir(parents=True)
+                (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(
+                    _ledger_text(), encoding="utf-8"
+                )
+                (provider_root / f"{filename}.py").write_text(
+                    f'{key} = "{random_value}"\\n', encoding="utf-8"
+                )
+                with self.assertRaisesRegex(
+                    ValueError, "high-entropy credential-like value"
+                ):
+                    write_release_artifacts(root / "build", repo_root=root)
 
     def test_final_archive_scan_rejects_secret_in_generated_pdf(self):
         from unittest.mock import patch
