@@ -27,7 +27,7 @@ from projects.provider_store.provider_adapter_registry import ProviderAdapterReg
 from projects.provider_store.provider_trace_manager import ProviderTraceManager
 from projects.provider_store.provider_structured_logger import ProviderStructuredLogger
 from projects.provider_store.quota_manager import ProviderQuotaManager
-from projects.provider_store.retry_policy import RetryPolicy
+from projects.provider_store.retry_policy import RetryBudget, RetryPolicy
 
 
 class ProviderServiceTests(unittest.TestCase):
@@ -301,6 +301,42 @@ class ProviderServiceTests(unittest.TestCase):
         retry = self.service.retry_decision(attempt=1, status_code=503)
         self.assertTrue(retry["retry"])
         self.assertEqual(retry["reason"], "TRANSIENT_HTTP_FAILURE")
+
+    def test_retry_decision_consumes_budget_only_for_retryable_failures(self):
+        budget = RetryBudget(capacity=1, refill_rate_per_second=0, clock=lambda: 0.0)
+        service = ProviderService(
+            self.connections,
+            retry_policy=RetryPolicy(random_fn=lambda: 0),
+            retry_budget=budget,
+        )
+        first = service.retry_decision(attempt=1, status_code=503)
+        self.assertTrue(first["retry"])
+        self.assertEqual(first["retry_budget"], "RETRY_BUDGET_GRANTED")
+
+        second = service.retry_decision(attempt=1, status_code=503)
+        self.assertFalse(second["retry"])
+        self.assertEqual(second["reason"], "RETRY_BUDGET_EXHAUSTED")
+
+        non_retryable = service.retry_decision(
+            attempt=1, status_code=503, idempotent=False
+        )
+        self.assertFalse(non_retryable["retry"])
+        self.assertEqual(non_retryable["reason"], "NON_IDEMPOTENT_REQUEST")
+
+    def test_retry_budget_failure_fails_closed(self):
+        class BrokenBudget:
+            def consume_decision(self, decision):
+                raise RuntimeError("private budget detail")
+
+        service = ProviderService(
+            self.connections,
+            retry_policy=RetryPolicy(random_fn=lambda: 0),
+            retry_budget=BrokenBudget(),
+        )
+        result = service.retry_decision(attempt=1, status_code=503)
+        self.assertFalse(result["retry"])
+        self.assertEqual(result["reason"], "RETRY_BUDGET_FAILED")
+        self.assertNotIn("private budget detail", repr(result))
 
     def test_started_request_reconciles_cost_commits_quota_and_records_health(self):
         self.cost.reserve_usage(
