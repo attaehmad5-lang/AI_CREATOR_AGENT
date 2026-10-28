@@ -19,7 +19,7 @@ class GenerateApiReferenceTests(unittest.TestCase):
                 '    pass\n'
                 'class PublicManager:\n'
                 '    """Manage a sample."""\n'
-                '    def execute(self, enabled: bool = True) -> None:\n'
+                '    def execute(self, enabled: bool=True) -> None:\n'
                 '        """Execute sample operation."""\n'
                 '    def _hidden(self):\n'
                 '        pass\n',
