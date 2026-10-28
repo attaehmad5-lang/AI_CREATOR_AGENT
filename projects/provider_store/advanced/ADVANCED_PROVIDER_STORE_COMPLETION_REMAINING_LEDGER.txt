@@ -663,13 +663,13 @@ Remaining work: Cross-platform CI verifies SPDX 2.3 JSON with SHA-256 hashes for
 
 Feature 129: CI/CD Pipeline
 Status: PARTIAL
-Implementation/evidence inspected: .github/workflows/task-25-tests.yml; .github/workflows/provider-store-core-catalog-release-gates.yml
-Remaining work: CI/release-gate/checksum/version primitives exist; the full Advanced Provider Store release package has not been verified.
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; .github/workflows/advanced-provider-store-release-gate.yml
+Remaining work: Cross-platform tests/build/report artifacts run in CI. A dedicated manual/tag release gate reruns compile/catalog/regression checks and requires all 150 ledger points before artifact upload; the release gate remains blocked until the component is complete.
 
 Feature 130: Automated Release Gates
 Status: PARTIAL
-Implementation/evidence inspected: .github/workflows/task-25-tests.yml; .github/workflows/provider-store-core-catalog-release-gates.yml
-Remaining work: CI/release-gate/checksum/version primitives exist; the full Advanced Provider Store release package has not been verified.
+Implementation/evidence inspected: .github/workflows/advanced-provider-store-release-gate.yml; advanced/release_report.py; tests/test_advanced_provider_release_report.py
+Remaining work: --require-complete returns exit code 2 unless every acceptance point is COMPLETED. The manual/tag workflow runs compile/catalog/regression gates and blocks artifact upload for incomplete ledgers; release execution remains blocked until criteria pass.
 
 Feature 131: Release Asset Management
 Status: PARTIAL
@@ -743,8 +743,8 @@ Remaining work: Per-file SHA-256 manifest is generated, archive membership is ch
 
 Feature 145: Secret-Free Package Verification
 Status: PARTIAL
-Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; sensitive_data_policy.py; CI #40560954116
-Remaining work: Allowlist excludes persisted state, backups, environment/credential files and private-key material; broader secret scan and final release ZIP audit remain.
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; PROVIDER_MANAGER_GUIDE.md
+Remaining work: Allowlist plus pre-package scanning rejects private-key blocks and high-confidence GitHub, OpenAI-style, AWS and Slack token patterns. Leak-injection tests/latest cross-platform CI are pending; broader entropy scanning and final ZIP audit remain.
 
 Feature 146: Backward Compatibility
 Status: PARTIAL
