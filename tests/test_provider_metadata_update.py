@@ -64,6 +64,9 @@ class ProviderMetadataUpdateTests(unittest.TestCase):
             {"tags": ["x" * 65]},
             {"description": "bad\nvalue"},
             {"description": "x" * 2049},
+            {"website": "javascript:alert(1)"},
+            {"docs_url": "https://user:pass@example.test/docs"},
+            {"logo_url": "https:///missing-host"},
         ):
             with self.subTest(patch_data=patch_data):
                 self.assertEqual(
