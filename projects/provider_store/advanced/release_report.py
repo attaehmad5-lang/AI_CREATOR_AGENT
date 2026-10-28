@@ -119,7 +119,7 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     rb"(?i)\b(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|api[_-]?secret|"
     rb"private[_-]?key(?:[_-]?(?:pem|value|data))?|secret(?:[_-]?(?:key|value|pem))?|"
     rb"(?:api|bearer|auth|refresh|session)?[_-]?token|password|client[_-]?secret|"
-    rb"credentials?)(?:[_-]?env)?\b\s*[:=]\s*[\"']?([A-Za-z0-9_./+=-]{32,})"
+    rb"credentials?)(?:[_-]?env)?\b\s*[:=]\s*[\"']([A-Za-z0-9_./+=-]{32,})[\"']"
 )
 
 
