@@ -103,9 +103,7 @@ class RoutingSimulationTests(unittest.TestCase):
         self.assertEqual(next_route["provider"], "fallback")
 
     def test_invalid_dry_run_flag_fails_closed(self):
-        result = self.router.route(
-            category="image", project_id="demo", dry_run="yes"
-        )
+        result = self.router.route(category="image", project_id="demo", dry_run="yes")
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "INVALID_DRY_RUN_FLAG")
         self.assertEqual(self.quota.calls, [])
