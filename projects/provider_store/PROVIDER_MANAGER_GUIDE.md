@@ -148,7 +148,7 @@ To explicitly enforce the completion ledger as a release gate, run:
 python -m projects.provider_store.advanced.release_report --output-dir build/advanced-provider-store-release --require-complete
 ```
 
-The normal report-generation command still exits successfully when it produces a valid report for an incomplete component. With `--require-complete`, an incomplete ledger returns exit code 2 so a publication workflow can fail closed. This flag does not publish assets or bypass CI/review.
+The normal report-generation command still exits successfully when it produces a valid report for an incomplete component. With `--require-complete`, an incomplete ledger returns exit code 2 so a publication workflow can fail closed. This flag does not publish assets or bypass CI/review. The dedicated `.github/workflows/advanced-provider-store-release-gate.yml` workflow (manual dispatch or `advanced-provider-store-v*` tag) also runs pinned Ruff, focused mypy/coverage, reproducible wheel installation, the bounded catalog benchmark, compilation and regression tests before it permits artifact upload.
 
 ## Wheel build and installation verification
 
