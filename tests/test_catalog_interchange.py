@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 from projects.provider_store.catalog_interchange import (
     _contains_credential_material,
-    _contains_credential_material,
     create_catalog_snapshot,
     export_catalog,
     import_catalog,
