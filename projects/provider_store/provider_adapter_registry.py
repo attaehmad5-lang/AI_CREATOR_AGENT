@@ -208,9 +208,13 @@ class ProviderAdapterRegistry:
                 **options,
             )
         except Exception as exc:
+            # The vendor may have accepted the request before the exception surfaced.
+            # Never label this as a confirmed no-start; callers must retain reservations.
             return {
-                "status": "ADAPTER_EXECUTION_FAILED",
+                "status": "ADAPTER_OUTCOME_UNKNOWN",
                 "executed": False,
+                "outcome_known": False,
+                "reservations_retained": True,
                 "provider_id": provider_id,
                 "request_id": request_id,
                 "error_type": type(exc).__name__,
