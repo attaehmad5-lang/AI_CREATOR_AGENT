@@ -78,8 +78,8 @@ Remaining work: Catalog/lifecycle foundations exist; individual acceptance cover
 
 Feature 012: Provider Adapter System
 Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py
-Remaining work: Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain.
+Implementation/evidence inspected: provider_adapter_registry.py; tests/test_provider_adapter_registry.py; provider_service.py; tests/test_provider_service.py
+Remaining work: Thread-safe runtime adapter registration, modality/model allowlists, disabled/unverified dispatch gates, reserved-option protection and sanitized adapter failure handling are implemented with deterministic contract tests. Vendor-specific generation adapters and authorized live API validation remain.
 
 Feature 013: API Key Authentication
 Status: COMPLETED
@@ -153,13 +153,13 @@ Remaining work: Bounded success/failure/timeout, latency and queue-wait aggregat
 
 Feature 027: Structured Logging
 Status: PARTIAL
-Implementation/evidence inspected: provider_structured_logger.py; provider_service.py; tests/test_provider_structured_logger.py; tests/test_provider_service.py; CI #40583715526
-Remaining work: JSON event logging is integrated into provider verification/manual verification with explicit safe fields and non-fatal logger errors; full service-wide lifecycle instrumentation and external log shipping remain.
+Implementation/evidence inspected: provider_structured_logger.py; provider_service.py; tests/test_provider_structured_logger.py; tests/test_provider_service.py
+Remaining work: Secret-safe JSON telemetry covers provider verification and routed generation execution with request ID, provider, bounded status, outcome and duration; telemetry failures are non-fatal. Service-wide lifecycle instrumentation and external log shipping remain; new execution telemetry tests await cross-platform CI.
 
 Feature 028: Distributed Tracing
 Status: PARTIAL
-Implementation/evidence inspected: provider_trace_manager.py; provider_service.py; tests/test_provider_trace_manager.py; tests/test_provider_service.py; CI #40584377034
-Remaining work: W3C traceparent is propagated into provider verification spans, outcomes are recorded with safe attributes, and tracing failures are non-fatal; full service-wide instrumentation and external trace export remain pending CI.
+Implementation/evidence inspected: provider_trace_manager.py; provider_service.py; tests/test_provider_trace_manager.py; tests/test_provider_service.py
+Remaining work: W3C traceparent propagates through provider verification and routed generation execution; bounded spans capture safe category/request metadata and outcomes. Trace failures are non-fatal. External trace export and broader lifecycle coverage remain; new execution-span tests await cross-platform CI.
 
 Feature 029: Incident Management
 Status: COMPLETED
