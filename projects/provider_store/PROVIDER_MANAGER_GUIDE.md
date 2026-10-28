@@ -198,6 +198,27 @@ result = provider_service.execute_routed_request(
 
 The example assumes the application has already configured `connection_manager`, `provider_service`, and `vendor_adapter`; those names are application-owned. Registry checks and policy rejections return an explicit not-started result before calling the vendor adapter. Exceptions from a vendor adapter propagate to `ProviderService`, which conservatively retains reservations when the provider request may have started. Listing adapters exposes provider IDs and capability declarations, never callable objects or credentials. Unit tests use injected stubs and do not prove a real provider API is reachable.
 
+## Tamper-evident audit events
+
+`ProviderAuditLog` stores a bounded append-only JSONL chain using SHA-256 hashes and an interprocess lock. Its allowlisted schema includes only timestamp, event/status/outcome codes, provider/actor/request identifiers and an optional reason code; it does not accept arbitrary payloads. A modified, truncated, oversized or symlinked log fails closed rather than silently extending an invalid chain.
+
+```python
+from projects.provider_store.provider_audit_log import ProviderAuditLog
+
+audit = ProviderAuditLog("state/provider-audit.jsonl")
+audit.record(
+    "provider.execute",
+    status="EXECUTION_SUCCEEDED",
+    outcome="OK",
+    provider_id="image-provider",
+    actor_id="user-123",
+    request_id="request-123",
+)
+print(audit.verify_chain())
+```
+
+Pass an instance to `ProviderService(..., audit_log_manager=audit)` to record provider verification and routed execution outcomes. Audit-write failures are non-fatal to generation and should be monitored through a separate operational health channel. Catalog/config mutations across every manager and remote audit shipping are not yet integrated.
+
 ## Structured provider events
 
 `ProviderStructuredLogger` emits JSON events from an injected standard-library `logging.Logger`. `ProviderService` accepts it as `structured_logger=...` and emits bounded, secret-safe `provider.verify`, `provider.manual_verify`, and `provider.execute` events. Routed execution logs request ID, provider, bounded status, outcome, duration and safe error code only; prompts, endpoint URLs, credentials, exception messages and arbitrary dictionaries are not included. Logging failures are deliberately non-fatal to the provider operation. Full instrumentation of every service lifecycle method and external log shipping remain outside this integration.
