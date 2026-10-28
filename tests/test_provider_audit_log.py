@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -78,6 +79,25 @@ class ProviderAuditLogTests(unittest.TestCase):
         audit = ProviderAuditLog(link)
         result = audit.record("provider.verify", status="CONNECTED", outcome="OK")
         self.assertEqual(result["status"], "AUDIT_LOG_SYMLINK_REJECTED")
+
+    def test_concurrent_writers_preserve_a_single_valid_hash_chain(self):
+        def write(index):
+            return self.audit.record(
+                "provider.execute",
+                status="EXECUTION_SUCCEEDED",
+                outcome="OK",
+                provider_id="image",
+                request_id=f"concurrent-{index}",
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(write, range(40)))
+        self.assertTrue(all(item["saved"] for item in results))
+        chain = self.audit.verify_chain()
+        self.assertTrue(chain["valid"])
+        self.assertEqual(chain["count"], 40)
+        records = [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(len({item["request_id"] for item in records}), 40)
 
     def test_size_limit_is_enforced_without_truncating_existing_audit(self):
         audit = ProviderAuditLog(self.path, max_bytes=1024, clock=self.clock)
