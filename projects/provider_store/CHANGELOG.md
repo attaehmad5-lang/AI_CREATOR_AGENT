@@ -2,7 +2,7 @@
 
 Changes are recorded here by release intent. This file does not imply a published release.
 
-## Unreleased — 2026-10-27
+## Unreleased — 2026-10-28
 
 ### Added
 - Validated atomic provider-catalog import/export with interprocess locking, backup, post-write validation, and rollback on failed writes.
@@ -14,12 +14,15 @@ Changes are recorded here by release intent. This file does not imply a publishe
 - Bounded poll-driven health scheduler with injected probes and explicit timeout propagation.
 - Outage detector that opens/deduplicates incidents for unhealthy or stale health evidence and resolves them after verified recovery.
 - Secret-safe structured JSON event logging integrated into provider connection and manual verification paths.
+- Pre-package secret scanning for high-confidence GitHub, OpenAI-style, AWS and Slack token patterns, in addition to private-key blocks.
+- Strict `--require-complete` release-report mode and a manual/tag-triggered Advanced Provider Store release gate that blocks artifact upload until all 150 acceptance points pass.
 
 ### Fixed
 - Preserve original configuration bytes and temporary-file cleanup when config migration replacement fails.
 - Preserve rollback history when the previous configuration fails validation.
 - Ensure generated SBOM JSON ends with a real newline and remains parseable.
 - Include root wheel build metadata in the source release bundle and manifest when present.
+- Preserve normal incomplete-ledger report generation while making explicit release-gate mode fail closed.
 
 ### Verification
 - GitHub Actions run [#40581121875](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40581121875) passed 480 tests on Ubuntu and Windows, focused Ruff lint/format gates, mypy checks for six maintenance/release modules, and 80% combined statement coverage across seven targeted modules.
