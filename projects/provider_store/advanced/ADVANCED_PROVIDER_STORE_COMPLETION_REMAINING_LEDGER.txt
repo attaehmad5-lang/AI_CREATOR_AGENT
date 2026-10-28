@@ -419,8 +419,7 @@ Remaining work: HTTP response reads are bounded and output validation rejects mi
 Feature 080: Dependency Security Scanning
 Status: PARTIAL
 Implementation/evidence inspected: .github/workflows/task-25-tests.yml; pip-audit==2.9.0; pyproject.toml
-Remaining work: CI installs a pinned pip-audit and audits the installed CI environment. Await the cross-platform audit result; transitive toolchain lock/hash enforcement remains open.
-Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
+Remaining work: CI installs pinned pip-audit and audits the installed CI environment; runtime dependencies are empty and build-tool pins are declared in pyproject.toml. Cross-platform audit verification, a committed transitive toolchain lock with hashes, repository-wide dependency scanning and privacy review remain.
 
 Feature 081: Provider Configuration Management
 Status: PARTIAL
