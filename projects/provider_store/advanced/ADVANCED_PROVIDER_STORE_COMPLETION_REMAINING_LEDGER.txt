@@ -744,7 +744,7 @@ Remaining work: Per-file SHA-256 manifest is generated, archive membership is ch
 Feature 145: Secret-Free Package Verification
 Status: PARTIAL
 Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; PROVIDER_MANAGER_GUIDE.md
-Remaining work: Allowlist plus pre-package scanning rejects private-key blocks and high-confidence GitHub, OpenAI-style, AWS and Slack token patterns. Focused leak-injection tests passed in cross-platform CI #40704591050; broader entropy scanning and final release ZIP audit remain.
+Remaining work: Allowlist plus pre-package scanning rejects private-key blocks and high-confidence GitHub, OpenAI-style/Anthropic, Google, Hugging Face, Replicate, AWS and Slack token patterns. Focused leak-injection tests passed in cross-platform CI #40704591050; broader entropy scanning and final release ZIP audit remain.
 
 Feature 146: Backward Compatibility
 Status: PARTIAL
