@@ -209,7 +209,11 @@ def create_catalog_snapshot(
     """Create an immutable, validated JSON snapshot in a history directory."""
     catalog = _read_valid_catalog(Path(source))
     history_path = Path(history_directory)
+    if history_path.is_symlink():
+        raise ValueError("history directory must not be a symlink")
     history_path.mkdir(parents=True, exist_ok=True)
+    if history_path.is_symlink() or not history_path.is_dir():
+        raise ValueError("history directory must be a real directory")
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     for sequence in range(1000):
         suffix = f"-{sequence:03d}" if sequence else ""
@@ -241,10 +245,14 @@ def list_catalog_snapshots(
 ) -> dict[str, Any]:
     """List valid snapshots without returning provider configuration or credentials."""
     history_path = Path(history_directory)
-    if not history_path.exists():
+    if not history_path.exists() and not history_path.is_symlink():
         return {"status": "CATALOG_HISTORY_EMPTY", "snapshots": []}
+    if history_path.is_symlink() or not history_path.is_dir():
+        raise ValueError("history directory must be a real directory")
     snapshots = []
     for path in sorted(history_path.glob("catalog-*.json"), reverse=True):
+        if path.is_symlink() or not path.is_file():
+            continue
         try:
             catalog = _read_valid_catalog(path)
         except (OSError, ValueError):
@@ -329,7 +337,8 @@ def restore_catalog_snapshot(
     """Restore a validated snapshot through the atomic import/backup path."""
     snapshot_path = Path(snapshot)
     if (
-        not snapshot_path.is_file()
+        snapshot_path.is_symlink()
+        or not snapshot_path.is_file()
         or not snapshot_path.name.startswith("catalog-")
         or snapshot_path.suffix != ".json"
     ):
