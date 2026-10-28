@@ -5,7 +5,6 @@ or claim a provider is live unless health evidence was supplied by the caller.
 """
 from __future__ import annotations
 
-import math
 import re
 import threading
 
