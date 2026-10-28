@@ -543,6 +543,74 @@ class ConnectionManager:
             safe[key] = value
         return safe
 
+    def update_provider_metadata(
+        self, provider_id: str, metadata: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update descriptive metadata atomically without changing identity, capabilities, or credentials."""
+        allowed_fields = {
+            "description", "website", "docs_url", "logo_url", "support_url", "tags"
+        }
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER_ID", "saved": False}
+        if not isinstance(metadata, dict) or not metadata:
+            return {"status": "INVALID_METADATA", "saved": False}
+        if any(not isinstance(key, str) or key not in allowed_fields for key in metadata):
+            return {"status": "METADATA_FIELD_NOT_EDITABLE", "saved": False}
+        if self._contains_credential_value_field(metadata):
+            return {"status": "CREDENTIAL_FIELDS_FORBIDDEN", "saved": False}
+        for key, value in metadata.items():
+            if key == "tags":
+                if (
+                    not isinstance(value, list)
+                    or any(not isinstance(tag, str) or not tag.strip() or len(tag) > 64 for tag in value)
+                    or len(value) > 32
+                    or len({tag.casefold() for tag in value}) != len(value)
+                ):
+                    return {"status": "INVALID_METADATA", "saved": False}
+            elif (
+                not isinstance(value, str)
+                or len(value) > 2048
+                or any(unicodedata.category(char) in {"Cc", "Cs"} for char in value)
+            ):
+                return {"status": "INVALID_METADATA", "saved": False}
+
+        with self._catalog_transaction():
+            providers = self._list_providers_unlocked()
+            index = next(
+                (i for i, item in enumerate(providers) if item.get("id") == provider_id),
+                None,
+            )
+            if index is None:
+                return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+            updated = [dict(item) for item in providers]
+            updated[index].update(metadata)
+            candidate = dict(self.catalog)
+            candidate["providers"] = updated
+            validation = self.validate_catalog_schema(candidate)
+            if validation.get("valid") is not True:
+                return {
+                    "status": "INVALID_PROVIDER_CATALOG",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
+            try:
+                self._atomic_write_json(self.catalog_path, candidate)
+            except OSError as exc:
+                return {
+                    "status": "METADATA_WRITE_FAILED",
+                    "provider": provider_id,
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
+            self.catalog = candidate
+        return {
+            "status": "METADATA_UPDATED",
+            "provider": provider_id,
+            "saved": True,
+            "updated_fields": sorted(metadata),
+        }
+
     def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
         """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
         with self._lock:
