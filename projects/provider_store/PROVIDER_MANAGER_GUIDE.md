@@ -200,11 +200,11 @@ The example assumes the application has already configured `connection_manager`,
 
 ## Structured provider events
 
-`ProviderStructuredLogger` emits JSON events from an injected standard-library `logging.Logger`. `ProviderService` accepts it as `structured_logger=...` and emits `provider.verify` / `provider.manual_verify` events with a bounded event/status code, outcome, provider ID, optional duration and safe error code. It does not log exception messages, endpoint URLs, request payloads, credentials or arbitrary dictionaries. A logging failure is deliberately non-fatal to provider verification. The current integration covers connection verification paths; it is not a replacement for full service-wide instrumentation or an external log collector.
+`ProviderStructuredLogger` emits JSON events from an injected standard-library `logging.Logger`. `ProviderService` accepts it as `structured_logger=...` and emits bounded, secret-safe `provider.verify`, `provider.manual_verify`, and `provider.execute` events. Routed execution logs request ID, provider, bounded status, outcome, duration and safe error code only; prompts, endpoint URLs, credentials, exception messages and arbitrary dictionaries are not included. Logging failures are deliberately non-fatal to the provider operation. Full instrumentation of every service lifecycle method and external log shipping remain outside this integration.
 
 ## Trace-context propagation
 
-`ProviderService` accepts an optional `trace_manager` and `traceparent` on provider verification calls. A valid W3C traceparent is propagated into a provider verification span, and the span is finished with a safe outcome and bounded attributes. Trace failures are non-fatal to verification. The recorder remains in-process and bounded; external OpenTelemetry/collector export and instrumentation of every provider-service method are not yet implemented.
+`ProviderService` accepts an optional `trace_manager`; verification methods and `execute_routed_request(..., traceparent=...)` can propagate a valid W3C traceparent into a bounded span. Routed execution records category/request metadata and final outcome without prompts or payloads. Trace failures are non-fatal. The recorder remains in-process; external OpenTelemetry/collector export and instrumentation of every provider-service method are not yet implemented.
 
 
 ## Companion documentation
