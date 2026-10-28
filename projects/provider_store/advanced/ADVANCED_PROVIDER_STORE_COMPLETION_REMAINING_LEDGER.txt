@@ -664,12 +664,12 @@ Remaining work: Cross-platform CI verifies SPDX 2.3 JSON with SHA-256 hashes for
 Feature 129: CI/CD Pipeline
 Status: PARTIAL
 Implementation/evidence inspected: .github/workflows/task-25-tests.yml; .github/workflows/advanced-provider-store-release-gate.yml
-Remaining work: Cross-platform tests/build/report artifacts run in CI. A dedicated manual/tag release gate reruns compile/catalog/regression checks and requires all 150 ledger points before artifact upload; the release gate remains blocked until the component is complete.
+Remaining work: Cross-platform tests/build/report artifacts run in CI. A dedicated manual/tag release gate includes Ruff, mypy, focused coverage, reproducible wheel/clean install, benchmark, compile/catalog/regression checks and requires all 150 ledger points before artifact upload; it has not been executed end-to-end on a release ref.
 
 Feature 130: Automated Release Gates
 Status: PARTIAL
 Implementation/evidence inspected: .github/workflows/advanced-provider-store-release-gate.yml; advanced/release_report.py; tests/test_advanced_provider_release_report.py
-Remaining work: --require-complete returns exit code 2 unless every acceptance point is COMPLETED. Strict-versus-normal report behavior passed tests in cross-platform CI #40704591050. The manual/tag workflow runs compile/catalog/regression gates and blocks artifact upload for incomplete ledgers; release execution remains blocked until criteria pass.
+Remaining work: --require-complete returns exit code 2 unless every acceptance point is COMPLETED. Strict-versus-normal report behavior passed tests in cross-platform CI #40704591050. The manual/tag workflow includes Ruff, mypy, focused coverage, reproducible wheel/clean install, benchmark, compile/catalog/regression gates and blocks artifact upload for incomplete ledgers; release execution remains blocked until criteria pass.
 
 Feature 131: Release Asset Management
 Status: PARTIAL
