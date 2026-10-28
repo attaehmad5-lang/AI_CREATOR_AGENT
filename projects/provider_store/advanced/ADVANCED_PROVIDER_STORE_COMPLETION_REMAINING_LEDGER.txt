@@ -442,9 +442,9 @@ Implementation/evidence inspected: connection_manager.py; tests/test_connection_
 Remaining work: Load/unload/enable/disable lifecycle paths and compatibility facades are covered by regression tests.
 
 Feature 085: Catalog Versioning
-Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
-Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+Status: COMPLETED
+Implementation/evidence inspected: catalog_interchange.py; catalog_diff.py; catalog_cli.py; tests/test_catalog_interchange.py; tests/test_catalog_diff.py; tests/test_catalog_cli.py; CI #40716283613
+Remaining work: Catalog versions are diffed explicitly; immutable timestamped snapshots can be listed, restored through validated atomic import/backup, and pruned using dry-run-first retention. Cross-manager state reconciliation is tracked separately in point 096.
 
 Feature 086: Catalog Migration
 Status: PARTIAL
