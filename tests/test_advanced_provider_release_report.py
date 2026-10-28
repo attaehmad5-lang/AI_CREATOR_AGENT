@@ -168,6 +168,10 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(_ledger_text(), encoding="utf-8")
             (provider_root / "provider_status_manager.py").write_text("class StatusManager: pass\n", encoding="utf-8")
             (provider_root / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (provider_root / "safe_credentials.py").write_text(
+                "credentials = self.store.manager.credential_status(provider_id)\n",
+                encoding="utf-8",
+            )
             (provider_root / "advanced_provider_catalog_backup.json").write_text('{"api_key":"never-package"}', encoding="utf-8")
             (provider_root / "connection_state.json").write_text('{"providers":{}}', encoding="utf-8")
             (provider_root / ".env").write_text("API_KEY=never-package", encoding="utf-8")
