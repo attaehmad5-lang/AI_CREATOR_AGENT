@@ -43,6 +43,7 @@ jobs:
           projects/provider_store/health_scheduler.py
           projects/provider_store/provider_structured_logger.py
           projects/provider_store/provider_service.py
+          projects/provider_store/routing_manager.py
           projects/provider_store/advanced/performance_benchmark.py
           projects/provider_store/advanced/release_report.py
           projects/provider_store/advanced/pdf_report.py
@@ -50,6 +51,7 @@ jobs:
           projects/provider_store/generate_api_reference.py
           tests/test_generate_provider_store_api_reference.py
           tests/test_provider_store_fuzz_regressions.py
+          tests/test_routing_simulation.py
           tests/test_catalog_interchange.py
           tests/test_catalog_diff.py
           tests/test_catalog_cli.py
@@ -66,6 +68,7 @@ jobs:
           projects/provider_store/generate_api_reference.py
           tests/test_generate_provider_store_api_reference.py
           tests/test_provider_store_fuzz_regressions.py
+          tests/test_routing_simulation.py
           tests/test_catalog_interchange.py
           tests/test_catalog_diff.py
           tests/test_provider_store_performance_benchmark.py
