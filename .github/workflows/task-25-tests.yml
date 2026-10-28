@@ -106,10 +106,10 @@ jobs:
         run: python -m unittest discover -s tests -p "test_*.py" -v
       - name: Run bounded catalog performance benchmark
         run: python -m projects.provider_store.advanced.performance_benchmark --iterations 25 --workers 4 --max-seconds 15
-      - name: Generate Advanced Provider Store report and source ZIP
-        run: python -m projects.provider_store.advanced.release_report --output-dir build/advanced-provider-store-release
       - name: Generate source-derived Python API reference
         run: python -m projects.provider_store.generate_api_reference --output projects/provider_store/PROVIDER_STORE_PYTHON_API.md
+      - name: Generate Advanced Provider Store report and source ZIP
+        run: python -m projects.provider_store.advanced.release_report --output-dir build/advanced-provider-store-release
       - name: Upload Advanced Provider Store release artifacts
         uses: actions/upload-artifact@v4
         with:
