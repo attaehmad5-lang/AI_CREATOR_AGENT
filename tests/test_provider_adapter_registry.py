@@ -107,7 +107,9 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
             modalities=("image",),
         )
         result = self.registry.execute("test-image", modality="image", request_id="req-error")
-        self.assertEqual(result["status"], "ADAPTER_EXECUTION_FAILED")
+        self.assertEqual(result["status"], "ADAPTER_OUTCOME_UNKNOWN")
+        self.assertFalse(result["outcome_known"])
+        self.assertTrue(result["reservations_retained"])
         self.assertEqual(result["error_type"], "RuntimeError")
         self.assertNotIn("secret-token", json.dumps(result))
 
