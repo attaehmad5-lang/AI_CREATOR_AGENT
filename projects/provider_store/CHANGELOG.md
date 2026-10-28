@@ -14,7 +14,7 @@ Changes are recorded here by release intent. This file does not imply a publishe
 - Bounded poll-driven health scheduler with injected probes and explicit timeout propagation.
 - Outage detector that opens/deduplicates incidents for unhealthy or stale health evidence and resolves them after verified recovery.
 - Secret-safe structured JSON event logging integrated into provider connection and manual verification paths.
-- Pre-package secret scanning for high-confidence GitHub, OpenAI-style/Anthropic, Google, Hugging Face, Replicate, AWS and Slack token patterns, in addition to private-key blocks.
+- Pre-package secret scanning for high-confidence GitHub, OpenAI-style/Anthropic, Google, Hugging Face, Replicate, AWS and Slack token patterns, private-key blocks, and high-entropy values assigned to credential-like fields.
 - Strict `--require-complete` release-report mode and a manual/tag-triggered Advanced Provider Store release gate that blocks artifact upload until all 150 acceptance points pass.
 - Dry-run-first catalog snapshot retention with explicit `--apply` deletion, validated snapshot filtering, symlink skipping, and retention-bound validation.
 
@@ -28,5 +28,5 @@ Changes are recorded here by release intent. This file does not imply a publishe
 ### Verification
 - GitHub Actions run [#40581121875](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40581121875) passed 480 tests on Ubuntu and Windows, focused Ruff lint/format gates, mypy checks for six maintenance/release modules, and 80% combined statement coverage across seven targeted modules.
 - Wheel/reproducibility CI [#40581736079](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40581736079) passed on Ubuntu and Windows: two isolated builds match byte-for-byte per OS, the wheel installs into a clean target, module import and catalog data succeed, and source ZIP/SBOM generation passes. Cross-OS binary equivalence and transitive dependency hash locking remain partial.
-- Latest hardening CI run [#40705338494](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40705338494) passed 497 tests on Ubuntu and Windows, focused Ruff/mypy/coverage gates (83% focused source coverage), provider-token leak-injection checks for GitHub/OpenAI-style/Anthropic/Google/Hugging Face/Replicate/AWS/Slack formats, strict-ledger release-gate tests, and source report/package generation. The ledger remains incomplete; no release is published.
+- Latest hardening CI run [#40705338494](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40705338494) passed 497 tests on Ubuntu and Windows, focused Ruff/mypy/coverage gates (83% focused source coverage), provider-token leak-injection checks for GitHub/OpenAI-style/Anthropic/Google/Hugging Face/Replicate/AWS/Slack formats, strict-ledger release-gate tests, and source report/package generation. The ledger remains incomplete; no release is published. High-entropy credential-field scanning was added after that run and is awaiting its own cross-platform CI verification.
 - Live provider calls, real account credit balances, and billable generation are not claimed.
