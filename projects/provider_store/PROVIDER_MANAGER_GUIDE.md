@@ -177,3 +177,17 @@ A successful result includes `"reproducible": true`, `"installed_import": true`,
 ## Trace-context propagation
 
 `ProviderService` accepts an optional `trace_manager` and `traceparent` on provider verification calls. A valid W3C traceparent is propagated into a provider verification span, and the span is finished with a safe outcome and bounded attributes. Trace failures are non-fatal to verification. The recorder remains in-process and bounded; external OpenTelemetry/collector export and instrumentation of every provider-service method are not yet implemented.
+
+
+## Companion documentation
+
+- CHANGELOG.md records unreleased changes and explicit verification limits; it does not imply a published release.
+- PROVIDER_STORE_ARCHITECTURE.md describes module boundaries, trust assumptions, operational flow and production constraints.
+- PROVIDER_STORE_API_REFERENCE.md documents operational APIs and CLI syntax.
+- PROVIDER_STORE_TROUBLESHOOTING.md covers readiness, catalog, connectivity, paid-use, output, release and CI failures.
+- PROVIDER_STORE_MIGRATION.md describes dry-run catalog changes, snapshots, migration, rollback and retention.
+- The source-derived API index is generated deterministically with:
+
+    python -m projects.provider_store.generate_api_reference
+
+The provider-store CI and strict release workflow generate PROVIDER_STORE_PYTHON_API.md before source packaging, so the generated API index is included in the release bundle. Do not edit that generated file by hand; change source declarations/docstrings and regenerate it.
