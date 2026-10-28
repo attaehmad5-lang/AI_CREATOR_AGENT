@@ -57,6 +57,21 @@ Use the canonical manager for provider registration, catalog validation, enable/
 
 Use the configuration lifecycle manager for version-validated candidate reload, explicitly registered schema migrations and rollback to a validated prior configuration. A failed migration write must preserve the original bytes and clean up its temporary file.
 
+## Routing simulation
+
+The route planner supports an explicit side-effect-free preview:
+
+    preview = router.route(
+        category="image",
+        project_id="demo",
+        request_id="preview-001",
+        estimated_cost=2.50,
+        paid_approved_providers={"provider-id"},
+        dry_run=True,
+    )
+
+A successful preview returns status ROUTE_SIMULATED, the selected provider, policy decisions, estimated cost/unit and a would_reserve list. It does not reserve paid budget, free credits or quota, and does not advance the round-robin cursor. A preview does not guarantee that quota or balances will still be available when a real request is submitted. Omit dry_run (or set it to False) only when the caller intends normal routing and reservation behavior.
+
 ## Runtime and policy modules
 
 | Module | Responsibility |
