@@ -25,6 +25,7 @@ from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.provider_adapter_registry import ProviderAdapterRegistry
 from projects.provider_store.provider_trace_manager import ProviderTraceManager
+from projects.provider_store.provider_audit_log import ProviderAuditLog
 from projects.provider_store.provider_structured_logger import ProviderStructuredLogger
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryBudget, RetryPolicy
@@ -605,6 +606,46 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(calls[0]["provider_id"], "image")
         self.assertEqual(calls[0]["request_id"], "registry-dispatch")
         self.assertTrue(result["finalization"]["finalized"])
+
+    def test_provider_service_writes_hash_chained_audit_events(self):
+        audit = ProviderAuditLog(self.root / "provider-audit.jsonl")
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            health_manager=self.health,
+            output_validator=self.validator,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            audit_log_manager=audit,
+        )
+        verified = service.verify_provider(
+            "image", lambda provider, **kwargs: {"ok": True}, principal_id="user-1"
+        )
+        self.assertTrue(verified["verified"])
+        output_path = self.root / "audit-generated.png"
+        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="audit-request",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+            },
+            modality="image", principal_id="user-1",
+            adapter_options={"output_path": str(output_path)},
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        chain = audit.verify_chain()
+        self.assertTrue(chain["valid"])
+        self.assertEqual(chain["count"], 2)
+        records = [json.loads(line) for line in (self.root / "provider-audit.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([item["event"] for item in records], ["provider.verify", "provider.execute"])
+        self.assertEqual(records[1]["request_id"], "audit-request")
+        self.assertEqual(records[1]["actor_id"], "user-1")
+        self.assertNotIn("safe-test-image", json.dumps(records))
 
     def test_routed_model_selection_reaches_registry_adapter(self):
         catalog = self.root / "model-routed-catalog.json"
