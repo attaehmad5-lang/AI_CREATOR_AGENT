@@ -127,6 +127,7 @@ class ProviderAdapterRegistry:
     def execute(
         self,
         provider_id: str,
+        /,
         *,
         modality: str,
         request_id: str,
