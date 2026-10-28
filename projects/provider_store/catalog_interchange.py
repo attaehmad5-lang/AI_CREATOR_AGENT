@@ -258,6 +258,66 @@ def list_catalog_snapshots(
     }
 
 
+def prune_catalog_snapshots(
+    history_directory: str | os.PathLike[str],
+    *,
+    keep: int = 20,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Preview or explicitly prune old valid snapshots, preserving at least one.
+
+    Invalid files and symlinks are never deleted. The default is dry-run; callers
+    must pass apply=True to remove older validated snapshot files.
+    """
+    if isinstance(keep, bool) or not isinstance(keep, int) or not 1 <= keep <= 10000:
+        raise ValueError("keep must be an integer between 1 and 10000")
+    if not isinstance(apply, bool):
+        raise ValueError("apply must be a boolean")
+    history_path = Path(history_directory)
+    if not history_path.exists():
+        return {
+            "status": "CATALOG_HISTORY_EMPTY",
+            "applied": False,
+            "kept": 0,
+            "would_delete": [],
+            "deleted": [],
+        }
+    if history_path.is_symlink() or not history_path.is_dir():
+        raise ValueError("history directory must be a real directory")
+    lock_path = history_path / ".catalog-history.lock"
+    with interprocess_file_lock(lock_path):
+        valid_snapshots: list[Path] = []
+        for path in history_path.glob("catalog-*.json"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                _read_valid_catalog(path)
+            except (OSError, ValueError):
+                continue
+            valid_snapshots.append(path)
+        valid_snapshots.sort(key=lambda path: path.name, reverse=True)
+        removable = valid_snapshots[keep:]
+        deleted: list[str] = []
+        if apply:
+            for path in removable:
+                # Recheck file type immediately before deletion; don't follow symlinks.
+                if path.is_symlink() or not path.is_file():
+                    continue
+                try:
+                    _read_valid_catalog(path)
+                except (OSError, ValueError):
+                    continue
+                path.unlink()
+                deleted.append(path.name)
+        return {
+            "status": "CATALOG_SNAPSHOTS_PRUNED" if apply else "CATALOG_SNAPSHOT_PRUNE_PREVIEW",
+            "applied": apply,
+            "kept": min(keep, len(valid_snapshots)),
+            "would_delete": [path.name for path in removable],
+            "deleted": deleted,
+        }
+
+
 def restore_catalog_snapshot(
     snapshot: str | os.PathLike[str],
     destination: str | os.PathLike[str],
