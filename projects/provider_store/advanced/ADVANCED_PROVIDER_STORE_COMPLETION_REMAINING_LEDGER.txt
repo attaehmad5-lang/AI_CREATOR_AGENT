@@ -588,9 +588,8 @@ Remaining work: Unit/regression/security/concurrency tests exist; not all integr
 
 Feature 114: Fuzz Testing
 Status: PARTIAL
-Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
-Remaining work: Unit/regression/security/concurrency tests exist; not all integration, failure-injection, fuzzing and performance dimensions are covered.
-
+Implementation/evidence inspected: tests/test_provider_store_fuzz_regressions.py; connection_manager.py; provider_trace_manager.py; .github/workflows/task-25-tests.yml
+Remaining work: Deterministic seeded fuzz-regression tests exercise 500 JSON-like provider catalog candidates and 1,000 arbitrary traceparent strings, requiring safe results without exceptions. Broader parser/property-based and live/network failure fuzzing remain.
 Feature 115: Performance Testing
 Status: PARTIAL
 Implementation/evidence inspected: advanced/performance_benchmark.py; tests/test_provider_store_performance_benchmark.py; .github/workflows/task-25-tests.yml
