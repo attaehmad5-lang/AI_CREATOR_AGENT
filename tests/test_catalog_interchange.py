@@ -124,6 +124,36 @@ class CatalogInterchangeTests(unittest.TestCase):
         (history / "catalog-broken.json").write_text("{bad", encoding="utf-8")
         self.assertEqual(list_catalog_snapshots(history)["snapshots"], [])
 
+    def test_snapshot_prune_defaults_to_preview_and_preserves_invalid_files(self):
+        history = self.root / "history"
+        history.mkdir()
+        for day in range(1, 5):
+            (history / f"catalog-2026010{day}T000000000000Z.json").write_bytes(
+                self.source.read_bytes()
+            )
+        invalid = history / "catalog-20260109T000000000000Z.json"
+        invalid.write_text("{invalid", encoding="utf-8")
+
+        preview = prune_catalog_snapshots(history, keep=2)
+        self.assertFalse(preview["applied"])
+        self.assertEqual(len(preview["would_delete"]), 2)
+        self.assertEqual(preview["deleted"], [])
+        self.assertTrue(all((history / name).is_file() for name in preview["would_delete"]))
+        self.assertTrue(invalid.is_file())
+
+        applied = prune_catalog_snapshots(history, keep=2, apply=True)
+        self.assertTrue(applied["applied"])
+        self.assertEqual(len(applied["deleted"]), 2)
+        self.assertEqual(len(list(history.glob("catalog-*.json"))), 3)
+        self.assertTrue(invalid.is_file())
+
+    def test_snapshot_prune_rejects_unsafe_retention_limits(self):
+        for keep in (0, -1, 10001, True, 1.5):
+            with self.subTest(keep=keep), self.assertRaises(ValueError):
+                prune_catalog_snapshots(self.root, keep=keep)
+        with self.assertRaises(ValueError):
+            prune_catalog_snapshots(self.root, apply="yes")
+
     def test_export_refuses_malformed_json(self):
         invalid = self.root / "broken.json"
         invalid.write_text("{broken", encoding="utf-8")
