@@ -88,6 +88,10 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             ("api-token.py", "TOKEN = \"sk-" + "B" * 32 + "\"\\n"),
             ("aws-key.py", "TOKEN = \"AKIA" + "A" * 16 + "\"\\n"),
             ("slack-token.py", "TOKEN = \"xoxb-" + "C" * 28 + "\"\\n"),
+            ("google-key.py", "TOKEN = \"AIza" + "D" * 35 + "\"\\n"),
+            ("huggingface-token.py", "TOKEN = \"hf_" + "E" * 28 + "\"\\n"),
+            ("replicate-token.py", "TOKEN = \"r8_" + "F" * 28 + "\"\\n"),
+            ("anthropic-token.py", "TOKEN = \"sk-ant-" + "G" * 28 + "\"\\n"),
         )
         for filename, contents in fixtures:
             with self.subTest(filename=filename), tempfile.TemporaryDirectory() as tmp:
