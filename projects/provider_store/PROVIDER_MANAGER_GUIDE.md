@@ -140,7 +140,15 @@ The `apply` command is a dry run unless `--apply` is supplied. Removing provider
 
 ## Release evidence and SBOM
 
-The release-report command creates JSON, Markdown and PDF status reports, a source-only ZIP, a SHA-256 source manifest/checksum sidecar, and an SPDX 2.3 JSON SBOM containing source-file SHA-256 hashes. License and copyright conclusions are recorded as `NOASSERTION`, not guessed. The report remains `INCOMPLETE` until all 150 acceptance points are completed. These offline checks do not prove live provider connectivity, real account credits, or billable generation.
+The release-report command creates JSON, Markdown and PDF status reports, a source-only ZIP, a SHA-256 source manifest/checksum sidecar, and an SPDX 2.3 JSON SBOM containing source-file SHA-256 hashes. Before packaging, it rejects private-key blocks and high-confidence GitHub, OpenAI-style, AWS and Slack token patterns in eligible source payloads. License and copyright conclusions are recorded as `NOASSERTION`, not guessed. The report remains `INCOMPLETE` until all 150 acceptance points are completed. These offline checks do not prove live provider connectivity, real account credits, or billable generation.
+
+To explicitly enforce the completion ledger as a release gate, run:
+
+```bash
+python -m projects.provider_store.advanced.release_report --output-dir build/advanced-provider-store-release --require-complete
+```
+
+The normal report-generation command still exits successfully when it produces a valid report for an incomplete component. With `--require-complete`, an incomplete ledger returns exit code 2 so a publication workflow can fail closed. This flag does not publish assets or bypass CI/review.
 
 ## Wheel build and installation verification
 
