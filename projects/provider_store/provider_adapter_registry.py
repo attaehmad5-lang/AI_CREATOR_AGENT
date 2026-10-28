@@ -124,6 +124,63 @@ class ProviderAdapterRegistry:
                 return {"status": "MODEL_NOT_IN_CATALOG", "resolved": False}
         return {"status": "ADAPTER_RESOLVED", "resolved": True, "adapter": entry["adapter"], "provider_id": provider_id}
 
+    def as_callable(
+        self,
+        provider_id: str,
+        *,
+        modality: str,
+        model_id: str | None = None,
+    ) -> Callable[..., Any]:
+        """Return an adapter callable compatible with ProviderService execution.
+
+        Registry/policy rejection happens before the vendor callable is invoked and
+        returns an explicit not-started result. Vendor exceptions are allowed to
+        propagate so ProviderService can conservatively retain ambiguous reservations.
+        """
+        if not isinstance(provider_id, str) or not _IDENTIFIER.fullmatch(provider_id):
+            raise ValueError("invalid provider_id")
+        if not isinstance(modality, str) or not _IDENTIFIER.fullmatch(modality):
+            raise ValueError("invalid modality")
+        if model_id is not None and (not isinstance(model_id, str) or not _IDENTIFIER.fullmatch(model_id)):
+            raise ValueError("invalid model_id")
+
+        def invoke(**options: Any) -> Any:
+            request_id = options.get("request_id")
+            if (
+                options.get("provider_id") != provider_id
+                or not isinstance(request_id, str)
+                or not _IDENTIFIER.fullmatch(request_id)
+            ):
+                return {
+                    "started": False,
+                    "success": False,
+                    "charge_outcome": "not_incurred",
+                    "credit_outcome": "not_used",
+                    "error_code": "ADAPTER_CONTRACT_REJECTED",
+                }
+            resolved = self.resolve(provider_id, modality=modality, model_id=model_id)
+            if resolved.get("resolved") is not True:
+                return {
+                    "started": False,
+                    "success": False,
+                    "charge_outcome": "not_incurred",
+                    "credit_outcome": "not_used",
+                    "error_code": resolved.get("status", "ADAPTER_NOT_AVAILABLE"),
+                }
+            adapter_options = {
+                key: value for key, value in options.items()
+                if key not in {"provider_id", "request_id", "model_id", "modality"}
+            }
+            return resolved["adapter"](
+                provider_id=provider_id,
+                modality=modality,
+                request_id=request_id,
+                model_id=model_id,
+                **adapter_options,
+            )
+
+        return invoke
+
     def execute(
         self,
         provider_id: str,
