@@ -269,11 +269,7 @@ def prune_catalog_snapshots(
     Invalid files and symlinks are never deleted. The default is dry-run; callers
     must pass apply=True to remove older validated snapshot files.
     """
-    if (
-        isinstance(keep, bool)
-        or not isinstance(keep, int)
-        or not 1 <= keep <= 10000
-    ):
+    if isinstance(keep, bool) or not isinstance(keep, int) or not 1 <= keep <= 10000:
         raise ValueError("keep must be an integer between 1 and 10000")
     if not isinstance(apply, bool):
         raise ValueError("apply must be a boolean")
