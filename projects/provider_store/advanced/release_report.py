@@ -249,14 +249,23 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("build/advanced-provider-store-release"))
+    parser.add_argument(
+        "--require-complete",
+        action="store_true",
+        help="return a failing exit code unless all 150 ledger points are COMPLETED",
+    )
     args = parser.parse_args()
     try:
         result = write_release_artifacts(args.output_dir)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, indent=2))
-    # An incomplete ledger is a valid report, not a successful production release.
-    return 0 if result["zip_integrity"] == "PASS" else 1
+    if result["zip_integrity"] != "PASS":
+        return 1
+    if args.require_complete and result["completion_status"] != "COMPLETE":
+        print("Release blocked: completion ledger is not fully COMPLETED.")
+        return 2
+    return 0
 
 
 if __name__ == "__main__":
