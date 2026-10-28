@@ -22,7 +22,7 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
             {
                 "id": "disabled-image", "name": "Disabled Image", "category": "image",
                 "auth_type": "NONE", "connection_type": "API", "enabled": False,
-                "supported_models": ["image-v1"],
+                "supported_models": [{"id": "image-v1"}],
             },
         ]}), encoding="utf-8")
         self.state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
