@@ -104,6 +104,10 @@ def _sha256(data: bytes) -> str:
 _SECRET_PATTERNS = (
     ("GitHub access token", re.compile(rb"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
     ("OpenAI-style API key", re.compile(rb"\bsk-[A-Za-z0-9_-]{24,}\b")),
+    ("Anthropic API key", re.compile(rb"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
+    ("Google API key", re.compile(rb"\bAIza[0-9A-Za-z_-]{30,}\b")),
+    ("Hugging Face access token", re.compile(rb"\bhf_[A-Za-z0-9]{20,}\b")),
+    ("Replicate access token", re.compile(rb"\br8_[A-Za-z0-9]{20,}\b")),
     ("AWS access key ID", re.compile(rb"\bAKIA[0-9A-Z]{16}\b")),
     ("Slack access token", re.compile(rb"\bxox[baprs]-[A-Za-z0-9-]{20,}\b")),
     ("private-key block", re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
