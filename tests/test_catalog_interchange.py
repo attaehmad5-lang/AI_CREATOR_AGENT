@@ -10,6 +10,7 @@ from projects.provider_store.catalog_interchange import (
     export_catalog,
     import_catalog,
     list_catalog_snapshots,
+    prune_catalog_snapshots,
     restore_catalog_snapshot,
 )
 
