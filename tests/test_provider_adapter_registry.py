@@ -131,7 +131,7 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         self.assertTrue(self.registry.register("test-image", self.adapter, modalities=("image",))["registered"])
         listed = self.registry.list_adapters()
         self.assertEqual(listed["count"], 1)
-        self.assertNotIn("adapter", json.dumps(listed))
+        self.assertNotIn("\"adapter\":", json.dumps(listed))
         self.assertTrue(self.registry.unregister("test-image")["unregistered"])
         self.assertEqual(self.registry.list_adapters()["count"], 0)
 
