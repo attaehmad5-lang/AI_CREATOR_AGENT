@@ -744,8 +744,7 @@ Remaining work: Per-file SHA-256 manifest is generated, archive membership is ch
 Feature 145: Secret-Free Package Verification
 Status: PARTIAL
 Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; PROVIDER_MANAGER_GUIDE.md
-Remaining work: Allowlist plus pre-package scanning rejects private-key blocks and high-confidence GitHub, OpenAI-style/Anthropic, Google, Hugging Face, Replicate, AWS and Slack token patterns. Focused leak-injection tests passed in cross-platform CI #40704591050; broader entropy scanning and final release ZIP audit remain.
-
+Remaining work: Explicit allowlist, known token/private-key patterns and Shannon-entropy screening for long credential-field assignments fail closed without printing secret values. Leak-injection tests cover common provider token formats and generic high-entropy api_key values. Final generated release ZIP audit and broader heuristic validation remain.
 Feature 146: Backward Compatibility
 Status: PARTIAL
 Implementation/evidence inspected: provider_store modules; test_provider_store_compat.py; regression tests
