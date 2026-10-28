@@ -36,7 +36,7 @@ class GenerateApiReferenceTests(unittest.TestCase):
             self.assertIn("async def async_public(value)", first)
             self.assertIn("class Undocumented", first)
             self.assertIn("class PublicManager", first)
-            self.assertIn("execute(self, enabled: bool = True) -> None", first)
+            self.assertIn("execute(self, enabled: bool=True) -> None", first)
             self.assertNotIn("_private_call", first)
             self.assertNotIn("_hidden", first)
 
