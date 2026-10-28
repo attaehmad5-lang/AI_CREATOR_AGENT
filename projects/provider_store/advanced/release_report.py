@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import zipfile
 from collections import Counter
@@ -114,11 +115,29 @@ _SECRET_PATTERNS = (
 )
 
 
+_CREDENTIAL_ASSIGNMENT = re.compile(
+    rb"(?i)\b(?:api[_-]?key|access[_-]?key|secret(?:[_-]?key)?|token|password|client[_-]?secret)"
+    rb"\b\s*[:=]\s*[\"']?([A-Za-z0-9_./+=-]{32,})"
+)
+
+
+def _shannon_entropy(value: bytes) -> float:
+    if not value:
+        return 0.0
+    frequencies = Counter(value)
+    length = len(value)
+    return -sum((count / length) * math.log2(count / length) for count in frequencies.values())
+
+
 def _scan_release_payload(relative: str, data: bytes) -> None:
-    """Reject high-confidence credential material before any source enters a release."""
+    """Reject known token formats and high-entropy values assigned to credential fields."""
     for label, pattern in _SECRET_PATTERNS:
         if pattern.search(data):
             raise ValueError(f"{label} detected in eligible source file: {relative}")
+    for match in _CREDENTIAL_ASSIGNMENT.finditer(data):
+        candidate = match.group(1).rstrip(b"\"';,)")
+        if len(candidate) >= 32 and _shannon_entropy(candidate) >= 3.7:
+            raise ValueError(f"high-entropy credential-like value detected in eligible source file: {relative}")
 
 
 def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) -> dict[str, Any]:
