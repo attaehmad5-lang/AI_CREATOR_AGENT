@@ -103,7 +103,7 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                     _ledger_text(), encoding="utf-8"
                 )
                 (provider_root / filename).write_text(contents, encoding="utf-8")
-                with self.assertRaisesRegex(ValueError, "detected in eligible source file"):
+                with self.assertRaisesRegex(ValueError, "detected in release payload"):
                     write_release_artifacts(root / "build", repo_root=root)
 
     def test_source_package_fails_closed_on_high_entropy_credential_assignment(self):
@@ -121,6 +121,29 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "high-entropy credential-like value"):
                 write_release_artifacts(root / "build", repo_root=root)
+
+    def test_final_archive_scan_rejects_secret_in_generated_pdf(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            provider_root = root / "projects" / "provider_store"
+            advanced = provider_root / "advanced"
+            advanced.mkdir(parents=True)
+            (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(
+                _ledger_text(), encoding="utf-8"
+            )
+            (provider_root / "safe.py").write_text("VALUE = 1\\n", encoding="utf-8")
+
+            def write_tainted_pdf(path, report):
+                path.write_bytes(b"%PDF-1.4\\nTOKEN=ghp_" + b"A" * 36 + b"\\n%%EOF\\n")
+
+            with patch(
+                "projects.provider_store.advanced.pdf_report.write_pdf_report",
+                side_effect=write_tainted_pdf,
+            ):
+                with self.assertRaisesRegex(ValueError, "GitHub access token detected in release payload"):
+                    write_release_artifacts(root / "build", repo_root=root)
 
     def test_source_zip_has_manifest_hashes_and_excludes_runtime_secret_files(self):
         with tempfile.TemporaryDirectory() as tmp:
