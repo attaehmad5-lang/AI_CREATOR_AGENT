@@ -43,6 +43,8 @@ jobs:
           projects/provider_store/health_scheduler.py
           projects/provider_store/provider_structured_logger.py
           projects/provider_store/provider_service.py
+          projects/provider_store/provider_adapter_registry.py
+          tests/test_provider_adapter_registry.py
           projects/provider_store/routing_manager.py
           projects/provider_store/advanced/performance_benchmark.py
           projects/provider_store/advanced/release_report.py
@@ -89,7 +91,7 @@ jobs:
         run: python -m pip install coverage==7.13.1
       - name: Enforce focused provider-store coverage
         run: |
-          python -m coverage run --source=projects.provider_store.catalog_interchange,projects.provider_store.catalog_diff,projects.provider_store.catalog_cli,projects.provider_store.provider_config_lifecycle,projects.provider_store.provider_outage_detector,projects.provider_store.health_scheduler,projects.provider_store.provider_structured_logger,projects.provider_store.advanced.release_report,projects.provider_store.advanced.pdf_report,projects.provider_store.advanced.performance_benchmark,projects.provider_store.generate_api_reference -m unittest discover -s tests -p "test_*.py"
+          python -m coverage run --source=projects.provider_store.catalog_interchange,projects.provider_store.catalog_diff,projects.provider_store.catalog_cli,projects.provider_store.provider_config_lifecycle,projects.provider_store.provider_outage_detector,projects.provider_store.health_scheduler,projects.provider_store.provider_structured_logger,projects.provider_store.provider_adapter_registry,projects.provider_store.advanced.release_report,projects.provider_store.advanced.pdf_report,projects.provider_store.advanced.performance_benchmark,projects.provider_store.generate_api_reference -m unittest discover -s tests -p "test_*.py"
           python -m coverage report --fail-under=65
       - name: Install focused static type checker
         run: python -m pip install mypy==1.18.2
@@ -105,6 +107,7 @@ jobs:
           projects/provider_store/provider_outage_detector.py
           projects/provider_store/health_scheduler.py
           projects/provider_store/provider_structured_logger.py
+          projects/provider_store/provider_adapter_registry.py
           projects/provider_store/advanced/release_report.py
           projects/provider_store/advanced/pdf_report.py
           projects/provider_store/advanced/performance_benchmark.py
