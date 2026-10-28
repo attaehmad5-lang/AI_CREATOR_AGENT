@@ -154,13 +154,13 @@ Remaining work: Bounded success/failure/timeout, latency and queue-wait aggregat
 
 Feature 027: Structured Logging
 Status: PARTIAL
-Implementation/evidence inspected: provider_structured_logger.py; provider_service.py; tests/test_provider_structured_logger.py; tests/test_provider_service.py; CI #40721830003
-Remaining work: Secret-safe JSON events cover provider verification and routed generation execution with request ID, provider, bounded status, outcome and duration; telemetry failures are non-fatal. Cross-platform CI passed. Instrumentation of every lifecycle method and external log shipping remain.
+Implementation/evidence inspected: provider_structured_logger.py; provider_service.py; provider_audit_log.py; tests/test_provider_structured_logger.py; tests/test_provider_service.py; CI #40722792917
+Remaining work: Secret-safe JSON telemetry covers verification and routed execution with bounded fields and non-fatal logging errors; durable hash-chained audit events separately record safe operation outcomes. Ubuntu/Windows CI passed 549 tests and focused quality gates. Instrumentation of every service lifecycle method and external log shipping remain.
 
 Feature 028: Distributed Tracing
 Status: PARTIAL
-Implementation/evidence inspected: provider_trace_manager.py; provider_service.py; tests/test_provider_trace_manager.py; tests/test_provider_service.py; CI #40721830003
-Remaining work: W3C traceparent propagates through provider verification and routed generation execution; bounded spans record safe category/request metadata and outcome. Cross-platform CI passed. External trace export and broader lifecycle coverage remain.
+Implementation/evidence inspected: provider_trace_manager.py; provider_service.py; tests/test_provider_trace_manager.py; tests/test_provider_service.py; CI #40722792917
+Remaining work: W3C traceparent propagates through verification and routed execution; bounded spans capture safe metadata/outcomes and trace failures are non-fatal. Ubuntu/Windows CI passed 549 tests and focused quality gates. External trace export and broader lifecycle coverage remain.
 
 Feature 029: Incident Management
 Status: COMPLETED
