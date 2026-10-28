@@ -11,9 +11,9 @@ from typing import Any
 
 from .interprocess_lock import interprocess_file_lock
 
-_EVENT = re.compile(r"[a-z][a-z0-9_.-]{0,95}\\Z")
-_CODE = re.compile(r"[A-Za-z0-9_.:-]{1,80}\\Z")
-_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\\Z")
+_EVENT = re.compile(r"[a-z][a-z0-9_.-]{0,95}\Z")
+_CODE = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
 _ZERO_HASH = "0" * 64
 
 
@@ -53,7 +53,7 @@ class ProviderAuditLog:
             return None, "AUDIT_LOG_READ_FAILED"
         if len(raw) > self.max_bytes:
             return None, "AUDIT_LOG_SIZE_LIMIT"
-        if raw and not raw.endswith(b"\\n"):
+        if raw and not raw.endswith(b"\n"):
             return None, "AUDIT_LOG_TRUNCATED"
         records: list[dict[str, Any]] = []
         previous_hash = _ZERO_HASH
@@ -156,7 +156,7 @@ class ProviderAuditLog:
             body = {**base, "previous_hash": previous_hash}
             record_hash = hashlib.sha256(_canonical_json(body)).hexdigest()
             record = {**body, "record_hash": record_hash}
-            encoded = _canonical_json(record) + b"\\n"
+            encoded = _canonical_json(record) + b"\n"
             current_size = self.path.stat().st_size if self.path.exists() else 0
             if current_size + len(encoded) > self.max_bytes:
                 return {"status": "AUDIT_LOG_SIZE_LIMIT", "saved": False}
