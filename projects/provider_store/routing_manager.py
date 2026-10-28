@@ -5,7 +5,6 @@ or claim a provider is live unless health evidence was supplied by the caller.
 """
 from __future__ import annotations
 
-import math
 import re
 import threading
 
@@ -150,12 +149,15 @@ class ProviderRoutingManager:
         max_benchmark_p95_latency_ms: float | None = None,
         allow_low_confidence_fallback: bool = True,
         required_region: str | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Return the first policy-compliant provider and the decisions that led to it."""
+        """Return a policy-compliant provider; dry-run previews without reserving resources."""
         if not isinstance(category, str) or not category.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_REQUIRED"}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
+        if not isinstance(dry_run, bool):
+            return {"allowed": False, "status": "INVALID_DRY_RUN_FLAG"}
         if required_region is not None and (
             not isinstance(required_region, str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", required_region)
@@ -393,6 +395,42 @@ class ProviderRoutingManager:
                 ):
                     decisions.append({"provider": provider_id, "status": "CONNECTION_NOT_VERIFIED"})
                     continue
+                # A persisted successful connection must not outlive its credentials.
+                # Re-check credential presence/expiry immediately before routing.
+                try:
+                    credential = self.connection_manager.credential_status(provider_id)
+                except Exception as exc:
+                    decisions.append({
+                        "provider": provider_id,
+                        "status": "CREDENTIAL_STATUS_LOOKUP_FAILED",
+                        "error_type": type(exc).__name__,
+                    })
+                    continue
+                if not isinstance(credential, dict):
+                    decisions.append({"provider": provider_id, "status": "CREDENTIAL_STATUS_LOOKUP_FAILED"})
+                    continue
+                credential_state = credential.get("status")
+                auth_type = str(provider.get("auth_type", "NONE")).strip().upper()
+                manual_auth_types = {
+                    "ACCOUNT", "MANUAL", "MANUAL_CONNECT", "OAUTH_BROWSER",
+                    "ACCOUNT_OR_API", "API_KEY_OR_ACCOUNT", "API_KEY_OR_SERVICE_ACCOUNT",
+                    "ACCOUNT_OR_LOCAL",
+                }
+                blocked_credential_states = {
+                    "CREDENTIALS_MISSING", "CREDENTIALS_EXPIRED", "CREDENTIAL_EXPIRY_INVALID",
+                    "CREDENTIAL_EXPIRY_UNKNOWN", "CREDENTIAL_VALUE_INVALID", "INVALID_ENVIRONMENT",
+                    "NOT_FOUND",
+                }
+                if credential_state in blocked_credential_states or (
+                    credential_state == "MANUAL_CONNECTION_REQUIRED"
+                    and auth_type not in manual_auth_types
+                ):
+                    decisions.append({
+                        "provider": provider_id,
+                        "status": credential_state if credential_state in blocked_credential_states
+                        else "CREDENTIAL_VERIFICATION_REQUIRED",
+                    })
+                    continue
             health_record: dict[str, Any] = {}
             if self.health_manager is not None:
                 try:
@@ -524,7 +562,8 @@ class ProviderRoutingManager:
             candidates.sort(key=self._priority)
             with self._lock:
                 start = self._round_robin_counters.get(category.strip().casefold(), 0) % len(candidates)
-                self._round_robin_counters[category.strip().casefold()] = start + 1
+                if not dry_run:
+                    self._round_robin_counters[category.strip().casefold()] = start + 1
             candidates = candidates[start:] + candidates[:start]
         else:
             candidates.sort(key=self._priority)
@@ -580,6 +619,43 @@ class ProviderRoutingManager:
                     decisions.append({"provider": provider_id, "status": status})
                     continue
                 billing_mode = decision.get("billing_mode")
+
+            if dry_run:
+                would_reserve = []
+                if billing_mode == "FREE_CREDITS":
+                    would_reserve.append("credits")
+                if billing_mode == "PAID_APPROVED" and self.cost_policy is not None:
+                    would_reserve.append("cost")
+                if self.quota_manager is not None:
+                    would_reserve.append("quota")
+                result = {
+                    "allowed": True,
+                    "status": "ROUTE_SIMULATED",
+                    "dry_run": True,
+                    "provider": provider_id,
+                    "category": category.strip(),
+                    "strategy": selected_strategy,
+                    "automatic_fallback": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
+                    "model": model,
+                    "model_version": model_version,
+                    "required_region": required_region,
+                    "estimated_cost": cost,
+                    "estimated_cost_unit": estimated_cost_unit.strip(),
+                    "billing_mode": billing_mode,
+                    "would_reserve": would_reserve,
+                    "prior_decisions": decisions,
+                }
+                if confidence_status is not None:
+                    result["confidence_routing_status"] = confidence_status
+                if confidence_evidence is not None:
+                    result["benchmark_evidence"] = {
+                        "sample_count": confidence_evidence.get("sample_count"),
+                        "success_rate": confidence_evidence.get("success_rate"),
+                        "p95_latency_ms": confidence_evidence.get("p95_latency_ms"),
+                        "avg_cost_per_success": confidence_evidence.get("avg_cost_per_success"),
+                        "avg_quality_score": confidence_evidence.get("avg_quality_score"),
+                    }
+                return result
 
             cost_reserved = False
             cost_reservation_created = False

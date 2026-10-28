@@ -9,6 +9,9 @@ output/
 
 # Sensitive setup scripts
 hf_token_setup.py
+# Generated source-derived API index
+projects/provider_store/PROVIDER_STORE_PYTHON_API.md
+
 # Generated media and archives
 *.png
 *.jpg

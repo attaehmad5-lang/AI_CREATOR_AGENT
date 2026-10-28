@@ -1,7 +1,7 @@
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 
-from projects.provider_store.retry_policy import CircuitBreaker, RetryPolicy
+from projects.provider_store.retry_policy import CircuitBreaker, RetryBudget, RetryDecision, RetryPolicy
 
 
 class RetryPolicyTests(unittest.TestCase):
@@ -136,6 +136,47 @@ class RetryPolicyTests(unittest.TestCase):
         self.assertEqual(breaker.state, "HALF_OPEN")
         breaker.record_failure()
         self.assertEqual(breaker.state, "OPEN")
+
+    def test_retry_budget_refills_and_caps_retry_volume(self):
+        now = [0.0]
+        budget = RetryBudget(capacity=2, refill_rate_per_second=1, clock=lambda: now[0])
+        self.assertTrue(budget.consume()["allowed"])
+        self.assertTrue(budget.consume()["allowed"])
+        exhausted = budget.consume()
+        self.assertEqual(exhausted["status"], "RETRY_BUDGET_EXHAUSTED")
+        self.assertEqual(exhausted["retry_after_seconds"], 1.0)
+        now[0] += 0.5
+        self.assertEqual(budget.consume()["retry_after_seconds"], 0.5)
+        now[0] += 0.5
+        self.assertTrue(budget.consume()["allowed"])
+
+    def test_retry_budget_refund_is_capped_and_decision_gated(self):
+        budget = RetryBudget(capacity=2, refill_rate_per_second=0, clock=lambda: 0.0)
+        denied = budget.consume_decision(RetryDecision(False, 1, 0.0, "NON_RETRYABLE_FAILURE"))
+        self.assertEqual(denied["status"], "RETRY_NOT_RECOMMENDED")
+        self.assertEqual(budget.snapshot()["available"], 2)
+        self.assertTrue(budget.consume_decision(RetryDecision(True, 1, 1.0, "TRANSIENT_HTTP_FAILURE"))["allowed"])
+        refunded = budget.refund(100)
+        self.assertTrue(refunded["refunded"])
+        self.assertEqual(refunded["remaining"], 2)
+        self.assertTrue(budget.consume()["allowed"])
+        self.assertTrue(budget.consume()["allowed"])
+        self.assertIsNone(budget.consume()["retry_after_seconds"])
+
+    def test_retry_budget_is_thread_safe_and_rejects_invalid_values(self):
+        budget = RetryBudget(capacity=5, refill_rate_per_second=0, clock=lambda: 0.0)
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(lambda _: budget.consume()["allowed"], range(40)))
+        self.assertEqual(sum(results), 5)
+        for value in (0, -1, float("nan"), float("inf"), True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                RetryBudget(capacity=value)
+        with self.assertRaises(ValueError):
+            RetryBudget(refill_rate_per_second=float("nan"))
+        for cost in (0, -1, float("nan"), float("inf"), True, 6):
+            with self.subTest(cost=cost):
+                self.assertFalse(budget.consume(cost)["allowed"])
+        self.assertEqual(budget.consume_decision(object())["status"], "INVALID_RETRY_DECISION")
 
     def test_invalid_policy_configuration_is_rejected(self):
         with self.assertRaises(ValueError):

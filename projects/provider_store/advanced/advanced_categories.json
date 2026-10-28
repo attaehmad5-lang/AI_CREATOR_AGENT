@@ -23,7 +23,8 @@
         "background_replacement",
         "relighting",
         "color_editing",
-        "image_restoration"
+        "image_restoration",
+        "image_editing"
       ]
     },
     "advanced_upscaling": {
@@ -35,7 +36,8 @@
         "denoise",
         "old_photo_restoration",
         "video_upscaling",
-        "frame_interpolation"
+        "frame_interpolation",
+        "image_restoration"
       ]
     },
     "advanced_transcription": {
@@ -58,7 +60,8 @@
         "audio_enhancement",
         "noise_removal",
         "music_generation",
-        "sound_effect_generation"
+        "sound_effect_generation",
+        "audio_generation"
       ]
     },
     "advanced_video_editing": {
@@ -70,7 +73,8 @@
         "background_replacement",
         "color_grading",
         "lip_sync",
-        "video_restoration"
+        "video_restoration",
+        "audio_editing"
       ]
     }
   }

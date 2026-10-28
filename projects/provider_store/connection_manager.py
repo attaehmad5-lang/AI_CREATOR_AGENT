@@ -11,10 +11,12 @@ import os
 import re
 import tempfile
 import threading
+import unicodedata
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import urlsplit
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .safe_numbers import finite_number
@@ -541,6 +543,86 @@ class ConnectionManager:
                 continue
             safe[key] = value
         return safe
+
+    def update_provider_metadata(
+        self, provider_id: str, metadata: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update descriptive metadata atomically without changing identity, capabilities, or credentials."""
+        allowed_fields = {
+            "description", "website", "docs_url", "logo_url", "support_url", "tags"
+        }
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER_ID", "saved": False}
+        if not isinstance(metadata, dict) or not metadata:
+            return {"status": "INVALID_METADATA", "saved": False}
+        if any(not isinstance(key, str) or key not in allowed_fields for key in metadata):
+            return {"status": "METADATA_FIELD_NOT_EDITABLE", "saved": False}
+        if self._contains_credential_value_field(metadata):
+            return {"status": "CREDENTIAL_FIELDS_FORBIDDEN", "saved": False}
+        for key, value in metadata.items():
+            if key == "tags":
+                if (
+                    not isinstance(value, list)
+                    or any(not isinstance(tag, str) or not tag.strip() or len(tag) > 64 for tag in value)
+                    or len(value) > 32
+                    or len({tag.casefold() for tag in value}) != len(value)
+                ):
+                    return {"status": "INVALID_METADATA", "saved": False}
+            elif (
+                not isinstance(value, str)
+                or len(value) > 2048
+                or any(unicodedata.category(char) in {"Cc", "Cs"} for char in value)
+            ):
+                return {"status": "INVALID_METADATA", "saved": False}
+            elif key in {"website", "docs_url", "logo_url", "support_url"}:
+                try:
+                    parsed_url = urlsplit(value)
+                    if (
+                        parsed_url.scheme not in {"http", "https"}
+                        or not parsed_url.hostname
+                        or parsed_url.username is not None
+                        or parsed_url.password is not None
+                    ):
+                        return {"status": "INVALID_METADATA_URL", "saved": False}
+                except ValueError:
+                    return {"status": "INVALID_METADATA_URL", "saved": False}
+
+        with self._catalog_transaction():
+            providers = self._list_providers_unlocked()
+            index = next(
+                (i for i, item in enumerate(providers) if item.get("id") == provider_id),
+                None,
+            )
+            if index is None:
+                return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+            updated = [dict(item) for item in providers]
+            updated[index].update(metadata)
+            candidate = dict(self.catalog)
+            candidate["providers"] = updated
+            validation = self.validate_catalog_schema(candidate)
+            if validation.get("valid") is not True:
+                return {
+                    "status": "INVALID_PROVIDER_CATALOG",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
+            try:
+                self._atomic_write_json(self.catalog_path, candidate)
+            except OSError as exc:
+                return {
+                    "status": "METADATA_WRITE_FAILED",
+                    "provider": provider_id,
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
+            self.catalog = candidate
+        return {
+            "status": "METADATA_UPDATED",
+            "provider": provider_id,
+            "saved": True,
+            "updated_fields": sorted(metadata),
+        }
 
     def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
         """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
@@ -1169,7 +1251,8 @@ class ConnectionManager:
         credentials = self.credential_status(provider_id, environ)
         blocked_credential_states = {
             "CREDENTIALS_MISSING", "CREDENTIALS_EXPIRED", "CREDENTIAL_EXPIRY_INVALID",
-            "CREDENTIAL_EXPIRY_UNKNOWN", "INVALID_ENVIRONMENT", "MANUAL_CONNECTION_REQUIRED",
+            "CREDENTIAL_EXPIRY_UNKNOWN", "CREDENTIAL_VALUE_INVALID", "INVALID_ENVIRONMENT",
+            "MANUAL_CONNECTION_REQUIRED",
         }
         if credentials["status"] in blocked_credential_states:
             if not save_state("ERROR"):
@@ -1426,6 +1509,19 @@ class ConnectionManager:
         env = os.environ if environ is None else environ
         raw_token = env.get(token_env)
         present = isinstance(raw_token, str) and bool(raw_token.strip())
+        if present and (
+            len(raw_token) > 16384
+            or any(
+                unicodedata.category(char) == "Cc" or char in "\u2028\u2029"
+                for char in raw_token
+            )
+        ):
+            return {
+                "provider": provider_id,
+                "status": "CREDENTIAL_VALUE_INVALID",
+                "credential_present": False,
+                "credential_name": token_env,
+            }
         if not present:
             return {
                 "provider": provider_id,

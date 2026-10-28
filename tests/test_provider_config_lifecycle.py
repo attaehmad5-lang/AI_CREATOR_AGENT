@@ -70,6 +70,47 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["schema_version"], "2")
         self.assertEqual(json.loads(Path(str(path) + ".bak").read_text(encoding="utf-8"))["schema_version"], "1")
 
+    def test_atomic_replace_failure_preserves_original_and_cleans_temp(self):
+        path = self.root / "provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        original_bytes = json.dumps(original).encode("utf-8")
+        path.write_bytes(original_bytes)
+
+        from unittest.mock import patch
+        with patch(
+            "projects.provider_store.provider_config_lifecycle.atomic_replace_with_retry",
+            side_effect=OSError("simulated replace failure"),
+        ):
+            result = self.manager.migrate_file(
+                path, target_version="2", migrations={"1": migrate_v1_to_v2}
+            )
+
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_WRITE_FAILED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(path.read_bytes(), original_bytes)
+        self.assertTrue(Path(str(path) + ".bak").is_file())
+        self.assertEqual(list(self.root.glob(".provider-config.json.*.tmp")), [])
+
+    def test_rollback_does_not_discard_previous_config_when_validation_fails(self):
+        first = {"schema_version": "1", "providers": {"image": {}}}
+        second = {"schema_version": "2", "providers": {"video": {}}}
+        self.manager.reload(first)
+        self.manager.reload(second)
+        original_validator = self.manager.validator
+
+        def reject_previous(config):
+            return config.get("schema_version") == "2"
+
+        self.manager.validator = reject_previous
+        result = self.manager.rollback()
+        self.assertEqual(result["status"], "ROLLBACK_CONFIG_INVALID")
+        self.assertEqual(self.manager.active_config, second)
+        self.assertEqual(len(self.manager._history), 1)
+        self.manager.validator = original_validator
+        recovered = self.manager.rollback()
+        self.assertEqual(recovered["status"], "CONFIG_ROLLED_BACK")
+        self.assertEqual(self.manager.active_config, first)
+
     def test_invalid_config_file_is_not_overwritten(self):
         path = self.root / "bad.json"
         path.write_text("{broken", encoding="utf-8")

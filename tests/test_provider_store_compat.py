@@ -117,6 +117,45 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
         self.assertEqual(len(advanced_ids), 18)
         self.assertTrue(advanced_ids.issubset(main_ids))
 
+        main_by_id = {p["id"]: p for p in json.loads(main_catalog.read_text(encoding="utf-8"))["providers"]}
+        advanced_records = json.loads(advanced_catalog.read_text(encoding="utf-8"))["providers"]
+        backup_catalog = project_root / "projects" / "provider_store" / "advanced" / "advanced_provider_catalog_backup.json"
+        backup_records = json.loads(backup_catalog.read_text(encoding="utf-8"))["providers"]
+        self.assertEqual(len(backup_records), len(advanced_records))
+        backup_by_id = {p["id"]: p for p in backup_records}
+        for advanced_record in advanced_records:
+            backup_record = backup_by_id[advanced_record["id"]]
+            for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required", "allowed_hosts", "token_env", "api_key_env", "credential_env", "official_api_url", "subscription_url", "zero_cost_allowed", "priority", "supported_models"):
+                self.assertEqual(advanced_record.get(field), backup_record.get(field), "advanced backup drift for " + advanced_record["id"] + " field " + field)
+            self.assertEqual(sorted(advanced_record.get("capabilities", [])), sorted(backup_record.get("capabilities", [])))
+            if advanced_record.get("connection_type") == "API":
+                self.assertTrue(
+                    isinstance(advanced_record.get("official_api_url"), str)
+                    and advanced_record["official_api_url"].startswith("https://"),
+                    "API provider lacks official docs URL: " + advanced_record["id"],
+                )
+                self.assertTrue(
+                    isinstance(advanced_record.get("allowed_hosts"), list)
+                    and advanced_record["allowed_hosts"],
+                    "API provider lacks an explicit host allowlist: " + advanced_record["id"],
+                )
+                self.assertTrue(
+                    isinstance(advanced_record.get("token_env"), str)
+                    and advanced_record["token_env"],
+                    "API provider lacks an environment credential reference: " + advanced_record["id"],
+                )
+            canonical = main_by_id[advanced_record["id"]]
+            for field in ("name", "category", "auth_type", "connection_type", "enabled", "subscription_required", "allowed_hosts", "token_env", "api_key_env", "credential_env", "official_api_url", "subscription_url", "zero_cost_allowed", "priority", "supported_models"):
+                self.assertEqual(
+                    advanced_record.get(field), canonical.get(field),
+                    "advanced catalog drift for " + advanced_record["id"] + " field " + field,
+                )
+            self.assertEqual(
+                sorted(advanced_record.get("capabilities", [])),
+                sorted(canonical.get("capabilities", [])),
+                "advanced catalog capability drift for " + advanced_record["id"],
+            )
+
         with tempfile.TemporaryDirectory() as tmp:
             manager = ConnectionManager(main_catalog, Path(tmp) / "state.json")
             registry = UnifiedProviderRegistry(connection_manager=manager)
@@ -124,6 +163,17 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             self.assertEqual(len(registry.all_providers()), 54)
             self.assertEqual(len(advanced.list_providers()), 18)
             self.assertEqual(registry.status()["advanced_providers"], 18)
+
+    def test_advanced_provider_capabilities_are_declared_by_their_category(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "advanced"
+        categories = json.loads((root / "advanced_categories.json").read_text(encoding="utf-8"))["categories"]
+        providers = json.loads((root / "advanced_provider_catalog.json").read_text(encoding="utf-8"))["providers"]
+        self.assertEqual(len(providers), 18)
+        for provider in providers:
+            with self.subTest(provider=provider["id"]):
+                self.assertIn(provider["category"], categories)
+                declared = set(categories[provider["category"]]["capabilities"])
+                self.assertTrue(set(provider.get("capabilities", [])).issubset(declared))
 
     def test_store_facade_rejects_mixed_manager_and_path_arguments(self):
         with self.assertRaises(ValueError):

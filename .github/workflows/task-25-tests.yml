@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: provider-store-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   provider-connection-manager:
     strategy:
@@ -26,10 +30,114 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Install focused Python lint gate
+        run: python -m pip install ruff==0.14.2
+      - name: Lint changed provider-store code and tests
+        run: >-
+          python -m ruff check
+          projects/provider_store/catalog_interchange.py
+          projects/provider_store/catalog_diff.py
+          projects/provider_store/catalog_cli.py
+          projects/provider_store/provider_config_lifecycle.py
+          projects/provider_store/provider_outage_detector.py
+          projects/provider_store/health_scheduler.py
+          projects/provider_store/provider_structured_logger.py
+          projects/provider_store/provider_service.py
+          projects/provider_store/provider_adapter_registry.py
+          projects/provider_store/provider_audit_log.py
+          tests/test_provider_adapter_registry.py
+          tests/test_provider_audit_log.py
+          projects/provider_store/routing_manager.py
+          projects/provider_store/advanced/performance_benchmark.py
+          projects/provider_store/advanced/release_report.py
+          projects/provider_store/advanced/pdf_report.py
+          projects/provider_store/advanced/verify_wheel.py
+          projects/provider_store/generate_api_reference.py
+          tests/test_generate_provider_store_api_reference.py
+          tests/test_provider_store_fuzz_regressions.py
+          tests/test_routing_simulation.py
+          tests/test_catalog_interchange.py
+          tests/test_catalog_diff.py
+          tests/test_catalog_cli.py
+          tests/test_provider_config_lifecycle.py
+          tests/test_provider_store_performance_benchmark.py
+          tests/test_advanced_provider_release_report.py
+          tests/test_advanced_provider_pdf_report.py
+      - name: Show formatting diff for catalog and benchmark modules
+        run: >-
+          python -m ruff format --diff
+          projects/provider_store/catalog_interchange.py
+          projects/provider_store/catalog_diff.py
+          projects/provider_store/advanced/performance_benchmark.py
+          projects/provider_store/generate_api_reference.py
+          tests/test_generate_provider_store_api_reference.py
+          tests/test_provider_store_fuzz_regressions.py
+          tests/test_routing_simulation.py
+          tests/test_catalog_interchange.py
+          tests/test_catalog_diff.py
+          tests/test_provider_store_performance_benchmark.py
+      - name: Check formatting of catalog and benchmark modules
+        run: >-
+          python -m ruff format --check
+          projects/provider_store/catalog_interchange.py
+          projects/provider_store/catalog_diff.py
+          projects/provider_store/advanced/performance_benchmark.py
+          projects/provider_store/generate_api_reference.py
+          tests/test_generate_provider_store_api_reference.py
+          tests/test_provider_store_fuzz_regressions.py
+          tests/test_routing_simulation.py
+          tests/test_catalog_interchange.py
+          tests/test_catalog_diff.py
+          tests/test_provider_store_performance_benchmark.py
+      - name: Install focused coverage gate
+        run: python -m pip install coverage==7.13.1
+      - name: Enforce focused provider-store coverage
+        run: |
+          python -m coverage run --source=projects.provider_store.catalog_interchange,projects.provider_store.catalog_diff,projects.provider_store.catalog_cli,projects.provider_store.provider_config_lifecycle,projects.provider_store.provider_outage_detector,projects.provider_store.health_scheduler,projects.provider_store.provider_structured_logger,projects.provider_store.provider_adapter_registry,projects.provider_store.provider_audit_log,projects.provider_store.advanced.release_report,projects.provider_store.advanced.pdf_report,projects.provider_store.advanced.performance_benchmark,projects.provider_store.generate_api_reference -m unittest discover -s tests -p "test_*.py"
+          python -m coverage report --fail-under=65
+      - name: Install focused static type checker
+        run: python -m pip install mypy==1.18.2
+      - name: Type-check provider-store maintenance and release modules
+        run: >-
+          python -m mypy
+          --ignore-missing-imports
+          --follow-imports=silent
+          --check-untyped-defs
+          projects/provider_store/catalog_interchange.py
+          projects/provider_store/catalog_diff.py
+          projects/provider_store/catalog_cli.py
+          projects/provider_store/provider_outage_detector.py
+          projects/provider_store/health_scheduler.py
+          projects/provider_store/provider_structured_logger.py
+          projects/provider_store/provider_adapter_registry.py
+          projects/provider_store/provider_audit_log.py
+          projects/provider_store/advanced/release_report.py
+          projects/provider_store/advanced/pdf_report.py
+          projects/provider_store/advanced/performance_benchmark.py
+          projects/provider_store/advanced/verify_wheel.py
+          projects/provider_store/generate_api_reference.py
+      - name: Install pinned dependency vulnerability auditor
+        run: python -m pip install pip-audit==2.9.0
+      - name: Audit installed CI environment dependencies
+        run: python -m pip_audit --local --progress-spinner off
       - name: Compile provider modules and tests
         run: python -m compileall -q projects/provider_store tests
+      - name: Build reproducible wheel and test clean installation
+        run: python -m projects.provider_store.advanced.verify_wheel
       - name: Validate provider JSON catalogs
         run: |
           python -c "import json; from pathlib import Path; [json.loads(p.read_text(encoding='utf-8')) for p in Path('projects/provider_store').rglob('*.json')]"
       - name: Run unit and regression tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: Run bounded catalog performance benchmark
+        run: python -m projects.provider_store.advanced.performance_benchmark --iterations 25 --workers 4 --max-seconds 15
+      - name: Generate source-derived Python API reference
+        run: python -m projects.provider_store.generate_api_reference --output projects/provider_store/PROVIDER_STORE_PYTHON_API.md
+      - name: Generate Advanced Provider Store report and source ZIP
+        run: python -m projects.provider_store.advanced.release_report --output-dir build/advanced-provider-store-release
+      - name: Upload Advanced Provider Store release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: advanced-provider-store-release-${{ runner.os }}
+          path: build/advanced-provider-store-release/
+          if-no-files-found: error

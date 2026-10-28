@@ -90,6 +90,25 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["confidence_routing_status"], "CONFIDENCE_AWARE_ROUTING")
         self.assertEqual(result["benchmark_evidence"]["sample_count"], 50)
 
+    def test_confidence_routing_enforces_maximum_p95_latency(self):
+        results = [
+            {"provider_id": "primary", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 50, "success_rate": 0.95, "p95_latency_ms": 450,
+             "avg_cost_per_success": 0.1, "avg_quality_score": 0.85},
+            {"provider_id": "fallback", "model_id": "stable-diffusion-xl", "modality": "image",
+             "sample_count": 50, "success_rate": 0.95, "p95_latency_ms": 120,
+             "avg_cost_per_success": 0.1, "avg_quality_score": 0.85},
+        ]
+        router = self._confidence_router(results)
+        result = router.route(
+            category="image", project_id="film", model="stable-diffusion-xl",
+            confidence_aware=True, min_benchmark_samples=20,
+            min_benchmark_success_rate=0.8, max_benchmark_p95_latency_ms=250,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["benchmark_evidence"]["p95_latency_ms"], 120)
+
     def test_benchmark_evidence_matches_provider_selected_after_quota_rejection(self):
         results = [
             {"provider_id": "primary", "model_id": "stable-diffusion-xl", "modality": "image",
@@ -191,6 +210,36 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
         self.assertFalse(rejected["allowed"])
         self.assertEqual(rejected["decisions"][0]["status"], "REGION_METADATA_UNVERIFIED")
+
+    def test_routing_rechecks_credentials_after_a_verified_connection(self):
+        catalog_path = self.root / "credential-provider.json"
+        state_path = self.root / "credential-state.json"
+        catalog_path.write_text(json.dumps({
+            "providers": [{
+                "id": "credential_image", "name": "Credential Image", "category": "image",
+                "auth_type": "API_KEY", "token_env": "TEST_ROUTING_API_TOKEN",
+                "connection_type": "API", "enabled": True, "zero_cost_allowed": True,
+                "priority": 1, "capabilities": ["image"],
+            }],
+        }), encoding="utf-8")
+        state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        connection = ConnectionManager(catalog_path, state_path)
+        with patch.dict("os.environ", {"TEST_ROUTING_API_TOKEN": "temporary-test-token"}):
+            verification = connection.verify_connectivity(
+                "credential_image", lambda provider, **kwargs: {"ok": True}
+            )
+            self.assertTrue(verification["verified"])
+            router = ProviderRoutingManager(connection)
+            routed = router.route(category="image", project_id="demo", capability="image")
+            self.assertTrue(routed["allowed"], routed)
+        # The stored CONNECTED state must not authorize routing after the token disappears.
+        router = ProviderRoutingManager(connection)
+        blocked = router.route(category="image", project_id="demo", capability="image")
+        self.assertFalse(blocked["allowed"])
+        self.assertTrue(any(
+            item.get("provider") == "credential_image" and item.get("status") == "CREDENTIALS_MISSING"
+            for item in blocked.get("decisions", [])
+        ), blocked)
 
     def test_routing_rejects_unverified_provider_even_if_catalog_label_says_connected(self):
         self.connections.set_state("primary", "READY")

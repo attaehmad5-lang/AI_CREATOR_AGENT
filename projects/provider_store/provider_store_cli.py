@@ -1,27 +1,33 @@
-from provider_store_manager import ProviderStoreManager
-from provider_status_manager import ProviderStatusManager
-from provider_flow import ProviderFlow
+"""Read-only provider-store CLI with honest catalog and runtime readiness diagnostics."""
+from __future__ import annotations
 
-store = ProviderStoreManager()
-status = ProviderStatusManager()
-flow = ProviderFlow()
+from .advanced.advanced_provider_manager import AdvancedProviderManager
+from .provider_store_manager import ProviderStoreManager
 
-print("===================================")
-print("       AI CREATOR PROVIDER STORE")
-print("===================================")
 
-providers = store.list_providers()
+def main() -> int:
+    store = ProviderStoreManager()
+    providers = store.list_providers()
+    advanced = AdvancedProviderManager()
+    readiness = advanced.readiness_report()
 
-for provider in providers:
-    pid = provider.get("id")
-    name = provider.get("name")
-    category = provider.get("category")
-    current_status = provider.get("status", "LOCKED")
+    print("===================================")
+    print("       AI CREATOR PROVIDER STORE")
+    print("===================================")
+    print("Provider catalog entries:", len(providers))
+    print("Advanced catalog entries:", readiness["providers_total"])
+    print("Catalog consistency:", readiness["catalog_consistency"])
+    print("Category catalog:", readiness["category_catalog_status"])
+    print("Advanced readiness:", readiness["status"])
+    print("-----------------------------------")
+    for provider in readiness["providers"]:
+        if not provider["ready"]:
+            blockers = ", ".join(provider["blockers"]) or "UNKNOWN"
+            print(f"[BLOCKED] {provider['provider']} | {blockers}")
+    print("-----------------------------------")
+    print("STATUS:", "READY" if readiness["status"] == "READY" else "DEGRADED")
+    return 0
 
-    print(f"[{current_status}] {name} | {category} | {pid}")
 
-print("-----------------------------------")
-print("Total Providers:", len(providers))
-print("Store Status:", status.catalog.get("status", "READY"))
-print("Universal Flow:", len(flow.available_providers()), "providers")
-print("STATUS: READY")
+if __name__ == "__main__":
+    raise SystemExit(main())

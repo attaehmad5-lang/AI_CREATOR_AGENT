@@ -1,4 +1,6 @@
 import json
+import io
+import logging
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import unittest
@@ -21,8 +23,12 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.provider_adapter_registry import ProviderAdapterRegistry
+from projects.provider_store.provider_trace_manager import ProviderTraceManager
+from projects.provider_store.provider_audit_log import ProviderAuditLog
+from projects.provider_store.provider_structured_logger import ProviderStructuredLogger
 from projects.provider_store.quota_manager import ProviderQuotaManager
-from projects.provider_store.retry_policy import RetryPolicy
+from projects.provider_store.retry_policy import RetryBudget, RetryPolicy
 
 
 class ProviderServiceTests(unittest.TestCase):
@@ -68,6 +74,50 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["connection"]["status"], "CONNECTED")
         self.assertEqual(result["health"]["status"], "HEALTHY")
         self.assertEqual(self.connections.get_state("image")["status"], "CONNECTED")
+
+    def test_provider_verification_emits_secret_safe_structured_event(self):
+        stream = io.StringIO()
+        logger = logging.Logger("provider-service-test", level=logging.DEBUG)
+        logger.addHandler(logging.StreamHandler(stream))
+        service = ProviderService(
+            self.connections,
+            health_manager=self.health,
+            structured_logger=ProviderStructuredLogger(logger),
+        )
+        result = service.verify_provider(
+            "image",
+            lambda provider, timeout_seconds: True,
+            environ={"API_TOKEN": "never-log-this-token"},
+        )
+        self.assertTrue(result["verified"])
+        encoded = stream.getvalue()
+        event = json.loads(encoded)
+        self.assertEqual(event["event"], "provider.verify")
+        self.assertEqual(event["provider_id"], "image")
+        self.assertEqual(event["outcome"], "OK")
+        self.assertNotIn("never-log-this-token", encoded)
+        self.assertNotIn("API_TOKEN", encoded)
+
+    def test_provider_verification_propagates_traceparent_and_records_span(self):
+        trace = ProviderTraceManager()
+        service = ProviderService(
+            self.connections,
+            health_manager=self.health,
+            trace_manager=trace,
+        )
+        traceparent = "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
+        result = service.verify_provider(
+            "image",
+            lambda provider, timeout_seconds: True,
+            traceparent=traceparent,
+        )
+        self.assertTrue(result["verified"])
+        snapshot = trace.snapshot()
+        self.assertEqual(snapshot["count"], 1)
+        self.assertEqual(snapshot["spans"][0]["trace_id"], "a" * 32)
+        self.assertEqual(snapshot["spans"][0]["parent_span_id"], "b" * 16)
+        self.assertEqual(snapshot["spans"][0]["outcome"], "OK")
+        self.assertEqual(snapshot["spans"][0]["attributes"]["provider_id"], "image")
 
     def test_builtin_http_provider_verification_updates_connection_and_health(self):
         class Response:
@@ -252,6 +302,42 @@ class ProviderServiceTests(unittest.TestCase):
         retry = self.service.retry_decision(attempt=1, status_code=503)
         self.assertTrue(retry["retry"])
         self.assertEqual(retry["reason"], "TRANSIENT_HTTP_FAILURE")
+
+    def test_retry_decision_consumes_budget_only_for_retryable_failures(self):
+        budget = RetryBudget(capacity=1, refill_rate_per_second=0, clock=lambda: 0.0)
+        service = ProviderService(
+            self.connections,
+            retry_policy=RetryPolicy(random_fn=lambda: 0),
+            retry_budget=budget,
+        )
+        first = service.retry_decision(attempt=1, status_code=503)
+        self.assertTrue(first["retry"])
+        self.assertEqual(first["retry_budget"], "RETRY_BUDGET_GRANTED")
+
+        second = service.retry_decision(attempt=1, status_code=503)
+        self.assertFalse(second["retry"])
+        self.assertEqual(second["reason"], "RETRY_BUDGET_EXHAUSTED")
+
+        non_retryable = service.retry_decision(
+            attempt=1, status_code=503, idempotent=False
+        )
+        self.assertFalse(non_retryable["retry"])
+        self.assertEqual(non_retryable["reason"], "NON_IDEMPOTENT_REQUEST")
+
+    def test_retry_budget_failure_fails_closed(self):
+        class BrokenBudget:
+            def consume_decision(self, decision):
+                raise RuntimeError("private budget detail")
+
+        service = ProviderService(
+            self.connections,
+            retry_policy=RetryPolicy(random_fn=lambda: 0),
+            retry_budget=BrokenBudget(),
+        )
+        result = service.retry_decision(attempt=1, status_code=503)
+        self.assertFalse(result["retry"])
+        self.assertEqual(result["reason"], "RETRY_BUDGET_FAILED")
+        self.assertNotIn("private budget detail", repr(result))
 
     def test_started_request_reconciles_cost_commits_quota_and_records_health(self):
         self.cost.reserve_usage(
@@ -482,6 +568,221 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["output"]["valid"])
         self.assertTrue(result["finalization"]["finalized"])
         self.assertEqual(result["provider"], "image")
+
+    def test_routed_execution_dispatches_through_verified_adapter_registry(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        registry = ProviderAdapterRegistry(self.connections)
+        calls = []
+
+        def adapter(**kwargs):
+            calls.append(kwargs)
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": kwargs["output_path"],
+            }
+
+        self.assertTrue(registry.register("image", adapter, modalities=("image",))["registered"])
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            health_manager=self.health,
+            output_validator=self.validator,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+        )
+        output_path = self.root / "registry-dispatch.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="registry-dispatch",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=registry.as_callable("image", modality="image"),
+            modality="image",
+            adapter_options={"output_path": str(output_path)},
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["provider_id"], "image")
+        self.assertEqual(calls[0]["request_id"], "registry-dispatch")
+        self.assertTrue(result["finalization"]["finalized"])
+
+    def test_provider_service_writes_hash_chained_audit_events(self):
+        audit = ProviderAuditLog(self.root / "provider-audit.jsonl")
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            health_manager=self.health,
+            output_validator=self.validator,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            audit_log_manager=audit,
+        )
+        verified = service.verify_provider(
+            "image", lambda provider, **kwargs: {"ok": True}, principal_id="user-1"
+        )
+        self.assertTrue(verified["verified"])
+        output_path = self.root / "audit-generated.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="audit-request",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+            },
+            modality="image", principal_id="user-1",
+            adapter_options={"output_path": str(output_path)},
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        chain = audit.verify_chain()
+        self.assertTrue(chain["valid"])
+        self.assertEqual(chain["count"], 2)
+        records = [json.loads(line) for line in (self.root / "provider-audit.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([item["event"] for item in records], ["provider.verify", "provider.execute"])
+        self.assertEqual(records[1]["request_id"], "audit-request")
+        self.assertEqual(records[1]["actor_id"], "user-1")
+        self.assertNotIn("safe-test-image", json.dumps(records))
+
+    def test_routed_model_selection_reaches_registry_adapter(self):
+        catalog = self.root / "model-routed-catalog.json"
+        state = self.root / "model-routed-state.json"
+        catalog.write_text(json.dumps({"providers": [{
+            "id": "image", "name": "Image", "category": "image",
+            "auth_type": "NONE", "connection_type": "API", "enabled": True,
+            "zero_cost_allowed": True,
+            "supported_models": [{"id": "image-v1", "versions": ["1"]}],
+        }]}), encoding="utf-8")
+        state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        manager = ConnectionManager(catalog, state)
+        self.assertTrue(manager.verify_connectivity(
+            "image", lambda provider, **kwargs: {"ok": True}
+        )["verified"])
+        cost = ProviderCostPolicy(self.root / "model-routed-cost.json", project_budgets={"film": 10.0})
+        quota = ProviderQuotaManager(self.root / "model-routed-quota.json", limits={"image": {"daily": 10}})
+        router = ProviderRoutingManager(manager, cost_policy=cost, quota_manager=quota)
+        registry = ProviderAdapterRegistry(manager)
+        calls = []
+
+        def adapter(**kwargs):
+            calls.append(kwargs)
+            return {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": kwargs["output_path"],
+            }
+
+        self.assertTrue(registry.register(
+            "image", adapter, modalities=("image",), model_ids=("image-v1",)
+        )["registered"])
+        service = ProviderService(
+            manager, routing_manager=router, health_manager=ProviderHealthManager(self.root / "model-routed-health.json"),
+            output_validator=self.validator, cost_policy=cost, quota_manager=quota,
+        )
+        output_path = self.root / "model-routed.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="model-routed",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=registry.as_callable("image", modality="image"),
+            modality="image", model="image-v1", model_version="1",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(calls[0]["model_id"], "image-v1")
+        self.assertEqual(calls[0]["provider_id"], "image")
+
+    def test_routed_execution_emits_secret_safe_log_and_trace_span(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        stream = io.StringIO()
+        logger = logging.Logger("provider-execution-test", level=logging.DEBUG)
+        logger.addHandler(logging.StreamHandler(stream))
+        trace = ProviderTraceManager()
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            health_manager=self.health,
+            output_validator=self.validator,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            structured_logger=ProviderStructuredLogger(logger),
+            trace_manager=trace,
+        )
+        output_path = self.root / "traced.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        traceparent = "00-" + "c" * 32 + "-" + "d" * 16 + "-01"
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="safe-execution-id",
+            estimated_cost=0.0,
+            output_path=str(output_path),
+            adapter_options={"harmless": "value", "private_prompt": "DO_NOT_LOG_PROMPT"},
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 5.0,
+            },
+            modality="image",
+            traceparent=traceparent,
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        event = json.loads(stream.getvalue())
+        self.assertEqual(event["event"], "provider.execute")
+        self.assertEqual(event["provider_id"], "image")
+        self.assertEqual(event["request_id"], "safe-execution-id")
+        self.assertEqual(event["outcome"], "OK")
+        self.assertNotIn("DO_NOT_LOG_PROMPT", stream.getvalue())
+        self.assertNotIn("private_prompt", stream.getvalue())
+        spans = trace.snapshot()
+        self.assertEqual(spans["count"], 1)
+        self.assertEqual(spans["spans"][0]["trace_id"], "c" * 32)
+        self.assertEqual(spans["spans"][0]["parent_span_id"], "d" * 16)
+        self.assertEqual(spans["spans"][0]["outcome"], "OK")
+        self.assertEqual(spans["spans"][0]["attributes"]["category"], "image")
+        self.assertNotIn("private_prompt", json.dumps(spans))
+
+    def test_execution_telemetry_failures_do_not_change_adapter_outcome(self):
+        class BrokenLogger:
+            def emit(self, *args, **kwargs):
+                raise RuntimeError("logger unavailable")
+
+        class BrokenTrace:
+            def start_span(self, *args, **kwargs):
+                raise RuntimeError("trace unavailable")
+
+            def finish_span(self, *args, **kwargs):
+                raise RuntimeError("trace unavailable")
+
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            health_manager=self.health,
+            output_validator=self.validator,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            structured_logger=BrokenLogger(),
+            trace_manager=BrokenTrace(),
+        )
+        output_path = self.root / "telemetry-failure.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="telemetry-failure",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertTrue(result["finalization"]["finalized"])
 
     def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
         router = ProviderRoutingManager(

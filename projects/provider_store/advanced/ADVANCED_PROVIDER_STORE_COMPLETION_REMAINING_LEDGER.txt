@@ -1,0 +1,765 @@
+ADVANCED PROVIDER STORE — COMPLETION / REMAINING WORK LEDGER
+Project: AI_CREATOR_AGENT
+Scope: canonical 150-point feature inventory
+Last audited: 2026-10-27
+
+STATUS RULES
+COMPLETED = implementation and relevant tests passed with evidence.
+PARTIAL = useful implementation exists but acceptance criteria remain.
+NOT STARTED = no adequate implementation/evidence located in this pass.
+UNVERIFIED = targeted source/runtime audit still required.
+BLOCKED = cannot proceed; exact reason must be recorded.
+
+VERIFICATION FACTS
+- Repository: attaehmad5-lang/AI_CREATOR_AGENT
+- Advanced catalog: 18 entries; canonical catalog: 54 entries; field-by-field metadata and category-capability consistency tests pass.
+- Latest verified feature test run #40720509533 passed 539 unit/regression tests on Ubuntu with Python 3.10, 3.11 and 3.12, including model catalog discovery, safe metadata updates and retry-budget tests.
+- Latest verified feature test run #40720073343 passed 536 unit/regression tests on Ubuntu/Python 3.10, 3.11 and 3.12. The last verified cross-platform run #40708674436 passed compilation, catalog JSON validation, all 501 unit/regression tests, Ruff lint/format gates, focused mypy checks, 83% focused source coverage, structured logging, health scheduling/outage recovery tests, reproducible isolated wheel builds, clean-target installation, package-data import, and source ZIP/SBOM generation. High-entropy credential-field leak-injection tests passed on Ubuntu and Windows; the source-derived API-reference generator and deterministic fuzz regressions were added afterward and are awaiting CI verification.
+- Passing evidence includes advanced capability/lifecycle/readiness tests, invalid category-catalog rejection, incident lifecycle, HMAC webhook/replay, provider authorization, OAuth/API-key safeguards, routing/quotas/budgets, media integrity, trace-context primitives, ledger/report validation, private-key fail-closed checks, clean ZIP extraction, per-file hashes and ZIP checksum sidecar verification.
+- CI generated and uploaded Linux and Windows report/package artifacts (source ZIP, JSON/Markdown/PDF report, source manifest, SPDX 2.3 source-file SBOM and ZIP checksum sidecar); PDF/SBOM rendering and ZIP inclusion are covered by focused tests. The report correctly stays INCOMPLETE until all 150 points are completed.
+- No provider credentials were supplied or used. No live generation, credit balance, or billing test is claimed.
+- Draft PR: https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/84
+
+150 FEATURE RECORDS
+
+Feature 001: Provider Catalog Management
+Status: PARTIAL
+Implementation/evidence inspected: connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py
+Remaining work: Catalog/lifecycle foundations exist; active advanced catalog has 18 records and is a subset of the 54-provider registry. Field-by-field metadata drift and category-capability consistency tests pass. Runtime adapter completeness remains.
+
+Feature 002: Provider Registration
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; tests/test_connection_manager.py; CI #40560954116
+Remaining work: Valid metadata registration persists, duplicate/invalid records and embedded secrets are rejected, and cross-process concurrent registration preserves records.
+
+Feature 003: Provider Discovery
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py
+Remaining work: Catalog discovery by category/capability is implemented and covered by regression tests.
+
+Feature 004: Provider Loading
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; tests/test_connection_manager.py
+Remaining work: Factory loading, disabled-provider rejection, contract enforcement and safe failure behavior are tested.
+
+Feature 005: Provider Unloading
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; tests/test_connection_manager.py
+Remaining work: Unload/cleanup behavior and cleanup-failure preservation are covered by regression tests.
+
+Feature 006: Provider Enable/Disable
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; tests/test_connection_manager.py; tests/test_provider_catalogs.py
+Remaining work: Enable/disable state, unload-on-disable, candidate catalog validation and deprecation rejection are tested.
+
+Feature 007: Provider Metadata Management
+Status: PARTIAL
+Implementation/evidence inspected: connection_manager.py:update_provider_metadata; tests/test_provider_metadata_update.py; tests/test_provider_store_compat.py; CI #40720073343
+Remaining work: Atomic schema-validated descriptive metadata updates reject identity/capability/credential edits and unsafe URLs. Persistence, invalid tags/control characters, URL validation, unknown-provider and injected-write-failure tests passed as part of 536 tests on Python 3.10, 3.11 and 3.12. Vendor adapter completeness remains separate.
+
+Feature 008: Provider Interface Contracts
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; tests/test_connection_manager.py; tests/test_provider_catalogs.py
+Remaining work: Modality callable contracts and load-time contract rejection are tested.
+
+Feature 009: Model Catalog Management
+Status: PARTIAL
+Implementation/evidence inspected: model_catalog.py; tests/test_model_catalog.py; connection_manager.py; CI #40720073343
+Remaining work: Deterministic exact-match discovery, provider/capability filters, disabled-provider opt-in, stable sorting and credential-bearing/malformed record exclusion passed within the 536-test Python 3.10/3.11/3.12 run. Catalog results are not live availability; vendor-specific runtime adapters remain incomplete.
+
+Feature 010: Capability Management
+Status: COMPLETED
+Implementation/evidence inspected: unified_provider_registry.py; advanced/advanced_provider_manager.py; tests/test_provider_catalogs.py; tests/test_advanced_provider_manager.py; CI #40565486477
+Remaining work: Capability identifiers are validated and normalized; exact capability discovery, category scoping, catalog consistency and modality contracts pass tests.
+
+Feature 011: Provider Version Management
+Status: PARTIAL
+Implementation/evidence inspected: connection_manager.py; provider_store_manager.py; unified_provider_registry.py; tests/test_provider_store_compat.py
+Remaining work: Catalog/lifecycle foundations exist; individual acceptance coverage and runtime adapter completeness remain.
+
+Feature 012: Provider Adapter System
+Status: PARTIAL
+Implementation/evidence inspected: provider_adapter_registry.py; tests/test_provider_adapter_registry.py; provider_service.py; tests/test_provider_service.py; CI #40722792917
+Remaining work: Runtime adapter registration, modality/model allowlists, enabled+verified dispatch gates, routed-model propagation and safe ambiguous-outcome handling are covered by deterministic tests. Ubuntu/Windows CI #40722792917 passed 549 tests plus focused lint/type/coverage and release packaging gates. Vendor-specific generation adapters and authorized live API validation remain.
+
+Feature 013: API Key Authentication
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; http_probe.py; tests/test_connection_manager.py; tests/test_http_probe.py; CI #40560954116
+Remaining work: Environment-referenced credentials, provider-specific auth headers, auth-protected endpoint requirements, malformed secret rejection and secret-free diagnostics pass tests; live provider credentials remain unverified.
+
+Feature 014: OAuth Authentication
+Status: COMPLETED
+Implementation/evidence inspected: oauth_pkce_manager.py; tests/test_oauth_pkce_manager.py; tests/test_provider_service.py; CI #40560954116
+Remaining work: PKCE S256/state binding, one-time exchange, expiry, token refresh/rotation, invalid response rejection and token non-disclosure pass focused tests; live OAuth-provider integration remains unverified.
+
+Feature 015: Credential Management
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_pkce_manager.py; tests/test_connection_manager.py; tests/test_http_probe.py; tests/test_oauth_pkce_manager.py; CI #40560954116
+Remaining work: Credential presence is separated from verified connectivity; secrets remain environment/in-memory only and are excluded from status/errors.
+
+Feature 016: Credential Rotation
+Status: PARTIAL
+Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py
+Remaining work: Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are rejected before any probe; full 429-test suite passed on Ubuntu and Windows at run #40555608773.
+
+Feature 017: Connection Management
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; provider_service.py; tests/test_connection_manager.py; tests/test_provider_service.py; CI #40560954116
+Remaining work: Persistent connection state, configure/enable/disable, verified-state transitions, manual-auth separation, concurrent lifecycle operations and failure-safe cleanup pass tests. Live provider connectivity remains separately tracked in point 021.
+
+Feature 018: TLS/HTTPS Security
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; http_probe.py; tests/test_connection_manager.py; tests/test_http_probe.py; CI #40565486477
+Remaining work: HTTPS is required for non-loopback endpoints, TLS verification is retained, embedded credentials and unallowlisted hosts are rejected, and redirects are blocked. Live provider certificate checks remain part of live integration verification.
+
+Feature 019: Endpoint Configuration
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; tests/test_connection_manager.py
+Remaining work: Endpoint/model configuration persistence and safe endpoint validation are covered by tests.
+
+Feature 020: Network Timeout Management
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; connection_manager.py; tests/test_http_probe.py; tests/test_connection_manager.py; CI #40560954116
+Remaining work: Positive bounded timeouts, bounded response reads and safe timeout classification are covered by focused tests.
+
+Feature 021: Live Connectivity Verification
+Status: PARTIAL
+Implementation/evidence inspected: connection_manager.py; http_probe.py; oauth_pkce_manager.py; test_connection_manager.py; test_http_probe.py
+Remaining work: Credential/network/OAuth primitives exist. Unicode C1 controls and Unicode line separators are rejected before any probe; full 429-test suite passed on Ubuntu and Windows at run #40555608773.
+
+Feature 022: Permission Management
+Status: COMPLETED
+Implementation/evidence inspected: provider_authorization.py; tests/test_provider_authorization.py; CI #40560954116
+Remaining work: Unknown principals/operations fail closed, roles receive only explicit permissions, disabled principals are denied, and malformed persistent assignments are rejected.
+
+Feature 023: Provider Health Monitoring
+Status: COMPLETED
+Implementation/evidence inspected: health_manager.py; tests/test_health_manager.py; CI #40560954116
+Remaining work: Persistent bounded health history, active probes, failure thresholds, recovery/readmission, stale-evidence exclusion and secret-safe diagnostics pass focused tests.
+
+Feature 024: Health Check Scheduling
+Status: COMPLETED
+Implementation/evidence inspected: health_scheduler.py; tests/test_provider_health_scheduler.py; .github/workflows/task-25-tests.yml; CI #40582600249
+Completion evidence: Deterministic poll-driven due scheduling, per-provider intervals, bounded provider/batch limits, registration/unregistration, timeout propagation, and invalid-clock/config fail-closed behavior pass cross-platform tests. The caller owns the polling loop by design; no hidden background thread is created.
+
+Feature 025: Provider Status Management
+Status: COMPLETED
+Implementation/evidence inspected: health_manager.py; provider_status_manager.py; tests/
+Remaining work: Persistent health/status states, reload behavior and availability checks are tested.
+
+Feature 026: Provider Metrics
+Status: COMPLETED
+Implementation/evidence inspected: provider_metrics_manager.py; tests/test_provider_metrics_manager.py; CI #40560954116
+Remaining work: Bounded success/failure/timeout, latency and queue-wait aggregation plus concurrent sample-bound tests pass; external metrics export remains out of scope.
+
+Feature 027: Structured Logging
+Status: PARTIAL
+Implementation/evidence inspected: provider_structured_logger.py; provider_service.py; provider_audit_log.py; tests/test_provider_structured_logger.py; tests/test_provider_service.py; CI #40722792917
+Remaining work: Secret-safe JSON telemetry covers verification and routed execution with bounded fields and non-fatal logging errors; durable hash-chained audit events separately record safe operation outcomes. Ubuntu/Windows CI passed 549 tests and focused quality gates. Instrumentation of every service lifecycle method and external log shipping remain.
+
+Feature 028: Distributed Tracing
+Status: PARTIAL
+Implementation/evidence inspected: provider_trace_manager.py; provider_service.py; tests/test_provider_trace_manager.py; tests/test_provider_service.py; CI #40722792917
+Remaining work: W3C traceparent propagates through verification and routed execution; bounded spans capture safe metadata/outcomes and trace failures are non-fatal. Ubuntu/Windows CI passed 549 tests and focused quality gates. External trace export and broader lifecycle coverage remain.
+
+Feature 029: Incident Management
+Status: COMPLETED
+Implementation/evidence inspected: provider_incident_manager.py; tests/test_provider_incident_manager.py; CI #40560954116
+Remaining work: Persistent incident deduplication, severity updates, acknowledge/resolve/reopen, state snapshots and invalid-field rejection pass regression tests.
+
+Feature 030: Outage Detection
+Status: COMPLETED
+Implementation/evidence inspected: provider_outage_detector.py; health_manager.py; provider_incident_manager.py; tests/test_provider_outage_detector.py; CI #40582600249
+Completion evidence: Unhealthy/stale health evidence opens deduplicated incidents; repeated observations update the incident; fresh healthy evidence resolves it. Missing evidence remains unknown rather than being mislabeled as an outage.
+
+Feature 031: Circuit Breaker
+Status: COMPLETED
+Implementation/evidence inspected: retry_policy.py; tests/test_retry_policy.py
+Remaining work: Circuit-breaker threshold, cooldown, half-open concurrency and cancellation recovery are tested.
+
+Feature 032: Automatic Retry
+Status: COMPLETED
+Implementation/evidence inspected: retry_policy.py; provider_service.py; tests/test_retry_policy.py; CI #40560954116
+Remaining work: Bounded exponential backoff, Retry-After, transient-only retry, attempt caps and non-idempotent request protection pass focused tests.
+
+Feature 033: Retry Budget Management
+Status: PARTIAL
+Implementation/evidence inspected: retry_policy.py:RetryPolicy, RetryBudget; tests/test_retry_policy.py; routing_manager.py; CI #40720509533
+Remaining work: A thread-safe token-bucket retry budget now supports bounded capacity/refill, validated costs, capped refunds, deterministic clock injection and retry-decision gating. Refill/exhaustion, invalid inputs and concurrent consumption passed within 539 tests on Python 3.10/3.11/3.12. End-to-end integration into every modality and production workload tuning remain.
+
+Feature 034: Rate Limit Handling
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; retry_policy.py; tests/test_http_probe.py; tests/test_retry_policy.py; CI #40560954116
+Remaining work: HTTP 429 and bounded Retry-After handling pass focused tests; live provider-specific rate-limit behavior remains integration-only.
+
+Feature 035: Intelligent Provider Routing
+Status: COMPLETED
+Implementation/evidence inspected: routing_manager.py; tests/test_routing_manager.py; CI #40560954116
+Remaining work: Routing combines provider/model compatibility, health evidence, project policy, quota, budget, verified credits, fallback safety and benchmark confidence; focused tests cover fail-closed cases.
+
+Feature 036: Primary Provider Selection
+Status: COMPLETED
+Implementation/evidence inspected: routing_manager.py; tests/test_routing_manager.py
+Remaining work: Primary route selection is deterministic by policy/priority and covered by routing tests.
+
+Feature 037: Fallback Provider Management
+Status: COMPLETED
+Implementation/evidence inspected: routing_manager.py; tests/test_routing_manager.py
+Remaining work: Fallback selection excludes failed providers and respects primary-only / fallback-disabled policy.
+
+Feature 038: Capability-Based Routing
+Status: COMPLETED
+Implementation/evidence inspected: routing_manager.py; tests/test_routing_manager.py; CI #40560954116
+Remaining work: Project policy can require/restrict declared capabilities and model compatibility; incompatible or undeclared capability routes fail closed.
+
+Feature 039: Cost-Based Routing
+Status: COMPLETED
+Implementation/evidence inspected: routing_manager.py; cost_policy.py; tests/test_routing_manager.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Free-first/lowest-cost strategies enforce verified credits, compatible cost units, budgets, approvals and idempotent reservations.
+
+Feature 040: Latency-Based Routing
+Status: COMPLETED
+Implementation/evidence inspected: routing_manager.py; provider_benchmark_manager.py; tests/test_routing_manager.py; tests/test_provider_benchmark_manager.py; CI #40565486477
+Remaining work: Confidence-aware routing enforces a maximum p95 latency and benchmark ranking uses latency as a tie-breaker after success and quality.
+
+Feature 041: Quality-Based Routing
+Status: COMPLETED
+Implementation/evidence inspected: routing_manager.py; provider_benchmark_manager.py; tests/test_routing_manager.py; tests/test_provider_benchmark_manager.py; CI #40565486477
+Remaining work: Confidence-aware routing consumes benchmark rankings; benchmark comparison uses average quality to break equal-success-rate ties, with regression coverage.
+
+Feature 042: Regional Routing
+Status: COMPLETED
+Implementation/evidence inspected: routing_manager.py; tests/test_routing_manager.py; CI #40560954116
+Remaining work: Required data-residency region filters provider candidates in focused routing tests.
+
+Feature 043: Load Balancing
+Status: COMPLETED
+Implementation/evidence inspected: routing_manager.py; tests/test_routing_manager.py; CI #40560954116
+Remaining work: Round-robin distribution across eligible providers is tested alongside health, quota and fallback exclusions.
+
+Feature 044: Fair Scheduling
+Status: PARTIAL
+Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
+Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+
+Feature 045: Concurrency Management
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; quota_manager.py; cost_policy.py; tests/test_provider_job_manager.py; tests/test_quota_manager.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Queue concurrency limits and cross-process quota/budget reservations prevent concurrent overcommit in regression tests.
+
+Feature 046: Request Queue Management
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Bounded queue capacity/backpressure, retry hints, priority order and concurrency limits pass focused tests.
+
+Feature 047: Request Deduplication
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Duplicate submissions are idempotent and conflicting reuse is rejected by focused tests.
+
+Feature 048: Idempotency Management
+Status: PARTIAL
+Implementation/evidence inspected: provider_job_manager.py; cost_policy.py; quota_manager.py; tests/
+Remaining work: Idempotency and duplicate/conflict protections exist in local ledgers; distributed cross-device guarantees are not provided.
+
+Feature 049: Async Job Management
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Job submission, lifecycle polling, result references, worker ownership and persisted state are covered by focused tests.
+
+Feature 050: Job Cancellation
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Queued and running job cancellation safety is covered by focused tests.
+
+Feature 051: Job Recovery
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Expired worker leases are requeued and jobs fail safely at the configured attempt limit.
+
+Feature 052: Streaming Response Management
+Status: PARTIAL
+Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
+Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+
+Feature 053: Request/Response Validation
+Status: COMPLETED
+Implementation/evidence inspected: provider_service.py; output_validator.py; media_integrity_validator.py; tests/test_provider_service.py; tests/test_output_validator.py; tests/test_media_integrity_validator.py; CI #40565486477
+Remaining work: Provider requests are gated by policy/auth/routing checks; response files and text/JSON/PDF/image/audio/video outputs receive bounded validation and malformed outputs fail closed.
+
+Feature 054: Error Normalization
+Status: COMPLETED
+Implementation/evidence inspected: provider_error_policy.py; retry_policy.py; tests/test_provider_error_policy.py; CI #40565486477
+Remaining work: Billing, credit exhaustion, auth, permission, rate-limit and transient failures map to normalized safe outcomes; malformed inputs and unknown raw error codes fail closed.
+
+Feature 055: Output Quality Validation
+Status: PARTIAL
+Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
+Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+
+Feature 056: Media Integrity Validation
+Status: COMPLETED
+Implementation/evidence inspected: media_integrity_validator.py; tests/test_media_integrity_validator.py; CI #40560954116
+Remaining work: Truncated WAV rejection, bounded MP4 box validation, WebM EBML/segment checks and size/modality fail-closed behavior pass focused tests; full codec decoding remains outside this point.
+
+Feature 057: Image Metadata Validation
+Status: COMPLETED
+Implementation/evidence inspected: output_validator.py; tests/test_output_validator.py; CI #40560954116
+Remaining work: Valid image signatures return hash/metadata and mismatched signatures/extensions are rejected; decoder-level validation remains a separate limitation.
+
+Feature 058: Audio Metadata Validation
+Status: COMPLETED
+Implementation/evidence inspected: media_integrity_validator.py; tests/test_media_integrity_validator.py; CI #40560954116
+Remaining work: WAV duration/audio metadata extraction and truncated-audio rejection are covered by focused tests.
+
+Feature 059: Video Metadata Validation
+Status: PARTIAL
+Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
+Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+
+Feature 060: Artifact Checksum Verification
+Status: COMPLETED
+Implementation/evidence inspected: output_validator.py; media_integrity_validator.py; tests/test_output_validator.py; CI #40560954116
+Remaining work: SHA-256 output hashes are produced and file growth/same-size mutation are detected during validation.
+
+Feature 061: Cost Estimation
+Status: PARTIAL
+Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
+Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+
+Feature 062: Usage Tracking
+Status: COMPLETED
+Implementation/evidence inspected: cost_policy.py; provider_service.py; tests/test_cost_policy.py; tests/test_provider_service.py; CI #40560954116
+Remaining work: Started requests reserve usage, actual charges reconcile idempotently, ambiguous charges retain reservations, and usage state persists safely. Live billing remains integration-only.
+
+Feature 063: Credit Management
+Status: COMPLETED
+Implementation/evidence inspected: credit_manager.py; tests/test_credit_manager.py; CI #40560954116
+Remaining work: Verified credit snapshots, timestamp monotonicity, reservations, cross-process overspend protection and stale/unverified balance rejection pass focused tests; provider-specific live refresh remains integration-only.
+
+Feature 064: Quota Management
+Status: COMPLETED
+Implementation/evidence inspected: quota_manager.py; tests/test_quota_manager.py; CI #40560954116
+Remaining work: Idempotent reserve/commit/release, concurrent limits, persistence, UTC daily/monthly reset and corrupt-state rejection pass focused tests.
+
+Feature 065: Budget Management
+Status: COMPLETED
+Implementation/evidence inspected: cost_policy.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Hard-stop project budgets, atomic/idempotent reservations, cross-process overcommit protection, reconciliation and invalid-budget rejection pass focused tests.
+
+Feature 066: Cost Reconciliation
+Status: COMPLETED
+Implementation/evidence inspected: cost_policy.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Actual-usage reconciliation, reservation matching, idempotent replay, unknown-charge safety and malformed outcome rejection pass focused tests.
+
+Feature 067: Billing Discrepancy Detection
+Status: COMPLETED
+Implementation/evidence inspected: cost_policy.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Reservation/provider/estimate mismatch is rejected and actual-cost overrun triggers budget alert; live billing reconciliation remains unverified.
+
+Feature 068: Pricing Catalog
+Status: PARTIAL
+Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
+Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+
+Feature 069: Budget Alerts
+Status: COMPLETED
+Implementation/evidence inspected: budget_alert_manager.py; tests/test_budget_alert_manager.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Threshold/overrun alert generation, delivery state, failed-delivery retry and secret-safe error handling pass focused tests; external notification credentials are not configured.
+
+Feature 070: Paid Usage Approval
+Status: COMPLETED
+Implementation/evidence inspected: cost_policy.py; tests/test_cost_policy.py; CI #40560954116
+Remaining work: Paid use fails closed without explicit approval and configured budget; boolean validation and budget hard-stop cases pass focused tests. Live provider billing remains unverified.
+
+Feature 071: Provider Data Policy
+Status: COMPLETED
+Implementation/evidence inspected: provider_data_policy.py; tests/test_provider_data_policy.py; CI #40560954116
+Remaining work: Provider/category restrictions, credential policy, retention limits and training-use consent gates are covered by focused tests. Broader privacy review remains a release activity.
+
+Feature 072: Sensitive Data Protection
+Status: COMPLETED
+Implementation/evidence inspected: sensitive_data_policy.py; tests/test_sensitive_data_policy.py; CI #40560954116
+Remaining work: Credential/token detection, fail-closed oversized/deep payload checks and configurable sensitive-data policy pass focused tests.
+
+Feature 073: Secret Redaction
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; tests/test_http_probe.py; tests/test_sensitive_data_policy.py; CI #40560954116
+Remaining work: Probe failures and diagnostics avoid returning credentials or raw response details; common token and labeled-secret detection is tested.
+
+Feature 074: Privacy Policy Enforcement
+Status: COMPLETED
+Implementation/evidence inspected: provider_data_policy.py; tests/test_provider_data_policy.py; CI #40560954116
+Remaining work: Provider/category restrictions, credential policy, retention limits and training-use consent gates are covered by focused tests.
+
+Feature 075: Endpoint Allowlisting
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; tests/test_http_probe.py; CI #40560954116
+Remaining work: Missing or unallowlisted hosts fail before network access; public HTTPS hosts still require explicit allowlisting.
+
+Feature 076: SSRF Protection
+Status: PARTIAL
+Implementation/evidence inspected: http_probe.py; connection_manager.py; sensitive_data_policy.py; related tests
+Remaining work: Security controls and tests exist; dependency scanning, fuzzing, privacy review, and release-grade security evidence remain.
+
+Feature 077: Redirect Security
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; tests/test_http_probe.py; CI #40560954116
+Remaining work: Redirects are rejected and response resources are closed; redirect/rate-limit failures do not leak details.
+
+Feature 078: Request Size Limits
+Status: COMPLETED
+Implementation/evidence inspected: provider_data_policy.py; sensitive_data_policy.py; tests/test_provider_data_policy.py; tests/test_sensitive_data_policy.py; CI #40560954116
+Remaining work: Oversized/deep payloads fail closed and provider data-policy retention/input constraints are tested.
+
+Feature 079: Response Size Limits
+Status: COMPLETED
+Implementation/evidence inspected: http_probe.py; output_validator.py; tests/test_http_probe.py; tests/test_output_validator.py; CI #40560954116
+Remaining work: HTTP response reads are bounded and output validation rejects missing, empty, oversized or changing files.
+
+Feature 080: Dependency Security Scanning
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; pip-audit==2.9.0; pyproject.toml; CI #40715403931
+Remaining work: Pinned pip-audit passes on Ubuntu and Windows; runtime dependencies are empty and build-tool pins are declared. Transitive toolchain lock hashes, repository-wide dependency inventory/scanning and privacy review remain.
+
+Feature 081: Provider Configuration Management
+Status: PARTIAL
+Implementation/evidence inspected: provider_config_lifecycle.py; catalog_interchange.py; tests/test_provider_config_lifecycle.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py
+Remaining work: Versioned config migration/hot reload and validated catalog import/export have focused rollback/failure-injection tests. Repository-wide state reconciliation, migration recovery across all consumers and CLI acceptance remain.
+
+Feature 082: Configuration Validation
+Status: COMPLETED
+Implementation/evidence inspected: provider_config_lifecycle.py; connection_manager.py; tests/test_provider_config_lifecycle.py; tests/test_provider_catalogs.py; CI #40560954116
+Remaining work: Invalid candidate configurations fail closed, hot reload preserves last-known-good config, and migrations validate versions and paths.
+
+Feature 083: Feature Flag Management
+Status: COMPLETED
+Implementation/evidence inspected: provider_feature_flags.py; tests/test_provider_feature_flags.py; CI #40560954116
+Remaining work: Unknown/disabled flags fail closed; project allow/deny, kill-switch precedence, deterministic rollout and persistence are covered by focused tests.
+
+Feature 084: Provider Lifecycle Management
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; tests/test_connection_manager.py; tests/test_provider_store_compat.py
+Remaining work: Load/unload/enable/disable lifecycle paths and compatibility facades are covered by regression tests.
+
+Feature 085: Catalog Versioning
+Status: COMPLETED
+Implementation/evidence inspected: catalog_interchange.py; catalog_diff.py; catalog_cli.py; tests/test_catalog_interchange.py; tests/test_catalog_diff.py; tests/test_catalog_cli.py; CI #40716283613
+Remaining work: Catalog versions are diffed explicitly; immutable timestamped snapshots can be listed, restored through validated atomic import/backup, and pruned using dry-run-first retention. Cross-manager state reconciliation is tracked separately in point 096.
+
+Feature 086: Catalog Migration
+Status: PARTIAL
+Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
+Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+
+Feature 087: Catalog Import/Export
+Status: COMPLETED
+Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py; CI #40576942629
+Completion evidence: Validated JSON export/import uses atomic replacement, schema validation, interprocess locking, backup and post-write verification. Injected write failure restores prior bytes or preserves an absent target. Cross-platform CI #40578756447 passed 476 tests on Ubuntu and Windows.
+
+Feature 088: Catalog Integrity Verification
+Status: COMPLETED
+Implementation/evidence inspected: connection_manager.py; provider catalog JSON/schema files; tests/test_provider_catalogs.py; tests/test_provider_store_compat.py; tests/test_advanced_provider_manager.py; CI #40560954116
+Remaining work: Catalog synchronization, schema/version validation, safe provider identity, required host allowlists, capability contracts and advanced-vs-canonical metadata consistency pass tests.
+
+Feature 089: Catalog Diff Management
+Status: COMPLETED
+Implementation/evidence inspected: catalog_diff.py; catalog_interchange.py; tests/test_catalog_diff.py; tests/test_catalog_interchange.py; CI #40578756447
+Completion evidence: Validated dry-run diff reports added/removed IDs and changed field names without values; application is explicit, provider removal requires approval, and application uses backed-up atomic import. Cross-platform CI passed 476 tests.
+
+Feature 090: Catalog Rollback
+Status: COMPLETED
+Implementation/evidence inspected: catalog_interchange.py; tests/test_catalog_interchange.py; connection_manager.py; interprocess_lock.py; CI #40578756447
+Completion evidence: Added immutable timestamped catalog snapshots, safe history listing without configuration contents, schema-validated snapshot restore through atomic import/backup, and invalid snapshot filtering. Cross-platform CI passed 476 tests on Ubuntu and Windows.
+
+Feature 091: Backup Management
+Status: PARTIAL
+Implementation/evidence inspected: catalog_interchange.py; catalog_cli.py; tests/test_catalog_interchange.py; tests/test_catalog_cli.py; PROVIDER_MANAGER_GUIDE.md
+Remaining work: Catalog snapshots and .bak import backups exist. Snapshot retention now previews by default and requires --apply for deletion, validates candidates, skips invalid files/symlinks, and preserves at least the requested number of valid snapshots. Migration-wide retention, crash-at-every-write and cross-manager recovery remain.
+
+Feature 092: Restore Management
+Status: PARTIAL
+Implementation/evidence inspected: connection_manager.py; tests/test_connection_manager.py
+Remaining work: Explicit validated restore from the master catalog exists; broader state, quota, credential and billing recovery remains incomplete.
+
+Feature 093: Atomic Storage Updates
+Status: COMPLETED
+Implementation/evidence inspected: interprocess_lock.py; connection_manager.py; tests/
+Remaining work: Atomic replacement helpers and reload-before-mutate storage paths are implemented and exercised by tests; cross-file multi-manager transactions remain out of scope.
+
+Feature 094: Interprocess Locking
+Status: COMPLETED
+Implementation/evidence inspected: interprocess_lock.py; tests/
+Remaining work: OS-level interprocess lock behavior is used for shared JSON state and covered by cross-platform regression tests.
+
+Feature 095: Crash Recovery
+Status: PARTIAL
+Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
+Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+
+Feature 096: State Reconciliation
+Status: PARTIAL
+Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
+Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+
+Feature 097: Stale Job Detection
+Status: COMPLETED
+Implementation/evidence inspected: provider_job_manager.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Expired worker leases are detected, requeued, and bounded by configured attempt limits in focused regression tests.
+
+Feature 098: Audit Logging
+Status: PARTIAL
+Implementation/evidence inspected: provider_audit_log.py; tests/test_provider_audit_log.py; provider_service.py; tests/test_provider_service.py; interprocess_lock.py; CI #40722792917
+Remaining work: An allowlisted append-only JSONL audit log uses SHA-256 hash chaining, interprocess locking, a size limit, and fail-closed handling for tampering/truncation/symlinks. Provider verification and routed execution are integrated; Ubuntu/Windows CI passed tests, lint, focused type/coverage gates, and artifact generation. Catalog/config mutations across every manager and external audit shipping remain.
+
+Feature 099: CLI Management
+Status: COMPLETED
+Implementation/evidence inspected: provider_store_cli.py; advanced/advanced_provider_manager.py; tests/test_provider_store_cli.py; CI #40566320236
+Remaining work: The module CLI lists catalog entries and advanced readiness/blockers without an unconditional READY claim; subprocess invocation passes on Ubuntu and Windows.
+
+Feature 100: Diagnostic Commands
+Status: COMPLETED
+Implementation/evidence inspected: advanced/advanced_provider_manager.py; advanced/release_report.py; provider_store_cli.py; tests/test_advanced_provider_manager.py; tests/test_provider_store_cli.py; CI #40566320236
+Remaining work: Readiness diagnostics expose category/catalog/credential/runtime blockers and CLI output is tested to distinguish DEGRADED from READY.
+
+Feature 101: Dry-Run Mode
+Status: PARTIAL
+Implementation/evidence inspected: catalog_diff.py; catalog_cli.py; tests/test_catalog_cli.py
+Remaining work: Catalog apply is dry-run by default and tested; other manager workflows still need dry-run acceptance coverage.
+
+Feature 102: Routing Policy Simulation
+Status: PARTIAL
+Implementation/evidence inspected: routing_manager.py; tests/test_routing_simulation.py; PROVIDER_STORE_API_REFERENCE.md
+Remaining work: route(dry_run=True) returns ROUTE_SIMULATED with selected provider, policy decisions, estimated cost and would_reserve fields. Tests verify no quota mutation, no round-robin cursor advance, and no paid-cost or free-credit reservation. A complete policy-matrix report covering quota/budget/health/fallback combinations remains.
+Feature 103: Provider Benchmarking
+Status: COMPLETED
+Implementation/evidence inspected: provider_benchmark_manager.py; tests/test_provider_benchmark_manager.py; CI #40560954116
+Remaining work: Bounded benchmark samples compare success rate, p50/p95 latency, cost and quality; invalid samples fail closed.
+
+Feature 104: Provider Quality Policies
+Status: COMPLETED
+Implementation/evidence inspected: provider_quality_policy.py; tests/test_provider_quality_policy.py; CI #40560954116
+Remaining work: Task-specific score thresholds, invalid scorer results/errors and invalid configuration are covered by focused tests.
+
+Feature 105: Provider Unlock Management
+Status: PARTIAL
+Implementation/evidence inspected: provider_benchmark_manager.py; provider_output_quality_policy.py; provider_unlock_manager.py; related tests
+Remaining work: Foundational modules exist; controlled benchmark data and full acceptance matrices remain.
+
+Feature 106: Webhook Verification
+Status: COMPLETED
+Implementation/evidence inspected: provider_webhook_verifier.py; tests/test_provider_webhook_verifier.py; CI #40560954116
+Remaining work: HMAC-SHA256 signatures, timestamp windows, replay rejection, payload bounds and secret/payload non-persistence pass regression tests.
+
+Feature 107: Integration Contract Testing
+Status: PARTIAL
+Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
+Remaining work: Unit/regression/security/concurrency tests exist; not all integration, failure-injection, fuzzing and performance dimensions are covered.
+
+Feature 108: Unit Testing
+Status: COMPLETED
+Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
+Remaining work: Full unit/regression suite passes on Ubuntu and Windows; 431 tests passed in run #40556234168.
+
+Feature 109: Integration Testing
+Status: PARTIAL
+Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
+Remaining work: Unit/regression/security/concurrency tests exist; not all integration, failure-injection, fuzzing and performance dimensions are covered.
+
+Feature 110: Regression Testing
+Status: COMPLETED
+Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml; CI #40560954116
+Remaining work: Cross-module provider regression suite runs on Ubuntu and Windows and includes catalog, auth, routing, quota/cost, security, output, incident and release-package checks.
+
+Feature 111: Concurrency Testing
+Status: COMPLETED
+Implementation/evidence inspected: tests/test_connection_manager.py; tests/test_health_manager.py; tests/test_credit_manager.py; tests/test_quota_manager.py; tests/test_cost_policy.py; tests/test_provider_job_manager.py; CI #40560954116
+Remaining work: Thread/process concurrency tests cover state updates, health history, credit/quota/budget reservations, job limits and idempotent finalization.
+
+Feature 112: Failure Injection Testing
+Status: PARTIAL
+Implementation/evidence inspected: tests/test_provider_config_lifecycle.py; tests/test_catalog_interchange.py; .github/workflows/task-25-tests.yml
+Remaining work: Injected atomic-replace failures verify config migration preserves original bytes and cleans temporary files; catalog import failure verifies rollback/no partial target. Network/provider, crash-at-every-write and cross-manager failure matrices remain.
+
+Feature 113: Security Testing
+Status: PARTIAL
+Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
+Remaining work: Unit/regression/security/concurrency tests exist; not all integration, failure-injection, fuzzing and performance dimensions are covered.
+
+Feature 114: Fuzz Testing
+Status: PARTIAL
+Implementation/evidence inspected: tests/test_provider_store_fuzz_regressions.py; connection_manager.py; provider_trace_manager.py; CI #40712713627
+Remaining work: Deterministic seeded fuzz-regression coverage for 500 JSON-like provider catalog candidates and 1,000 arbitrary traceparent strings passed on Ubuntu and Windows in CI #40712713627. Broader parser/property-based fuzzing and live/network failure fuzzing remain.
+Feature 115: Performance Testing
+Status: PARTIAL
+Implementation/evidence inspected: advanced/performance_benchmark.py; tests/test_provider_store_performance_benchmark.py; .github/workflows/task-25-tests.yml
+Remaining work: CI runs a bounded 25-iteration catalog-integrity benchmark with a 15-second budget and reports throughput/counts. Provider request/generation latency and representative production workload baselines remain unmeasured.
+
+Feature 116: Load Testing
+Status: PARTIAL
+Implementation/evidence inspected: advanced/performance_benchmark.py; tests/test_provider_store_performance_benchmark.py; .github/workflows/task-25-tests.yml
+Remaining work: CI exercises 25 concurrent offline catalog-integrity validations with four workers and a 15-second budget. Provider API throughput, queue saturation, streaming and live-generation load remain untested.
+
+Feature 117: Cross-Platform Testing
+Status: COMPLETED
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml
+Remaining work: Python 3.13 test suite passes on Ubuntu and Windows; other runtimes such as Pydroid remain unverified.
+
+Feature 118: Python Version Compatibility
+Status: COMPLETED
+Implementation/evidence inspected: .github/workflows/provider-store-python-compatibility.yml; .github/workflows/task-25-tests.yml; CI #40715403928; CI #40715403931
+Remaining work: Full tests, catalog JSON validation, reproducible wheel build and clean-target install pass on Python 3.10, 3.11 and 3.12 on Ubuntu; Python 3.13 passes full cross-platform CI on Ubuntu and Windows. Mobile/Pydroid is not claimed by this repository CI.
+
+Feature 119: Code Formatting Checks
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; Ruff 0.14.2; catalog_interchange.py; advanced/performance_benchmark.py; focused tests; CI #40575388557
+Remaining work: Ruff format --check covers the new catalog-interchange and benchmark modules/tests; Ubuntu passed. Repository-wide formatting remains unverified.
+
+Feature 120: Linting
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; Ruff 0.14.2; focused provider-store modules/tests; CI #40575225305
+Remaining work: Pinned Ruff lint gate covers catalog interchange, config lifecycle, PDF/benchmark code and focused tests; Ubuntu passed. Repository-wide linting remains unverified.
+
+Feature 121: Static Type Checking
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; mypy 1.18.2; catalog_interchange.py; catalog_diff.py; catalog_cli.py; provider_outage_detector.py; health_scheduler.py; advanced/release_report.py; advanced/pdf_report.py; advanced/performance_benchmark.py; advanced/verify_wheel.py; CI #40582600249
+Remaining work: Focused mypy gate passes on the maintenance/release, outage and health scheduling modules on Ubuntu and Windows; repository-wide typing for remaining provider runtime remains.
+
+Feature 122: Test Coverage Enforcement
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; coverage 7.13.1; focused provider-store modules; CI #40582600249
+Remaining work: Coverage gate passed with 82% combined statement coverage across nine catalog/config/release/benchmark/health modules while all 489 tests passed; repository-wide coverage threshold remains undefined.
+
+Feature 123: Build Verification
+Status: COMPLETED
+Implementation/evidence inspected: pyproject.toml; advanced/verify_wheel.py; .github/workflows/task-25-tests.yml; CI #40581736079
+Completion evidence: Ubuntu and Windows build the provider-store wheel twice with isolated pinned build dependencies, compare SHA-256 hashes, install into a clean target and verify module import plus catalog JSON package data.
+
+Feature 124: Wheel Installation Testing
+Status: COMPLETED
+Implementation/evidence inspected: pyproject.toml; advanced/verify_wheel.py; CI #40581736079
+Completion evidence: Ubuntu and Windows both install the wheel into a temporary target and import projects.provider_store.catalog_cli while loading provider_catalog.json from installed package data.
+
+Feature 125: Clean ZIP Extraction Testing
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40563450621
+Remaining work: Generated source ZIP passes CRC/integrity checks, SHA-256 manifest comparisons and clean extraction with expected files; full-app packaging remains separate.
+
+Feature 126: Reproducible Build Verification
+Status: PARTIAL
+Implementation/evidence inspected: pyproject.toml; advanced/verify_wheel.py; CI #40581736079
+Remaining work: Two isolated builds are byte-for-byte identical per OS with SOURCE_DATE_EPOCH fixed; cross-OS binary equivalence and long-term reproducibility across toolchain versions are not claimed.
+
+Feature 127: Dependency Locking
+Status: PARTIAL
+Implementation/evidence inspected: pyproject.toml; advanced/verify_wheel.py; .github/workflows/task-25-tests.yml
+Remaining work: Runtime dependencies are explicitly empty and direct build requirements setuptools==80.9.0 and wheel==0.45.1 are pinned; transitive build dependency hashes and a full platform lockfile remain.
+
+Feature 128: Software Bill of Materials (SBOM)
+Status: PARTIAL
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; .github/workflows/task-25-tests.yml; CI #40580523121
+Remaining work: Cross-platform CI verifies SPDX 2.3 JSON with SHA-256 hashes for all packaged source files and confirms ZIP inclusion. Third-party dependency inventory and license conclusions are not inferred.
+
+Feature 129: CI/CD Pipeline
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; .github/workflows/advanced-provider-store-release-gate.yml
+Remaining work: Cross-platform tests/build/report artifacts run in CI. A dedicated manual/tag release gate includes Ruff, mypy, focused coverage, reproducible wheel/clean install, benchmark, compile/catalog/regression checks and requires all 150 ledger points before artifact upload; it has not been executed end-to-end on a release ref.
+
+Feature 130: Automated Release Gates
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/advanced-provider-store-release-gate.yml; advanced/release_report.py; tests/test_advanced_provider_release_report.py
+Remaining work: --require-complete returns exit code 2 unless every acceptance point is COMPLETED. Strict-versus-normal report behavior passed tests in cross-platform CI #40704591050. The manual/tag workflow includes Ruff, mypy, focused coverage, reproducible wheel/clean install, benchmark, compile/catalog/regression gates and blocks artifact upload for incomplete ledgers; release execution remains blocked until criteria pass.
+
+Feature 131: Release Asset Management
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; advanced/release_report.py; CI #40564854208
+Remaining work: CI generates and uploads the report, source ZIP, manifest and ZIP checksum sidecar as workflow artifacts; a versioned GitHub Release asset workflow remains.
+
+Feature 132: SHA-256 Checksum Verification
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40563694393
+Remaining work: Source files are checked against manifest hashes and the generated ZIP has a SHA-256 sidecar whose digest is verified against archive bytes.
+
+Feature 133: Release Versioning
+Status: PARTIAL
+Implementation/evidence inspected: .github/workflows/task-25-tests.yml; .github/workflows/provider-store-core-catalog-release-gates.yml
+Remaining work: CI/release-gate/checksum/version primitives exist; the full Advanced Provider Store release package has not been verified.
+
+Feature 134: Changelog Management
+Status: COMPLETED
+Implementation/evidence inspected: projects/provider_store/CHANGELOG.md
+Remaining work: Versioned Unreleased entry documents implemented catalog, health, release, security and quality-gate changes without implying a published release.
+Feature 135: API Documentation
+Status: COMPLETED
+Implementation/evidence inspected: PROVIDER_STORE_API_REFERENCE.md; generate_api_reference.py; tests/test_generate_provider_store_api_reference.py; CI #40712713627
+Remaining work: Operational API/CLI reference plus deterministic AST-based public declaration/docstring index are generated and packaged in CI. Generator determinism, stale-reference detection, malformed-source handling and API symbol filtering passed cross-platform CI.
+Feature 136: Architecture Documentation
+Status: COMPLETED
+Implementation/evidence inspected: projects/provider_store/PROVIDER_STORE_ARCHITECTURE.md; projects/provider_store/PROVIDER_MANAGER_GUIDE.md
+Remaining work: Architecture layers, operational flow, trust boundaries, persistence limits and production constraints are documented.
+Feature 137: Developer Guide
+Status: COMPLETED
+Implementation/evidence inspected: projects/provider_store/PROVIDER_MANAGER_GUIDE.md; projects/provider_store/PROVIDER_STORE_API_REFERENCE.md; projects/provider_store/PROVIDER_STORE_ARCHITECTURE.md
+Remaining work: Developer guide covers module responsibilities, configuration, routing/cost invariants, recovery APIs, import/export and operational commands.
+Feature 138: Troubleshooting Guide
+Status: COMPLETED
+Implementation/evidence inspected: projects/provider_store/PROVIDER_STORE_TROUBLESHOOTING.md
+Remaining work: Readiness, catalog, connectivity/authentication, paid-use, output, release-package and CI failure triage are documented without weakening safety controls.
+Feature 139: Migration Guide
+Status: COMPLETED
+Implementation/evidence inspected: projects/provider_store/PROVIDER_STORE_MIGRATION.md; catalog_cli.py; catalog_interchange.py; provider_config_lifecycle.py
+Remaining work: Dry-run-first catalog changes, explicit removal approval, snapshots, import/export backup/rollback, versioned config migration, restore and retention are documented.
+Feature 140: Feature Ledger
+Status: COMPLETED
+Implementation/evidence inspected: ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md; ADVANCED_PROVIDER_STORE_COMPLETION_REMAINING_LEDGER.txt; tests/test_advanced_provider_manager.py
+Remaining work: Both 150-row ledgers are present and their IDs/status rows are validated by regression tests.
+
+Feature 141: Test Report Generation
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py
+Remaining work: Ledger-derived JSON/Markdown/PDF reports, status counts, source manifest and source ZIP are generated; incomplete reports are supported separately from strict release-gate mode.
+Feature 142: PDF Report Generation
+Status: UNVERIFIED
+Implementation/evidence inspected: No PDF generator implemented
+Remaining work: Implement and validate PDF output with an approved dependency and Unicode-safe rendering.
+
+Feature 143: ZIP Package Generation
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40563450621
+Remaining work: Component source ZIP is generated from an explicit safe allowlist and includes the completion report and source manifest; production release publication remains open.
+
+Feature 144: Package File Manifest
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40563450621
+Remaining work: Per-file SHA-256 manifest is generated, archive membership is checked and each packaged source hash is compared to the manifest.
+
+Feature 145: Secret-Free Package Verification
+Status: COMPLETED
+Implementation/evidence inspected: advanced/release_report.py; tests/test_advanced_provider_release_report.py; CI #40715403931
+Remaining work: Explicit source allowlist, known-token/private-key patterns, quoted credential-assignment entropy screening, nonliteral-expression false-positive regression and final generated ZIP payload scanning passed cross-platform CI. Verified source ZIP, manifest, SPDX SBOM, PDF and checksum artifacts were generated/uploaded. Heuristic scanning cannot mathematically guarantee that arbitrary secrets are absent.
+Feature 146: Backward Compatibility
+Status: PARTIAL
+Implementation/evidence inspected: provider_store modules; test_provider_store_compat.py; regression tests
+Remaining work: Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains.
+
+Feature 147: Deprecation Management
+Status: PARTIAL
+Implementation/evidence inspected: provider_store modules; test_provider_store_compat.py; regression tests
+Remaining work: Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains.
+
+Feature 148: Error Diagnostics
+Status: COMPLETED
+Implementation/evidence inspected: advanced/advanced_provider_manager.py; provider_error_policy.py; tests/test_advanced_provider_manager.py; tests/test_provider_error_policy.py
+Remaining work: Secret-free readiness diagnostics and normalized error taxonomy cover catalog, connectivity, billing, exhausted credits, authentication, permissions, rate limits, transient errors, rejected requests and unknown outcomes without echoing raw provider codes/bodies.
+Feature 149: Recovery Diagnostics
+Status: PARTIAL
+Implementation/evidence inspected: provider_store modules; test_provider_store_compat.py; regression tests
+Remaining work: Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains.
+
+Feature 150: Production Readiness Verification
+Status: NOT STARTED
+Implementation/evidence inspected: No release-grade end-to-end evidence
+Remaining work: Complete remaining adapter, live integration, packaging and release gates before production readiness can be claimed.
+
+RELEASE GATE
+Do not mark this component complete until all 150 rows have evidence-backed status, the full cross-platform suite passes on the latest commit, provider-specific live integrations are verified or explicitly blocked for missing credentials, and the final clean ZIP/PDF/checksum package is validated.

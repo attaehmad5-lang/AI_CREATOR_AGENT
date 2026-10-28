@@ -20,6 +20,16 @@ This guide describes the current implementation in this branch. It is not a clai
 - `provider_catalog.json` and `provider_catalog_master.json` — one synchronized 54-provider registry, including the 18 advanced-provider records. Catalog v3 requires complete provider identity fields and explicit `enabled` / `subscription_required` booleans; provider IDs and documentation/subscription links are validated before acceptance. The master catalog is the fallback copy, and the older v2 backup remains archival.
 - Legacy store, category, advanced, unlock, status, and unified-registry/router facades now read the central catalog. Discovery facades distinguish catalog labels from live verified state; actual policy-aware execution still belongs to `ProviderRoutingManager`.
 
+## Advanced Provider Store operations
+
+- `advanced/advanced_provider_manager.py` is a compatibility facade over the canonical provider registry. Use `list_categories()`, `get_category()`, `by_capability()`, and `supports_capability()` for validated category/capability discovery.
+- Use `load_provider(provider_id, factory)` only for explicitly enabled advanced providers. The canonical connection manager validates the callable contract before retaining an adapter; `unload_provider()` runs adapter cleanup and `loaded_provider()` returns only the process-local instance. Never serialize adapter instances.
+- `catalog_consistency()` compares the legacy advanced catalog against canonical provider metadata and category capability declarations. A mismatch is a configuration error, not a live-connection failure.
+- `readiness_report()` separates category-catalog validity, catalog consistency, enabled state, credential presence, and verified runtime connectivity. It never returns credential values. A provider is not ready just because its catalog says `CONNECTED` or a credential exists.
+- Run `python -m projects.provider_store.advanced.advanced_provider_manager` from the repository root to print a secret-free readiness report and actionable blockers. `DEGRADED` is expected until provider-specific credentials, enablement, and live verification are intentionally configured.
+- Run `python -m projects.provider_store.advanced.release_report --output-dir build/advanced-provider-store-release` to generate a JSON/Markdown ledger report, per-file SHA-256 manifest, integrity-checked source ZIP, and verified ZIP SHA-256 sidecar. The report intentionally remains `INCOMPLETE` until all 150 ledger points are completed; the ZIP excludes runtime state, backups, environment files, and credential/secret files.
+- Live generation, billing, credit-balance, and subscription tests require the user to configure provider credentials and approve any potentially billable operation. No provider is automatically enabled, purchased, or unlocked.
+
 ## Safety contracts
 
 1. **No automatic purchases.** These modules do not purchase credits, start subscriptions, or infer paid approval.
@@ -47,6 +57,28 @@ print(result)
 ```
 
 This restores catalog metadata only; it does not restore credentials, connection sessions, quota ledgers, or credit/cost history.
+
+## Validated catalog import and export
+
+Use `projects.provider_store.catalog_interchange` to move catalog metadata between files. Both paths reject malformed JSON, invalid catalog schemas, duplicate/unsafe provider records, and credential-bearing fields. Export writes through a same-directory temporary file and atomic replacement. Import validates before mutation, takes an OS-level lock for the destination, saves the prior bytes to `.bak` by default, validates the written file, and restores the original bytes if replacement/verification fails.
+
+```python
+from projects.provider_store.catalog_interchange import export_catalog, import_catalog
+
+export_result = export_catalog(
+    "projects/provider_store/provider_catalog.json",
+    "build/provider_catalog.export.json",
+)
+print(export_result["status"], export_result["provider_count"])
+
+import_result = import_catalog(
+    "build/provider_catalog.export.json",
+    "build/provider_catalog.staging.json",
+)
+print(import_result["status"], import_result.get("provider_count"))
+```
+
+Import/export only changes the destination path supplied by the caller; it does not silently update every runtime catalog consumer. For production rollout, use a staging destination, inspect the exported diff, and separately coordinate runtime reloads. A failed import returns a safe status and leaves the prior destination intact where rollback succeeds. If rollback itself fails, stop and restore from the preserved `.bak` before retrying.
 
 ## Verification
 
@@ -87,3 +119,124 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+
+## Catalog maintenance CLI
+
+Run catalog maintenance from the repository root with Python module mode:
+
+```bash
+python -m projects.provider_store.catalog_cli diff projects/provider_store/provider_catalog.json /path/to/candidate.json
+python -m projects.provider_store.catalog_cli apply projects/provider_store/provider_catalog.json /path/to/candidate.json
+python -m projects.provider_store.catalog_cli apply projects/provider_store/provider_catalog.json /path/to/candidate.json --apply
+python -m projects.provider_store.catalog_cli export projects/provider_store/provider_catalog.json /path/to/export.json
+python -m projects.provider_store.catalog_cli import /path/to/export.json projects/provider_store/provider_catalog.json
+python -m projects.provider_store.catalog_cli snapshot projects/provider_store/provider_catalog.json /path/to/catalog-history
+python -m projects.provider_store.catalog_cli history /path/to/catalog-history
+python -m projects.provider_store.catalog_cli prune /path/to/catalog-history --keep 20
+python -m projects.provider_store.catalog_cli prune /path/to/catalog-history --keep 20 --apply
+python -m projects.provider_store.catalog_cli restore /path/to/catalog-history/catalog-TIMESTAMP.json projects/provider_store/provider_catalog.json
+```
+
+The `apply` command is a dry run unless `--apply` is supplied. Removing providers additionally requires `--allow-removals`; the CLI never prints provider field values in a diff. Import and restore validate schema, use an interprocess lock, keep a backup by default, verify the written catalog, and attempt rollback on failure. Snapshots are immutable timestamped JSON files; history output contains filenames and provider counts only. The `prune` command previews retention changes by default and only deletes old valid snapshots when `--apply` is explicit; invalid files and symlinks are skipped, and `--keep` must preserve at least one valid snapshot. Catalog export/import rejects embedded credential material. Review the diff and preserve a separate backup before any intentional destructive change.
+
+## Release evidence and SBOM
+
+The release-report command creates JSON, Markdown and PDF status reports, a source-only ZIP, a SHA-256 source manifest/checksum sidecar, and an SPDX 2.3 JSON SBOM containing source-file SHA-256 hashes. Before packaging, it rejects private-key blocks and high-confidence GitHub, OpenAI-style/Anthropic, Google, Hugging Face, Replicate, AWS and Slack token patterns in eligible source payloads. License and copyright conclusions are recorded as `NOASSERTION`, not guessed. The report remains `INCOMPLETE` until all 150 acceptance points are completed. These offline checks do not prove live provider connectivity, real account credits, or billable generation.
+
+To explicitly enforce the completion ledger as a release gate, run:
+
+```bash
+python -m projects.provider_store.advanced.release_report --output-dir build/advanced-provider-store-release --require-complete
+```
+
+The normal report-generation command still exits successfully when it produces a valid report for an incomplete component. With `--require-complete`, an incomplete ledger returns exit code 2 so a publication workflow can fail closed. This flag does not publish assets or bypass CI/review. The dedicated `.github/workflows/advanced-provider-store-release-gate.yml` workflow (manual dispatch or `advanced-provider-store-v*` tag) also runs pinned Ruff, focused mypy/coverage, reproducible wheel installation, the bounded catalog benchmark, compilation and regression tests before it permits artifact upload.
+
+## Wheel build and installation verification
+
+The repository-root `pyproject.toml` builds the provider-store namespace as the `ai-creator-agent-provider-store` distribution. Runtime dependencies are declared empty; the build backend is pinned to `setuptools==80.9.0` and `wheel==0.45.1`. CI runs `python -m projects.provider_store.advanced.verify_wheel`, which performs two isolated wheel builds with a fixed `SOURCE_DATE_EPOCH`, compares their SHA-256 hashes, installs one wheel into a temporary target, then checks the installed CLI import and bundled provider catalog JSON from outside the repository. This verifies the declared package scope, not the entire AI_CREATOR_AGENT application.
+
+For a local build from the repository root:
+
+```bash
+python -m projects.provider_store.advanced.verify_wheel
+```
+
+A successful result includes `"reproducible": true`, `"installed_import": true`, and `"catalog_data_included": true`. Build verification requires access to the pinned build tools when they are not cached.
+
+## Health scheduling and outage detection
+
+`ProviderHealthScheduler` is a bounded poll-driven scheduler. Register an injected probe with `register(provider_id, probe, interval_seconds=...)`, call `run_due(max_checks=...)` from the application's own lifecycle loop, and call `unregister(provider_id)` to remove it. The scheduler enforces provider-count, batch-size, interval, timeout-value and clock bounds; each probe receives `timeout_seconds`. A probe must enforce that timeout at its network boundary—the scheduler does not kill arbitrary Python callbacks. Schedules are in memory and are not a background daemon.
+
+`ProviderOutageDetector` converts verified `ProviderHealthManager` evidence into deduplicated `ProviderIncidentManager` incidents for unhealthy or stale providers. Once fresh healthy evidence is recorded, it resolves matching open health incidents. No evidence, recovering state, slow response, or invalid health policy does not get mislabeled as a confirmed outage. Both components are tested with injected clocks and local state files; these tests do not claim live provider uptime.
+
+## Runtime generation adapter registry
+
+`ProviderAdapterRegistry` is the runtime binding layer for application-supplied provider generation callables. It does not invent vendor API implementations or claim live connectivity. Register an adapter only for a catalog provider; dispatch requires the provider to be enabled and its connection state to be verified.
+
+```python
+from projects.provider_store.provider_adapter_registry import ProviderAdapterRegistry
+
+registry = ProviderAdapterRegistry(connection_manager)
+registry.register(
+    "image-provider",
+    vendor_adapter,
+    modalities=("image",),
+    model_ids=("image-model-v1",),
+)
+adapter = registry.as_callable("image-provider", modality="image", model_id="image-model-v1")
+result = provider_service.execute_routed_request(
+    category="image",
+    project_id="project-123",
+    request_id="request-123",
+    estimated_cost=0.0,
+    modality="image",
+    adapter=adapter,
+    output_path="generated.png",
+)
+```
+
+The example assumes the application has already configured `connection_manager`, `provider_service`, and `vendor_adapter`; those names are application-owned. Registry checks and policy rejections return an explicit not-started result before calling the vendor adapter. Exceptions from a vendor adapter propagate to `ProviderService`, which conservatively retains reservations when the provider request may have started. Listing adapters exposes provider IDs and capability declarations, never callable objects or credentials. Unit tests use injected stubs and do not prove a real provider API is reachable.
+
+## Tamper-evident audit events
+
+`ProviderAuditLog` stores a bounded append-only JSONL chain using SHA-256 hashes and an interprocess lock. Its allowlisted schema includes only timestamp, event/status/outcome codes, provider/actor/request identifiers and an optional reason code; it does not accept arbitrary payloads. A modified, truncated, oversized or symlinked log fails closed rather than silently extending an invalid chain.
+
+```python
+from projects.provider_store.provider_audit_log import ProviderAuditLog
+
+audit = ProviderAuditLog("state/provider-audit.jsonl")
+audit.record(
+    "provider.execute",
+    status="EXECUTION_SUCCEEDED",
+    outcome="OK",
+    provider_id="image-provider",
+    actor_id="user-123",
+    request_id="request-123",
+)
+print(audit.verify_chain())
+```
+
+Pass an instance to `ProviderService(..., audit_log_manager=audit)` to record provider verification and routed execution outcomes. Audit-write failures are non-fatal to generation and should be monitored through a separate operational health channel. Catalog/config mutations across every manager and remote audit shipping are not yet integrated.
+
+## Structured provider events
+
+`ProviderStructuredLogger` emits JSON events from an injected standard-library `logging.Logger`. `ProviderService` accepts it as `structured_logger=...` and emits bounded, secret-safe `provider.verify`, `provider.manual_verify`, and `provider.execute` events. Routed execution logs request ID, provider, bounded status, outcome, duration and safe error code only; prompts, endpoint URLs, credentials, exception messages and arbitrary dictionaries are not included. Logging failures are deliberately non-fatal to the provider operation. Full instrumentation of every service lifecycle method and external log shipping remain outside this integration.
+
+## Trace-context propagation
+
+`ProviderService` accepts an optional `trace_manager`; verification methods and `execute_routed_request(..., traceparent=...)` can propagate a valid W3C traceparent into a bounded span. Routed execution records category/request metadata and final outcome without prompts or payloads. Trace failures are non-fatal. The recorder remains in-process; external OpenTelemetry/collector export and instrumentation of every provider-service method are not yet implemented.
+
+
+## Companion documentation
+
+- CHANGELOG.md records unreleased changes and explicit verification limits; it does not imply a published release.
+- PROVIDER_STORE_ARCHITECTURE.md describes module boundaries, trust assumptions, operational flow and production constraints.
+- PROVIDER_STORE_API_REFERENCE.md documents operational APIs and CLI syntax.
+- PROVIDER_STORE_TROUBLESHOOTING.md covers readiness, catalog, connectivity, paid-use, output, release and CI failures.
+- PROVIDER_STORE_MIGRATION.md describes dry-run catalog changes, snapshots, migration, rollback and retention.
+- The source-derived API index is generated deterministically with:
+
+    python -m projects.provider_store.generate_api_reference
+
+The provider-store CI and strict release workflow generate PROVIDER_STORE_PYTHON_API.md before source packaging, so the generated API index is included in the release bundle. Do not edit that generated file by hand; change source declarations/docstrings and regenerate it.
