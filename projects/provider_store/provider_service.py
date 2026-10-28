@@ -38,6 +38,7 @@ class ProviderService:
         media_integrity_validator: Any | None = None,
         structured_logger: Any | None = None,
         trace_manager: Any | None = None,
+        audit_log_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -64,6 +65,7 @@ class ProviderService:
             (media_integrity_validator, "validate", "media_integrity_validator"),
             (structured_logger, "emit", "structured_logger"),
             (trace_manager, "start_span", "trace_manager"),
+            (audit_log_manager, "record", "audit_log_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -93,6 +95,7 @@ class ProviderService:
         self.media_integrity_validator = media_integrity_validator
         self.structured_logger = structured_logger
         self.trace_manager = trace_manager
+        self.audit_log_manager = audit_log_manager
 
     def _start_provider_span(self, event: str, provider_id: str, traceparent: str | None) -> dict[str, Any] | None:
         if self.trace_manager is None:
@@ -137,6 +140,33 @@ class ProviderService:
             # Diagnostics must never change provider verification behavior.
             return
 
+    def _audit_operation_event(
+        self,
+        event: str,
+        status: str,
+        outcome: str,
+        provider_id: Any,
+        actor_id: Any,
+        request_id: Any = None,
+        reason_code: str | None = None,
+    ) -> None:
+        if self.audit_log_manager is None:
+            return
+        try:
+            self.audit_log_manager.record(
+                event,
+                status=status if isinstance(status, str) else "UNKNOWN",
+                outcome=outcome if outcome in {"OK", "ERROR", "CANCELLED", "DENIED", "UNKNOWN"} else "UNKNOWN",
+                provider_id=provider_id if isinstance(provider_id, str) else None,
+                actor_id=actor_id if isinstance(actor_id, str) else None,
+                request_id=request_id if isinstance(request_id, str) else None,
+                reason_code=reason_code,
+            )
+        except Exception:
+            # Durable audit failure must be surfaced by its own health channel,
+            # never by changing the provider execution result.
+            return
+
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
             return None
@@ -163,6 +193,10 @@ class ProviderService:
         """Verify connection using an injected provider-specific probe and record health."""
         authorization = self._authorize_operation(principal_id, "provider.verify")
         if authorization is not None:
+            self._audit_operation_event(
+                "provider.verify", "AUTHORIZATION_DENIED", "DENIED",
+                provider_id, principal_id, reason_code="AUTHORIZATION_DENIED",
+            )
             return {
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
                 "verified": False, "authorization": authorization,
@@ -192,6 +226,15 @@ class ProviderService:
                 health = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
         self._finish_provider_span(span, connection)
         self._log_provider_event("provider.verify", provider_id, connection)
+        verified = connection.get("verified") is True
+        self._audit_operation_event(
+            "provider.verify",
+            str(connection.get("status", "UNKNOWN")),
+            "OK" if verified else "ERROR",
+            provider_id,
+            principal_id,
+            reason_code=None if verified else str(connection.get("status", "UNKNOWN")),
+        )
         return {
             "status": connection.get("status", "UNKNOWN"),
             "provider": provider_id,
@@ -561,19 +604,28 @@ class ProviderService:
                 "EXECUTION_SERVICE_EXCEPTION", "ERROR", duration_ms,
                 type(exc).__name__,
             )
+            self._audit_operation_event(
+                "provider.execute", "EXECUTION_SERVICE_EXCEPTION", "ERROR",
+                category, principal_id, request_id, "EXECUTION_SERVICE_EXCEPTION",
+            )
             raise
         duration_ms = max(0.0, (time.monotonic() - started_at) * 1000.0)
         status = result.get("status", "UNKNOWN") if isinstance(result, dict) else "INVALID_SERVICE_RESULT"
         success = status == "EXECUTION_SUCCEEDED"
         self._finish_operation_span(span, "OK" if success else "ERROR", duration_ms)
+        resolved_provider = result.get("provider") if isinstance(result, dict) else category
         self._log_operation_event(
             "provider.execute",
-            result.get("provider") if isinstance(result, dict) else category,
+            resolved_provider,
             request_id,
             status,
             "OK" if success else "ERROR",
             duration_ms,
             None if success else status,
+        )
+        self._audit_operation_event(
+            "provider.execute", status, "OK" if success else "ERROR",
+            resolved_provider, principal_id, request_id, None if success else status,
         )
         return result
 
