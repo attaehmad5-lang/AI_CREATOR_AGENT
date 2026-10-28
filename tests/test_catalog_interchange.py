@@ -179,7 +179,9 @@ class CatalogInterchangeTests(unittest.TestCase):
             linked_history.symlink_to(real_history, target_is_directory=True)
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
-        with self.assertRaisesRegex(ValueError, "history directory must not be a symlink"):
+        with self.assertRaisesRegex(
+            ValueError, "history directory must not be a symlink"
+        ):
             create_catalog_snapshot(self.source, linked_history)
 
     def test_export_refuses_malformed_json(self):
