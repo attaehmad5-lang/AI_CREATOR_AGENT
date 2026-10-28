@@ -81,6 +81,7 @@ jobs:
           projects/provider_store/generate_api_reference.py
           tests/test_generate_provider_store_api_reference.py
           tests/test_provider_store_fuzz_regressions.py
+          tests/test_routing_simulation.py
           tests/test_catalog_interchange.py
           tests/test_catalog_diff.py
           tests/test_provider_store_performance_benchmark.py
