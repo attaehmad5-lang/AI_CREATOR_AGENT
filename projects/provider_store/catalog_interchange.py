@@ -33,6 +33,14 @@ _FORBIDDEN_CREDENTIAL_KEYS = {
     "bearer",
     "bearertoken",
 }
+_CREDENTIAL_KEY_PREFIXES = (
+    "privatekey",
+    "secret",
+    "password",
+    "credential",
+    "authorization",
+    "bearer",
+)
 _CREDENTIAL_KEY_SUFFIXES = (
     "apikey",
     "accesskey",
@@ -59,9 +67,7 @@ def _contains_credential_material(value: Any) -> bool:
             )
             if not env_reference and (
                 normalized in _FORBIDDEN_CREDENTIAL_KEYS
-                or normalized.startswith(
-                    ("privatekey", "secret", "password", "credential", "authorization", "bearer")
-                )
+                or normalized.startswith(_CREDENTIAL_KEY_PREFIXES)
                 or normalized.endswith(_CREDENTIAL_KEY_SUFFIXES)
             ):
                 return True
