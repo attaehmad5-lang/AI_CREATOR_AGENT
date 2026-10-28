@@ -531,6 +531,97 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["finalization"]["finalized"])
         self.assertEqual(result["provider"], "image")
 
+    def test_routed_execution_emits_secret_safe_log_and_trace_span(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        stream = io.StringIO()
+        logger = logging.Logger("provider-execution-test", level=logging.DEBUG)
+        logger.addHandler(logging.StreamHandler(stream))
+        trace = ProviderTraceManager()
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            health_manager=self.health,
+            output_validator=self.validator,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            structured_logger=ProviderStructuredLogger(logger),
+            trace_manager=trace,
+        )
+        output_path = self.root / "traced.png"
+        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        traceparent = "00-" + "c" * 32 + "-" + "d" * 16 + "-01"
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="safe-execution-id",
+            estimated_cost=0.0,
+            output_path=str(output_path),
+            adapter_options={"harmless": "value", "private_prompt": "DO_NOT_LOG_PROMPT"},
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 5.0,
+            },
+            modality="image",
+            traceparent=traceparent,
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        event = json.loads(stream.getvalue())
+        self.assertEqual(event["event"], "provider.execute")
+        self.assertEqual(event["provider_id"], "image")
+        self.assertEqual(event["request_id"], "safe-execution-id")
+        self.assertEqual(event["outcome"], "OK")
+        self.assertNotIn("DO_NOT_LOG_PROMPT", stream.getvalue())
+        self.assertNotIn("private_prompt", stream.getvalue())
+        spans = trace.snapshot()
+        self.assertEqual(spans["count"], 1)
+        self.assertEqual(spans["spans"][0]["trace_id"], "c" * 32)
+        self.assertEqual(spans["spans"][0]["parent_span_id"], "d" * 16)
+        self.assertEqual(spans["spans"][0]["outcome"], "OK")
+        self.assertEqual(spans["spans"][0]["attributes"]["category"], "image")
+        self.assertNotIn("private_prompt", json.dumps(spans))
+
+    def test_execution_telemetry_failures_do_not_change_adapter_outcome(self):
+        class BrokenLogger:
+            def emit(self, *args, **kwargs):
+                raise RuntimeError("logger unavailable")
+
+        class BrokenTrace:
+            def start_span(self, *args, **kwargs):
+                raise RuntimeError("trace unavailable")
+
+            def finish_span(self, *args, **kwargs):
+                raise RuntimeError("trace unavailable")
+
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            health_manager=self.health,
+            output_validator=self.validator,
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            structured_logger=BrokenLogger(),
+            trace_manager=BrokenTrace(),
+        )
+        output_path = self.root / "telemetry-failure.png"
+        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="telemetry-failure",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertTrue(result["finalization"]["finalized"])
+
     def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
