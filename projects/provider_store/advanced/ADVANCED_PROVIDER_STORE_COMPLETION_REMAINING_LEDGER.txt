@@ -687,35 +687,29 @@ Implementation/evidence inspected: .github/workflows/task-25-tests.yml; .github/
 Remaining work: CI/release-gate/checksum/version primitives exist; the full Advanced Provider Store release package has not been verified.
 
 Feature 134: Changelog Management
-Status: PARTIAL
-Implementation/evidence inspected: PROVIDER_MANAGER_GUIDE.md; catalog CLI and release-report commits
-Remaining work: Catalog maintenance and SBOM behavior are documented; a versioned changelog and broader API/architecture migration documentation remain.
-
+Status: COMPLETED
+Implementation/evidence inspected: projects/provider_store/CHANGELOG.md
+Remaining work: Versioned Unreleased entry documents implemented catalog, health, release, security and quality-gate changes without implying a published release.
 Feature 135: API Documentation
 Status: PARTIAL
-Implementation/evidence inspected: PROVIDER_MANAGER_GUIDE.md; catalog_cli.py; catalog_interchange.py; catalog_diff.py
-Remaining work: CLI syntax and import/export safety behavior are documented; full generated Python API reference remains.
-
+Implementation/evidence inspected: projects/provider_store/PROVIDER_STORE_API_REFERENCE.md; projects/provider_store/generate_api_reference.py; tests/test_generate_provider_store_api_reference.py; provider-store CI/release workflows
+Remaining work: Operational API/CLI reference is written. Deterministic AST-based API generator and tests are added; CI generates a source-derived API index into the release bundle. Await cross-platform CI verification before closing this point.
 Feature 136: Architecture Documentation
-Status: PARTIAL
-Implementation/evidence inspected: PROVIDER_MANAGER_GUIDE.md; existing task ledgers
-Remaining work: A provider guide and task ledgers exist; changelog/API/architecture/migration/troubleshooting docs need a completeness pass.
-
+Status: COMPLETED
+Implementation/evidence inspected: projects/provider_store/PROVIDER_STORE_ARCHITECTURE.md; projects/provider_store/PROVIDER_MANAGER_GUIDE.md
+Remaining work: Architecture layers, operational flow, trust boundaries, persistence limits and production constraints are documented.
 Feature 137: Developer Guide
-Status: PARTIAL
-Implementation/evidence inspected: PROVIDER_MANAGER_GUIDE.md; existing task ledgers
-Remaining work: A provider guide and task ledgers exist; changelog/API/architecture/migration/troubleshooting docs need a completeness pass.
-
+Status: COMPLETED
+Implementation/evidence inspected: projects/provider_store/PROVIDER_MANAGER_GUIDE.md; projects/provider_store/PROVIDER_STORE_API_REFERENCE.md; projects/provider_store/PROVIDER_STORE_ARCHITECTURE.md
+Remaining work: Developer guide covers module responsibilities, configuration, routing/cost invariants, recovery APIs, import/export and operational commands.
 Feature 138: Troubleshooting Guide
-Status: PARTIAL
-Implementation/evidence inspected: PROVIDER_MANAGER_GUIDE.md; existing task ledgers
-Remaining work: A provider guide and task ledgers exist; changelog/API/architecture/migration/troubleshooting docs need a completeness pass.
-
+Status: COMPLETED
+Implementation/evidence inspected: projects/provider_store/PROVIDER_STORE_TROUBLESHOOTING.md
+Remaining work: Readiness, catalog, connectivity/authentication, paid-use, output, release-package and CI failure triage are documented without weakening safety controls.
 Feature 139: Migration Guide
-Status: PARTIAL
-Implementation/evidence inspected: PROVIDER_MANAGER_GUIDE.md; existing task ledgers
-Remaining work: A provider guide and task ledgers exist; changelog/API/architecture/migration/troubleshooting docs need a completeness pass.
-
+Status: COMPLETED
+Implementation/evidence inspected: projects/provider_store/PROVIDER_STORE_MIGRATION.md; catalog_cli.py; catalog_interchange.py; provider_config_lifecycle.py
+Remaining work: Dry-run-first catalog changes, explicit removal approval, snapshots, import/export backup/rollback, versioned config migration, restore and retention are documented.
 Feature 140: Feature Ledger
 Status: COMPLETED
 Implementation/evidence inspected: ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md; ADVANCED_PROVIDER_STORE_COMPLETION_REMAINING_LEDGER.txt; tests/test_advanced_provider_manager.py
