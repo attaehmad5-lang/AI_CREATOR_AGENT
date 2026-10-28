@@ -42,7 +42,12 @@ class ProviderQuotaManager:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "requests": {}}
-        self._reload_state()
+        # Initial reads must use the same cross-process lock as mutations. On
+        # Windows, opening the JSON file while another process atomically replaces
+        # it can raise PermissionError even though the replacement itself is safe.
+        lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+        with interprocess_file_lock(lock_path):
+            self._reload_state()
 
     def _reload_state(self) -> None:
         """Reload the latest atomically written state while holding the process lock."""
