@@ -64,6 +64,15 @@ class ProviderMetadataUpdateTests(unittest.TestCase):
             {"tags": ["x" * 65]},
             {"description": "bad\nvalue"},
             {"description": "x" * 2049},
+        ):
+            with self.subTest(patch_data=patch_data):
+                self.assertEqual(
+                    self.manager.update_provider_metadata(self.provider_id, patch_data)["status"],
+                    "INVALID_METADATA",
+                )
+
+    def test_rejects_unsafe_metadata_urls(self):
+        for patch_data in (
             {"website": "javascript:alert(1)"},
             {"docs_url": "https://user:pass@example.test/docs"},
             {"logo_url": "https:///missing-host"},
@@ -71,7 +80,7 @@ class ProviderMetadataUpdateTests(unittest.TestCase):
             with self.subTest(patch_data=patch_data):
                 self.assertEqual(
                     self.manager.update_provider_metadata(self.provider_id, patch_data)["status"],
-                    "INVALID_METADATA",
+                    "INVALID_METADATA_URL",
                 )
 
     def test_failed_atomic_write_does_not_mutate_memory_or_disk(self):
