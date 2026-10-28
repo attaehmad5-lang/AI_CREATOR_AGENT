@@ -747,6 +747,9 @@ class ProviderService:
         if isinstance(selected_model_id, str) and selected_model_id.strip():
             # The routing decision is authoritative; adapter options cannot spoof it.
             options["model_id"] = selected_model_id
+        if output_path is not None:
+            # The explicit output destination is part of the adapter invocation contract.
+            options["output_path"] = output_path
         options["provider_id"] = provider_id
         options["request_id"] = request_id
         started_at = time.monotonic()
