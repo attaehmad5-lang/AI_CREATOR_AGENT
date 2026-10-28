@@ -159,7 +159,9 @@ class RetryPolicyTests(unittest.TestCase):
         refunded = budget.refund(100)
         self.assertTrue(refunded["refunded"])
         self.assertEqual(refunded["remaining"], 2)
-        self.assertIsNone(budget.consume()["retry_after_seconds"] if budget.consume()["allowed"] else None)
+        self.assertTrue(budget.consume()["allowed"])
+        self.assertTrue(budget.consume()["allowed"])
+        self.assertIsNone(budget.consume()["retry_after_seconds"])
 
     def test_retry_budget_is_thread_safe_and_rejects_invalid_values(self):
         budget = RetryBudget(capacity=5, refill_rate_per_second=0, clock=lambda: 0.0)
