@@ -1,0 +1,44 @@
+name: Hugging Face Live Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      generate_image:
+        description: "Generate one real test image (may consume account credits)"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify-huggingface:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install live-check dependencies
+        run: python -m pip install --upgrade huggingface_hub pillow
+
+      - name: Verify token and optional image generation
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_LIVE_GENERATION: ${{ inputs.generate_image }}
+        run: python scripts/huggingface_live_check.py
+
+      - name: Upload generated test image
+        if: ${{ inputs.generate_image }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: huggingface-live-test-image
+          path: output/huggingface-live-test.png
+          if-no-files-found: error
+          retention-days: 7
