@@ -3,7 +3,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.advanced.advanced_provider_manager import AdvancedProviderManager
 
 
@@ -12,29 +11,41 @@ class AdvancedProviderStoreTests(unittest.TestCase):
         catalog = root / "catalog.json"
         state = root / "state.json"
         catalog.write_text(json.dumps({
+            "store": "AI_CREATOR_AGENT_PROVIDER_STORE",
             "version": "3.0",
+            "status": "READY",
+            "subscription_policy": "USER_CONTROLLED",
             "providers": [
                 {
                     "id": "advanced-story", "name": "Advanced Story",
                     "category": "script_story", "auth_type": "API_KEY",
                     "connection_type": "API", "enabled": True,
+                    "subscription_required": False,
+                    "allowed_hosts": ["story.example.test"],
+                    "official_api_url": "https://story.example.test/docs",
                     "capabilities": ["story_generation"],
                 },
                 {
                     "id": "advanced-audio", "name": "Advanced Audio",
                     "category": "advanced_audio", "auth_type": "NONE",
                     "connection_type": "API", "enabled": False,
+                    "subscription_required": False,
                     "capabilities": ["audio_generation"],
                 },
                 {
                     "id": "core-image", "name": "Core Image",
                     "category": "image", "auth_type": "NONE",
                     "connection_type": "API", "enabled": True,
+                    "subscription_required": False,
+                    "allowed_hosts": ["image.example.test"],
+                    "official_api_url": "https://image.example.test/docs",
                     "capabilities": ["text_to_image"],
                 },
             ],
         }), encoding="utf-8")
-        state.write_text(json.dumps({"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}), encoding="utf-8")
+        state.write_text(json.dumps({
+            "version": "1.0", "policy": "USER_CONTROLLED", "providers": {}
+        }), encoding="utf-8")
         return AdvancedProviderManager(catalog_path=str(catalog), state_path=str(state))
 
     def test_only_advanced_categories_are_exposed(self):
