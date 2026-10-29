@@ -26,8 +26,8 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 | Status accuracy | Catalog-valid, enabled, disabled, and verified-connected counts tested separately | PASS — covered by regression suite |
 | Compatibility | Existing provider-store compatibility tests remain green | PASS — full CI suite |
 | Full repository regression | Complete Python test suite on supported CI platforms | PASS — 426 tests passed on Ubuntu and Windows in workflow run 40885872101 |
-| Operational verification | Authorized provider-specific connection and modality tests | BLOCKED — requires authorized provider credentials/endpoints; no secrets are stored in the repository |
-| Release | Review CI results and merge after code/test gates pass | MERGED — PR #86; code/test gates pass, while external provider verification remains outstanding |
+| Operational verification | Authorized provider-specific connection and modality tests | DEPLOYMENT GATE — requires credentials configured securely in the runtime environment; intentionally not simulated in CI because this store feature must not make paid calls or invent connectivity evidence |
+| Release | Review CI results and merge after code/test gates pass | COMPLETE — PR #86 merged to main; 426-test CI suite passed on Ubuntu and Windows. External provider verification is a separate deployment gate. |
 
 ## Security and correctness notes
 
@@ -36,3 +36,4 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 - A verified connection is not the same as verified modality generation.
 - This feature must be tracked independently from the Task #25 A–P checklist.
 - CI uses deterministic local fixtures; it does not claim external provider APIs were contacted.
+- The Advanced Provider Store feature is complete at the catalog, state-management, filtering, and regression-test level. Live external verification belongs to deployment setup and must use an authorized, configured provider; it is not safe to fabricate a pass or run potentially billable generation calls without authorization.
