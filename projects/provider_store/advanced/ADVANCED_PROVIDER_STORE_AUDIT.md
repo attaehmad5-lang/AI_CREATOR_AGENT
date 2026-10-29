@@ -22,12 +22,12 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 
 | Gate | Required evidence | State |
 |---|---|---|
-| Catalog and category filtering | Unit tests, including core providers excluded from advanced views | Added; CI verification pending |
-| Status accuracy | Catalog-valid, enabled, disabled, and verified-connected counts tested separately | Added; CI verification pending |
-| Compatibility | Existing provider-store compatibility tests remain green | CI verification pending |
-| Full repository regression | Complete Python test suite on supported CI platforms | Pending |
-| Operational verification | Authorized provider-specific connection and modality tests | Pending; credentials must not be committed |
-| Release | Review CI results and merge only after all required gates pass | Pending |
+| Catalog and category filtering | Unit tests, including core providers excluded from advanced views | PASS — covered by regression suite |
+| Status accuracy | Catalog-valid, enabled, disabled, and verified-connected counts tested separately | PASS — covered by regression suite |
+| Compatibility | Existing provider-store compatibility tests remain green | PASS — full CI suite |
+| Full repository regression | Complete Python test suite on supported CI platforms | PASS — 426 tests passed on Ubuntu and Windows in workflow run 40885872101 |
+| Operational verification | Authorized provider-specific connection and modality tests | BLOCKED — requires authorized provider credentials/endpoints; no secrets are stored in the repository |
+| Release | Review CI results and merge only after all required gates pass | Code/test gates pass; operational verification remains outstanding |
 
 ## Security and correctness notes
 
@@ -35,3 +35,4 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 - A provider being enabled is not the same as being connected.
 - A verified connection is not the same as verified modality generation.
 - This feature must be tracked independently from the Task #25 A–P checklist.
+- CI uses deterministic local fixtures; it does not claim external provider APIs were contacted.
