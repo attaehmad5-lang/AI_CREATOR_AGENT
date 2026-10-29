@@ -20,8 +20,17 @@ class MediaIntegrityValidator:
         self.max_duration_seconds = max_duration_seconds
 
     def validate(self, path: str | os.PathLike[str], *, modality: str) -> dict[str, Any]:
-        if modality not in {"audio", "video"}:
+        # Validate untrusted arguments before set membership or filesystem calls:
+        # malformed inputs must return a controlled result, never leak TypeError.
+        if not isinstance(modality, str) or modality not in {"audio", "video"}:
             return {"valid": False, "status": "UNSUPPORTED_MEDIA_MODALITY"}
+        if not isinstance(path, (str, os.PathLike)):
+            return {"valid": False, "status": "INVALID_MEDIA_PATH"}
+        # Path("") resolves to "."; reject blank textual paths before pathlib
+        # normalizes them, otherwise the caller gets a misleading missing-output
+        # status instead of the stable invalid-input result.
+        if isinstance(path, str) and not path.strip():
+            return {"valid": False, "status": "INVALID_MEDIA_PATH"}
         try:
             file_path = Path(path)
             size = file_path.stat().st_size
@@ -64,8 +73,21 @@ class MediaIntegrityValidator:
             "channels": channels, "sample_rate": sample_rate,
         }
 
+    def _read_bounded(self, path: Path, expected_size: int) -> tuple[bytes | None, str | None]:
+        """Read at most the configured limit and fail closed if the file changes mid-validation."""
+        with path.open("rb") as stream:
+            data = stream.read(self.max_bytes + 1)
+        if len(data) > self.max_bytes:
+            return None, "MEDIA_FILE_TOO_LARGE"
+        if len(data) != expected_size:
+            return None, "MEDIA_FILE_CHANGED_DURING_VALIDATION"
+        return data, None
+
     def _validate_mp4(self, path: Path, size: int) -> dict[str, Any]:
-        data = path.read_bytes()
+        data, error = self._read_bounded(path, size)
+        if error:
+            return {"valid": False, "status": error, "size_bytes": size}
+        assert data is not None
         offset = 0
         boxes: list[str] = []
         while offset < len(data):
@@ -94,13 +116,19 @@ class MediaIntegrityValidator:
         return {"valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "MP4", "boxes": boxes, "size_bytes": size}
 
     def _validate_webm(self, path: Path, size: int) -> dict[str, Any]:
-        data = path.read_bytes()
+        data, error = self._read_bounded(path, size)
+        if error:
+            return {"valid": False, "status": error, "size_bytes": size}
+        assert data is not None
         if len(data) < 12 or b"\x18\x53\x80\x67" not in data[4:]:
             return {"valid": False, "status": "WEBM_SEGMENT_MISSING", "size_bytes": size}
         return {"valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "WEBM", "size_bytes": size}
 
     def _validate_ogg(self, path: Path, size: int) -> dict[str, Any]:
-        data = path.read_bytes()
+        data, error = self._read_bounded(path, size)
+        if error:
+            return {"valid": False, "status": error, "size_bytes": size}
+        assert data is not None
         offset = 0
         pages = 0
         while offset < len(data):

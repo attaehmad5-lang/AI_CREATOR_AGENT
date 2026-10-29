@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import math
+import hashlib
+import hmac
 import os
 import re
 import tempfile
@@ -49,9 +51,14 @@ class ConnectionManager:
         self,
         catalog_path: str | os.PathLike[str] | None = None,
         state_path: str | os.PathLike[str] | None = None,
+        audit_path: str | os.PathLike[str] | None = None,
     ) -> None:
         self.catalog_path = Path(catalog_path) if catalog_path else self._default_catalog()
         self.state_path = Path(state_path) if state_path else DEFAULT_STATE
+        self.audit_path = (
+            Path(audit_path) if audit_path
+            else self.state_path.with_name(self.state_path.stem + ".audit.jsonl")
+        )
         # Constructor reads must use the same interprocess locks as writers. On
         # Windows, an unlocked read can race with atomic replacement and fail with
         # a transient sharing violation while another process registers a provider.
@@ -163,6 +170,60 @@ class ConnectionManager:
             except FileNotFoundError:
                 pass
             raise
+
+    def _append_audit_event(self, event: dict[str, Any]) -> None:
+        """Append a secret-free, structured audit event under a cross-process lock."""
+        self.audit_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self.audit_path.with_name(self.audit_path.name + ".lock")
+        with interprocess_file_lock(lock_path):
+            previous_hash = "0" * 64
+            if self.audit_path.exists():
+                with self.audit_path.open("r", encoding="utf-8") as existing:
+                    for line_number, line in enumerate(existing, start=1):
+                        try:
+                            prior_record = json.loads(line)
+                        except json.JSONDecodeError as exc:
+                            raise ValueError(
+                                f"Audit log contains invalid JSON at line {line_number}"
+                            ) from exc
+                        if not isinstance(prior_record, dict):
+                            raise ValueError(
+                                f"Audit log record at line {line_number} is not an object"
+                            )
+                        supplied_hash = prior_record.get("event_hash")
+                        claimed_previous = prior_record.get("previous_hash")
+                        if not isinstance(supplied_hash, str) or claimed_previous != previous_hash:
+                            raise ValueError(
+                                f"Audit log hash chain is invalid at line {line_number}"
+                            )
+                        payload = dict(prior_record)
+                        payload.pop("event_hash", None)
+                        expected_hash = hashlib.sha256(
+                            json.dumps(
+                                payload, sort_keys=True, separators=(",", ":"),
+                                ensure_ascii=True,
+                            ).encode("utf-8")
+                        ).hexdigest()
+                        if not hmac.compare_digest(supplied_hash, expected_hash):
+                            raise ValueError(
+                                f"Audit log integrity check failed at line {line_number}"
+                            )
+                        previous_hash = supplied_hash
+            record = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "schema_version": "1.0",
+                "previous_hash": previous_hash,
+                **event,
+            }
+            record["event_hash"] = hashlib.sha256(
+                json.dumps(
+                    record, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+                ).encode("utf-8")
+            ).hexdigest()
+            with self.audit_path.open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(json.dumps(record, sort_keys=True, ensure_ascii=True) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
 
     def _save(self) -> None:
         self._atomic_write_json(self.state_path, self.state)
@@ -542,13 +603,25 @@ class ConnectionManager:
             safe[key] = value
         return safe
 
-    def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
-        """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
+    def set_provider_enabled(
+        self,
+        provider_id: str,
+        enabled: bool,
+        *,
+        paid_usage_approved: bool = False,
+    ) -> dict[str, Any]:
+        """Serialize enable/disable and require a successful policy dry-run to enable."""
         with self._lock:
-            return self._set_provider_enabled_locked(provider_id, enabled)
+            return self._set_provider_enabled_locked(
+                provider_id, enabled, paid_usage_approved=paid_usage_approved
+            )
 
     def _set_provider_enabled_locked(
-        self, provider_id: str, enabled: bool
+        self,
+        provider_id: str,
+        enabled: bool,
+        *,
+        paid_usage_approved: bool = False,
     ) -> dict[str, Any]:
         """Enable/disable catalog eligibility only; never purchases or proves connectivity."""
         if not isinstance(enabled, bool):
@@ -570,6 +643,60 @@ class ConnectionManager:
                     "saved": False,
                     "errors": validation.get("errors", []),
                 }
+            simulation = None
+            if enabled:
+                simulation = simulate_provider_policy(
+                    new_catalog,
+                    [{"provider_id": provider_id, "enabled": True}],
+                    paid_usage_approved=paid_usage_approved,
+                )
+                if simulation.get("status") != "WOULD_APPLY":
+                    try:
+                        self._append_audit_event({
+                            "event": "provider.activation_decision",
+                            "provider_id": provider_id,
+                            "requested_enabled": True,
+                            "decision": "DENY",
+                            "policy_simulation_status": simulation.get("status"),
+                            "paid_usage_approved": paid_usage_approved,
+                        })
+                    except (OSError, ValueError) as exc:
+                        return {
+                            "status": "AUDIT_WRITE_FAILED",
+                            "provider": provider_id,
+                            "saved": False,
+                            "error_type": type(exc).__name__,
+                        }
+                    return {
+                        "status": (
+                            "POLICY_SIMULATION_BLOCKED"
+                            if simulation.get("status") == "BLOCKED"
+                            else "POLICY_SIMULATION_INVALID"
+                        ),
+                        "provider": provider_id,
+                        "saved": False,
+                        "policy_simulation": simulation,
+                    }
+            try:
+                self._append_audit_event({
+                    "event": "provider.activation_decision",
+                    "provider_id": provider_id,
+                    "requested_enabled": enabled,
+                    "decision": "ALLOW" if not enabled or (
+                        simulation is not None and simulation.get("status") == "WOULD_APPLY"
+                    ) else "DENY",
+                    "policy_simulation_status": (
+                        simulation.get("status") if simulation is not None else "NOT_REQUIRED"
+                    ),
+                    "paid_usage_approved": paid_usage_approved if enabled else False,
+                })
+            except (OSError, ValueError) as exc:
+                return {
+                    "status": "AUDIT_WRITE_FAILED",
+                    "provider": provider_id,
+                    "saved": False,
+                    "error_type": type(exc).__name__,
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
         if not enabled and provider_id in self._loaded_providers:
@@ -581,13 +708,16 @@ class ConnectionManager:
                     "saved": True,
                     "runtime_unloaded": False,
                 }
-        return {
+        result = {
             "status": "ENABLED" if enabled else "DISABLED",
             "provider": provider_id,
             "saved": True,
             "runtime_unloaded": not enabled,
             "note": "Eligibility only; no purchase, billing, or live connectivity check performed.",
         }
+        if simulation is not None:
+            result["policy_simulation"] = simulation
+        return result
 
     def is_provider_enabled(self, provider_id: str) -> bool:
         provider = self.get_provider(provider_id)
@@ -788,6 +918,17 @@ class ConnectionManager:
             updated.append(safe_provider)
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
+            # Registration must uphold the same schema contract as loading and
+            # enabling; otherwise malformed metadata can be persisted and poison
+            # every later catalog consumer.
+            validation = self.validate_catalog_schema(new_catalog)
+            if validation.get("valid") is not True:
+                return {
+                    "status": "INVALID_PROVIDER",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
             return {
@@ -1501,3 +1642,116 @@ if __name__ == "__main__":
     print("Tracked connections:", len(manager.state["providers"]))
     print("Summary:", manager.summary())
     print("Credential checks report presence only; they do not prove live API access.")
+
+
+def simulate_provider_policy(
+    catalog: dict[str, Any],
+    changes: list[dict[str, Any]],
+    *,
+    paid_usage_approved: bool = False,
+) -> dict[str, Any]:
+    """Dry-run provider enable/disable changes without mutating state or contacting APIs.
+
+    Enabling a provider is rejected unless its identity, supported capabilities,
+    official documentation, network allowlist, and credential reference (when
+    authentication is required) are declared. Paid providers additionally require
+    an explicit approval flag. This function never writes files or invokes providers.
+    """
+    def blocked(status: str, reason: str) -> dict[str, Any]:
+        return {
+            "status": status,
+            "dry_run": True,
+            "applied": False,
+            "real_provider_call": False,
+            "results": [],
+            "errors": [reason],
+        }
+
+    if not isinstance(catalog, dict):
+        return blocked("INVALID_INPUT", "catalog must be an object")
+    providers = catalog.get("providers")
+    if not isinstance(providers, list) or any(not isinstance(p, dict) for p in providers):
+        return blocked("INVALID_INPUT", "catalog providers must be a list of objects")
+    if not isinstance(changes, list) or any(not isinstance(c, dict) for c in changes):
+        return blocked("INVALID_INPUT", "changes must be a list of objects")
+    if not isinstance(paid_usage_approved, bool):
+        return blocked("INVALID_INPUT", "paid_usage_approved must be boolean")
+
+    index: dict[str, dict[str, Any]] = {}
+    for provider in providers:
+        provider_id = provider.get("id")
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return blocked("INVALID_CATALOG", "every provider must have a non-empty string id")
+        if provider_id in index:
+            return blocked("INVALID_CATALOG", "duplicate provider id in catalog")
+        index[provider_id] = provider
+
+    seen: set[str] = set()
+    results: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for change in changes:
+        provider_id = change.get("provider_id")
+        enabled = change.get("enabled")
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            errors.append("provider_id must be a non-empty string")
+            continue
+        if provider_id in seen:
+            errors.append("duplicate provider change")
+            continue
+        seen.add(provider_id)
+        if not isinstance(enabled, bool):
+            errors.append("enabled must be boolean")
+            continue
+        provider = index.get(provider_id)
+        if provider is None:
+            errors.append("unknown provider id")
+            continue
+
+        reasons: list[str] = []
+        if enabled:
+            if provider.get("deprecated") is True:
+                reasons.append("deprecated providers cannot be enabled")
+            if provider.get("connection_type") in {"API", "API_OR_ACCOUNT"}:
+                docs = provider.get("official_api_url")
+                if not isinstance(docs, str) or not docs.startswith("https://"):
+                    reasons.append("official HTTPS API documentation is required")
+                hosts = provider.get("allowed_hosts")
+                if not isinstance(hosts, list) or not hosts or not all(
+                    isinstance(host, str) and host.strip() for host in hosts
+                ):
+                    reasons.append("non-empty allowed_hosts is required")
+                capabilities = provider.get("capabilities")
+                if not isinstance(capabilities, list) or not capabilities or not all(
+                    isinstance(capability, str) and capability.strip()
+                    for capability in capabilities
+                ):
+                    reasons.append("declared capabilities are required")
+                auth_type = provider.get("auth_type", "NONE")
+                if auth_type != "NONE":
+                    token_env = provider.get("token_env")
+                    if not isinstance(token_env, str) or not token_env.strip():
+                        reasons.append("credential environment-variable reference is required")
+            if provider.get("subscription_required") is True and not paid_usage_approved:
+                reasons.append("explicit paid-usage approval is required")
+        results.append({
+            "provider_id": provider_id,
+            "requested_enabled": enabled,
+            "allowed": not reasons,
+            "decision": "ALLOW" if not reasons else "DENY",
+            "reasons": reasons,
+        })
+
+    rejected = sum(1 for item in results if not item["allowed"])
+    rejected += len(errors)
+    status = "INVALID_INPUT" if errors else ("BLOCKED" if rejected else "WOULD_APPLY")
+    return {
+        "status": status,
+        "dry_run": True,
+        "applied": False,
+        "real_provider_call": False,
+        "total_changes": len(changes),
+        "allowed": sum(1 for item in results if item["allowed"]),
+        "rejected": rejected,
+        "results": results,
+        "errors": errors,
+    }

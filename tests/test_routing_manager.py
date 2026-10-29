@@ -11,6 +11,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.credit_manager import ProviderCreditManager
 from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
+from projects.provider_store.tenant_policy_manager import ProviderTenantPolicyManager
 
 
 class ProviderRoutingManagerTests(unittest.TestCase):
@@ -353,6 +354,88 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             decision["status"] == "PROJECT_CAPABILITY_NOT_ALLOWED"
             for decision in capability_denied["decisions"]
         ))
+
+    def test_persisted_project_region_policy_is_enforced_by_router(self):
+        policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        saved = policies.set_policy("film", {"required_region": "SAUDI-ARABIA"})
+        self.assertTrue(saved["saved"])
+        router = ProviderRoutingManager(self.connections, project_policy_manager=policies)
+        result = router.route(category="image", project_id="film")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertTrue(all(
+            decision["status"] == "REGION_METADATA_UNVERIFIED"
+            for decision in result["decisions"]
+        ))
+
+    def test_tenant_policy_is_required_and_intersects_project_allowlist(self):
+        tenant_policies = ProviderTenantPolicyManager(self.root / "tenant-policies.json")
+        router_missing = ProviderRoutingManager(
+            self.connections, tenant_policy_manager=tenant_policies
+        )
+        missing = router_missing.route(category="image", project_id="film")
+        self.assertFalse(missing["allowed"])
+        self.assertEqual(missing["status"], "TENANT_POLICY_REQUIRED")
+
+        project_policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        project_policies.set_policy("film", {"allowed_providers": ["primary", "fallback"]})
+        tenant_policies.set_policy("tenant-a", {"allowed_providers": ["fallback"]})
+        router = ProviderRoutingManager(
+            self.connections, project_policy_manager=project_policies,
+            tenant_policy_manager=tenant_policies,
+        )
+        result = router.route(category="image", project_id="film", tenant_id="tenant-a")
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+
+    def test_tenant_policy_applies_stricter_cost_and_rejects_region_conflicts(self):
+        project_policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
+        tenant_policies = ProviderTenantPolicyManager(self.root / "tenant-policies.json")
+        project_policies.set_policy("film", {
+            "allowed_providers": ["primary", "fallback"],
+            "max_estimated_cost": 5.0,
+            "required_region": "EU-WEST-1",
+        })
+        tenant_policies.set_policy("tenant-a", {
+            "allowed_providers": ["primary", "fallback"],
+            "max_estimated_cost": 1.0,
+            "required_region": "SAUDI-ARABIA",
+        })
+        router = ProviderRoutingManager(
+            self.connections, project_policy_manager=project_policies,
+            tenant_policy_manager=tenant_policies,
+        )
+        conflict = router.route(
+            category="image", project_id="film", tenant_id="tenant-a",
+            estimated_cost=0.0,
+        )
+        self.assertFalse(conflict["allowed"])
+        self.assertEqual(conflict["status"], "TENANT_PROJECT_REGION_POLICY_CONFLICT")
+
+        project_policies.set_policy("film", {
+            "allowed_providers": ["primary", "fallback"],
+            "max_estimated_cost": 5.0,
+        })
+        tenant_policies.set_policy("tenant-a", {
+            "allowed_providers": ["primary", "fallback"],
+            "max_estimated_cost": 1.0,
+        })
+        too_expensive = router.route(
+            category="image", project_id="film", tenant_id="tenant-a",
+            estimated_cost=2.0,
+        )
+        self.assertFalse(too_expensive["allowed"])
+        self.assertEqual(too_expensive["status"], "PROJECT_COST_LIMIT_EXCEEDED")
+
+    def test_tenant_policy_alone_restricts_providers(self):
+        policies = ProviderTenantPolicyManager(self.root / "tenant-policies.json")
+        policies.set_policy("tenant-a", {"allowed_providers": ["fallback"]})
+        router = ProviderRoutingManager(self.connections, tenant_policy_manager=policies)
+        result = router.route(
+            category="image", project_id="film", tenant_id="tenant-a"
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
 
     def test_project_policy_can_require_health_evidence(self):
         policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
@@ -892,6 +975,47 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         router = ProviderRoutingManager(self.connections, quota_manager=quota)
         result = router.route(category="image", project_id="film")
         self.assertEqual(result["status"], "QUOTA_REQUEST_ID_REQUIRED")
+
+    def test_healthiest_first_routing_prefers_lower_recorded_latency(self):
+        health = ProviderHealthManager(self.health_path)
+        self.assertEqual(
+            health.record_result("primary", success=True, latency_ms=140)["status"],
+            "HEALTHY",
+        )
+        self.assertEqual(
+            health.record_result("fallback", success=True, latency_ms=18)["status"],
+            "HEALTHY",
+        )
+        router = ProviderRoutingManager(
+            self.connections, health_manager=health,
+        )
+        result = router.route(
+            category="image", project_id="film", strategy="HEALTHIEST_FIRST",
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(result["strategy"], "HEALTHIEST_FIRST")
+
+    def test_malformed_latency_ranks_last_without_crashing(self):
+        class HealthStub:
+            data = {
+                "providers": {
+                    "primary": {"last_latency_ms": None},
+                    "fallback": {"last_latency_ms": 18},
+                }
+            }
+
+            def is_eligible(self, provider_id):
+                return {"eligible": True, "status": "HEALTHY"}
+
+        router = ProviderRoutingManager(
+            self.connections, health_manager=HealthStub(),
+        )
+        result = router.route(
+            category="image", project_id="film", strategy="HEALTHIEST_FIRST",
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
 
     def test_invalid_route_inputs_and_missing_health_evidence_fail_closed(self):
         router = ProviderRoutingManager(self.connections)

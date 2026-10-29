@@ -29,6 +29,7 @@ class ProviderProjectPolicyManager:
         "automatic_fallback",
         "require_health_evidence",
         "require_verified_connection",
+        "required_region",
     }
 
     def __init__(self, path: str | os.PathLike[str] | None = None) -> None:
@@ -97,6 +98,11 @@ class ProviderProjectPolicyManager:
                 or len({value.casefold() for value in values if isinstance(value, str)}) != len(values)
             ):
                 errors.append("allowed_capabilities must be a unique list of lowercase identifiers")
+        if "required_region" in policy and (
+            not isinstance(policy["required_region"], str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", policy["required_region"])
+        ):
+            errors.append("required_region must be a safe region identifier")
         if "max_estimated_cost" in policy and finite_number(policy["max_estimated_cost"], minimum=0) is None:
             errors.append("max_estimated_cost must be a finite non-negative number")
         for key in ("automatic_fallback", "require_health_evidence", "require_verified_connection"):

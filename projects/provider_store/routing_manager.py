@@ -32,6 +32,8 @@ class ProviderRoutingManager:
         quota_manager: Any | None = None,
         credit_manager: Any | None = None,
         project_policy_manager: Any | None = None,
+        tenant_policy_manager: Any | None = None,
+        outage_manager: Any | None = None,
         benchmark_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
         require_verified_connection: bool = True,
@@ -48,6 +50,10 @@ class ProviderRoutingManager:
             raise ValueError("credit_manager must provide fresh verified balances")
         if project_policy_manager is not None and not callable(getattr(project_policy_manager, "get_policy", None)):
             raise ValueError("project_policy_manager must support policy lookup")
+        if tenant_policy_manager is not None and not callable(getattr(tenant_policy_manager, "get_policy", None)):
+            raise ValueError("tenant_policy_manager must support policy lookup")
+        if outage_manager is not None and not callable(getattr(outage_manager, "evaluate_provider", None)):
+            raise ValueError("outage_manager must support provider availability checks")
         if benchmark_manager is not None and not callable(getattr(benchmark_manager, "compare", None)):
             raise ValueError("benchmark_manager must support comparison")
         if not isinstance(require_verified_connection, bool):
@@ -63,6 +69,8 @@ class ProviderRoutingManager:
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager
         self.project_policy_manager = project_policy_manager
+        self.tenant_policy_manager = tenant_policy_manager
+        self.outage_manager = outage_manager
         self.benchmark_manager = benchmark_manager
         self.default_strategy = normalized_strategy
         self.require_verified_connection = require_verified_connection
@@ -150,6 +158,7 @@ class ProviderRoutingManager:
         max_benchmark_p95_latency_ms: float | None = None,
         allow_low_confidence_fallback: bool = True,
         required_region: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         """Return the first policy-compliant provider and the decisions that led to it."""
         if not isinstance(category, str) or not category.strip():
@@ -161,6 +170,22 @@ class ProviderRoutingManager:
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", required_region)
         ):
             return {"allowed": False, "status": "INVALID_REQUIRED_REGION"}
+
+        tenant_policy: dict[str, Any] = {}
+        if self.tenant_policy_manager is not None:
+            if not isinstance(tenant_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", tenant_id):
+                return {"allowed": False, "status": "TENANT_POLICY_REQUIRED"}
+            try:
+                tenant_result = self.tenant_policy_manager.get_policy(tenant_id)
+            except Exception as exc:
+                return {"allowed": False, "status": "TENANT_POLICY_LOOKUP_FAILED", "error_type": type(exc).__name__}
+            if (
+                not isinstance(tenant_result, dict)
+                or tenant_result.get("status") != "TENANT_POLICY_FOUND"
+                or not isinstance(tenant_result.get("policy"), dict)
+            ):
+                return {"allowed": False, "status": "TENANT_POLICY_REQUIRED"}
+            tenant_policy = tenant_result["policy"]
 
         project_policy: dict[str, Any] = {}
         if self.project_policy_manager is not None:
@@ -177,7 +202,42 @@ class ProviderRoutingManager:
                 or not isinstance(policy_result.get("policy"), dict)
             ):
                 return {"allowed": False, "status": "PROJECT_POLICY_REQUIRED"}
-            project_policy = policy_result["policy"]
+            project_policy = dict(policy_result["policy"])
+            if self.tenant_policy_manager is not None:
+                for field in ("allowed_providers", "allowed_models", "allowed_capabilities"):
+                    tenant_values = tenant_policy.get(field)
+                    project_values = project_policy.get(field)
+                    if tenant_values is not None and project_values is not None:
+                        project_policy[field] = [
+                            value for value in project_values
+                            if value.casefold() in {item.casefold() for item in tenant_values}
+                        ]
+                    elif tenant_values is not None:
+                        project_policy[field] = list(tenant_values)
+                project_policy["denied_providers"] = list(dict.fromkeys(
+                    list(project_policy.get("denied_providers", []))
+                    + list(tenant_policy.get("denied_providers", []))
+                ))
+                tenant_region = tenant_policy.get("required_region")
+                project_region = project_policy.get("required_region")
+                if tenant_region is not None and project_region is not None and tenant_region.casefold() != project_region.casefold():
+                    return {"allowed": False, "status": "TENANT_PROJECT_REGION_POLICY_CONFLICT"}
+                if tenant_region is not None:
+                    project_policy["required_region"] = tenant_region
+                costs = [
+                    value for value in (
+                        project_policy.get("max_estimated_cost"),
+                        tenant_policy.get("max_estimated_cost"),
+                    ) if value is not None
+                ]
+                if costs:
+                    project_policy["max_estimated_cost"] = min(costs)
+                for field in ("automatic_fallback",):
+                    if tenant_policy.get(field) is False:
+                        project_policy[field] = False
+                for field in ("require_health_evidence", "require_verified_connection"):
+                    if tenant_policy.get(field) is True:
+                        project_policy[field] = True
             policy_region = project_policy.get("required_region")
             if policy_region is not None:
                 if not isinstance(policy_region, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", policy_region):
@@ -196,6 +256,28 @@ class ProviderRoutingManager:
             max_estimated_cost = project_policy.get("max_estimated_cost")
             if max_estimated_cost is not None and self._valid_amount(estimated_cost) and estimated_cost > max_estimated_cost:
                 return {"allowed": False, "status": "PROJECT_COST_LIMIT_EXCEEDED"}
+            if project_policy.get("automatic_fallback") is False:
+                automatic_fallback = False
+            require_health_evidence = require_health_evidence or project_policy.get("require_health_evidence") is True
+
+        if self.tenant_policy_manager is not None and self.project_policy_manager is None:
+            project_policy = dict(tenant_policy)
+            policy_region = project_policy.get("required_region")
+            if policy_region is not None:
+                if not isinstance(policy_region, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", policy_region):
+                    return {"allowed": False, "status": "INVALID_TENANT_REGION_POLICY"}
+                if required_region is not None and required_region.casefold() != policy_region.casefold():
+                    return {"allowed": False, "status": "TENANT_REGION_POLICY_CONFLICT"}
+                required_region = policy_region
+            allowed_models = project_policy.get("allowed_models")
+            if allowed_models is not None and (model is None or model not in allowed_models):
+                return {"allowed": False, "status": "TENANT_MODEL_NOT_ALLOWED"}
+            allowed_capabilities = project_policy.get("allowed_capabilities")
+            if allowed_capabilities is not None and capability is not None and capability not in allowed_capabilities:
+                return {"allowed": False, "status": "TENANT_CAPABILITY_NOT_ALLOWED"}
+            max_estimated_cost = project_policy.get("max_estimated_cost")
+            if max_estimated_cost is not None and self._valid_amount(estimated_cost) and estimated_cost > max_estimated_cost:
+                return {"allowed": False, "status": "TENANT_COST_LIMIT_EXCEEDED"}
             if project_policy.get("automatic_fallback") is False:
                 automatic_fallback = False
             require_health_evidence = require_health_evidence or project_policy.get("require_health_evidence") is True
@@ -321,6 +403,23 @@ class ProviderRoutingManager:
             if item_id in denied_providers:
                 decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_DENIED"})
                 continue
+            if self.outage_manager is not None:
+                try:
+                    outage = self.outage_manager.evaluate_provider(
+                        item, required_region=required_region
+                    )
+                except Exception as exc:
+                    return {
+                        "allowed": False, "status": "OUTAGE_CHECK_FAILED",
+                        "error_type": type(exc).__name__,
+                    }
+                if not isinstance(outage, dict) or outage.get("available") is not True:
+                    decisions.append({
+                        "provider": item_id,
+                        "status": outage.get("status", "OUTAGE_CHECK_FAILED")
+                        if isinstance(outage, dict) else "INVALID_OUTAGE_RESPONSE",
+                    })
+                    continue
             if allowed_capabilities is not None and capability is None:
                 item_capabilities = item.get("capabilities", [])
                 if not isinstance(item_capabilities, list) or not set(item_capabilities).intersection(allowed_capabilities):
@@ -445,11 +544,18 @@ class ProviderRoutingManager:
             if cost == 0 and provider.get("zero_cost_allowed") is not True:
                 decisions.append({"provider": provider_id, "status": "ZERO_COST_NOT_VERIFIED"})
                 continue
+            recorded_latency = finite_number(
+                health_record.get("last_latency_ms"), minimum=0
+            )
             candidates.append({
                 **provider,
                 "_route_cost": float(cost),
                 "_route_credits": credit_sort,
-                "_route_latency": health_record.get("last_latency_ms", float("inf")),
+                # Malformed/missing latency must rank last, never crash sorting or
+                # accidentally outrank a provider with valid measured latency.
+                "_route_latency": (
+                    recorded_latency if recorded_latency is not None else float("inf")
+                ),
             })
 
         confidence_status = None

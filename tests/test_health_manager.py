@@ -262,6 +262,17 @@ class ProviderHealthManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderHealthManager(self.path, clock=lambda: self.now[0])
 
+    def test_invalid_health_clock_fails_closed_without_recording_event(self):
+        for clock in (
+            lambda: datetime(2026, 10, 16, 12),
+            lambda: "not-a-datetime",
+            lambda: (_ for _ in ()).throw(RuntimeError("clock failed")),
+        ):
+            manager = ProviderHealthManager(self.path.with_name("invalid-clock.json"), clock=clock)
+            result = manager.record_result("image", success=True)
+            self.assertEqual(result, {"status": "INVALID_HEALTH_CLOCK", "saved": False})
+            self.assertEqual(manager.data["providers"], {})
+
     def test_invalid_input_is_rejected(self):
         self.assertEqual(self.manager.record_result("", success=True)["status"], "INVALID_PROVIDER")
         self.assertEqual(self.manager.record_result("image", success=True, latency_ms=-1)["status"], "INVALID_LATENCY")

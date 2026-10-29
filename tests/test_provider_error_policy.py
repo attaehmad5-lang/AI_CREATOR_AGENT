@@ -16,6 +16,34 @@ class ProviderErrorPolicyTests(unittest.TestCase):
         )
         self.assertNotIn("retry_after_seconds", result)
 
+    def test_common_credit_and_budget_aliases_never_retry(self):
+        for code in (
+            "insufficient_balance",
+            "no_credits_remaining",
+            "credit_limit_exceeded",
+            "monthly_budget_exceeded",
+            "billing_limit_exceeded",
+        ):
+            with self.subTest(code=code):
+                result = classify_provider_error(429, provider_code=code, retry_after_seconds=20)
+                self.assertEqual(result["status"], "CREDITS_EXHAUSTED")
+                self.assertFalse(result["retryable"])
+                self.assertNotIn("retry_after_seconds", result)
+                self.assertNotIn(code, repr(result))
+
+    def test_common_billing_state_aliases_never_retry(self):
+        for code in (
+            "billing_not_active",
+            "payment_method_required",
+            "payment_failed",
+            "subscription_inactive",
+        ):
+            with self.subTest(code=code):
+                result = classify_provider_error(400, provider_code=code)
+                self.assertEqual(result["status"], "BILLING_ACTION_REQUIRED")
+                self.assertFalse(result["retryable"])
+                self.assertNotIn(code, repr(result))
+
     def test_payment_required_stops_without_retry(self):
         result = classify_provider_error(402)
         self.assertEqual(result["status"], "BILLING_ACTION_REQUIRED")
@@ -41,10 +69,25 @@ class ProviderErrorPolicyTests(unittest.TestCase):
         self.assertEqual(result["retry_after_seconds"], 300.0)
 
     def test_invalid_retry_after_is_ignored(self):
-        for value in ("30", float("nan"), float("inf"), -1, True):
+        for value in ("30", float("nan"), float("inf"), -1, True, 10**1000):
             with self.subTest(value=value):
                 result = classify_provider_error(429, retry_after_seconds=value)
                 self.assertNotIn("retry_after_seconds", result)
+
+
+    def test_explicit_rate_limit_codes_are_retryable_without_echoing_code(self):
+        for code in ("rate_limit_exceeded", "rate-limited", "too many requests"):
+            with self.subTest(code=code):
+                result = classify_provider_error(400, provider_code=code)
+                self.assertEqual(result["status"], "RATE_LIMITED")
+                self.assertTrue(result["retryable"])
+                self.assertNotIn("provider_code", result)
+                self.assertNotIn(code, repr(result))
+
+    def test_credit_exhaustion_takes_precedence_over_rate_limit_code(self):
+        result = classify_provider_error(400, provider_code="insufficient_quota")
+        self.assertEqual(result["status"], "CREDITS_EXHAUSTED")
+        self.assertFalse(result["retryable"])
 
     def test_transient_server_errors_can_retry_with_policy(self):
         result = classify_provider_error(503)

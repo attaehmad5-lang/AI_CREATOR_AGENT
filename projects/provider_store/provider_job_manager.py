@@ -31,6 +31,9 @@ class ProviderJobManager:
         lease_seconds: int = 120,
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
+        priority_aging_seconds: int = 60,
+        max_queued_per_tenant: int | None = None,
+        max_concurrent_per_tenant: int | None = None,
         clock: Any = None,
     ) -> None:
         for value, name, minimum, maximum in (
@@ -39,9 +42,22 @@ class ProviderJobManager:
             (lease_seconds, "lease_seconds", 1, 86400),
             (max_attempts, "max_attempts", 1, 20),
             (backpressure_retry_seconds, "backpressure_retry_seconds", 1, 3600),
+            (priority_aging_seconds, "priority_aging_seconds", 1, 86400),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise ValueError(f"{name} is outside safe limits")
+        if max_queued_per_tenant is not None and (
+            isinstance(max_queued_per_tenant, bool)
+            or not isinstance(max_queued_per_tenant, int)
+            or not 1 <= max_queued_per_tenant <= 100000
+        ):
+            raise ValueError("max_queued_per_tenant is outside safe limits")
+        if max_concurrent_per_tenant is not None and (
+            isinstance(max_concurrent_per_tenant, bool)
+            or not isinstance(max_concurrent_per_tenant, int)
+            or not 1 <= max_concurrent_per_tenant <= 10000
+        ):
+            raise ValueError("max_concurrent_per_tenant is outside safe limits")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
@@ -50,6 +66,9 @@ class ProviderJobManager:
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.backpressure_retry_seconds = backpressure_retry_seconds
+        self.priority_aging_seconds = priority_aging_seconds
+        self.max_queued_per_tenant = max_queued_per_tenant or max_queue_size
+        self.max_concurrent_per_tenant = max_concurrent_per_tenant or max_concurrent
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "jobs": {}}
@@ -73,6 +92,10 @@ class ProviderJobManager:
                 or job.get("job_id") != job_id
                 or job.get("status") not in {"QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"}
                 or not isinstance(job.get("project_id"), str)
+                or ("tenant_id" in job and (
+                    not isinstance(job.get("tenant_id"), str)
+                    or not _ID_RE.fullmatch(job.get("tenant_id", ""))
+                ))
                 or not isinstance(job.get("provider_id"), str)
                 or not isinstance(job.get("payload_ref"), str)
                 or isinstance(job.get("attempts"), bool)
@@ -119,10 +142,15 @@ class ProviderJobManager:
         provider_id: str,
         payload_ref: str,
         priority: int = 50,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         for value, name in ((job_id, "job_id"), (project_id, "project_id"), (provider_id, "provider_id")):
             if not isinstance(value, str) or not _ID_RE.fullmatch(value):
                 return {"status": f"INVALID_{name.upper()}", "accepted": False}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "accepted": False}
         if not isinstance(payload_ref, str) or not _REF_RE.fullmatch(payload_ref):
             return {"status": "INVALID_PAYLOAD_REFERENCE", "accepted": False}
         if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
@@ -131,6 +159,10 @@ class ProviderJobManager:
         with self._transaction():
             existing = self.data["jobs"].get(job_id)
             if isinstance(existing, dict):
+                same_tenant = existing.get("tenant_id") == tenant_id
+                if not same_tenant:
+                    # Do not disclose another tenant's job metadata or payload reference.
+                    return {"status": "REQUEST_ID_CONFLICT", "accepted": False}
                 same = all(existing.get(key) == value for key, value in {
                     "project_id": project_id, "provider_id": provider_id,
                     "payload_ref": payload_ref, "priority": priority,
@@ -144,6 +176,19 @@ class ProviderJobManager:
                 1 for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "QUEUED"
             )
+            if tenant_id is not None:
+                tenant_queued_count = sum(
+                    1 for job in self.data["jobs"].values()
+                    if isinstance(job, dict)
+                    and job.get("status") == "QUEUED"
+                    and job.get("tenant_id") == tenant_id
+                )
+                if tenant_queued_count >= self.max_queued_per_tenant:
+                    return {
+                        "status": "TENANT_QUEUE_FULL",
+                        "accepted": False,
+                        "retry_after_seconds": self.backpressure_retry_seconds,
+                    }
             if queued >= self.max_queue_size:
                 return {
                     "status": "QUEUE_FULL",
@@ -156,6 +201,8 @@ class ProviderJobManager:
                 "attempts": 0, "created_at": now, "updated_at": now,
                 "cancel_requested": False,
             }
+            if tenant_id is not None:
+                job["tenant_id"] = tenant_id
             self.data["jobs"][job_id] = job
             self._save()
             return {"status": "JOB_QUEUED", "accepted": True, "job": dict(job)}
@@ -166,9 +213,19 @@ class ProviderJobManager:
             if not isinstance(job, dict) or job.get("status") != "RUNNING":
                 continue
             lease_until = job.get("lease_until")
+            # A missing, malformed, or timezone-naive lease cannot safely prove
+            # that a worker still owns the job. Reap it instead of allowing bad
+            # persisted state to crash claim_next() or strand a RUNNING job.
             try:
-                expired = isinstance(lease_until, str) and datetime.fromisoformat(lease_until) <= now
-            except ValueError:
+                if not isinstance(lease_until, str):
+                    expired = True
+                else:
+                    parsed_lease = datetime.fromisoformat(lease_until)
+                    if parsed_lease.tzinfo is None or parsed_lease.utcoffset() is None:
+                        expired = True
+                    else:
+                        expired = parsed_lease.astimezone(timezone.utc) <= now
+            except (TypeError, ValueError, OverflowError):
                 expired = True
             if not expired:
                 continue
@@ -188,9 +245,15 @@ class ProviderJobManager:
             changed = True
         return changed
 
-    def claim_next(self, *, worker_id: str) -> dict[str, Any]:
+    def claim_next(
+        self, *, worker_id: str, tenant_id: str | None = None
+    ) -> dict[str, Any]:
         if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
             return {"status": "INVALID_WORKER_ID", "job": None}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "job": None}
         now = self.clock().astimezone(timezone.utc)
         with self._transaction():
             changed = self._reap_expired_locked(now)
@@ -198,15 +261,54 @@ class ProviderJobManager:
                 1 for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "RUNNING"
             )
+            if tenant_id is not None:
+                tenant_running = sum(
+                    1 for job in self.data["jobs"].values()
+                    if isinstance(job, dict)
+                    and job.get("status") == "RUNNING"
+                    and job.get("tenant_id") == tenant_id
+                )
+                if tenant_running >= self.max_concurrent_per_tenant:
+                    if changed:
+                        self._save()
+                    return {"status": "TENANT_CONCURRENCY_LIMIT", "job": None}
             if running >= self.max_concurrent:
                 if changed:
                     self._save()
                 return {"status": "CONCURRENCY_LIMIT", "job": None}
+            tenant_queued = [
+                job for job in self.data["jobs"].values()
+                if isinstance(job, dict)
+                and job.get("status") == "QUEUED"
+                and "tenant_id" in job
+            ]
             queued = [
                 job for job in self.data["jobs"].values()
-                if isinstance(job, dict) and job.get("status") == "QUEUED"
+                if isinstance(job, dict)
+                and job.get("status") == "QUEUED"
+                and (
+                    job.get("tenant_id") == tenant_id
+                    if tenant_id is not None
+                    else "tenant_id" not in job
+                )
             ]
-            queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
+            if tenant_id is None and tenant_queued and not queued:
+                if changed:
+                    self._save()
+                return {"status": "TENANT_ID_REQUIRED", "job": None}
+            def queue_order(job: dict[str, Any]) -> tuple[int, str, str]:
+                # Gradually raise old jobs' effective priority to prevent starvation.
+                try:
+                    created = datetime.fromisoformat(job["created_at"]).astimezone(timezone.utc)
+                    age_seconds = max(0, int((now - created).total_seconds()))
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    age_seconds = 0
+                effective_priority = min(
+                    100, job["priority"] + age_seconds // self.priority_aging_seconds
+                )
+                return (-effective_priority, str(job.get("created_at", "")), str(job.get("job_id", "")))
+
+            queued.sort(key=queue_order)
             if not queued:
                 if changed:
                     self._save()
@@ -221,6 +323,67 @@ class ProviderJobManager:
             self._save()
             return {"status": "JOB_CLAIMED", "job": dict(job)}
 
+    def renew_lease(
+        self,
+        *,
+        job_id: str,
+        worker_id: str,
+        tenant_id: str | None = None,
+        lease_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        """Extend a live worker lease without allowing stale or cross-tenant renewal."""
+        if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
+            return {"status": "INVALID_JOB_ID", "saved": False}
+        if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
+            return {"status": "INVALID_WORKER_ID", "saved": False}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "saved": False}
+        if lease_seconds is not None and (
+            isinstance(lease_seconds, bool)
+            or not isinstance(lease_seconds, int)
+            or not 1 <= lease_seconds <= 86400
+        ):
+            return {"status": "INVALID_LEASE_SECONDS", "saved": False}
+        duration = self.lease_seconds if lease_seconds is None else lease_seconds
+        now_dt = self.clock().astimezone(timezone.utc)
+        now = now_dt.isoformat()
+        with self._transaction():
+            job = self.data["jobs"].get(job_id)
+            if not isinstance(job, dict):
+                return {"status": "JOB_NOT_FOUND", "saved": False}
+            if "tenant_id" in job and tenant_id is None:
+                return {"status": "TENANT_ID_REQUIRED", "saved": False}
+            if "tenant_id" in job and job.get("tenant_id") != tenant_id:
+                return {"status": "JOB_NOT_FOUND", "saved": False}
+            if job.get("status") != "RUNNING" or job.get("worker_id") != worker_id:
+                return {"status": "JOB_NOT_OWNED_BY_WORKER", "saved": False}
+            if job.get("cancel_requested") is True:
+                return {"status": "CANCEL_REQUESTED", "saved": False}
+            lease_until = job.get("lease_until")
+            try:
+                parsed_lease = (
+                    datetime.fromisoformat(lease_until)
+                    if isinstance(lease_until, str) else None
+                )
+                expired = (
+                    parsed_lease is None
+                    or parsed_lease.tzinfo is None
+                    or parsed_lease.utcoffset() is None
+                    or parsed_lease.astimezone(timezone.utc) <= now_dt
+                )
+            except (TypeError, ValueError, OverflowError):
+                expired = True
+            if expired:
+                self._reap_expired_locked(now_dt)
+                self._save()
+                return {"status": "JOB_LEASE_EXPIRED", "saved": False}
+            job["lease_until"] = (now_dt + timedelta(seconds=duration)).isoformat()
+            job["updated_at"] = now
+            self._save()
+            return {"status": "LEASE_RENEWED", "saved": True, "job": dict(job)}
+
     def complete(
         self,
         *,
@@ -229,11 +392,16 @@ class ProviderJobManager:
         success: bool,
         result_ref: str | None = None,
         error_code: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
             return {"status": "INVALID_JOB_ID", "saved": False}
         if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
             return {"status": "INVALID_WORKER_ID", "saved": False}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "saved": False}
         if not isinstance(success, bool):
             return {"status": "INVALID_SUCCESS_FLAG", "saved": False}
         if success and (not isinstance(result_ref, str) or not _REF_RE.fullmatch(result_ref)):
@@ -242,13 +410,39 @@ class ProviderJobManager:
             not isinstance(error_code, str) or not _ERROR_RE.fullmatch(error_code)
         ):
             return {"status": "INVALID_ERROR_CODE", "saved": False}
-        now = self.clock().astimezone(timezone.utc).isoformat()
+        now_dt = self.clock().astimezone(timezone.utc)
+        now = now_dt.isoformat()
         with self._transaction():
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
                 return {"status": "JOB_NOT_FOUND", "saved": False}
+            if "tenant_id" in job and tenant_id is None:
+                return {"status": "TENANT_ID_REQUIRED", "saved": False}
+            if "tenant_id" in job and job.get("tenant_id") != tenant_id:
+                return {"status": "JOB_NOT_FOUND", "saved": False}
             if job.get("status") != "RUNNING" or job.get("worker_id") != worker_id:
                 return {"status": "JOB_NOT_OWNED_BY_WORKER", "saved": False}
+            # A worker must not commit a result after its lease has expired,
+            # even if no replacement worker has claimed the requeued job yet.
+            # Otherwise a stale worker could race a retry and overwrite its state.
+            lease_until = job.get("lease_until")
+            try:
+                parsed_lease = (
+                    datetime.fromisoformat(lease_until)
+                    if isinstance(lease_until, str) else None
+                )
+                lease_expired = (
+                    parsed_lease is None
+                    or parsed_lease.tzinfo is None
+                    or parsed_lease.utcoffset() is None
+                    or parsed_lease.astimezone(timezone.utc) <= now_dt
+                )
+            except (TypeError, ValueError, OverflowError):
+                lease_expired = True
+            if lease_expired:
+                self._reap_expired_locked(now_dt)
+                self._save()
+                return {"status": "JOB_LEASE_EXPIRED", "saved": False}
             if job.get("cancel_requested") is True:
                 job["status"] = "CANCELLED"
             else:
@@ -263,13 +457,23 @@ class ProviderJobManager:
             self._save()
             return {"status": "JOB_COMPLETED", "saved": True, "job": dict(job)}
 
-    def cancel(self, *, job_id: str) -> dict[str, Any]:
+    def cancel(
+        self, *, job_id: str, tenant_id: str | None = None
+    ) -> dict[str, Any]:
         if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
             return {"status": "INVALID_JOB_ID", "saved": False}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "saved": False}
         now = self.clock().astimezone(timezone.utc).isoformat()
         with self._transaction():
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
+                return {"status": "JOB_NOT_FOUND", "saved": False}
+            if "tenant_id" in job and tenant_id is None:
+                return {"status": "TENANT_ID_REQUIRED", "saved": False}
+            if "tenant_id" in job and job.get("tenant_id") != tenant_id:
                 return {"status": "JOB_NOT_FOUND", "saved": False}
             if job.get("status") == "QUEUED":
                 job["status"] = "CANCELLED"
@@ -282,11 +486,21 @@ class ProviderJobManager:
             self._save()
             return {"status": "CANCEL_REQUESTED" if job["status"] == "RUNNING" else "JOB_CANCELLED", "saved": True, "job": dict(job)}
 
-    def poll(self, *, job_id: str) -> dict[str, Any]:
+    def poll(
+        self, *, job_id: str, tenant_id: str | None = None
+    ) -> dict[str, Any]:
         if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
             return {"status": "INVALID_JOB_ID", "job": None}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "job": None}
         with self._transaction():
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
+                return {"status": "JOB_NOT_FOUND", "job": None}
+            if "tenant_id" in job and tenant_id is None:
+                return {"status": "TENANT_ID_REQUIRED", "job": None}
+            if "tenant_id" in job and job.get("tenant_id") != tenant_id:
                 return {"status": "JOB_NOT_FOUND", "job": None}
             return {"status": "JOB_STATUS", "job": dict(job)}

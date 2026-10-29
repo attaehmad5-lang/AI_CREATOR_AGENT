@@ -18,14 +18,24 @@ _CREDIT_EXHAUSTED_CODES = {
     "credit_balance_exhausted",
     "billing_hard_limit_reached",
     "quota_exhausted",
+    "insufficient_balance",
+    "no_credits_remaining",
+    "credit_limit_exceeded",
+    "monthly_budget_exceeded",
+    "billing_limit_exceeded",
 }
 _BILLING_ACTION_CODES = {
     "payment_required",
     "billing_required",
     "account_payment_required",
+    "billing_not_active",
+    "payment_method_required",
+    "payment_failed",
+    "subscription_inactive",
 }
 _AUTH_CODES = {"invalid_api_key", "invalid_token", "unauthorized"}
 _PERMISSION_CODES = {"permission_denied", "insufficient_scope", "forbidden"}
+_RATE_LIMIT_CODES = {"rate_limit_exceeded", "rate_limited", "too_many_requests"}
 _TRANSIENT_CODES = {"temporarily_unavailable", "overloaded", "server_overloaded"}
 
 
@@ -43,7 +53,12 @@ def _normalize_code(value: Any) -> str | None:
 def _retry_after(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    seconds = float(value)
+    try:
+        seconds = float(value)
+    except (OverflowError, ValueError):
+        # Huge integers can overflow during float conversion before isfinite()
+        # gets a chance to reject them. Treat malformed retry metadata as absent.
+        return None
     if not math.isfinite(seconds) or seconds < 0:
         return None
     return min(seconds, 300.0)
@@ -106,7 +121,7 @@ def classify_provider_error(
             "action": "review_provider_permissions_and_scopes",
             "http_status": http_status,
         }
-    if http_status == 429:
+    if http_status == 429 or code in _RATE_LIMIT_CODES:
         result = {
             "status": "RATE_LIMITED",
             "category": "rate_limit",

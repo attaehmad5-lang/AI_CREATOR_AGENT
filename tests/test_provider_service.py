@@ -8,8 +8,10 @@ from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.provider_feature_flags import ProviderFeatureFlagManager
 from projects.provider_store.provider_incident_manager import ProviderIncidentManager
 from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
+from projects.provider_store.provider_ab_benchmark_manager import ProviderABBenchmarkManager
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
+from projects.provider_store.provider_slo_manager import ProviderSLOManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
@@ -62,12 +64,156 @@ class ProviderServiceTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_routed_generation_can_require_fresh_health_evidence(self):
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "FREE"}
+
+        calls = []
+        service = ProviderService(
+            self.connections, routing_manager=RoutingStub(), health_manager=self.health,
+        )
+        blocked = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-unknown",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            require_fresh_health_check=True,
+        )
+        self.assertEqual(blocked["status"], "PROVIDER_HEALTH_REJECTED")
+        self.assertFalse(blocked["executed"])
+        self.assertEqual(calls, [])
+
+        self.health.record_result("image", success=True, latency_ms=5.0)
+        allowed = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-fresh",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs) or {
+                "started": False, "success": False,
+            },
+            require_fresh_health_check=True,
+            health_stale_after_seconds=60,
+            health_max_latency_ms=100,
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertNotEqual(allowed["status"], "PROVIDER_HEALTH_REJECTED")
+
+    def test_routed_generation_health_gate_fails_closed_without_manager(self):
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "FREE"}
+
+        calls = []
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-no-manager",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            require_fresh_health_check=True,
+        )
+        self.assertEqual(result["status"], "PROVIDER_HEALTH_CHECK_UNAVAILABLE")
+        self.assertEqual(calls, [])
+
+    def test_ab_benchmark_paid_usage_requires_authenticated_billing_approval(self):
+        class Authorization:
+            def __init__(self, allowed):
+                self.allowed = allowed
+                self.calls = []
+
+            def authorize(self, principal_id, operation):
+                self.calls.append((principal_id, operation))
+                return {"allowed": self.allowed, "status": "OK" if self.allowed else "DENIED"}
+
+        candidates = [
+            {"provider_id": "provider-a", "model_id": "model-a", "estimated_cost_per_run": 0.1},
+            {"provider_id": "provider-b", "model_id": "model-b", "estimated_cost_per_run": 0.2},
+        ]
+        denied_auth = Authorization(False)
+        denied_service = ProviderService(
+            self.connections, authorization_manager=denied_auth,
+            ab_benchmark_manager=ProviderABBenchmarkManager(),
+        )
+        denied = denied_service.plan_ab_benchmark(
+            principal_id="user-1", benchmark_id="paid-plan", category="image",
+            candidates=candidates, repetitions=2, allow_paid=True, max_total_cost=1.0,
+            paid_approval={"approved": True, "benchmark_id": "paid-plan", "approved_by": "forged"},
+        )
+        self.assertEqual(denied["status"], "PAID_BENCHMARK_APPROVAL_DENIED")
+        self.assertEqual(denied_auth.calls, [("user-1", "billing.approve")])
+
+        approved_auth = Authorization(True)
+        approved_service = ProviderService(
+            self.connections, authorization_manager=approved_auth,
+            ab_benchmark_manager=ProviderABBenchmarkManager(),
+        )
+        approved = approved_service.plan_ab_benchmark(
+            principal_id="user-1", benchmark_id="paid-plan", category="image",
+            candidates=candidates, repetitions=2, allow_paid=True, max_total_cost=1.0,
+            paid_approval={"approved": False, "benchmark_id": "wrong", "approved_by": "forged"},
+        )
+        self.assertEqual(approved["status"], "BENCHMARK_PLAN_READY")
+        self.assertEqual(approved["estimated_total_cost"], 0.6)
+        self.assertFalse(approved["executable"])
+        self.assertEqual(approved["provider_calls_made"], 0)
+        self.assertEqual(approved_auth.calls, [("user-1", "billing.approve")])
+
+    def test_ab_benchmark_requires_authorization_manager_for_paid_plan(self):
+        service = ProviderService(
+            self.connections, ab_benchmark_manager=ProviderABBenchmarkManager(),
+        )
+        result = service.plan_ab_benchmark(
+            principal_id="user-1", benchmark_id="paid-plan", category="image",
+            candidates=[
+                {"provider_id": "provider-a", "model_id": "model-a", "estimated_cost_per_run": 0.1},
+                {"provider_id": "provider-b", "model_id": "model-b", "estimated_cost_per_run": 0.2},
+            ],
+            repetitions=1, allow_paid=True, max_total_cost=1.0,
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_REQUIRED")
+        self.assertFalse(result["executable"])
+
+    def test_ab_benchmark_rejects_forged_approval_when_paid_usage_not_enabled(self):
+        service = ProviderService(
+            self.connections, ab_benchmark_manager=ProviderABBenchmarkManager(),
+        )
+        result = service.plan_ab_benchmark(
+            benchmark_id="forged-plan", category="image",
+            candidates=[
+                {"provider_id": "provider-a", "model_id": "model-a", "estimated_cost_per_run": 0.1},
+                {"provider_id": "provider-b", "model_id": "model-b", "estimated_cost_per_run": 0.2},
+            ],
+            repetitions=1, allow_paid=False, max_total_cost=1.0,
+            paid_approval={"approved": True, "benchmark_id": "forged-plan", "approved_by": "forged"},
+        )
+        self.assertEqual(result["status"], "PAID_BENCHMARK_APPROVAL_REQUIRED")
+        self.assertFalse(result["executable"])
+
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
         self.assertTrue(result["verified"])
         self.assertEqual(result["connection"]["status"], "CONNECTED")
         self.assertEqual(result["health"]["status"], "HEALTHY")
         self.assertEqual(self.connections.get_state("image")["status"], "CONNECTED")
+
+    def test_malformed_connection_manager_responses_fail_closed(self):
+        class MalformedConnectionManager:
+            def verify_connectivity(self, *args, **kwargs):
+                return None
+
+            def verify_manual_connection(self, *args, **kwargs):
+                return []
+
+        service = ProviderService(MalformedConnectionManager())
+        result = service.verify_provider("image", lambda **kwargs: True)
+        self.assertEqual(result["status"], "INVALID_CONNECTION_RESPONSE")
+        self.assertFalse(result["verified"])
+        self.assertFalse(result["connection"]["verified"])
+
+        manual = service.verify_manual_provider(
+            "image", object(), lambda **kwargs: True
+        )
+        self.assertEqual(manual["status"], "INVALID_CONNECTION_RESPONSE")
+        self.assertFalse(manual["verified"])
+        self.assertFalse(manual["connection"]["verified"])
 
     def test_builtin_http_provider_verification_updates_connection_and_health(self):
         class Response:
@@ -252,6 +398,56 @@ class ProviderServiceTests(unittest.TestCase):
         retry = self.service.retry_decision(attempt=1, status_code=503)
         self.assertTrue(retry["retry"])
         self.assertEqual(retry["reason"], "TRANSIENT_HTTP_FAILURE")
+
+    def test_explicit_provider_rate_limit_code_reaches_retry_policy(self):
+        retry = self.service.retry_decision(
+            attempt=1, status_code=400, provider_code="rate_limit_exceeded",
+            idempotent=True,
+        )
+        self.assertTrue(retry["retry"])
+        self.assertEqual(retry["reason"], "RATE_LIMIT_BACKOFF")
+
+    def test_malformed_retry_policy_response_fails_closed_without_truthy_coercion(self):
+        class MalformedPolicy:
+            def decide(self, **failure):
+                return type("Decision", (), {
+                    "retry": "false",
+                    "attempt": 1,
+                    "delay_seconds": 0.1,
+                    "reason": "MALFORMED",
+                })()
+        self.service.retry_policy = MalformedPolicy()
+        result = self.service.retry_decision(attempt=1, status_code=503)
+        self.assertEqual(result, {"retry": False, "reason": "INVALID_RETRY_RESPONSE"})
+
+    def test_retry_policy_response_rejects_nonfinite_or_excessive_delay(self):
+        class MalformedPolicy:
+            def __init__(self, delay):
+                self.delay = delay
+            def decide(self, **failure):
+                return type("Decision", (), {
+                    "retry": True,
+                    "attempt": 1,
+                    "delay_seconds": self.delay,
+                    "reason": "TEST",
+                })()
+        for delay in (float("inf"), float("nan"), -1, 86401):
+            self.service.retry_policy = MalformedPolicy(delay)
+            result = self.service.retry_decision(attempt=1, status_code=503)
+            self.assertFalse(result["retry"])
+            self.assertEqual(result["reason"], "INVALID_RETRY_RESPONSE")
+
+    def test_retry_policy_decision_property_errors_fail_closed(self):
+        class BrokenDecision:
+            @property
+            def retry(self):
+                raise RuntimeError("private policy detail")
+        class MalformedPolicy:
+            def decide(self, **failure):
+                return BrokenDecision()
+        self.service.retry_policy = MalformedPolicy()
+        result = self.service.retry_decision(attempt=1, status_code=503)
+        self.assertEqual(result, {"retry": False, "reason": "INVALID_RETRY_RESPONSE"})
 
     def test_started_request_reconciles_cost_commits_quota_and_records_health(self):
         self.cost.reserve_usage(
@@ -483,17 +679,63 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["finalization"]["finalized"])
         self.assertEqual(result["provider"], "image")
 
-    def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
+    def test_execute_routed_request_cannot_forge_paid_approval_provider_set(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
         )
         service = ProviderService(
-            self.connections, routing_manager=router, health_manager=self.health,
+            self.connections, routing_manager=router, cost_policy=self.cost,
+            quota_manager=self.quota,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="forged-paid-approval",
+            estimated_cost=1.0, paid_approved_providers={"image"},
+            adapter=lambda **kwargs: calls.append(kwargs) or {
+                "started": False, "success": False,
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "PAID_USAGE_APPROVAL_REQUIRED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
+    def test_execute_routed_request_paid_approval_requires_billing_permission(self):
+        auth = ProviderAuthorizationManager(self.root / "paid-approval-auth.json")
+        auth.assign_role("creator-1", "creator")
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, authorization_manager=auth,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="paid-approval-denied",
+            estimated_cost=1.0, principal_id="creator-1",
+            paid_usage_approved=True, paid_approved_providers={"image"},
+            adapter=lambda **kwargs: calls.append(kwargs),
+            modality="image",
+        )
+        self.assertEqual(result["status"], "PAID_USAGE_APPROVAL_DENIED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
+    def test_execute_routed_request_releases_only_confirmed_unstarted_calls(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        auth = ProviderAuthorizationManager(self.root / "paid-auth.json")
+        auth.assign_role("billing-admin", "admin")
+        service = ProviderService(
+            self.connections, authorization_manager=auth, routing_manager=router, health_manager=self.health,
             cost_policy=self.cost, quota_manager=self.quota,
         )
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-not-started",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_usage_approved=True, principal_id="billing-admin",
             adapter=lambda **kwargs: {"started": False, "success": False},
             modality="image",
         )
@@ -542,13 +784,16 @@ class ProviderServiceTests(unittest.TestCase):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
         )
+        auth = ProviderAuthorizationManager(self.root / "paid-auth.json")
+        auth.assign_role("billing-admin", "admin")
         service = ProviderService(
-            self.connections, routing_manager=router,
+            self.connections, authorization_manager=auth, routing_manager=router,
             cost_policy=self.cost, quota_manager=self.quota,
         )
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-contradictory-start",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_usage_approved=True, principal_id="billing-admin",
             adapter=lambda **kwargs: {
                 "started": False, "success": True, "actual_cost": 1.0,
                 "charge_outcome": "incurred",
@@ -566,8 +811,10 @@ class ProviderServiceTests(unittest.TestCase):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
         )
+        auth = ProviderAuthorizationManager(self.root / "paid-auth.json")
+        auth.assign_role("billing-admin", "admin")
         service = ProviderService(
-            self.connections, routing_manager=router, health_manager=self.health,
+            self.connections, authorization_manager=auth, routing_manager=router, health_manager=self.health,
             cost_policy=self.cost, quota_manager=self.quota,
         )
         def adapter(**kwargs):
@@ -575,6 +822,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-unknown",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_usage_approved=True, principal_id="billing-admin",
             adapter=adapter, modality="image",
         )
         self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
@@ -587,8 +835,10 @@ class ProviderServiceTests(unittest.TestCase):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
         )
+        auth = ProviderAuthorizationManager(self.root / "paid-auth.json")
+        auth.assign_role("billing-admin", "admin")
         service = ProviderService(
-            self.connections, routing_manager=router, health_manager=self.health,
+            self.connections, authorization_manager=auth, routing_manager=router, health_manager=self.health,
             output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
         )
         output_path = self.root / "cost-report.png"
@@ -596,6 +846,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-invalid-cost",
             estimated_cost=1.0, paid_approved_providers={"image"},
+            paid_usage_approved=True, principal_id="billing-admin",
             adapter=lambda **kwargs: {
                 "started": True, "success": True, "actual_cost": float("nan"),
                 "charge_outcome": "not_incurred", "output_path": str(output_path),
@@ -1034,6 +1285,130 @@ class ProviderServiceTests(unittest.TestCase):
             "SUCCEEDED",
         )
 
+    def test_job_state_recovers_expired_worker_lease_across_service_restart(self):
+        from datetime import datetime, timedelta, timezone
+
+        now = [datetime(2026, 10, 25, 12, tzinfo=timezone.utc)]
+        state_path = self.root / "restart-recovery-jobs.json"
+        first_manager = ProviderJobManager(
+            state_path, max_queue_size=10, max_concurrent=1,
+            lease_seconds=10, max_attempts=2, clock=lambda: now[0],
+        )
+        first_service = ProviderService(self.connections, job_manager=first_manager)
+        submitted = first_service.submit_job(
+            job_id="restart-job", project_id="film", provider_id="image",
+            payload_ref="payload:restart-job",
+        )
+        self.assertEqual(submitted["status"], "JOB_QUEUED")
+        first_claim = first_service.claim_next_job(worker_id="worker-crashed")
+        self.assertEqual(first_claim["status"], "JOB_CLAIMED")
+        self.assertEqual(first_claim["job"]["attempts"], 1)
+
+        # Simulate a process restart after the worker lease expired.
+        now[0] += timedelta(seconds=11)
+        recovered_manager = ProviderJobManager(
+            state_path, max_queue_size=10, max_concurrent=1,
+            lease_seconds=10, max_attempts=2, clock=lambda: now[0],
+        )
+        recovered_service = ProviderService(self.connections, job_manager=recovered_manager)
+        recovered_claim = recovered_service.claim_next_job(worker_id="worker-recovered")
+        self.assertEqual(recovered_claim["status"], "JOB_CLAIMED")
+        self.assertEqual(recovered_claim["job"]["job_id"], "restart-job")
+        self.assertEqual(recovered_claim["job"]["attempts"], 2)
+
+        completed = recovered_service.complete_job(
+            job_id="restart-job", worker_id="worker-recovered",
+            success=True, result_ref="asset:restart-job",
+        )
+        self.assertIn(completed["status"], {"JOB_COMPLETED", "JOB_SUCCEEDED"})
+        polled = recovered_service.poll_job(job_id="restart-job")
+        self.assertEqual(polled["job"]["status"], "SUCCEEDED")
+        self.assertEqual(polled["job"]["attempts"], 2)
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["jobs"]["restart-job"]["status"], "SUCCEEDED")
+        serialized = state_path.read_text(encoding="utf-8")
+        self.assertNotIn("secret", serialized.lower())
+        self.assertNotIn("raw_prompt", serialized.lower())
+
+    def test_async_job_facade_propagates_tenant_scope(self):
+        jobs = ProviderJobManager(
+            self.root / "tenant-service-jobs.json",
+            max_queue_size=10, max_concurrent=4,
+        )
+        authorization = ProviderAuthorizationManager(self.root / "tenant-job-auth.json")
+        authorization.assign_role("tenant-creator", "creator", tenant_id="tenant-a")
+        service = ProviderService(
+            self.connections, job_manager=jobs, authorization_manager=authorization,
+        )
+        created = service.submit_job(
+            job_id="tenant-job", project_id="film", provider_id="image",
+            payload_ref="payload:tenant-job", principal_id="tenant-creator",
+            tenant_id="tenant-a",
+        )
+        self.assertEqual(created["status"], "JOB_QUEUED")
+        self.assertEqual(
+            service.poll_job(job_id="tenant-job", principal_id="tenant-creator")["status"],
+            "TENANT_AUTHORIZATION_DENIED",
+        )
+        self.assertEqual(
+            service.poll_job(
+                job_id="tenant-job", principal_id="tenant-creator", tenant_id="tenant-b"
+            )["status"],
+            "TENANT_AUTHORIZATION_DENIED",
+        )
+        claimed_wrong_tenant = service.claim_next_job(
+            worker_id="worker-b", principal_id="tenant-creator", tenant_id="tenant-b"
+        )
+        self.assertEqual(claimed_wrong_tenant["status"], "TENANT_AUTHORIZATION_DENIED")
+        claimed = service.claim_next_job(
+            worker_id="worker-a", principal_id="tenant-creator", tenant_id="tenant-a"
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        denied_renewal = service.renew_job_lease(
+            job_id="tenant-job", worker_id="worker-a", principal_id="tenant-creator",
+            tenant_id="tenant-b",
+        )
+        self.assertEqual(denied_renewal["status"], "TENANT_AUTHORIZATION_DENIED")
+        renewed = service.renew_job_lease(
+            job_id="tenant-job", worker_id="worker-a", principal_id="tenant-creator",
+            tenant_id="tenant-a", lease_seconds=30,
+        )
+        self.assertEqual(renewed["status"], "LEASE_RENEWED")
+        denied_completion = service.complete_job(
+            job_id="tenant-job", worker_id="worker-a", success=True,
+            result_ref="asset:tenant-job", principal_id="tenant-creator",
+            tenant_id="tenant-b",
+        )
+        self.assertEqual(denied_completion["status"], "TENANT_AUTHORIZATION_DENIED")
+        completed = service.complete_job(
+            job_id="tenant-job", worker_id="worker-a", success=True,
+            result_ref="asset:tenant-job", principal_id="tenant-creator",
+            tenant_id="tenant-a",
+        )
+        self.assertEqual(completed["status"], "JOB_COMPLETED")
+        self.assertEqual(
+            service.poll_job(
+                job_id="tenant-job", principal_id="tenant-creator", tenant_id="tenant-a"
+            )["job"]["status"],
+            "SUCCEEDED",
+        )
+
+    def test_routed_generation_denies_cross_tenant_principal_before_adapter(self):
+        authorization = ProviderAuthorizationManager(self.root / "tenant-generation-auth.json")
+        authorization.assign_role("tenant-a-creator", "creator", tenant_id="tenant-a")
+        service = ProviderService(
+            self.connections, authorization_manager=authorization,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="cross-tenant-request",
+            estimated_cost=0.0, adapter=lambda **kwargs: calls.append(kwargs),
+            modality="image", principal_id="tenant-a-creator", tenant_id="tenant-b",
+        )
+        self.assertEqual(result["status"], "TENANT_AUTHORIZATION_DENIED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
     def test_execution_records_latency_queue_wait_and_failure_metrics(self):
         outer = self
 
@@ -1053,27 +1428,81 @@ class ProviderServiceTests(unittest.TestCase):
                 return {"allowed": True, "provider": "image", "billing_mode": "PAID_APPROVED"}
 
         metrics = ProviderMetricsManager()
+        slo = ProviderSLOManager(metrics, self.root / "service-slo-policies.json")
+        self.assertTrue(slo.set_policy("image", "image", {
+            "minimum_samples": 1, "min_success_rate": 0.9,
+        })["saved"])
         service = ProviderService(
             self.connections,
             routing_manager=RoutingStub(),
             cost_policy=self.cost,
             quota_manager=self.quota,
             metrics_manager=metrics,
+            slo_manager=slo,
         )
-        result = service.execute_routed_request(
-            category="image", project_id="film", request_id="metrics-job",
-            estimated_cost=2.0, modality="image",
-            adapter=lambda **kwargs: {
+        adapter_calls = []
+
+        def adapter(**kwargs):
+            adapter_calls.append(kwargs)
+            return {
                 "started": True, "success": False, "actual_cost": 1.0,
                 "charge_outcome": "incurred", "status_code": 503,
                 "latency_ms": 25.0, "queue_wait_ms": 12.0,
-            },
+            }
+
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="metrics-job",
+            trace_id="trace-metrics-01", estimated_cost=2.0, modality="image",
+            adapter=adapter,
         )
+        self.assertEqual(adapter_calls[0]["trace_id"], "trace-metrics-01")
+        self.assertEqual(result["trace_id"], "trace-metrics-01")
+        invalid_trace = service.execute_routed_request(
+            category="image", project_id="film", request_id="invalid-trace-job",
+            trace_id="trace has spaces", estimated_cost=0.0, modality="image",
+            adapter=adapter,
+        )
+        self.assertEqual(invalid_trace["status"], "INVALID_TRACE_ID")
+
+        # Request IDs are correlation keys used by persistent accounting and
+        # diagnostics; reject control characters, whitespace, and oversized IDs
+        # before routing can reserve cost/quota or invoke a provider.
+        for invalid_request_id in (" bad-id", "bad id", "bad\nid", "x" * 129, ""):
+            invalid_request = service.execute_routed_request(
+                category="image", project_id="film",
+                request_id=invalid_request_id, estimated_cost=0.0,
+                modality="image", adapter=adapter,
+            )
+            self.assertEqual(invalid_request["status"], "INVALID_REQUEST_ID")
+            self.assertFalse(invalid_request["executed"])
+        self.assertEqual(len(adapter_calls), 1)
         self.assertEqual(result["metrics"]["status"], "METRIC_RECORDED")
+        self.assertEqual(result["slo"]["status"], "SLO_BREACH")
+        self.assertIn("SUCCESS_RATE_BELOW_TARGET", result["slo"]["breaches"])
         snapshot = metrics.snapshot(provider_id="image")["metrics"]
         self.assertEqual(snapshot["failure_count"], 1)
         self.assertEqual(snapshot["avg_latency_ms"], 25.0)
         self.assertEqual(snapshot["avg_queue_wait_ms"], 12.0)
+
+        # Use an isolated route stub so this assertion tests trace
+        # sanitization rather than the SLO gate or prior quota reservations.
+        class TraceRoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True, "provider": "image", "billing_mode": "FREE",
+                }
+
+        trace_service = ProviderService(
+            self.connections, routing_manager=TraceRoutingStub(),
+        )
+        hidden_trace = trace_service.execute_routed_request(
+            category="image", project_id="film", request_id="hidden-trace-job",
+            estimated_cost=0.0, modality="image", adapter=adapter,
+            adapter_options={"trace_id": "unvalidated trace"},
+        )
+        self.assertNotEqual(hidden_trace.get("status"), "INVALID_TRACE_ID")
+        self.assertEqual(len(adapter_calls), 2)
+        self.assertNotIn("trace_id", adapter_calls[1])
 
     def test_low_output_quality_score_prevents_success_status(self):
         router = ProviderRoutingManager(
@@ -1260,6 +1689,541 @@ class ProviderServiceTests(unittest.TestCase):
         service = ProviderService(self.connections)
         self.assertEqual(service.route_request(category="image", project_id="film")["status"], "ROUTING_MANAGER_UNAVAILABLE")
         self.assertEqual(service.validate_output("missing.png", modality="image")["status"], "OUTPUT_VALIDATOR_UNAVAILABLE")
+
+
+class ProviderAdminControlTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.root = Path(self.temp_dir.name)
+        self.auth = ProviderAuthorizationManager(self.root / "authorization.json")
+        self.auth.assign_role("viewer-1", "viewer")
+        self.auth.assign_role("admin-1", "admin")
+
+        class ConnectionStub:
+            def __init__(self):
+                self.calls = []
+
+            def verify_connectivity(self, *args, **kwargs):
+                return {"verified": False}
+
+            def set_provider_enabled(self, provider_id, enabled, *, paid_usage_approved=False):
+                self.calls.append(("enable", provider_id, enabled, paid_usage_approved))
+                return {"status": "ENABLED" if enabled else "DISABLED", "saved": True}
+
+            def configure_provider(self, provider_id, **configuration):
+                self.calls.append(("configure", provider_id, dict(configuration)))
+                return {"status": "CONFIGURED", "saved": True}
+
+        self.connection = ConnectionStub()
+        self.service = ProviderService(
+            self.connection,
+            authorization_manager=self.auth,
+        )
+
+    def test_viewer_cannot_enable_or_configure_provider(self):
+        enable = self.service.set_provider_enabled(
+            "image", True, principal_id="viewer-1"
+        )
+        configure = self.service.configure_provider(
+            "image", principal_id="viewer-1", model="safe-model"
+        )
+        self.assertEqual(enable["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(configure["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(self.connection.calls, [])
+
+    def test_admin_can_enable_and_paid_approval_is_forwarded(self):
+        result = self.service.set_provider_enabled(
+            "image",
+            True,
+            principal_id="admin-1",
+            paid_usage_approved=True,
+        )
+        self.assertEqual(result["status"], "ENABLED")
+        self.assertEqual(
+            self.connection.calls,
+            [("enable", "image", True, True)],
+        )
+
+    def test_paid_usage_requires_billing_approval_permission(self):
+        class EnableOnlyAuthorization:
+            def authorize(self, principal_id, operation):
+                allowed = operation == "provider.enable"
+                return {
+                    "allowed": allowed,
+                    "status": "AUTHORIZED" if allowed else "ACCESS_DENIED",
+                    "principal_id": principal_id,
+                    "operation": operation,
+                }
+
+        service = ProviderService(
+            self.connection,
+            authorization_manager=EnableOnlyAuthorization(),
+        )
+        result = service.set_provider_enabled(
+            "image", True, principal_id="limited-admin", paid_usage_approved=True
+        )
+        self.assertEqual(result["status"], "PAID_USAGE_APPROVAL_DENIED")
+        self.assertEqual(self.connection.calls, [])
+
+    def test_paid_usage_approval_flag_must_be_boolean(self):
+        result = self.service.set_provider_enabled(
+            "image", True, principal_id="admin-1", paid_usage_approved="yes"
+        )
+        self.assertEqual(result["status"], "INVALID_PAID_USAGE_APPROVAL")
+        self.assertEqual(self.connection.calls, [])
+
+    def test_admin_can_configure_provider(self):
+        result = self.service.configure_provider(
+            "image", principal_id="admin-1", model="safe-model"
+        )
+        self.assertEqual(result["status"], "CONFIGURED")
+        self.assertEqual(
+            self.connection.calls,
+            [("configure", "image", {"model": "safe-model"})],
+        )
+
+    def test_management_fails_closed_without_authorization_manager(self):
+        service = ProviderService(self.connection)
+        result = service.set_provider_enabled("image", True, principal_id="admin-1")
+        self.assertEqual(result["status"], "AUTHORIZATION_REQUIRED")
+        self.assertEqual(self.connection.calls, [])
+
+    def test_authorization_manager_exception_fails_closed(self):
+        class BrokenAuthorization:
+            def authorize(self, principal_id, operation):
+                raise RuntimeError("internal detail must not leak")
+
+        service = ProviderService(
+            self.connection,
+            authorization_manager=BrokenAuthorization(),
+        )
+        result = service.configure_provider(
+            "image", principal_id="admin-1", model="safe-model"
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_DENIED")
+        self.assertNotIn("internal detail", repr(result))
+        self.assertEqual(self.connection.calls, [])
+
+
+
+
+    def test_explicit_provider_rechecks_delegate_to_configured_coordinator(self):
+        class Coordinator:
+            def run_due_rechecks(self):
+                return {"status": "COMPLETED", "probed": ["provider-a"], "results": {}}
+
+        service = ProviderService(self.connection, recovery_coordinator=Coordinator())
+        result = service.run_due_provider_rechecks()
+        self.assertEqual(result["status"], "COMPLETED")
+        self.assertEqual(result["probed"], ["provider-a"])
+
+    def test_provider_rechecks_fail_closed_when_coordinator_missing(self):
+        service = ProviderService(self.connection)
+        result = service.run_due_provider_rechecks()
+        self.assertEqual(result["status"], "RECOVERY_COORDINATOR_UNAVAILABLE")
+        self.assertEqual(result["probed"], [])
+
+    def test_provider_rechecks_require_provider_verify_authorization_when_configured(self):
+        class Coordinator:
+            def __init__(self):
+                self.calls = 0
+
+            def run_due_rechecks(self):
+                self.calls += 1
+                return {"status": "COMPLETED", "probed": [], "results": {}}
+
+        class Authorization:
+            def __init__(self, allowed):
+                self.allowed = allowed
+                self.calls = []
+
+            def authorize(self, principal_id, operation):
+                self.calls.append((principal_id, operation))
+                return {
+                    "allowed": self.allowed,
+                    "status": "OK" if self.allowed else "DENIED",
+                    "detail": "private authorization internals",
+                }
+
+        denied_coordinator = Coordinator()
+        denied_auth = Authorization(False)
+        denied_service = ProviderService(
+            self.connection,
+            authorization_manager=denied_auth,
+            recovery_coordinator=denied_coordinator,
+        )
+        denied = denied_service.run_due_provider_rechecks(principal_id="guest")
+        self.assertEqual(denied["status"], "PROVIDER_RECHECK_AUTHORIZATION_DENIED")
+        self.assertEqual(denied["probed"], [])
+        self.assertEqual(denied_coordinator.calls, 0)
+        self.assertEqual(denied_auth.calls, [("guest", "provider.verify")])
+        self.assertNotIn("private authorization internals", repr(denied))
+
+        allowed_coordinator = Coordinator()
+        allowed_auth = Authorization(True)
+        allowed_service = ProviderService(
+            self.connection,
+            authorization_manager=allowed_auth,
+            recovery_coordinator=allowed_coordinator,
+        )
+        allowed = allowed_service.run_due_provider_rechecks(principal_id="operator")
+        self.assertEqual(allowed["status"], "COMPLETED")
+        self.assertEqual(allowed_coordinator.calls, 1)
+        self.assertEqual(allowed_auth.calls, [("operator", "provider.verify")])
+
+    def test_provider_recheck_coordinator_exception_does_not_leak_details(self):
+        class BrokenCoordinator:
+            def run_due_rechecks(self):
+                raise RuntimeError("secret internal probe details")
+
+        service = ProviderService(self.connection, recovery_coordinator=BrokenCoordinator())
+        result = service.run_due_provider_rechecks()
+        self.assertEqual(result["status"], "RECOVERY_RECHECK_FAILED")
+        self.assertNotIn("secret internal", repr(result))
+
+    def test_provider_recheck_non_completed_result_is_blocked(self):
+        class BlockedCoordinator:
+            def run_due_rechecks(self):
+                return {"status": "BLOCKED_INVALID_HEALTH_STATE", "probed": ["provider-a"]}
+
+        service = ProviderService(self.connection, recovery_coordinator=BlockedCoordinator())
+        result = service.run_due_provider_rechecks()
+        self.assertEqual(result["status"], "RECOVERY_RECHECK_BLOCKED")
+        self.assertEqual(result["probed"], [])
+
+
+    def test_local_model_service_rejects_generated_result_without_text(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": None}
+
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        result = service.generate_local_text(prompt="hello")
+        self.assertEqual(result, {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False})
+
+    def test_local_model_service_whitelists_success_fields(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                return {
+                    "status": "LOCAL_TEXT_GENERATED",
+                    "generated": True,
+                    "text": "safe output",
+                    "provider_id": "local-ollama",
+                    "model_id": "qwen-local",
+                    "secret": "must not escape",
+                    "prompt": prompt,
+                }
+
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        result = service.generate_local_text(prompt="private prompt")
+        self.assertEqual(result["text"], "safe output")
+        self.assertNotIn("secret", result)
+        self.assertNotIn("prompt", result)
+        self.assertEqual(result["provider_id"], "local-ollama")
+
+    def test_local_model_health_gate_blocks_generation_when_health_is_stale_or_unavailable(self):
+        class Adapter:
+            provider_id = "local-ollama"
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "should not run"}
+
+        adapter = Adapter()
+        service = ProviderService(self.connection, local_model_adapter=adapter)
+        result = service.generate_local_text(prompt="hello", require_fresh_health_check=True)
+        self.assertEqual(result["status"], "PROVIDER_HEALTH_CHECK_UNAVAILABLE")
+        self.assertFalse(adapter.called)
+
+        class Unhealthy:
+            def record_result(self, *args, **kwargs): return {"recorded": True}
+            def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
+                return {"eligible": False, "status": "STALE"}
+        service = ProviderService(self.connection, local_model_adapter=adapter, health_manager=Unhealthy())
+        result = service.generate_local_text(prompt="hello", require_fresh_health_check=True)
+        self.assertEqual(result["status"], "PROVIDER_HEALTH_REJECTED")
+        self.assertFalse(adapter.called)
+
+    def test_local_model_health_gate_allows_generation_only_after_explicit_eligibility(self):
+        class Adapter:
+            provider_id = "local-ollama"
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "safe output"}
+        class Healthy:
+            def record_result(self, *args, **kwargs): return {"recorded": True}
+            def __init__(self): self.args = None
+            def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
+                self.args = (provider_id, stale_after_seconds, max_latency_ms)
+                return {"eligible": True, "status": "HEALTHY"}
+        health = Healthy()
+        service = ProviderService(self.connection, local_model_adapter=Adapter(), health_manager=health)
+        result = service.generate_local_text(
+            prompt="hello", provider_id="local-ollama", require_fresh_health_check=True,
+            health_stale_after_seconds=45, health_max_latency_ms=900,
+        )
+        self.assertTrue(result["generated"])
+        self.assertEqual(health.args, ("local-ollama", 45.0, 900.0))
+
+    def test_local_model_health_gate_fails_closed_on_exception_and_malformed_evidence(self):
+        class Adapter:
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        class BrokenHealth:
+            def record_result(self, *args, **kwargs): return {"recorded": True}
+            def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
+                raise RuntimeError("private health backend detail")
+        class MalformedHealth:
+            def record_result(self, *args, **kwargs): return {"recorded": True}
+            def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
+                return {"eligible": "true", "status": "HEALTHY"}
+        for manager, expected in (
+            (BrokenHealth(), "PROVIDER_HEALTH_CHECK_FAILED"),
+            (MalformedHealth(), "PROVIDER_HEALTH_REJECTED"),
+        ):
+            with self.subTest(expected=expected):
+                adapter = Adapter()
+                service = ProviderService(self.connection, local_model_adapter=adapter, health_manager=manager)
+                result = service.generate_local_text(
+                    prompt="hello", require_fresh_health_check=True,
+                )
+                self.assertEqual(result["status"], expected)
+                self.assertFalse(adapter.called)
+                self.assertNotIn("private health backend detail", repr(result))
+
+    def test_local_model_health_gate_rejects_invalid_policy_values(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                raise AssertionError("adapter must not be called")
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        for options in (
+            {"require_fresh_health_check": "yes"},
+            {"require_fresh_health_check": True, "health_stale_after_seconds": -1},
+            {"require_fresh_health_check": True, "health_max_latency_ms": float("inf")},
+        ):
+            with self.subTest(options=options):
+                result = service.generate_local_text(prompt="hello", **options)
+                self.assertEqual(result["status"], "INVALID_HEALTH_CHECK_POLICY")
+                self.assertFalse(result["generated"])
+
+    def test_local_model_data_policy_blocks_unknown_or_denied_provider_before_generation(self):
+        class Adapter:
+            provider_id = "unlisted-local-provider"
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        adapter = Adapter()
+        policy = ProviderDataHandlingPolicy({})
+        service = ProviderService(self.connection, local_model_adapter=adapter, data_handling_policy=policy)
+        result = service.generate_local_text(prompt="private text")
+        self.assertEqual(result["status"], "PROVIDER_DATA_POLICY_REJECTED")
+        self.assertFalse(adapter.called)
+
+    def test_local_model_data_policy_receives_explicit_consent_and_retention_controls(self):
+        class Adapter:
+            provider_id = "local-ollama"
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "safe output"}
+        class Policy:
+            def __init__(self): self.kwargs = None
+            def evaluate(self, **kwargs):
+                self.kwargs = kwargs
+                return {"allowed": True, "status": "ALLOWED"}
+        policy = Policy()
+        service = ProviderService(self.connection, local_model_adapter=Adapter(), data_handling_policy=policy)
+        result = service.generate_local_text(
+            prompt="hello", provider_id="local-ollama", data_categories=("user_content",), retention_days=0,
+            provider_training_use=False, user_training_consent=False,
+        )
+        self.assertTrue(result["generated"])
+        self.assertEqual(policy.kwargs, {
+            "provider_id": "local-ollama", "data_categories": ["user_content"],
+            "retention_days": 0, "provider_training_use": False,
+            "user_training_consent": False,
+        })
+
+    def test_local_model_data_policy_never_allows_credentials_or_unconsented_training(self):
+        class Adapter:
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        policy = ProviderDataHandlingPolicy({
+            "local-model": {
+                "allowed_categories": ["user_content", "credential"],
+                "max_retention_days": 30,
+                "training_use_allowed": True,
+                "source_url": "https://provider.example.com/privacy",
+            }
+        })
+        adapter = Adapter()
+        service = ProviderService(self.connection, local_model_adapter=adapter, data_handling_policy=policy)
+        credential = service.generate_local_text(prompt="token text", data_categories=("credential",))
+        self.assertEqual(credential["status"], "PROVIDER_DATA_POLICY_REJECTED")
+        self.assertFalse(adapter.called)
+        training = service.generate_local_text(
+            prompt="ordinary text", provider_training_use=True, user_training_consent=False,
+        )
+        self.assertEqual(training["status"], "PROVIDER_DATA_POLICY_REJECTED")
+        self.assertFalse(adapter.called)
+
+    def test_local_model_data_policy_rejects_invalid_inputs(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                raise AssertionError("adapter must not be called")
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        for options in (
+            {"data_categories": ()},
+            {"data_categories": ("user_content", "user_content")},
+            {"retention_days": -1},
+            {"retention_days": 1.5},
+            {"retention_days": True},
+            {"retention_days": 3651},
+            {"provider_training_use": "false"},
+            {"user_training_consent": 1},
+        ):
+            with self.subTest(options=options):
+                result = service.generate_local_text(prompt="hello", **options)
+                self.assertEqual(result["status"], "INVALID_DATA_HANDLING_POLICY_INPUT")
+                self.assertFalse(result["generated"])
+
+    def test_local_model_provider_identity_is_explicit_and_cannot_be_spoofed_by_adapter(self):
+        class Adapter:
+            provider_id = "healthy-but-unrelated-provider"
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "safe output"}
+        class Health:
+            def record_result(self, *args, **kwargs): return {"recorded": True}
+            def __init__(self): self.checked = []
+            def is_eligible(self, provider_id, *, stale_after_seconds, max_latency_ms=None):
+                self.checked.append(provider_id)
+                return {"eligible": provider_id == "configured-local-provider"}
+        health = Health()
+        service = ProviderService(self.connection, local_model_adapter=Adapter(), health_manager=health)
+        result = service.generate_local_text(
+            prompt="hello", provider_id="configured-local-provider", require_fresh_health_check=True,
+        )
+        self.assertTrue(result["generated"])
+        self.assertEqual(health.checked, ["configured-local-provider"])
+
+    def test_local_model_provider_id_validation_rejects_injection_like_values(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                raise AssertionError("adapter must not be called")
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        for value in ("", "../other", "provider\nadmin", "provider:admin", "x" * 129, None):
+            with self.subTest(value=value):
+                result = service.generate_local_text(prompt="hello", provider_id=value)
+                self.assertEqual(result["status"], "INVALID_PROVIDER_ID")
+                self.assertFalse(result["generated"])
+
+    def test_local_model_authorization_denial_blocks_adapter_and_hides_details(self):
+        class Adapter:
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        class Authorization:
+            def authorize(self, principal_id, operation):
+                return {"allowed": False, "status": "DENIED", "detail": "sensitive internal detail"}
+        adapter = Adapter()
+        service = ProviderService(self.connection, local_model_adapter=adapter, authorization_manager=Authorization())
+        result = service.generate_local_text(prompt="hello", principal_id="guest")
+        self.assertEqual(result["status"], "AUTHORIZATION_DENIED")
+        self.assertFalse(adapter.called)
+        self.assertNotIn("sensitive internal detail", repr(result))
+
+    def test_local_model_feature_flag_failure_or_disabled_blocks_adapter(self):
+        class Adapter:
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        class Disabled:
+            def evaluate(self, flag, *, project_id, request_id=None):
+                return {"enabled": False}
+        class Broken:
+            def evaluate(self, flag, *, project_id, request_id=None):
+                raise RuntimeError("secret flag backend detail")
+        for manager, expected in ((Disabled(), "FEATURE_DISABLED"), (Broken(), "FEATURE_FLAG_CHECK_FAILED")):
+            with self.subTest(expected=expected):
+                adapter = Adapter()
+                service = ProviderService(self.connection, local_model_adapter=adapter, feature_flag_manager=manager)
+                result = service.generate_local_text(prompt="hello", project_id="film")
+                self.assertEqual(result["status"], expected)
+                self.assertFalse(adapter.called)
+                self.assertNotIn("secret flag backend detail", repr(result))
+
+    def test_local_model_data_policy_exception_fails_closed_without_leaking_message(self):
+        class Adapter:
+            called = False
+            def generate_text(self, prompt, *, system=None):
+                self.called = True
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "must not run"}
+        class BrokenPolicy:
+            def evaluate(self, **kwargs):
+                raise RuntimeError("private policy storage contents")
+        adapter = Adapter()
+        service = ProviderService(self.connection, local_model_adapter=adapter, data_handling_policy=BrokenPolicy())
+        result = service.generate_local_text(prompt="private prompt")
+        self.assertEqual(result["status"], "PROVIDER_DATA_POLICY_CHECK_FAILED")
+        self.assertFalse(adapter.called)
+        self.assertNotIn("private policy storage contents", repr(result))
+        self.assertNotIn("private prompt", repr(result))
+
+    def test_local_model_project_id_rejects_control_and_oversized_values(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                raise AssertionError("adapter must not be called")
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        for value in ("", " bad", "bad id", "film\\nadmin", "x" * 129, "../private"):
+            with self.subTest(value=value):
+                result = service.generate_local_text(prompt="hello", project_id=value)
+                self.assertEqual(result["status"], "INVALID_PROJECT_ID")
+                self.assertFalse(result["generated"])
+
+    def test_local_model_request_id_matches_safe_routing_contract(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "safe output"}
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        for value in ("", " bad", "bad id", "bad\\ntrace", "x" * 129, "../secret"):
+            with self.subTest(value=value):
+                result = service.generate_local_text(prompt="hello", request_id=value)
+                self.assertEqual(result["status"], "INVALID_REQUEST_ID")
+                self.assertFalse(result["generated"])
+        self.assertTrue(service.generate_local_text(prompt="hello", request_id="request-01")["generated"])
+
+    def test_local_model_service_rejects_oversized_custom_adapter_output(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": "x" * (2 * 1024 * 1024 + 1)}
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        result = service.generate_local_text(prompt="hello")
+        self.assertEqual(result, {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False})
+
+    def test_local_model_service_bounds_utf8_bytes_and_rejects_invalid_unicode(self):
+        class Adapter:
+            def __init__(self, text): self.text = text
+            def generate_text(self, prompt, *, system=None):
+                return {"status": "LOCAL_TEXT_GENERATED", "generated": True, "text": self.text}
+        for value in ("漢" * 700_000, chr(0xD800)):
+            with self.subTest(size=len(value)):
+                service = ProviderService(self.connection, local_model_adapter=Adapter(value))
+                result = service.generate_local_text(prompt="hello")
+                self.assertEqual(result, {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False})
+
+    def test_local_model_service_rejects_malformed_adapter_status(self):
+        class Adapter:
+            def generate_text(self, prompt, *, system=None):
+                return {"generated": False, "status": []}
+
+        service = ProviderService(self.connection, local_model_adapter=Adapter())
+        result = service.generate_local_text(prompt="hello")
+        self.assertEqual(result, {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False})
 
 
 if __name__ == "__main__":

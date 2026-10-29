@@ -43,6 +43,8 @@ class ProviderMetricsManagerTests(unittest.TestCase):
     def test_empty_metrics_and_invalid_inputs_are_safe(self):
         self.assertEqual(self.manager.snapshot()["status"], "NO_METRICS")
         self.assertEqual(self.record("image-a", True, float("nan"))["status"], "INVALID_METRIC_TIMING")
+        self.assertEqual(self.record("image-a", True, 1e308)["status"], "INVALID_METRIC_TIMING")
+        self.assertEqual(self.record("image-a", True, 1, wait=1e308)["status"], "INVALID_METRIC_TIMING")
         self.assertEqual(self.manager.record(
             provider_id="image-a", category="image", success="yes",
             latency_ms=1,
@@ -53,6 +55,19 @@ class ProviderMetricsManagerTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(lambda i: self.record("image-a", i % 2 == 0, i), range(100)))
         self.assertEqual(self.manager.snapshot(provider_id="image-a")["metrics"]["sample_count"], 3)
+
+    def test_invalid_or_failing_clock_does_not_store_metrics(self):
+        for clock, expected in (
+            (lambda: datetime(2026, 10, 16, 12), "INVALID_METRIC_CLOCK"),
+            (lambda: "not-a-datetime", "INVALID_METRIC_CLOCK"),
+            (lambda: (_ for _ in ()).throw(RuntimeError("clock failed")), "METRIC_CLOCK_FAILED"),
+        ):
+            manager = ProviderMetricsManager(clock=clock)
+            result = manager.record(
+                provider_id="image-a", category="image", success=True, latency_ms=1,
+            )
+            self.assertEqual(result, {"status": expected, "saved": False})
+            self.assertEqual(manager.snapshot()["metrics"]["sample_count"], 0)
 
 
 if __name__ == "__main__":

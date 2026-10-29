@@ -26,6 +26,7 @@ class ProviderProjectPolicyManagerTests(unittest.TestCase):
             "automatic_fallback": False,
             "require_health_evidence": True,
             "require_verified_connection": True,
+            "required_region": "sa-riyadh-1",
         })
         self.assertTrue(result["saved"])
         loaded = ProviderProjectPolicyManager(self.path).get_policy("film-project")
@@ -33,6 +34,7 @@ class ProviderProjectPolicyManagerTests(unittest.TestCase):
         self.assertEqual(loaded["policy"]["max_estimated_cost"], 2.5)
         self.assertFalse(loaded["policy"]["automatic_fallback"])
         self.assertTrue(loaded["policy"]["require_health_evidence"])
+        self.assertEqual(loaded["policy"]["required_region"], "sa-riyadh-1")
 
     def test_invalid_policy_fields_values_and_allow_deny_overlap_fail_closed(self):
         invalid = [
@@ -65,6 +67,14 @@ class ProviderProjectPolicyManagerTests(unittest.TestCase):
         self.assertEqual(len(reloaded.data["projects"]), len(policies))
         for project_id, policy in policies:
             self.assertEqual(reloaded.get_policy(project_id)["policy"], policy)
+
+    def test_required_region_rejects_unsafe_values(self):
+        for region in ("", "sa/riyadh", "region with spaces", ["region"]):
+            result = self.manager.set_policy(
+                "regional-project", {"required_region": region}
+            )
+            self.assertFalse(result["saved"])
+            self.assertEqual(result["status"], "INVALID_PROJECT_POLICY")
 
     def test_remove_policy_and_missing_policy_are_explicit(self):
         self.manager.set_policy("film-project", {"allowed_providers": ["huggingface"]})

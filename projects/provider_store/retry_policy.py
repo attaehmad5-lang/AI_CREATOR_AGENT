@@ -10,6 +10,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
 from .safe_numbers import finite_number
+from .provider_error_policy import classify_provider_error
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,9 @@ class RetryPolicy:
 
     @staticmethod
     def _retry_after_seconds(value: str | int | float | None) -> float | None:
-        if value is None:
+        if value is None or isinstance(value, bool):
+            return None
+        if not isinstance(value, (str, int, float)):
             return None
         try:
             seconds = float(value)
@@ -76,6 +79,7 @@ class RetryPolicy:
         exception: BaseException | None = None,
         retry_after: str | int | float | None = None,
         idempotent: bool = True,
+        provider_code: str | None = None,
     ) -> RetryDecision:
         if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
             return RetryDecision(False, attempt if isinstance(attempt, int) else 0, 0.0, "INVALID_ATTEMPT")
@@ -109,9 +113,20 @@ class RetryPolicy:
             return RetryDecision(False, attempt, 0.0, "INVALID_STATUS_CODE")
         if not idempotent:
             return RetryDecision(False, attempt, 0.0, "NON_IDEMPOTENT_REQUEST")
-        if status_code in {401, 403}:
+        # Explicit provider error codes override generic HTTP retry rules. In
+        # particular, HTTP 429 can mean exhausted credits, not transient throttling.
+        effective_status = status_code if status_code is not None else 500
+        error_classification = classify_provider_error(
+            effective_status, provider_code=provider_code
+        )
+        if error_classification.get("category") in {"authentication", "permission"} or status_code in {401, 403}:
             return RetryDecision(False, attempt, 0.0, "AUTHORIZATION_FAILURE")
-        retryable_status = status_code == 429 or (status_code is not None and 500 <= status_code <= 599)
+        if error_classification.get("category") in {
+            "billing", "credits_exhausted", "request", "invalid_input",
+        }:
+            return RetryDecision(False, attempt, 0.0, "PROVIDER_ERROR_NON_RETRYABLE")
+        explicit_rate_limit = error_classification.get("category") == "rate_limit"
+        retryable_status = status_code == 429 or explicit_rate_limit or (status_code is not None and 500 <= status_code <= 599)
         retryable_exception = isinstance(exception, (TimeoutError, ConnectionError, OSError))
         if not retryable_status and not retryable_exception:
             return RetryDecision(False, attempt, 0.0, "NON_RETRYABLE_FAILURE")
@@ -151,10 +166,13 @@ class RetryPolicy:
             return RetryDecision(False, attempt, 0.0, "INVALID_JITTER_SOURCE")
         delay = min(self.max_delay_seconds, exponential + jitter)
         header_delay = self._retry_after_seconds(retry_after)
-        if status_code == 429 and header_delay is not None:
-            # Never let an untrusted Retry-After value bypass the configured backoff cap.
-            delay = min(self.max_delay_seconds, max(delay, header_delay))
-            reason = "RATE_LIMIT_RETRY_AFTER" if header_delay else "RATE_LIMIT_BACKOFF"
+        if status_code == 429 or explicit_rate_limit:
+            if header_delay is not None:
+                # Never let an untrusted Retry-After value bypass the configured backoff cap.
+                delay = min(self.max_delay_seconds, max(delay, header_delay))
+                reason = "RATE_LIMIT_RETRY_AFTER" if header_delay else "RATE_LIMIT_BACKOFF"
+            else:
+                reason = "RATE_LIMIT_BACKOFF"
         else:
             reason = "TRANSIENT_HTTP_FAILURE" if retryable_status else "TRANSIENT_NETWORK_FAILURE"
         return RetryDecision(True, attempt, delay, reason)

@@ -5,7 +5,7 @@ import unittest
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
-from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.connection_manager import ConnectionManager, simulate_provider_policy
 
 
 def _set_provider_state_in_process(args):
@@ -776,6 +776,26 @@ class ConnectionManagerTests(unittest.TestCase):
         }
         self.assertEqual(self.manager.register_provider(provider)["status"], "INVALID_PROVIDER")
 
+    def test_register_provider_rejects_catalog_schema_violations_without_persisting(self):
+        invalid_auth = {
+            "id": "bad_auth", "name": "Bad Auth", "category": "image",
+            "auth_type": "MAGIC", "connection_type": "LOCAL",
+        }
+        result = self.manager.register_provider(invalid_auth)
+        self.assertEqual(result["status"], "INVALID_PROVIDER")
+        self.assertFalse(result["saved"])
+        self.assertFalse(self.manager.provider_exists("bad_auth"))
+        self.assertTrue(any("auth_type is unsupported" in error for error in result["errors"]))
+
+        invalid_capabilities = {
+            "id": "bad_caps", "name": "Bad Capabilities", "category": "image",
+            "auth_type": "NONE", "connection_type": "LOCAL",
+            "capabilities": ["Generate-Image"],
+        }
+        result = self.manager.register_provider(invalid_capabilities)
+        self.assertEqual(result["status"], "INVALID_PROVIDER")
+        self.assertFalse(self.manager.provider_exists("bad_caps"))
+
     def test_discovery_filters_by_category_case_insensitively(self):
         results = self.manager.discover_providers(category="IMAGE")
         self.assertEqual({item["id"] for item in results}, {"public_image", "token_image"})
@@ -1195,6 +1215,239 @@ class ConnectionManagerTests(unittest.TestCase):
             "HOST_ALLOWLIST_REQUIRED",
         )
         self.assertNotIn("configuration", self.manager.get_state("public_image"))
+
+
+
+
+class ProviderPolicySimulationTests(unittest.TestCase):
+    def setUp(self):
+        self.catalog = {
+            "providers": [
+                {
+                    "id": "free_image",
+                    "name": "Free Image",
+                    "category": "image",
+                    "auth_type": "API_TOKEN",
+                    "connection_type": "API",
+                    "enabled": False,
+                    "subscription_required": False,
+                    "allowed_hosts": ["api.example.com"],
+                    "official_api_url": "https://api.example.com/docs",
+                    "token_env": "FREE_IMAGE_TOKEN",
+                    "capabilities": ["text_to_image"],
+                },
+                {
+                    "id": "paid_image",
+                    "name": "Paid Image",
+                    "category": "image",
+                    "auth_type": "API_KEY",
+                    "connection_type": "API",
+                    "enabled": False,
+                    "subscription_required": True,
+                    "allowed_hosts": ["paid.example.com"],
+                    "official_api_url": "https://paid.example.com/docs",
+                    "token_env": "PAID_IMAGE_KEY",
+                    "capabilities": ["text_to_image"],
+                },
+                {
+                    "id": "retired",
+                    "name": "Retired Provider",
+                    "category": "video",
+                    "auth_type": "API_KEY",
+                    "connection_type": "API",
+                    "enabled": False,
+                    "deprecated": True,
+                    "subscription_required": False,
+                    "allowed_hosts": ["retired.example.com"],
+                    "official_api_url": "https://retired.example.com/docs",
+                    "token_env": "RETIRED_KEY",
+                    "capabilities": ["text_to_video"],
+                },
+            ]
+        }
+
+    def test_free_provider_with_complete_metadata_is_allowed_in_dry_run(self):
+        result = simulate_provider_policy(
+            self.catalog, [{"provider_id": "free_image", "enabled": True}]
+        )
+        self.assertEqual(result["status"], "WOULD_APPLY")
+        self.assertTrue(result["dry_run"])
+        self.assertFalse(result["applied"])
+        self.assertFalse(result["real_provider_call"])
+        self.assertTrue(result["results"][0]["allowed"])
+        self.assertFalse(self.catalog["providers"][0]["enabled"])
+
+    def test_paid_provider_requires_explicit_approval(self):
+        result = simulate_provider_policy(
+            self.catalog, [{"provider_id": "paid_image", "enabled": True}]
+        )
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn(
+            "explicit paid-usage approval is required",
+            result["results"][0]["reasons"],
+        )
+        self.assertFalse(result["applied"])
+
+    def test_paid_provider_can_be_simulated_after_approval_without_applying(self):
+        result = simulate_provider_policy(
+            self.catalog,
+            [{"provider_id": "paid_image", "enabled": True}],
+            paid_usage_approved=True,
+        )
+        self.assertEqual(result["status"], "WOULD_APPLY")
+        self.assertTrue(result["results"][0]["allowed"])
+        self.assertFalse(self.catalog["providers"][1]["enabled"])
+
+    def test_deprecated_provider_is_never_allowed_to_enable(self):
+        result = simulate_provider_policy(
+            self.catalog,
+            [{"provider_id": "retired", "enabled": True}],
+            paid_usage_approved=True,
+        )
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("deprecated providers cannot be enabled", result["results"][0]["reasons"])
+
+    def test_missing_capabilities_and_docs_fail_closed(self):
+        provider = self.catalog["providers"][0]
+        provider.pop("capabilities")
+        provider.pop("official_api_url")
+        result = simulate_provider_policy(
+            self.catalog, [{"provider_id": "free_image", "enabled": True}]
+        )
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertFalse(result["results"][0]["allowed"])
+        self.assertEqual(len(result["results"][0]["reasons"]), 2)
+
+    def test_unknown_provider_and_duplicate_changes_are_rejected(self):
+        result = simulate_provider_policy(self.catalog, [
+            {"provider_id": "missing", "enabled": True},
+            {"provider_id": "free_image", "enabled": True},
+            {"provider_id": "free_image", "enabled": False},
+        ])
+        self.assertEqual(result["status"], "INVALID_INPUT")
+        self.assertEqual(result["rejected"], 2)
+        self.assertFalse(result["applied"])
+
+    def test_malformed_input_fails_closed(self):
+        for catalog, changes in (
+            (None, []),
+            ({"providers": "not-a-list"}, []),
+            (self.catalog, "not-a-list"),
+            (self.catalog, [{"provider_id": "free_image", "enabled": "yes"}]),
+        ):
+            with self.subTest(catalog_type=type(catalog).__name__, changes_type=type(changes).__name__):
+                result = simulate_provider_policy(catalog, changes)
+                self.assertNotEqual(result["status"], "WOULD_APPLY")
+                self.assertFalse(result["applied"])
+                self.assertTrue(result["dry_run"])
+
+    def test_duplicate_catalog_ids_invalidate_simulation(self):
+        duplicate_catalog = {
+            "providers": [
+                {"id": "same", "enabled": False},
+                {"id": "same", "enabled": False},
+            ]
+        }
+        result = simulate_provider_policy(
+            duplicate_catalog, [{"provider_id": "same", "enabled": True}]
+        )
+        self.assertEqual(result["status"], "INVALID_CATALOG")
+        self.assertFalse(result["applied"])
+
+
+    def _build_manager(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        catalog_path = root / "catalog.json"
+        state_path = root / "state.json"
+        catalog_path.write_text(
+            json.dumps({"providers": [dict(p) for p in self.catalog["providers"][:2]]}),
+            encoding="utf-8",
+        )
+        state_path.write_text(
+            json.dumps({"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}),
+            encoding="utf-8",
+        )
+        return ConnectionManager(catalog_path, state_path)
+
+    def test_provider_activation_writes_secret_free_audit_event(self):
+        manager = self._build_manager()
+        result = manager.set_provider_enabled("free_image", True)
+        self.assertEqual(result["status"], "ENABLED")
+        self.assertTrue(manager.audit_path.is_file())
+        events = [
+            json.loads(line)
+            for line in manager.audit_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "provider.activation_decision")
+        self.assertEqual(events[0]["provider_id"], "free_image")
+        self.assertEqual(events[0]["decision"], "ALLOW")
+        self.assertEqual(events[0]["policy_simulation_status"], "WOULD_APPLY")
+        self.assertNotIn("FREE_IMAGE_TOKEN", manager.audit_path.read_text(encoding="utf-8"))
+
+    def test_activation_audit_hash_chain_detects_tampering(self):
+        manager = self._build_manager()
+        first = manager.set_provider_enabled("free_image", True)
+        self.assertEqual(first["status"], "ENABLED")
+        records = [
+            json.loads(line)
+            for line in manager.audit_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(records[0]["previous_hash"], "0" * 64)
+        self.assertEqual(len(records[0]["event_hash"]), 64)
+
+        records[0]["decision"] = "DENY"
+        manager.audit_path.write_text(
+            json.dumps(records[0]) + "\n", encoding="utf-8"
+        )
+        second = manager.set_provider_enabled("free_image", False)
+        self.assertEqual(second["status"], "AUDIT_WRITE_FAILED")
+        self.assertFalse(second["saved"])
+        self.assertTrue(manager.is_provider_enabled("free_image"))
+
+    def test_audit_write_failure_blocks_provider_activation(self):
+        manager = self._build_manager()
+        manager.audit_path = manager.state_path.parent
+        result = manager.set_provider_enabled("free_image", True)
+        self.assertEqual(result["status"], "AUDIT_WRITE_FAILED")
+        self.assertFalse(result["saved"])
+        self.assertFalse(manager.is_provider_enabled("free_image"))
+
+    def test_paid_activation_denial_is_audited_without_mutating_catalog(self):
+        manager = self._build_manager()
+        result = manager.set_provider_enabled("paid_image", True)
+        self.assertEqual(result["status"], "POLICY_SIMULATION_BLOCKED")
+        self.assertFalse(manager.is_provider_enabled("paid_image"))
+        events = [
+            json.loads(line)
+            for line in manager.audit_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["decision"], "DENY")
+        self.assertEqual(events[0]["policy_simulation_status"], "BLOCKED")
+
+    def test_provider_activation_runs_policy_simulation_before_persisting(self):
+        manager = self._build_manager()
+        result = manager.set_provider_enabled("free_image", True)
+        self.assertEqual(result["status"], "ENABLED")
+        self.assertTrue(manager.is_provider_enabled("free_image"))
+        self.assertFalse(result["policy_simulation"]["applied"])
+        self.assertTrue(result["policy_simulation"]["dry_run"])
+
+    def test_paid_provider_activation_requires_explicit_approval(self):
+        manager = self._build_manager()
+        denied = manager.set_provider_enabled("paid_image", True)
+        self.assertEqual(denied["status"], "POLICY_SIMULATION_BLOCKED")
+        self.assertFalse(denied["saved"])
+        self.assertFalse(manager.is_provider_enabled("paid_image"))
+
+        approved = manager.set_provider_enabled(
+            "paid_image", True, paid_usage_approved=True
+        )
+        self.assertEqual(approved["status"], "ENABLED")
+        self.assertTrue(manager.is_provider_enabled("paid_image"))
 
 
 if __name__ == "__main__":

@@ -168,5 +168,33 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         )
 
 
+
+    def test_riff_container_subtypes_cannot_be_mislabeled(self):
+        # RIFF alone is not enough: WebP, WAV, and AVI have distinct subtype tags.
+        cases = (
+            ("valid.webp", b"RIFF\x04\x00\x00\x00WEBPpayload", "image", True),
+            ("fake.webp", b"RIFF\x04\x00\x00\x00AVI payload", "image", False),
+            ("valid.wav", b"RIFF\x04\x00\x00\x00WAVEpayload", "audio", True),
+            ("fake.wav", b"RIFF\x04\x00\x00\x00AVI payload", "audio", False),
+            ("valid.avi", b"RIFF\x04\x00\x00\x00AVI payload", "video", True),
+            ("fake.avi", b"RIFF\x04\x00\x00\x00WAVEpayload", "video", False),
+        )
+        for filename, payload, modality, expected_valid in cases:
+            with self.subTest(filename=filename):
+                path = self.root / filename
+                path.write_bytes(payload)
+                result = self.validator.validate_file(path, modality=modality)
+                self.assertEqual(result["valid"], expected_valid)
+                if not expected_valid:
+                    self.assertEqual(result["status"], "SIGNATURE_MISMATCH")
+
+    def test_mp4_container_signature_is_checked_at_iso_bmff_offset(self):
+        path = self.root / "clip.mp4"
+        path.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"test payload")
+        result = self.validator.validate_file(path, modality="video")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["mime_type"], "video/mp4")
+
+
 if __name__ == "__main__":
     unittest.main()

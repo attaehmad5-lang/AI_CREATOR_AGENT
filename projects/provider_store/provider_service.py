@@ -30,11 +30,15 @@ class ProviderService:
         webhook_verifier: Any | None = None,
         job_manager: Any | None = None,
         metrics_manager: Any | None = None,
+        slo_manager: Any | None = None,
         quality_policy: Any | None = None,
         benchmark_manager: Any | None = None,
+        ab_benchmark_manager: Any | None = None,
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
+        local_model_adapter: Any | None = None,
+        recovery_coordinator: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -53,11 +57,15 @@ class ProviderService:
             (webhook_verifier, "verify", "webhook_verifier"),
             (job_manager, "submit", "job_manager"),
             (metrics_manager, "record", "metrics_manager"),
+            (slo_manager, "evaluate", "slo_manager"),
             (quality_policy, "evaluate", "quality_policy"),
             (benchmark_manager, "record", "benchmark_manager"),
+            (ab_benchmark_manager, "plan", "ab_benchmark_manager"),
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
+            (local_model_adapter, "generate_text", "local_model_adapter"),
+            (recovery_coordinator, "run_due_rechecks", "recovery_coordinator"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -77,11 +85,15 @@ class ProviderService:
         self.webhook_verifier = webhook_verifier
         self.job_manager = job_manager
         self.metrics_manager = metrics_manager
+        self.slo_manager = slo_manager
         self.quality_policy = quality_policy
         self.benchmark_manager = benchmark_manager
+        self.ab_benchmark_manager = ab_benchmark_manager
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
+        self.local_model_adapter = local_model_adapter
+        self.recovery_coordinator = recovery_coordinator
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -95,6 +107,111 @@ class ProviderService:
                 "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
             }
         return None
+
+    def _authorize_job_scope(
+        self, principal_id: str | None, tenant_id: str | None
+    ) -> dict[str, Any] | None:
+        """Check tenant membership before any job metadata or state is accessed."""
+        if self.authorization_manager is None:
+            if tenant_id is not None:
+                return {"allowed": False, "status": "TENANT_AUTHORIZATION_REQUIRED"}
+            return None
+        checker = getattr(self.authorization_manager, "authorize_tenant", None)
+        if not callable(checker):
+            if tenant_id is not None:
+                return {"allowed": False, "status": "TENANT_AUTHORIZATION_UNAVAILABLE"}
+            return None
+        try:
+            result = checker(principal_id, tenant_id)
+        except Exception as exc:
+            return {"allowed": False, "status": "TENANT_AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("allowed") is not True:
+            return result if isinstance(result, dict) else {
+                "allowed": False, "status": "INVALID_TENANT_AUTHORIZATION_RESPONSE"
+            }
+        return None
+
+    def set_provider_enabled(
+        self,
+        provider_id: str,
+        enabled: bool,
+        *,
+        principal_id: str | None = None,
+        paid_usage_approved: bool = False,
+    ) -> dict[str, Any]:
+        """Authorize provider activation changes before delegating to the connection manager."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_REQUIRED", "saved": False}
+        if not isinstance(enabled, bool):
+            return {"status": "INVALID_ENABLED_VALUE", "saved": False}
+        if not isinstance(paid_usage_approved, bool):
+            return {"status": "INVALID_PAID_USAGE_APPROVAL", "saved": False}
+        operation = "provider.enable" if enabled else "provider.disable"
+        authorization = self._authorize_operation(principal_id, operation)
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "saved": False,
+                "authorization": authorization,
+            }
+        if enabled and paid_usage_approved:
+            billing_authorization = self._authorize_operation(principal_id, "billing.approve")
+            if billing_authorization is not None:
+                return {
+                    "status": "PAID_USAGE_APPROVAL_DENIED",
+                    "saved": False,
+                    "authorization": billing_authorization,
+                }
+        setter = getattr(self.connection_manager, "set_provider_enabled", None)
+        if not callable(setter):
+            return {"status": "MANAGEMENT_OPERATION_UNAVAILABLE", "saved": False}
+        try:
+            result = setter(
+                provider_id,
+                enabled,
+                paid_usage_approved=paid_usage_approved,
+            )
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_ENABLEMENT_FAILED",
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_MANAGEMENT_RESPONSE", "saved": False}
+        return result
+
+    def configure_provider(
+        self,
+        provider_id: str,
+        *,
+        principal_id: str | None = None,
+        **configuration: Any,
+    ) -> dict[str, Any]:
+        """Authorize provider configuration changes and return only safe manager results."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_REQUIRED", "saved": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "saved": False,
+                "authorization": authorization,
+            }
+        configure = getattr(self.connection_manager, "configure_provider", None)
+        if not callable(configure):
+            return {"status": "MANAGEMENT_OPERATION_UNAVAILABLE", "saved": False}
+        try:
+            result = configure(provider_id, **configuration)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_CONFIGURATION_FAILED",
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_MANAGEMENT_RESPONSE", "saved": False}
+        return result
 
     def verify_provider(
         self,
@@ -122,6 +239,12 @@ class ProviderService:
                 "provider": provider_id,
                 "verified": False,
                 "error_type": type(exc).__name__,
+            }
+        if not isinstance(connection, dict):
+            connection = {
+                "status": "INVALID_CONNECTION_RESPONSE",
+                "provider": provider_id,
+                "verified": False,
             }
         health: dict[str, Any] | None = None
         if self.health_manager is not None and isinstance(provider_id, str) and provider_id.strip():
@@ -279,6 +402,12 @@ class ProviderService:
                 "verified": False,
                 "error_type": type(exc).__name__,
             }
+        if not isinstance(connection, dict):
+            connection = {
+                "status": "INVALID_CONNECTION_RESPONSE",
+                "provider": provider_id,
+                "verified": False,
+            }
         health: dict[str, Any] | None = None
         if self.health_manager is not None and isinstance(provider_id, str) and provider_id.strip():
             try:
@@ -304,9 +433,13 @@ class ProviderService:
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {"status": "TENANT_AUTHORIZATION_DENIED", "accepted": False, "authorization": scope_authorization}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "accepted": False, "authorization": authorization}
@@ -314,40 +447,85 @@ class ProviderService:
             result = self.job_manager.submit(
                 job_id=job_id, project_id=project_id, provider_id=provider_id,
                 payload_ref=payload_ref, priority=priority,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
             )
         except Exception as exc:
             return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
 
-    def poll_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
+    def poll_job(
+        self, *, job_id: str, principal_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {"status": "TENANT_AUTHORIZATION_DENIED", "job": None, "authorization": scope_authorization}
         authorization = self._authorize_operation(principal_id, "provider.read")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
         try:
-            result = self.job_manager.poll(job_id=job_id)
+            result = self.job_manager.poll(
+                job_id=job_id,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
+            )
         except Exception as exc:
             return {"status": "JOB_POLL_FAILED", "job": None, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
 
-    def claim_next_job(self, *, worker_id: str, principal_id: str | None = None) -> dict[str, Any]:
+    def claim_next_job(
+        self, *, worker_id: str, principal_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {"status": "TENANT_AUTHORIZATION_DENIED", "job": None, "authorization": scope_authorization}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
         try:
-            result = self.job_manager.claim_next(worker_id=worker_id)
+            result = self.job_manager.claim_next(
+                worker_id=worker_id,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
+            )
         except Exception as exc:
             return {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
 
-    def complete_job(self, *, job_id: str, worker_id: str, success: bool,
-                     result_ref: str | None = None, error_code: str | None = None,
-                     principal_id: str | None = None) -> dict[str, Any]:
+    def renew_job_lease(
+        self, *, job_id: str, worker_id: str,
+        principal_id: str | None = None, tenant_id: str | None = None,
+        lease_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        """Renew an owned async job lease through the same authorization boundary."""
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {"status": "TENANT_AUTHORIZATION_DENIED", "saved": False, "authorization": scope_authorization}
+        authorization = self._authorize_operation(principal_id, "provider.generate")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        try:
+            result = self.job_manager.renew_lease(
+                job_id=job_id, worker_id=worker_id, lease_seconds=lease_seconds,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
+            )
+        except Exception as exc:
+            return {"status": "JOB_LEASE_RENEWAL_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+
+    def complete_job(self, *, job_id: str, worker_id: str, success: bool,
+                     result_ref: str | None = None, error_code: str | None = None,
+                     principal_id: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {"status": "TENANT_AUTHORIZATION_DENIED", "saved": False, "authorization": scope_authorization}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
@@ -355,19 +533,29 @@ class ProviderService:
             result = self.job_manager.complete(
                 job_id=job_id, worker_id=worker_id, success=success,
                 result_ref=result_ref, error_code=error_code,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
             )
         except Exception as exc:
             return {"status": "JOB_COMPLETION_FAILED", "saved": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
 
-    def cancel_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
+    def cancel_job(
+        self, *, job_id: str, principal_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {"status": "TENANT_AUTHORIZATION_DENIED", "saved": False, "authorization": scope_authorization}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
         try:
-            result = self.job_manager.cancel(job_id=job_id)
+            result = self.job_manager.cancel(
+                job_id=job_id,
+                **({"tenant_id": tenant_id} if tenant_id is not None else {}),
+            )
         except Exception as exc:
             return {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
@@ -403,6 +591,194 @@ class ProviderService:
         return result if isinstance(result, dict) else {
             "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
+
+    def generate_local_text(
+        self,
+        *,
+        prompt: str,
+        system: str | None = None,
+        principal_id: str | None = None,
+        project_id: str = "default",
+        request_id: str | None = None,
+        require_fresh_health_check: bool = False,
+        health_stale_after_seconds: float = 300.0,
+        health_max_latency_ms: float | None = None,
+        data_categories: list[str] | tuple[str, ...] = ("user_content",),
+        retention_days: float = 0,
+        provider_training_use: bool = False,
+        user_training_consent: bool = False,
+        provider_id: str = "local-model",
+    ) -> dict[str, Any]:
+        """Generate through an injected loopback-only local adapter with service policy gates."""
+        if self.local_model_adapter is None:
+            return {"status": "LOCAL_MODEL_ADAPTER_UNAVAILABLE", "generated": False}
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 100_000:
+            return {"status": "INVALID_PROMPT", "generated": False}
+        if system is not None and (not isinstance(system, str) or len(system) > 20_000):
+            return {"status": "INVALID_SYSTEM_PROMPT", "generated": False}
+        if not isinstance(project_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", project_id):
+            return {"status": "INVALID_PROJECT_ID", "generated": False}
+        if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", provider_id):
+            return {"status": "INVALID_PROVIDER_ID", "generated": False}
+        if request_id is not None and (
+            not isinstance(request_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request_id)
+        ):
+            return {"status": "INVALID_REQUEST_ID", "generated": False}
+        authorization = self._authorize_operation(principal_id, "provider.generate")
+        if authorization is not None:
+            # Do not forward authorization-manager internals or arbitrary denial details.
+            return {"status": "AUTHORIZATION_DENIED", "generated": False}
+        if self.feature_flag_manager is not None:
+            try:
+                flag = self.feature_flag_manager.evaluate(
+                    "provider_generation", project_id=project_id, request_id=request_id
+                )
+            except Exception as exc:
+                return {"status": "FEATURE_FLAG_CHECK_FAILED", "generated": False, "error_type": type(exc).__name__}
+            if not isinstance(flag, dict) or flag.get("enabled") is not True:
+                return {"status": "FEATURE_DISABLED", "generated": False}
+        if self.sensitive_data_policy is not None:
+            try:
+                scan = self.sensitive_data_policy.inspect({"prompt": prompt, "system": system or ""})
+            except Exception as exc:
+                return {"status": "SENSITIVE_DATA_SCAN_FAILED", "generated": False, "error_type": type(exc).__name__}
+            if not isinstance(scan, dict) or scan.get("allowed") is not True:
+                return {"status": "SENSITIVE_DATA_BLOCKED", "generated": False}
+        if (
+            not isinstance(data_categories, (list, tuple))
+            or not data_categories
+            or any(not isinstance(item, str) or not item.strip() for item in data_categories)
+            or len(set(data_categories)) != len(data_categories)
+            or not isinstance(provider_training_use, bool)
+            or not isinstance(user_training_consent, bool)
+            or isinstance(retention_days, bool)
+            or not isinstance(retention_days, int)
+            or not 0 <= retention_days <= 3650
+        ):
+            return {"status": "INVALID_DATA_HANDLING_POLICY_INPUT", "generated": False}
+        if self.data_handling_policy is not None:
+            try:
+                data_policy = self.data_handling_policy.evaluate(
+                    provider_id=provider_id,
+                    data_categories=list(data_categories),
+                    retention_days=retention_days,
+                    provider_training_use=provider_training_use,
+                    user_training_consent=user_training_consent,
+                )
+            except Exception as exc:
+                return {
+                    "status": "PROVIDER_DATA_POLICY_CHECK_FAILED",
+                    "generated": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(data_policy, dict) or data_policy.get("allowed") is not True:
+                return {"status": "PROVIDER_DATA_POLICY_REJECTED", "generated": False}
+        if not isinstance(require_fresh_health_check, bool):
+            return {"status": "INVALID_HEALTH_CHECK_POLICY", "generated": False}
+        if require_fresh_health_check:
+            stale_limit = finite_number(health_stale_after_seconds, minimum=0)
+            latency_limit = (
+                None if health_max_latency_ms is None
+                else finite_number(health_max_latency_ms, minimum=0)
+            )
+            if stale_limit is None or (
+                health_max_latency_ms is not None and latency_limit is None
+            ):
+                return {"status": "INVALID_HEALTH_CHECK_POLICY", "generated": False}
+            eligibility_fn = getattr(self.health_manager, "is_eligible", None)
+            if not callable(eligibility_fn):
+                return {"status": "PROVIDER_HEALTH_CHECK_UNAVAILABLE", "generated": False}
+            try:
+                eligibility = eligibility_fn(
+                    provider_id,
+                    stale_after_seconds=stale_limit,
+                    max_latency_ms=latency_limit,
+                )
+            except Exception as exc:
+                return {
+                    "status": "PROVIDER_HEALTH_CHECK_FAILED",
+                    "generated": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(eligibility, dict) or eligibility.get("eligible") is not True:
+                return {"status": "PROVIDER_HEALTH_REJECTED", "generated": False}
+        try:
+            result = self.local_model_adapter.generate_text(prompt, system=system)
+        except Exception as exc:
+            return {"status": "LOCAL_MODEL_REQUEST_FAILED", "generated": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or not isinstance(result.get("generated"), bool):
+            return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
+        status = result.get("status")
+        if not isinstance(status, str) or not status.strip():
+            return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
+        if result["generated"] is True:
+            text = result.get("text")
+            if not isinstance(text, str) or not text.strip():
+                return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
+            try:
+                output_size_bytes = len(text.encode("utf-8"))
+            except UnicodeEncodeError:
+                return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
+            if output_size_bytes > 2 * 1024 * 1024:
+                return {"status": "INVALID_LOCAL_MODEL_RESPONSE", "generated": False}
+            # Return a strict public schema; never forward arbitrary adapter fields
+            # that could accidentally expose prompts, credentials, or internals.
+            safe_result = {"status": status, "generated": True, "text": text}
+            for key in ("provider_id", "model_id"):
+                value = result.get(key)
+                if isinstance(value, str) and value.strip():
+                    safe_result[key] = value
+            if result.get("done") is True:
+                safe_result["done"] = True
+            return safe_result
+        safe_failure = {"status": status, "generated": False}
+        error_type = result.get("error_type")
+        if isinstance(error_type, str) and error_type.isidentifier():
+            safe_failure["error_type"] = error_type
+        return safe_failure
+
+    def plan_ab_benchmark(self, *, principal_id: str | None = None, **plan_options: Any) -> dict[str, Any]:
+        """Create a safe A/B plan and require billing.approve for any paid estimate."""
+        if self.ab_benchmark_manager is None:
+            return {"status": "AB_BENCHMARK_MANAGER_UNAVAILABLE", "executable": False}
+        if not isinstance(plan_options, dict):
+            return {"status": "INVALID_BENCHMARK_OPTIONS", "executable": False}
+        allow_paid = plan_options.get("allow_paid", False)
+        if allow_paid is True:
+            if self.authorization_manager is None:
+                return {"status": "AUTHORIZATION_REQUIRED", "executable": False}
+            authorization = self._authorize_operation(principal_id, "billing.approve")
+            if authorization is not None:
+                return {
+                    "status": "PAID_BENCHMARK_APPROVAL_DENIED",
+                    "executable": False,
+                    "authorization": authorization,
+                }
+            benchmark_id = plan_options.get("benchmark_id")
+            if not isinstance(benchmark_id, str) or not benchmark_id.strip():
+                return {"status": "INVALID_BENCHMARK_ID", "executable": False}
+            # Never trust a caller-supplied approval object; mint the plan token
+            # only after the authorization manager grants billing.approve.
+            plan_options["paid_approval"] = {
+                "approved": True,
+                "benchmark_id": benchmark_id,
+                "approved_by": principal_id,
+            }
+        else:
+            # Prevent a forged approval dict from enabling paid planning.
+            plan_options["paid_approval"] = None
+        try:
+            result = self.ab_benchmark_manager.plan(**plan_options)
+        except Exception as exc:
+            return {
+                "status": "AB_BENCHMARK_PLANNING_FAILED",
+                "executable": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_AB_BENCHMARK_RESPONSE", "executable": False}
+        return result
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
@@ -444,6 +820,7 @@ class ProviderService:
         estimated_cost: float,
         adapter: Any,
         modality: str,
+        trace_id: str | None = None,
         principal_id: str | None = None,
         data_categories: tuple[str, ...] | list[str] = ("user_content",),
         retention_days: int = 0,
@@ -452,6 +829,10 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        require_fresh_health_check: bool = False,
+        paid_usage_approved: bool = False,
+        health_stale_after_seconds: float = 300.0,
+        health_max_latency_ms: float | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
@@ -463,14 +844,47 @@ class ProviderService:
             return {"status": "INVALID_ADAPTER", "executed": False}
         if not isinstance(adapter_options, (dict, type(None))):
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
-        if not isinstance(request_id, str) or not request_id.strip():
+        if (
+            not isinstance(request_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request_id)
+        ):
             return {"status": "INVALID_REQUEST_ID", "executed": False}
+        if trace_id is not None and (
+            not isinstance(trace_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", trace_id)
+        ):
+            return {"status": "INVALID_TRACE_ID", "executed": False}
         if not isinstance(category, str) or not category.strip():
             return {"status": "INVALID_CATEGORY", "executed": False}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        if not isinstance(paid_usage_approved, bool):
+            return {"status": "INVALID_PAID_USAGE_APPROVAL", "executed": False}
+
+        authorization = None
+        if self.authorization_manager is not None:
+            try:
+                authorization = self.authorization_manager.authorize(principal_id, "provider.generate")
+            except Exception as exc:
+                return {"status": "AUTHORIZATION_CHECK_FAILED", "executed": False, "error_type": type(exc).__name__}
+            if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+                return {
+                    "status": "AUTHORIZATION_DENIED", "executed": False,
+                    "authorization": authorization if isinstance(authorization, dict) else {
+                        "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
+                    },
+                }
+
+        tenant_id = route_options.get("tenant_id")
+        scope_authorization = self._authorize_job_scope(principal_id, tenant_id)
+        if scope_authorization is not None:
+            return {
+                "status": "TENANT_AUTHORIZATION_DENIED",
+                "executed": False,
+                "authorization": scope_authorization,
+            }
 
         feature_flag_result = None
         if self.feature_flag_manager is not None:
@@ -493,20 +907,6 @@ class ProviderService:
                     },
                 }
 
-        authorization = None
-        if self.authorization_manager is not None:
-            try:
-                authorization = self.authorization_manager.authorize(principal_id, "provider.generate")
-            except Exception as exc:
-                return {"status": "AUTHORIZATION_CHECK_FAILED", "executed": False, "error_type": type(exc).__name__}
-            if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
-                return {
-                    "status": "AUTHORIZATION_DENIED", "executed": False,
-                    "authorization": authorization if isinstance(authorization, dict) else {
-                        "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
-                    },
-                }
-
         sensitive_data_scan = None
         if self.sensitive_data_policy is not None:
             try:
@@ -518,6 +918,30 @@ class ProviderService:
                     "status": "SENSITIVE_DATA_BLOCKED", "executed": False,
                     "sensitive_data_scan": sensitive_data_scan if isinstance(sensitive_data_scan, dict) else {
                         "allowed": False, "status": "INVALID_SENSITIVE_DATA_SCAN_RESPONSE"
+                    },
+                }
+
+        # A caller-provided provider set is not itself proof of paid-use approval.
+        paid_approved_providers = route_options.get("paid_approved_providers")
+        if paid_approved_providers is not None and not isinstance(
+            paid_approved_providers, (set, frozenset)
+        ):
+            return {"status": "INVALID_PAID_APPROVAL_SET", "executed": False}
+        if paid_approved_providers is not None and any(
+            not isinstance(value, str) or not value.strip()
+            for value in paid_approved_providers
+        ):
+            return {"status": "INVALID_PAID_APPROVAL_SET", "executed": False}
+        if paid_approved_providers:
+            if not paid_usage_approved:
+                return {"status": "PAID_USAGE_APPROVAL_REQUIRED", "executed": False}
+            billing_authorization = self._authorize_operation(principal_id, "billing.approve")
+            if self.authorization_manager is None or billing_authorization is not None:
+                return {
+                    "status": "PAID_USAGE_APPROVAL_DENIED",
+                    "executed": False,
+                    "authorization": billing_authorization or {
+                        "allowed": False, "status": "AUTHORIZATION_REQUIRED"
                     },
                 }
 
@@ -534,6 +958,66 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+
+        if not isinstance(require_fresh_health_check, bool):
+            release = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            return {
+                "status": "INVALID_HEALTH_CHECK_POLICY", "executed": False,
+                "release": release,
+            }
+        if require_fresh_health_check:
+            stale_limit = finite_number(health_stale_after_seconds, minimum=0)
+            latency_limit = (
+                None if health_max_latency_ms is None
+                else finite_number(health_max_latency_ms, minimum=0)
+            )
+            if stale_limit is None or (
+                health_max_latency_ms is not None and latency_limit is None
+            ):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "INVALID_HEALTH_CHECK_POLICY", "executed": False,
+                    "release": release,
+                }
+            eligibility_fn = getattr(self.health_manager, "is_eligible", None)
+            if not callable(eligibility_fn):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "PROVIDER_HEALTH_CHECK_UNAVAILABLE", "executed": False,
+                    "health": {"eligible": False, "status": "HEALTH_MANAGER_UNAVAILABLE"},
+                    "release": release,
+                }
+            try:
+                health_eligibility = eligibility_fn(
+                    provider_id,
+                    stale_after_seconds=stale_limit,
+                    max_latency_ms=latency_limit,
+                )
+            except Exception as exc:
+                health_eligibility = {
+                    "eligible": False, "status": "HEALTH_CHECK_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if (
+                not isinstance(health_eligibility, dict)
+                or health_eligibility.get("eligible") is not True
+            ):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "PROVIDER_HEALTH_REJECTED", "executed": False,
+                    "health": health_eligibility if isinstance(health_eligibility, dict) else {
+                        "eligible": False, "status": "INVALID_HEALTH_CHECK_RESPONSE"
+                    },
+                    "release": release,
+                }
 
         data_policy_result = None
         if self.data_handling_policy is not None:
@@ -566,8 +1050,13 @@ class ProviderService:
                 }
 
         options = dict(adapter_options or {})
+        # Do not allow an unvalidated trace_id hidden in adapter_options to bypass
+        # the explicit API validation below.
+        options.pop("trace_id", None)
         options["provider_id"] = provider_id
         options["request_id"] = request_id
+        if trace_id is not None:
+            options["trace_id"] = trace_id
         started_at = time.monotonic()
         try:
             adapter_result = adapter(**options)
@@ -579,6 +1068,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                "trace_id": trace_id,
                 "reservations_retained": True,
                 "error_type": type(exc).__name__,
             }
@@ -588,6 +1078,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                "trace_id": trace_id,
                 "reservations_retained": True,
             }
         if adapter_result["started"] is False:
@@ -609,6 +1100,7 @@ class ProviderService:
                     "executed": False,
                     "provider": provider_id,
                     "request_id": request_id,
+                "trace_id": trace_id,
                     "reservations_retained": True,
                 }
             released = self.release_unstarted_request(
@@ -619,6 +1111,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                "trace_id": trace_id,
                 "release": released,
             }
 
@@ -768,6 +1261,18 @@ class ProviderService:
                     "saved": False,
                     "error_type": type(exc).__name__,
                 }
+        slo_result = None
+        if self.slo_manager is not None:
+            try:
+                slo_result = self.slo_manager.evaluate(
+                    provider_id=provider_id, category=category
+                )
+            except Exception as exc:
+                slo_result = {
+                    "status": "SLO_EVALUATION_FAILED",
+                    "compliant": False,
+                    "error_type": type(exc).__name__,
+                }
         budget_alerts = None
         if self.budget_alert_manager is not None and self.cost_policy is not None:
             try:
@@ -816,6 +1321,7 @@ class ProviderService:
                     status_code=adapter_result.get("status_code"),
                     retry_after=adapter_result.get("retry_after"),
                     idempotent=adapter_result.get("idempotent", False),
+                    provider_code=provider_code,
                 )
         incident_result = None
         if self.incident_manager is not None and not final_success:
@@ -859,12 +1365,14 @@ class ProviderService:
             "executed": True,
             "provider": provider_id,
             "request_id": request_id,
+                "trace_id": trace_id,
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "media_integrity": media_integrity_result,
             "quality": quality_result,
             "finalization": finalization,
             "metrics": metrics_result,
+            "slo": slo_result,
             "benchmark": benchmark_result,
             "incident": incident_result,
             "provider_error": provider_error,
@@ -883,11 +1391,33 @@ class ProviderService:
             decision = self.retry_policy.decide(**failure)
         except Exception as exc:
             return {"retry": False, "reason": "RETRY_POLICY_FAILED", "error_type": type(exc).__name__}
+
+        # A malformed third-party policy must never turn a truthy string such as
+        # "false" into permission to retry, or inject an unbounded/non-finite delay.
+        try:
+            retry = getattr(decision, "retry", None)
+            attempt = getattr(decision, "attempt", None)
+            delay = getattr(decision, "delay_seconds", None)
+            reason = getattr(decision, "reason", None)
+        except Exception:
+            return {"retry": False, "reason": "INVALID_RETRY_RESPONSE"}
+        normalized_delay = finite_number(delay, minimum=0, maximum=86400)
+        if (
+            not isinstance(retry, bool)
+            or not isinstance(attempt, int)
+            or isinstance(attempt, bool)
+            or attempt < 0
+            or normalized_delay is None
+            or not isinstance(reason, str)
+            or not reason.strip()
+            or len(reason) > 128
+        ):
+            return {"retry": False, "reason": "INVALID_RETRY_RESPONSE"}
         return {
-            "retry": bool(getattr(decision, "retry", False)),
-            "attempt": getattr(decision, "attempt", 0),
-            "delay_seconds": getattr(decision, "delay_seconds", 0.0),
-            "reason": getattr(decision, "reason", "INVALID_RETRY_RESPONSE"),
+            "retry": retry,
+            "attempt": attempt,
+            "delay_seconds": normalized_delay,
+            "reason": reason,
         }
 
     @staticmethod
@@ -1155,3 +1685,31 @@ class ProviderService:
             for item in results.values()
         )
         return {"status": "RELEASED" if released else "RELEASE_PARTIAL", "released": released, **results}
+
+
+    def run_due_provider_rechecks(
+        self, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        """Run due health rechecks after provider-verification authorization."""
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            # Do not expose internal authorization details from this maintenance action.
+            return {
+                "status": "PROVIDER_RECHECK_AUTHORIZATION_DENIED",
+                "probed": [],
+                "results": {},
+            }
+        if self.recovery_coordinator is None:
+            return {"status": "RECOVERY_COORDINATOR_UNAVAILABLE", "probed": [], "results": {}}
+        try:
+            result = self.recovery_coordinator.run_due_rechecks()
+        except Exception as exc:
+            return {
+                "status": "RECOVERY_RECHECK_FAILED",
+                "probed": [],
+                "results": {},
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict) or result.get("status") != "COMPLETED":
+            return {"status": "RECOVERY_RECHECK_BLOCKED", "probed": [], "results": {}}
+        return result
