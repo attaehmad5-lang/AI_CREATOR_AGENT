@@ -18,7 +18,7 @@ class AdvancedProviderStoreTests(unittest.TestCase):
             "providers": [
                 {
                     "id": "advanced-story", "name": "Advanced Story",
-                    "category": "script_story", "auth_type": "API_KEY",
+                    "category": "script_story", "auth_type": "NONE",
                     "connection_type": "API", "enabled": True,
                     "subscription_required": False,
                     "allowed_hosts": ["story.example.test"],
@@ -71,9 +71,10 @@ class AdvancedProviderStoreTests(unittest.TestCase):
             self.assertEqual(initial["providers_disabled"], 1)
             self.assertEqual(initial["connected_verified"], 0)
 
-            manager.store.manager.verify_connectivity(
+            result = manager.store.manager.verify_connectivity(
                 "advanced-story", lambda provider, **kwargs: {"ok": True}
             )
+            self.assertTrue(result["verified"], result)
             updated = manager.status()
             self.assertEqual(updated["connected_verified"], 1)
             self.assertEqual(updated["providers_enabled"], 1)
