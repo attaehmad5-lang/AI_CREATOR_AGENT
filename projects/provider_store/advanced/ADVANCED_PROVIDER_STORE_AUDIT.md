@@ -27,7 +27,7 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 | Compatibility | Existing provider-store compatibility tests remain green | PASS — full CI suite |
 | Full repository regression | Complete Python test suite on supported CI platforms | PASS — 426 tests passed on Ubuntu and Windows in workflow run 40885872101 |
 | Operational verification | Authorized provider-specific connection and modality tests | BLOCKED — requires authorized provider credentials/endpoints; no secrets are stored in the repository |
-| Release | Review CI results and merge only after all required gates pass | Code/test gates pass; operational verification remains outstanding |
+| Release | Review CI results and merge after code/test gates pass | MERGED — PR #86; code/test gates pass, while external provider verification remains outstanding |
 
 ## Security and correctness notes
 
