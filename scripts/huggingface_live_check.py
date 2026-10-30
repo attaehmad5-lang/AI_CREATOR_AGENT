@@ -5,11 +5,17 @@ provider/model may consume account credits or have usage limits.
 """
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 
 def verify_token(token: str) -> None:
@@ -49,22 +55,29 @@ def main() -> int:
         return 0
 
     try:
-        from PIL import Image
-        from projects.generation.providers.huggingface_provider import HuggingFaceProvider
+        image_module = importlib.import_module("PIL.Image")
+        provider_module = importlib.import_module(
+            "projects.generation.providers.huggingface_provider"
+        )
+        provider_class = getattr(provider_module, "HuggingFaceProvider")
 
-        output = Path("output/huggingface-live-test.png")
-        result = HuggingFaceProvider().generate_image(
+        output = REPOSITORY_ROOT / "output" / "huggingface-live-test.png"
+        result = provider_class().generate_image(
             "A cinematic realistic landscape photograph at golden hour, natural colors, no text",
             str(output),
         )
         if result.get("status") != "COMPLETED" or not output.is_file() or output.stat().st_size == 0:
             raise RuntimeError("provider did not produce a non-empty image file")
-        with Image.open(output) as image:
+        with image_module.open(output) as image:
             image.verify()
         print("PASS: Hugging Face image generation returned a valid image file.")
-        print(f"Image artifact: {output} ({output.stat().st_size} bytes)")
+        print(f"Image artifact: {output.relative_to(REPOSITORY_ROOT)} ({output.stat().st_size} bytes)")
+    except ModuleNotFoundError as exc:
+        missing = exc.name or "unknown"
+        print(f"FAIL: required Python module is missing: {missing}")
+        return 1
     except Exception as exc:
-        # Report the exception class only to avoid accidentally exposing request data.
+        # Exception text may contain request data; expose only the exception class.
         print(f"FAIL: image generation failed ({type(exc).__name__}). Check model access, provider availability, and account credits.")
         return 1
 
