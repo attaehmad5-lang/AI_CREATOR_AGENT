@@ -36,28 +36,3 @@ jobs:
           python -c "import json; from pathlib import Path; [json.loads(p.read_text(encoding='utf-8')) for p in Path('projects/provider_store').rglob('*.json')]"
       - name: Run unit and regression tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
-      - name: One-time authenticated Pollinations live smoke test
-        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest'
-        env:
-          POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
-        run: |
-          python - <<'PY'
-          from projects.generation.providers.pollinations_provider import PollinationsProvider
-          result = PollinationsProvider().generate_image(
-              "A single cinematic landscape photograph of a quiet alpine lake at sunrise, natural light, realistic detail",
-              "output/pollinations-live-smoke.png",
-          )
-          print("LIVE_IMAGE_TEST=PASS")
-          print("PROVIDER={}".format(result["provider"]))
-          print("MODEL={}".format(result["model"]))
-          print("BYTES={}".format(result["bytes"]))
-          print("OUTPUT={}".format(result["output"]))
-          PY
-      - name: Upload live image proof
-        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest' && success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pollinations-live-smoke-image
-          path: output/pollinations-live-smoke.png
-          if-no-files-found: ignore
-          retention-days: 3
