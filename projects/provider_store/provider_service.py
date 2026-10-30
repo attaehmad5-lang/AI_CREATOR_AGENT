@@ -452,6 +452,9 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        require_fresh_health: bool = False,
+        health_stale_after_seconds: float = 300.0,
+        max_health_latency_ms: float | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
@@ -534,6 +537,52 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+
+        if not isinstance(require_fresh_health, bool):
+            release = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            return {
+                "status": "INVALID_HEALTH_GATE_POLICY", "executed": False,
+                "release": release,
+            }
+        if require_fresh_health:
+            health_check = getattr(self.health_manager, "is_eligible", None)
+            if not callable(health_check):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "HEALTH_GATE_UNAVAILABLE", "executed": False,
+                    "provider": provider_id, "release": release,
+                }
+            try:
+                eligibility = health_check(
+                    provider_id,
+                    stale_after_seconds=health_stale_after_seconds,
+                    max_latency_ms=max_health_latency_ms,
+                )
+            except Exception as exc:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "HEALTH_GATE_CHECK_FAILED", "executed": False,
+                    "provider": provider_id, "release": release,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(eligibility, dict) or eligibility.get("eligible") is not True:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "HEALTH_GATE_REJECTED", "executed": False,
+                    "provider": provider_id,
+                    "health": eligibility if isinstance(eligibility, dict) else {
+                        "eligible": False, "status": "INVALID_HEALTH_RESPONSE"
+                    },
+                    "release": release,
+                }
 
         data_policy_result = None
         if self.data_handling_policy is not None:
