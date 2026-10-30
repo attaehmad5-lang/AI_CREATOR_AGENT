@@ -96,6 +96,51 @@ class ProviderService:
             }
         return None
 
+    def active_probe_provider(
+        self,
+        provider_id: str,
+        probe: Any,
+        *,
+        timeout_seconds: float = 5.0,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run an injected bounded health probe and persist only safe health metadata."""
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "verified": False, "authorization": authorization,
+            }
+        if self.health_manager is None:
+            return {"status": "HEALTH_MANAGER_UNAVAILABLE", "provider": provider_id, "verified": False}
+        active_probe = getattr(self.health_manager, "active_probe", None)
+        if not callable(active_probe):
+            return {"status": "ACTIVE_PROBE_UNAVAILABLE", "provider": provider_id, "verified": False}
+        try:
+            result = active_probe(provider_id, probe, timeout_seconds=timeout_seconds)
+        except Exception as exc:
+            return {
+                "status": "ACTIVE_PROBE_FAILED", "provider": provider_id,
+                "verified": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_ACTIVE_PROBE_RESPONSE", "provider": provider_id, "verified": False}
+        # Do not return probe exceptions, response bodies, credentials, or arbitrary plugin fields.
+        safe = {
+            "status": result.get("status") if isinstance(result.get("status"), str) else "UNKNOWN",
+            "provider": provider_id,
+            "verified": result.get("verified") is True,
+        }
+        if isinstance(result.get("latency_ms"), (int, float)) and not isinstance(result.get("latency_ms"), bool):
+            latency = finite_number(result["latency_ms"], minimum=0)
+            if latency is not None:
+                safe["latency_ms"] = round(latency, 2)
+        if result.get("verified") is True and result.get("status") == "HEALTHY":
+            safe["saved"] = True
+        else:
+            safe["saved"] = result.get("status") not in {"HEALTH_RECORD_FAILED", "ACTIVE_PROBE_UNAVAILABLE"}
+        return safe
+
     def verify_provider(
         self,
         provider_id: str,
