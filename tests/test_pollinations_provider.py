@@ -6,7 +6,8 @@ from pathlib import Path
 from projects.generation.providers.pollinations_provider import PollinationsProvider
 
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"test-image-bytes"
+PNG = bytes.fromhex("89504e470d0a1a0a") + b"test-image-bytes"
+JPEG = bytes.fromhex("ffd8ff") + b"test-jpeg-bytes"
 
 
 class FakeResponse:
@@ -35,7 +36,7 @@ class FakeSession:
 
 
 class PollinationsProviderTests(unittest.TestCase):
-    def test_sends_bearer_key_and_writes_valid_image(self):
+    def test_sends_bearer_key_and_writes_png_with_matching_extension(self):
         response = FakeResponse({"data": [{"b64_json": base64.b64encode(PNG).decode()}]})
         session = FakeSession(response)
         provider = PollinationsProvider(
@@ -46,6 +47,8 @@ class PollinationsProviderTests(unittest.TestCase):
             output = Path(directory) / "nested" / "image.png"
             result = provider.generate_image("cinematic landscape", output)
             self.assertEqual(output.read_bytes(), PNG)
+            self.assertEqual(result["output"], str(output))
+            self.assertEqual(result["format"], "png")
         args, kwargs = session.calls[0]
         self.assertEqual(args[0], provider.endpoint)
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer test-secret")
@@ -54,6 +57,21 @@ class PollinationsProviderTests(unittest.TestCase):
         self.assertEqual(result["status"], "COMPLETED")
         self.assertNotIn("test-secret", repr(result))
         self.assertTrue(response.closed)
+
+    def test_jpeg_bytes_get_jpg_extension_instead_of_png(self):
+        response = FakeResponse({"data": [{"b64_json": base64.b64encode(JPEG).decode()}]})
+        provider = PollinationsProvider(
+            session=FakeSession(response),
+            environ={"POLLINATIONS_API_KEY": "test-secret"},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            requested = Path(directory) / "image.png"
+            result = provider.generate_image("cinematic landscape", requested)
+            actual = Path(result["output"])
+            self.assertEqual(actual.suffix, ".jpg")
+            self.assertFalse(requested.exists())
+            self.assertEqual(actual.read_bytes(), JPEG)
+            self.assertEqual(result["format"], "jpg")
 
     def test_missing_key_fails_before_network_call(self):
         session = FakeSession(FakeResponse({}))
