@@ -1385,9 +1385,10 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn("secret", result)
 
     def test_active_probe_provider_denies_unauthorized_probe(self):
+        authorization = ProviderAuthorizationManager(self.root / "authorization.json")
         service = ProviderService(
             self.connections, health_manager=self.health,
-            authorization_manager=self.authorization,
+            authorization_manager=authorization,
         )
         result = service.active_probe_provider(
             "image", lambda timeout_seconds: True, principal_id="unknown-principal"
