@@ -75,8 +75,8 @@ class PollinationsProvider:
 
             if not image_bytes or len(image_bytes) > self.max_response_bytes:
                 raise RuntimeError("Pollinations image is empty or exceeds the size limit")
-            if not (image_bytes.startswith(b"\\x89PNG\\r\\n\\x1a\\n")
-                    or image_bytes.startswith(b"\\xff\\xd8\\xff")
+            if not (image_bytes.startswith(bytes.fromhex("89504e470d0a1a0a"))
+                    or image_bytes.startswith(bytes.fromhex("ffd8ff"))
                     or image_bytes.startswith(b"GIF87a")
                     or image_bytes.startswith(b"GIF89a")
                     or (len(image_bytes) >= 12 and image_bytes[:4] == b"RIFF"
