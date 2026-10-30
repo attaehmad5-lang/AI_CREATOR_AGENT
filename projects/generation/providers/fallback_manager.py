@@ -29,5 +29,15 @@ class FallbackManager:
                 if self.provider_health:
                     self.provider_health.record_failure(provider_name, exc)
                 errors.append({"provider": provider_name, "error": str(exc)})
+                # Authentication, permission, billing and quota failures must
+                # stop here: trying another paid provider could incur charges.
+                if getattr(exc, "retryable", True) is False:
+                    return {
+                        "status": "FAILED",
+                        "provider": None,
+                        "errors": errors,
+                        "fallback_stopped": True,
+                        "failure_class": type(exc).__name__,
+                    }
 
         return {"status": "FAILED", "provider": None, "errors": errors}
