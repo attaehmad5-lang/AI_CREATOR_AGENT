@@ -11,6 +11,15 @@ from pathlib import Path
 import requests
 
 
+class PollinationsProviderError(RuntimeError):
+    """Safe provider error with explicit retry/fallback semantics."""
+
+    def __init__(self, message, *, status_code=None, retryable=False):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = retryable
+
+
 class PollinationsProvider:
     name = "Pollinations"
     endpoint = "https://gen.pollinations.ai/v1/images/generations"
@@ -65,10 +74,10 @@ class PollinationsProvider:
             if response.status_code != 200:
                 # Do not include response bodies: providers may echo sensitive data.
                 if response.status_code == 401:
-                    raise RuntimeError("Pollinations authentication failed (HTTP 401)")
+                    raise PollinationsProviderError("Pollinations authentication failed (HTTP 401)", status_code=401, retryable=False)
                 if response.status_code == 402:
-                    raise RuntimeError("Pollinations account or key budget is exhausted (HTTP 402)")
-                raise RuntimeError("Pollinations image request failed (HTTP {})".format(response.status_code))
+                    raise PollinationsProviderError("Pollinations account or key budget is exhausted (HTTP 402)", status_code=402, retryable=False)
+                raise PollinationsProviderError("Pollinations image request failed (HTTP {})".format(response.status_code), status_code=response.status_code, retryable=response.status_code in (408, 425, 429, 500, 502, 503, 504))
 
             try:
                 payload = response.json()
