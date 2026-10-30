@@ -457,6 +457,45 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
+    def test_fresh_health_gate_allows_verified_provider(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(self.connections, routing_manager=router, health_manager=self.health)
+        service.verify_provider("image", lambda provider, timeout_seconds: True)
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-gate-healthy",
+            estimated_cost=0.0, adapter=lambda **kwargs: (
+                called.append(kwargs) or {"started": False, "success": False}
+            ), modality="image", require_fresh_health=True,
+        )
+        self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
+        self.assertEqual(len(called), 1)
+
+    def test_fresh_health_gate_rejects_unknown_provider_before_adapter(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(self.connections, routing_manager=router, health_manager=self.health)
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-gate-unknown",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(kwargs),
+            modality="image", require_fresh_health=True,
+        )
+        self.assertEqual(result["status"], "HEALTH_GATE_REJECTED")
+        self.assertEqual(result["health"]["status"], "UNKNOWN")
+        self.assertEqual(called, [])
+
+    def test_fresh_health_gate_fails_closed_without_health_manager(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(self.connections, routing_manager=router)
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-gate-missing",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(kwargs),
+            modality="image", require_fresh_health=True,
+        )
+        self.assertEqual(result["status"], "HEALTH_GATE_UNAVAILABLE")
+        self.assertEqual(called, [])
+
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
