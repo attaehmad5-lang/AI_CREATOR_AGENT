@@ -22,6 +22,18 @@ class PollinationsProvider:
         self.environ = os.environ if environ is None else environ
         self.timeout = timeout
 
+    @staticmethod
+    def _image_extension(image_bytes):
+        if image_bytes.startswith(bytes.fromhex("89504e470d0a1a0a")):
+            return ".png"
+        if image_bytes.startswith(bytes.fromhex("ffd8ff")):
+            return ".jpg"
+        if image_bytes.startswith((b"GIF87a", b"GIF89a")):
+            return ".gif"
+        if len(image_bytes) >= 12 and image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+            return ".webp"
+        raise RuntimeError("Pollinations response is not a supported image")
+
     def generate_image(self, prompt, output_path):
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Image prompt must be a non-empty string")
@@ -75,15 +87,11 @@ class PollinationsProvider:
 
             if not image_bytes or len(image_bytes) > self.max_response_bytes:
                 raise RuntimeError("Pollinations image is empty or exceeds the size limit")
-            if not (image_bytes.startswith(bytes.fromhex("89504e470d0a1a0a"))
-                    or image_bytes.startswith(bytes.fromhex("ffd8ff"))
-                    or image_bytes.startswith(b"GIF87a")
-                    or image_bytes.startswith(b"GIF89a")
-                    or (len(image_bytes) >= 12 and image_bytes[:4] == b"RIFF"
-                        and image_bytes[8:12] == b"WEBP")):
-                raise RuntimeError("Pollinations response is not a supported image")
+            extension = self._image_extension(image_bytes)
 
             destination = Path(output_path)
+            if destination.suffix.lower() != extension:
+                destination = destination.with_suffix(extension)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(image_bytes)
             return {
@@ -91,6 +99,7 @@ class PollinationsProvider:
                 "provider": self.name,
                 "model": model,
                 "output": str(destination),
+                "format": extension.lstrip("."),
                 "bytes": len(image_bytes),
             }
         finally:
