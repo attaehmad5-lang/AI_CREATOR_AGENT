@@ -459,7 +459,10 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_fresh_health_gate_allows_verified_provider(self):
         router = ProviderRoutingManager(self.connections)
-        service = ProviderService(self.connections, routing_manager=router, health_manager=self.health)
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
         service.verify_provider("image", lambda provider, timeout_seconds: True)
         called = []
         result = service.execute_routed_request(
