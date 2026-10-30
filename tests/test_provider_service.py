@@ -1312,6 +1312,7 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.health.record_result("image", success=False, error_code="SIMULATED_OUTAGE")
         self.health.record_result("image", success=False, error_code="SIMULATED_OUTAGE")
+        self.health.record_result("image", success=False, error_code="SIMULATED_OUTAGE")
         called = []
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="health-gate-unhealthy",
