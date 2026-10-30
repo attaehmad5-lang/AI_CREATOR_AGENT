@@ -26,6 +26,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Install runtime dependency used by provider adapters
+        run: python -m pip install requests
       - name: Compile provider modules and tests
         run: python -m compileall -q projects/provider_store tests
       - name: Validate provider JSON catalogs
