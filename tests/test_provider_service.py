@@ -1310,7 +1310,8 @@ class ProviderServiceTests(unittest.TestCase):
             self.connections, routing_manager=router, health_manager=self.health,
             cost_policy=self.cost, quota_manager=self.quota,
         )
-        self.health.record_failure("image", error="simulated outage")
+        self.health.record_result("image", success=False, error_code="SIMULATED_OUTAGE")
+        self.health.record_result("image", success=False, error_code="SIMULATED_OUTAGE")
         called = []
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="health-gate-unhealthy",
@@ -1323,6 +1324,9 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_fresh_health_gate_health_manager_exception_fails_closed(self):
         class RaisingHealthManager:
+            def record_result(self, provider_id, **kwargs):
+                return {"saved": True}
+
             def is_eligible(self, provider_id, **kwargs):
                 raise RuntimeError("health backend unavailable")
 
@@ -1345,6 +1349,9 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_fresh_health_gate_rejects_malformed_health_response(self):
         class MalformedHealthManager:
+            def record_result(self, provider_id, **kwargs):
+                return {"saved": True}
+
             def is_eligible(self, provider_id, **kwargs):
                 return {"eligible": 1, "status": "MALFORMED"}
 
