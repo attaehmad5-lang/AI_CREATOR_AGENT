@@ -1374,5 +1374,43 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["release"]["released"])
 
 
+    def test_active_probe_provider_records_safe_success(self):
+        service = ProviderService(self.connections, health_manager=self.health)
+        result = service.active_probe_provider(
+            "image", lambda timeout_seconds: {"ok": True, "secret": "must-not-escape"}
+        )
+        self.assertEqual(result["status"], "HEALTHY")
+        self.assertTrue(result["verified"])
+        self.assertTrue(result["saved"])
+        self.assertNotIn("secret", result)
+
+    def test_active_probe_provider_denies_unauthorized_probe(self):
+        service = ProviderService(
+            self.connections, health_manager=self.health,
+            authorization_manager=self.authorization,
+        )
+        result = service.active_probe_provider(
+            "image", lambda timeout_seconds: True, principal_id="unknown-principal"
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_DENIED")
+        self.assertFalse(result["verified"])
+
+    def test_active_probe_provider_fails_closed_without_health_manager(self):
+        service = ProviderService(self.connections)
+        result = service.active_probe_provider("image", lambda timeout_seconds: True)
+        self.assertEqual(result["status"], "HEALTH_MANAGER_UNAVAILABLE")
+        self.assertFalse(result["verified"])
+
+    def test_active_probe_provider_does_not_expose_probe_exception(self):
+        service = ProviderService(self.connections, health_manager=self.health)
+        def failing_probe(timeout_seconds):
+            raise RuntimeError("private endpoint and secret")
+        result = service.active_probe_provider("image", failing_probe)
+        self.assertEqual(result["status"], "NETWORK_ERROR")
+        self.assertFalse(result["verified"])
+        self.assertNotIn("error", result)
+        self.assertNotIn("private endpoint and secret", str(result))
+
+
 if __name__ == "__main__":
     unittest.main()
