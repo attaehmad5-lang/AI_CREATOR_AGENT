@@ -127,9 +127,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error("unsupported command")
             return 2
     except (OSError, ValueError) as exc:
-        parser.error(str(exc))
-        return 2
-    exit_code = 0
+        # Keep operational failures in the JSON result so the audit chain can
+        # record a terminal event instead of leaving a misleading "started" entry.
+        result = {
+            "status": "CATALOG_OPERATION_FAILED",
+            "operation": args.command,
+            "error_type": type(exc).__name__,
+        }
+        exit_code = 2
+    else:
+        exit_code = 0
     if args.command == "apply" and result.get("status") == "CATALOG_DIFF_REMOVAL_APPROVAL_REQUIRED":
         exit_code = 3
     elif args.command == "import" and not result.get("imported"):
