@@ -31,7 +31,13 @@ def interprocess_file_lock(lock_path: str | os.PathLike[str]) -> Iterator[None]:
     path = Path(lock_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    with path.open("a+b") as stream:
+    # Refuse a pre-existing symlink, and use O_NOFOLLOW where the platform
+    # provides it so an attacker cannot redirect the lock open to another file.
+    if path.is_symlink():
+        raise OSError("lock file must not be a symlink")
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    with os.fdopen(descriptor, "r+b") as stream:
         stream.seek(0, os.SEEK_END)
         if stream.tell() == 0:
             stream.write(b"\0")
