@@ -5,72 +5,86 @@
     "script_story": {
       "name": "Script & Story",
       "capabilities": [
-        "story_generation",
-        "screenplay",
-        "scene_breakdown",
         "character_development",
         "dialogue_writing",
+        "scene_breakdown",
+        "screenplay",
+        "story_generation",
         "storyboard_planning"
-      ]
+      ],
+      "planned_capabilities": []
     },
     "advanced_image_editing": {
       "name": "Advanced Image Editing",
       "capabilities": [
-        "inpainting",
-        "outpainting",
-        "object_removal",
         "background_removal",
         "background_replacement",
-        "relighting",
-        "color_editing",
-        "image_restoration"
+        "image_editing",
+        "image_restoration",
+        "inpainting",
+        "object_removal",
+        "outpainting",
+        "relighting"
+      ],
+      "planned_capabilities": [
+        "color_editing"
       ]
     },
     "advanced_upscaling": {
       "name": "Advanced Upscaling & Restoration",
       "capabilities": [
-        "image_upscaling",
-        "face_restoration",
-        "detail_enhancement",
         "denoise",
+        "detail_enhancement",
+        "face_restoration",
+        "image_restoration",
+        "image_upscaling",
         "old_photo_restoration",
-        "video_upscaling",
+        "video_upscaling"
+      ],
+      "planned_capabilities": [
         "frame_interpolation"
       ]
     },
     "advanced_transcription": {
       "name": "Transcription & Subtitles",
       "capabilities": [
-        "speech_to_text",
-        "speaker_detection",
-        "subtitle_generation",
-        "subtitle_translation",
         "caption_timing",
+        "speaker_detection",
+        "speech_to_text",
+        "subtitle_generation",
         "transcript_cleanup"
+      ],
+      "planned_capabilities": [
+        "subtitle_translation"
       ]
     },
     "advanced_audio": {
       "name": "Advanced Audio",
       "capabilities": [
-        "voice_generation",
+        "audio_enhancement",
+        "audio_generation",
+        "music_generation",
+        "noise_removal",
+        "sound_effect_generation",
         "voice_cloning",
         "voice_dubbing",
-        "audio_enhancement",
-        "noise_removal",
-        "music_generation",
-        "sound_effect_generation"
-      ]
+        "voice_generation"
+      ],
+      "planned_capabilities": []
     },
     "advanced_video_editing": {
       "name": "Advanced Video Editing",
       "capabilities": [
-        "video_editing",
-        "scene_detection",
-        "object_removal",
+        "audio_editing",
         "background_replacement",
         "color_grading",
-        "lip_sync",
+        "object_removal",
+        "scene_detection",
+        "video_editing",
         "video_restoration"
+      ],
+      "planned_capabilities": [
+        "lip_sync"
       ]
     }
   }
