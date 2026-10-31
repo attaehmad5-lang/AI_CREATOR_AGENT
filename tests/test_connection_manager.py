@@ -1398,6 +1398,36 @@ class ConnectionManagerTests(unittest.TestCase):
             "must-not-leak-this-secret",
         )
 
+    def test_configuration_allowlist_rejects_safe_reference_alias_fields(self):
+        self.manager.state["providers"]["public_image"] = {
+            "status": "UNKNOWN",
+            "verified": False,
+            "configuration": {"token_env": "hardcoded-private-token"},
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+
+        read_result = self.manager.get_provider_configuration("public_image")
+        self.assertEqual(read_result["status"], "INVALID_CONFIGURATION")
+        self.assertEqual(read_result["configuration"], {})
+        self.assertNotIn("hardcoded-private-token", repr(read_result))
+
+        write_result = self.manager.configure_provider("public_image", model="safe-model")
+        self.assertEqual(write_result["status"], "INVALID_CONFIGURATION")
+        self.assertFalse(write_result["saved"])
+        self.assertNotIn("hardcoded-private-token", repr(write_result))
+        self.assertNotIn("safe-model", repr(write_result))
+
+    def test_configuration_allowlist_rejects_unrecognized_nested_fields(self):
+        self.manager.state["providers"]["public_image"] = {
+            "status": "UNKNOWN",
+            "verified": False,
+            "configuration": {"custom": {"region": "global"}},
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+        result = self.manager.get_provider_configuration("public_image")
+        self.assertEqual(result["status"], "INVALID_CONFIGURATION")
+        self.assertEqual(result["configuration"], {})
+
     def test_provider_model_configuration_is_persisted_without_credentials(self):
         result = self.manager.configure_provider("public_image", model="test-model-v1")
         self.assertEqual(result["status"], "CONFIGURED")
