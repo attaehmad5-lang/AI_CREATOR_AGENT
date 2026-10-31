@@ -1077,6 +1077,33 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.get_state("public_image")["status"], "CONNECTED")
         self.assertTrue(self.manager.get_state("public_image")["verified"])
 
+    def test_disabling_provider_during_probe_prevents_late_connected_state(self):
+        probe_started = threading.Event()
+        release_probe = threading.Event()
+
+        def blocking_probe(provider, timeout_seconds):
+            probe_started.set()
+            if not release_probe.wait(timeout=3):
+                raise TimeoutError("test probe release timed out")
+            return True
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            verification = pool.submit(
+                self.manager.verify_connectivity, "public_image", blocking_probe
+            )
+            self.assertTrue(probe_started.wait(timeout=2))
+            disabled = self.manager.set_provider_enabled("public_image", False)
+            self.assertEqual(disabled["status"], "DISABLED")
+            release_probe.set()
+            result = verification.result(timeout=3)
+
+        self.assertEqual(result["status"], "DISABLED")
+        self.assertFalse(result["verified"])
+        state = self.manager.get_state("public_image")
+        self.assertEqual(state["status"], "DISABLED")
+        self.assertFalse(state["verified"])
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
+
     def test_connectivity_probe_requires_credentials_and_never_probes_without_them(self):
         called = []
         result = self.manager.verify_connectivity(

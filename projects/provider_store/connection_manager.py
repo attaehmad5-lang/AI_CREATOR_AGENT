@@ -897,20 +897,46 @@ class ConnectionManager:
             return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
 
     def _mark_connected_after_probe(self, provider_id: str) -> dict[str, Any]:
-        """Record CONNECTED only after the provider-specific probe succeeds."""
-        if not self.provider_exists(provider_id):
-            return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
-        with self._state_transaction():
-            existing = self.state["providers"].get(provider_id, {})
-            record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
-            record.update({
-                "status": "CONNECTED",
-                "verified": True,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
-            self.state["providers"][provider_id] = record
-            self._save()
-            return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
+        """Record CONNECTED only if the provider is still enabled after its probe."""
+        # Serialize the final eligibility check with catalog changes. A provider can
+        # be disabled while an injected network probe is in flight; a late success
+        # must never resurrect it as CONNECTED.
+        with self._catalog_transaction():
+            provider = next(
+                (
+                    item for item in self.catalog.get("providers", [])
+                    if isinstance(item, dict) and item.get("id") == provider_id
+                ),
+                None,
+            )
+            if provider is None:
+                return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+            if provider.get("enabled") is False:
+                with self._state_transaction():
+                    existing = self.state["providers"].get(provider_id, {})
+                    record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+                    record.update({
+                        "status": "DISABLED",
+                        "verified": False,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    self.state["providers"][provider_id] = record
+                    self._save()
+                    return {
+                        "status": "DISABLED", "provider": provider_id,
+                        "verified": False, "saved": True,
+                    }
+            with self._state_transaction():
+                existing = self.state["providers"].get(provider_id, {})
+                record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+                record.update({
+                    "status": "CONNECTED",
+                    "verified": True,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+                self.state["providers"][provider_id] = record
+                self._save()
+                return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
 
     @staticmethod
     def validate_endpoint(
@@ -1258,6 +1284,8 @@ class ConnectionManager:
             saved = self._mark_connected_after_probe(provider_id)
         except Exception:
             saved = {"saved": False}
+        if isinstance(saved, dict) and saved.get("status") == "DISABLED":
+            return {"status": "DISABLED", "provider": provider_id, "verified": False}
         if not isinstance(saved, dict) or saved.get("saved") is not True:
             return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
         return {
