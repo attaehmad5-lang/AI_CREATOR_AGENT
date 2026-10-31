@@ -773,6 +773,41 @@ class ConnectionManagerTests(unittest.TestCase):
         self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
         self.assertEqual(self.manager.summary()["UNKNOWN"], 1)
 
+    def test_disabled_catalog_overrides_stale_connected_state(self):
+        self.manager.state["providers"]["token_image"] = {
+            "status": "CONNECTED", "verified": True, "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"][1]["enabled"] = False
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+        state = self.manager.get_state("token_image")
+        self.assertEqual(state["status"], "DISABLED")
+        self.assertFalse(state["verified"])
+        self.assertEqual(self.manager.summary()["DISABLED"], 1)
+        self.assertEqual(self.manager.summary()["CONNECTED"], 0)
+
+    def test_disabled_catalog_overrides_state_when_revocation_write_fails(self):
+        from unittest.mock import patch
+
+        self.manager.state["providers"]["token_image"] = {
+            "status": "CONNECTED", "verified": True,
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+
+        # The catalog disable succeeds first; a failed state write must not make
+        # subsequent public reads report the stale verified connection.
+        with patch.object(self.manager, "_save", side_effect=OSError("simulated state disk failure")):
+            with self.assertRaises(OSError):
+                self.manager.set_provider_enabled("token_image", False)
+
+        state = self.manager.get_state("token_image")
+        self.assertEqual(state["status"], "DISABLED")
+        self.assertFalse(state["verified"])
+        self.assertEqual(self.manager.summary()["DISABLED"], 1)
+        self.assertEqual(self.manager.summary()["CONNECTED"], 0)
+
     def test_legacy_connected_state_is_not_treated_as_verified(self):
         self.manager.state["providers"]["token_image"] = {"status": "CONNECTED"}
         self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
