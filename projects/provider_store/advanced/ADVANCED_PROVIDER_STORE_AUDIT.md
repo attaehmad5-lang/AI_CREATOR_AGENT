@@ -52,3 +52,5 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 - Both PRs are merged to `main`. These checks do not establish live provider authentication or modality generation; operational verification remains a deployment gate.
 
 - PR #99: the final connectivity-success transition now rechecks provider enablement under the catalog transaction lock. If a provider is disabled during an in-flight probe, a late successful result is persisted as `DISABLED` and unverified, not `CONNECTED`. The deterministic concurrency regression passed on Ubuntu and Windows (workflow run 41224126274); PR #99 is merged to `main`.
+
+- PR #101: manual account-session verification now propagates the shared post-probe `DISABLED` result instead of incorrectly reporting `CONNECTED` when a provider is disabled during an in-flight manual probe. A deterministic concurrency regression verifies disabled/unverified state and that session data is not persisted. Ubuntu and Windows CI passed (workflow run 41224549870); PR #101 is merged to `main`.
