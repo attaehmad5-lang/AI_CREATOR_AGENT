@@ -80,6 +80,23 @@ class ProviderAuditLogTests(unittest.TestCase):
         result = audit.record("provider.verify", status="CONNECTED", outcome="OK")
         self.assertEqual(result["status"], "AUDIT_LOG_SYMLINK_REJECTED")
 
+    def test_broken_symlink_is_rejected_by_verification_and_append(self):
+        target = self.root / "missing-target.jsonl"
+        link = self.root / "broken-audit.jsonl"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation is unavailable on this platform")
+
+        audit = ProviderAuditLog(link, clock=self.clock)
+        verified = audit.verify_chain()
+        self.assertEqual(verified["status"], "AUDIT_LOG_SYMLINK_REJECTED")
+        self.assertFalse(verified["valid"])
+        appended = audit.record("provider.verify", status="CONNECTED", outcome="OK")
+        self.assertEqual(appended["status"], "AUDIT_LOG_SYMLINK_REJECTED")
+        self.assertFalse(appended["saved"])
+        self.assertFalse(target.exists())
+
     def test_concurrent_writers_preserve_a_single_valid_hash_chain(self):
         def write(index):
             return self.audit.record(
