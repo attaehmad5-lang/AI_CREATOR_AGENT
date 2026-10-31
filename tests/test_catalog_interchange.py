@@ -120,6 +120,44 @@ class CatalogInterchangeTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(), original)
         self.assertEqual(Path(str(target) + ".bak").read_bytes(), original)
 
+    def test_failed_rollback_cleans_temporary_restore_file(self):
+        target = self.root / "existing.json"
+        original = b'{"version":"original","providers":[]}\\n'
+        target.write_bytes(original)
+        real_read = __import__(
+            "projects.provider_store.catalog_interchange", fromlist=["_read_valid_catalog"]
+        )._read_valid_catalog
+        validations = {"count": 0}
+        replacements = {"count": 0}
+
+        def fail_post_write_validation(path):
+            validations["count"] += 1
+            if Path(path) == target and validations["count"] >= 2:
+                raise ValueError("simulated verification failure")
+            return real_read(path)
+
+        def fail_restore_only(source, destination):
+            replacements["count"] += 1
+            if replacements["count"] == 3:
+                raise OSError("simulated rollback replacement failure")
+            __import__("os").replace(source, destination)
+
+        with (
+            patch(
+                "projects.provider_store.catalog_interchange._read_valid_catalog",
+                side_effect=fail_post_write_validation,
+            ),
+            patch(
+                "projects.provider_store.catalog_interchange.atomic_replace_with_retry",
+                side_effect=fail_restore_only,
+            ),
+        ):
+            result = import_catalog(self.source, target)
+
+        self.assertEqual(result["status"], "CATALOG_IMPORT_ROLLBACK_FAILED")
+        self.assertFalse(result["imported"])
+        self.assertEqual(list(self.root.glob(".existing.json.restore.*.tmp")), [])
+
     def test_versioned_snapshot_listing_and_restore(self):
         history = self.root / "history"
         snapshot_result = create_catalog_snapshot(self.source, history)
