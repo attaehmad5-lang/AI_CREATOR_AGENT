@@ -56,6 +56,23 @@ class CatalogInterchangeTests(unittest.TestCase):
             [],
         )
 
+    def test_import_rejects_symlinked_destination_without_touching_target(self):
+        real_target = self.root / "real-target.json"
+        original = b'{"version":"keep","providers":[]}\\n'
+        real_target.write_bytes(original)
+        link = self.root / "linked-target.json"
+        try:
+            link.symlink_to(real_target)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
+
+        result = import_catalog(self.source, link)
+        self.assertEqual(result["status"], "CATALOG_IMPORT_UNSAFE_DESTINATION")
+        self.assertFalse(result["imported"])
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(real_target.read_bytes(), original)
+        self.assertFalse(Path(str(real_target) + ".bak").exists())
+
     def test_credential_bearing_source_is_rejected_without_mutation(self):
         invalid = self.root / "invalid.json"
         catalog = json.loads(self.source.read_text(encoding="utf-8"))
