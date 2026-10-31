@@ -280,27 +280,45 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
         }],
     }
     _atomic_write(sbom_json, (json.dumps(sbom, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for relative, data in payloads:
-            zf.writestr(relative, data)
-        zf.writestr("RELEASE_REPORT.json", report_json.read_bytes())
-        zf.writestr("SOURCE_MANIFEST.json", manifest_json.read_bytes())
-        zf.writestr("SBOM.spdx.json", sbom_json.read_bytes())
-        zf.write(pdf_report, "ADVANCED_PROVIDER_STORE_REPORT.pdf")
-    with zipfile.ZipFile(archive, "r") as zf:
-        bad_member = zf.testzip()
-        if bad_member is not None:
-            raise ValueError(f"ZIP integrity check failed at {bad_member}")
-        archived = set(zf.namelist())
-        expected = {name for name, _ in payloads} | {"RELEASE_REPORT.json", "SOURCE_MANIFEST.json", "SBOM.spdx.json", "ADVANCED_PROVIDER_STORE_REPORT.pdf"}
-        if archived != expected:
-            raise ValueError("ZIP file list does not match the verified manifest")
-        for member in sorted(archived):
-            _scan_release_payload(member, zf.read(member))
-        for entry in manifest_entries:
-            archived_data = zf.read(entry["path"])
-            if _sha256(archived_data) != entry["sha256"]:
-                raise ValueError(f"ZIP checksum mismatch for {entry['path']}")
+    if archive.is_symlink():
+        raise ValueError("release archive destination must not be a symlink")
+    archive_temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=archive.parent, prefix=f".{archive.name}.", suffix=".tmp", delete=False
+        ) as handle:
+            archive_temporary = handle.name
+        with zipfile.ZipFile(archive_temporary, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for relative, data in payloads:
+                zf.writestr(relative, data)
+            zf.writestr("RELEASE_REPORT.json", report_json.read_bytes())
+            zf.writestr("SOURCE_MANIFEST.json", manifest_json.read_bytes())
+            zf.writestr("SBOM.spdx.json", sbom_json.read_bytes())
+            zf.write(pdf_report, "ADVANCED_PROVIDER_STORE_REPORT.pdf")
+        with zipfile.ZipFile(archive_temporary, "r") as zf:
+            bad_member = zf.testzip()
+            if bad_member is not None:
+                raise ValueError(f"ZIP integrity check failed at {bad_member}")
+            archived = set(zf.namelist())
+            expected = {name for name, _ in payloads} | {"RELEASE_REPORT.json", "SOURCE_MANIFEST.json", "SBOM.spdx.json", "ADVANCED_PROVIDER_STORE_REPORT.pdf"}
+            if archived != expected:
+                raise ValueError("ZIP file list does not match the verified manifest")
+            for member in sorted(archived):
+                _scan_release_payload(member, zf.read(member))
+            for entry in manifest_entries:
+                archived_data = zf.read(entry["path"])
+                if _sha256(archived_data) != entry["sha256"]:
+                    raise ValueError(f"ZIP checksum mismatch for {entry['path']}")
+        if archive.is_symlink():
+            raise ValueError("release archive destination must not be a symlink")
+        os.replace(archive_temporary, archive)
+        archive_temporary = None
+    finally:
+        if archive_temporary is not None:
+            try:
+                os.unlink(archive_temporary)
+            except FileNotFoundError:
+                pass
     archive_digest = _sha256(archive.read_bytes())
     _atomic_write(archive_checksum, f"{archive_digest}  {archive.name}\n".encode("ascii"))
     if archive_checksum.read_text(encoding="ascii").split()[0] != _sha256(archive.read_bytes()):
