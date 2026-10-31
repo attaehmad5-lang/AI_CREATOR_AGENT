@@ -313,6 +313,7 @@ class ProviderJobManager:
             job["completed_at"] = now
             job["updated_at"] = now
             job["lease_until"] = None
+            job["worker_id"] = None
             self._save()
             return {"status": "JOB_COMPLETED", "saved": True, "job": dict(job)}
 
