@@ -1111,6 +1111,23 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("sensitive endpoint details", repr(result))
         self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
 
+    def test_unload_provider_reports_cleanup_accessor_failure_without_dropping_instance(self):
+        class BrokenAccessor:
+            def generate_image(self, prompt, output_path):
+                return None
+
+            @property
+            def close(self):
+                raise RuntimeError("sensitive cleanup accessor detail")
+
+        instance = BrokenAccessor()
+        self.manager.load_provider("public_image", lambda metadata: instance)
+        result = self.manager.unload_provider("public_image")
+        self.assertEqual(result["status"], "UNLOAD_FAILED")
+        self.assertEqual(result["error_type"], "RuntimeError")
+        self.assertNotIn("sensitive cleanup accessor detail", repr(result))
+        self.assertIs(self.manager.get_loaded_provider("public_image"), instance)
+
     def test_unload_provider_reports_not_loaded_and_unknown(self):
         self.assertEqual(self.manager.unload_provider("public_image")["status"], "NOT_LOADED")
         self.assertEqual(self.manager.unload_provider("missing")["status"], "NOT_FOUND")
