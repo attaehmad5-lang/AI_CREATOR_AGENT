@@ -160,6 +160,8 @@ class ProviderJobManagerTests(unittest.TestCase):
                     "project_id": "film",
                     "provider_id": "image",
                     "payload_ref": "payload:job-1",
+                    "created_at": "2026-10-16T12:00:00+00:00",
+                    "updated_at": "2026-10-16T12:00:00+00:00",
                     "status": [],
                     "attempts": 0,
                     "priority": 50,
