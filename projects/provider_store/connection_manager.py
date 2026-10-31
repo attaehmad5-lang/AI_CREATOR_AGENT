@@ -1148,6 +1148,15 @@ class ConnectionManager:
                     "provider": provider_id,
                     "saved": False,
                 }
+            allowed_configuration_keys = {
+                "model", "endpoint", "probe_endpoint", "authentication_required"
+            }
+            if any(key not in allowed_configuration_keys for key in current):
+                return {
+                    "status": "INVALID_CONFIGURATION",
+                    "provider": provider_id,
+                    "saved": False,
+                }
             merged = dict(current)
             merged.update(configuration)
             record["configuration"] = merged
@@ -1173,6 +1182,11 @@ class ConnectionManager:
                 return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
             if self._contains_credential_value_field(raw):
                 return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
+            allowed_configuration_keys = {
+                "model", "endpoint", "probe_endpoint", "authentication_required"
+            }
+            if any(key not in allowed_configuration_keys for key in raw):
+                return {"status": "INVALID_CONFIGURATION", "provider": provider_id, "configuration": {}}
             configuration = self._sanitize_public_data(raw)
         if self._contains_credential_value_field(configuration):
             return {"status": "SENSITIVE_CONFIGURATION_REJECTED", "provider": provider_id, "configuration": {}}
