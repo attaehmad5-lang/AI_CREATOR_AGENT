@@ -103,5 +103,61 @@ class AdvancedProviderStoreTests(unittest.TestCase):
             self.assertIn("connected_verified", status)
 
 
+    def test_disabled_provider_cannot_be_marked_connected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            result = manager.store.manager.verify_connectivity(
+                "advanced-audio", lambda provider, **kwargs: {"ok": True}
+            )
+            self.assertEqual(result["status"], "DISABLED")
+            self.assertFalse(result["verified"])
+            self.assertEqual(manager.status()["connected_verified"], 0)
+
+    def test_invalid_probe_and_timeout_never_create_verified_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            connection = manager.store.manager
+            invalid_probe = connection.verify_connectivity("advanced-story", None)
+            invalid_timeout = connection.verify_connectivity(
+                "advanced-story", lambda provider, **kwargs: {"ok": True},
+                timeout_seconds=0,
+            )
+            self.assertEqual(invalid_probe["status"], "INVALID_PROBE")
+            self.assertEqual(invalid_timeout["status"], "INVALID_TIMEOUT")
+            self.assertFalse(connection.get_state("advanced-story").get("verified", False))
+            self.assertEqual(manager.status()["connected_verified"], 0)
+
+    def test_failed_provider_probe_does_not_count_as_connected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            result = manager.store.manager.verify_connectivity(
+                "advanced-story", lambda provider, **kwargs: {"ok": False}
+            )
+            self.assertEqual(result["status"], "CONNECTION_FAILED")
+            self.assertFalse(result["verified"])
+            self.assertEqual(manager.status()["connected_verified"], 0)
+
+    def test_probe_exception_does_not_leak_exception_message_or_mark_connected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+
+            def failing_probe(provider, **kwargs):
+                raise RuntimeError("sensitive probe detail must not be returned")
+
+            result = manager.store.manager.verify_connectivity(
+                "advanced-story", failing_probe
+            )
+            self.assertEqual(result["status"], "PROBE_FAILED")
+            self.assertNotIn("sensitive probe detail", str(result))
+            self.assertEqual(manager.status()["connected_verified"], 0)
+
+    def test_unknown_and_core_provider_ids_are_not_exposed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            self.assertIsNone(manager.get_provider("missing-provider"))
+            self.assertIsNone(manager.get_provider("core-image"))
+            self.assertEqual(manager.by_category("not-a-real-category"), [])
+
+
 if __name__ == "__main__":
     unittest.main()
