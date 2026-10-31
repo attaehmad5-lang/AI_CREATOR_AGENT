@@ -91,6 +91,28 @@ class ProviderJobManager:
                 or not isinstance(job.get("attempts"), int) or job["attempts"] < 0
                 or isinstance(job.get("priority"), bool)
                 or not isinstance(job.get("priority"), int) or not 0 <= job["priority"] <= 100
+                or not isinstance(job.get("cancel_requested", False), bool)
+                or (
+                    job.get("worker_id") is not None
+                    and (
+                        not isinstance(job.get("worker_id"), str)
+                        or not _ID_RE.fullmatch(job["worker_id"])
+                    )
+                )
+                or (
+                    job.get("result_ref") is not None
+                    and (
+                        not isinstance(job.get("result_ref"), str)
+                        or not _REF_RE.fullmatch(job["result_ref"])
+                    )
+                )
+                or (
+                    job.get("error_code") is not None
+                    and (
+                        not isinstance(job.get("error_code"), str)
+                        or not _ERROR_RE.fullmatch(job["error_code"])
+                    )
+                )
             ):
                 raise ValueError("invalid provider job record")
         self.data = loaded
