@@ -66,8 +66,13 @@ def validate_advanced_catalogs(
         if not isinstance(category, str) or not isinstance(definition, dict):
             errors.append("advanced category definitions must be objects keyed by category name")
             continue
-        if definition.get("name") != category:
-            errors.append(f"advanced category definition name mismatch for {category}")
+        if not isinstance(definition.get("name"), str) or not definition["name"].strip():
+            errors.append(f"advanced category display name is missing for {category}")
+        capabilities = definition.get("capabilities")
+        if not isinstance(capabilities, list) or any(
+            not isinstance(item, str) or not item.strip() for item in capabilities
+        ):
+            errors.append(f"advanced category capabilities are invalid for {category}")
     if set(expected) != set(advanced_index):
         errors.append("advanced catalog provider IDs differ from the central advanced provider IDs")
     for provider_id in set(expected) & set(advanced_index):
