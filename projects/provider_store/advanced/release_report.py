@@ -100,6 +100,19 @@ def _safe_source_files(repo_root: Path) -> list[Path]:
     return sorted(files, key=lambda path: path.relative_to(repo_root).as_posix())
 
 
+def _reject_symlink_path_components(path: Path, *, label: str) -> None:
+    """Reject symlinks in every existing component, not only the leaf path."""
+    absolute = path.absolute()
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        current = current / part
+        try:
+            if current.is_symlink():
+                raise ValueError(f"{label} must not contain symlink path components")
+        except OSError as exc:
+            raise ValueError(f"{label} path cannot be inspected safely") from exc
+
+
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -161,10 +174,10 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
         manifest_entries.append({"path": relative, "size_bytes": len(data), "sha256": _sha256(data)})
         payloads.append((relative, data))
 
-    if output_dir.is_symlink():
-        raise ValueError("release output directory must not be a symlink")
+    _reject_symlink_path_components(output_dir, label="release output directory")
     output_dir.mkdir(parents=True, exist_ok=True)
-    if output_dir.is_symlink() or not output_dir.is_dir():
+    _reject_symlink_path_components(output_dir, label="release output directory")
+    if not output_dir.is_dir():
         raise ValueError("release output directory must be a real directory")
     report_json = output_dir / "advanced_provider_store_report.json"
     report_md = output_dir / "advanced_provider_store_report.md"
