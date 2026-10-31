@@ -209,6 +209,7 @@ def import_catalog(
                 os.unlink(temp_name)
             except FileNotFoundError:
                 pass
+            restore_name: str | None = None
             try:
                 if original_bytes is None:
                     destination_path.unlink(missing_ok=True)
@@ -223,11 +224,18 @@ def import_catalog(
                         stream.flush()
                         os.fsync(stream.fileno())
                     atomic_replace_with_retry(restore_name, destination_path)
+                    restore_name = None
             except Exception:
                 return {
                     "status": "CATALOG_IMPORT_ROLLBACK_FAILED",
                     "imported": False,
                 }
+            finally:
+                if restore_name is not None:
+                    try:
+                        os.unlink(restore_name)
+                    except FileNotFoundError:
+                        pass
             return {
                 "status": "CATALOG_IMPORT_FAILED_ROLLED_BACK",
                 "imported": False,
