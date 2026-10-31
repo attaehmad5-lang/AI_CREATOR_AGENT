@@ -1136,7 +1136,19 @@ class ConnectionManager:
             state = self.state["providers"].get(provider_id, {})
             record = dict(state) if isinstance(state, dict) else {}
             current = record.get("configuration", {})
-            merged = dict(current) if isinstance(current, dict) else {}
+            if not isinstance(current, dict):
+                return {
+                    "status": "INVALID_CONFIGURATION",
+                    "provider": provider_id,
+                    "saved": False,
+                }
+            if self._contains_credential_value_field(current):
+                return {
+                    "status": "SENSITIVE_CONFIGURATION_REJECTED",
+                    "provider": provider_id,
+                    "saved": False,
+                }
+            merged = dict(current)
             merged.update(configuration)
             record["configuration"] = merged
             record["configuration_updated_at"] = datetime.now(timezone.utc).isoformat()
