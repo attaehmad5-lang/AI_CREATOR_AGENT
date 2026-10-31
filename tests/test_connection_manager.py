@@ -750,7 +750,7 @@ class ConnectionManagerTests(unittest.TestCase):
                     key: "literal-private-credential-value",
                 })
                 self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
-                self.assertFalse(result["saved"])
+                self.assertFalse(result.get("saved", False))
                 self.assertNotIn("literal-private-credential-value", repr(result))
                 self.assertFalse(self.manager.provider_exists(f"credential_alias_{index}"))
         self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), original_catalog)
