@@ -32,6 +32,8 @@ def _repo_root() -> Path:
 
 def read_ledger(ledger_path: Path) -> list[dict[str, Any]]:
     """Parse the canonical ledger and reject missing, duplicate, or malformed point IDs."""
+    if ledger_path.is_symlink():
+        raise ValueError("completion ledger must not be a symlink")
     try:
         text = ledger_path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
