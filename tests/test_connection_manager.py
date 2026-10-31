@@ -1251,6 +1251,20 @@ class ConnectionManagerTests(unittest.TestCase):
         metadata["name"] = "mutated"
         self.assertNotEqual(self.manager.get_provider("public_image").get("name"), "mutated")
 
+    def test_public_data_sanitizer_rejects_noncanonical_secret_reference_aliases(self):
+        sanitized = ConnectionManager._sanitize_public_data({
+            "token_env": "SAFE_ENV_NAME",
+            "Token-Env": "must-not-leak",
+            "API-Key-Env": "also-must-not-leak",
+            "nested": {"Credential-Env": "private-value"},
+        })
+        self.assertEqual(sanitized["token_env"], "SAFE_ENV_NAME")
+        self.assertNotIn("Token-Env", sanitized)
+        self.assertNotIn("API-Key-Env", sanitized)
+        self.assertNotIn("Credential-Env", sanitized["nested"])
+        for secret in ("must-not-leak", "also-must-not-leak", "private-value"):
+            self.assertNotIn(secret, repr(sanitized))
+
     def test_catalog_status_is_not_exposed_as_live_connection_status(self):
         self.manager.catalog["providers"][0]["status"] = "CONNECTED"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
