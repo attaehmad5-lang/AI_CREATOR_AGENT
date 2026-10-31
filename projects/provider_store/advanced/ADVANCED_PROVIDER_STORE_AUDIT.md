@@ -50,3 +50,5 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 - PR #96: provider registration now validates the complete candidate catalog before persistence; invalid metadata is rejected without changing the catalog. Ubuntu and Windows CI passed (workflow run 41223117609).
 - PR #97: credential-reference exemptions accept only exact canonical lowercase underscore keys; case and hyphen aliases are rejected. Four registration regression cases confirm rejection without persistence. Ubuntu and Windows CI passed (workflow run 41223513751).
 - Both PRs are merged to `main`. These checks do not establish live provider authentication or modality generation; operational verification remains a deployment gate.
+
+- PR #99: the final connectivity-success transition now rechecks provider enablement under the catalog transaction lock. If a provider is disabled during an in-flight probe, a late successful result is persisted as `DISABLED` and unverified, not `CONNECTED`. The deterministic concurrency regression passed on Ubuntu and Windows (workflow run 41224126274); PR #99 is merged to `main`.
