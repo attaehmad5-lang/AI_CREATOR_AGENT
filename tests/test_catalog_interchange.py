@@ -1,9 +1,11 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from projects.provider_store import catalog_interchange
 from projects.provider_store.catalog_interchange import (
     _contains_credential_material,
     create_catalog_snapshot,
@@ -96,11 +98,9 @@ class CatalogInterchangeTests(unittest.TestCase):
 
     def test_post_write_verification_failure_restores_original_bytes(self):
         target = self.root / "existing.json"
-        original = b'{"version":"original","providers":[]}\\n'
+        original = b'{"version":"original","providers":[]}\n'
         target.write_bytes(original)
-        real_read = __import__(
-            "projects.provider_store.catalog_interchange", fromlist=["_read_valid_catalog"]
-        )._read_valid_catalog
+        real_read = catalog_interchange._read_valid_catalog
         calls = {"count": 0}
 
         def fail_second_validation(path):
@@ -122,11 +122,9 @@ class CatalogInterchangeTests(unittest.TestCase):
 
     def test_failed_rollback_cleans_temporary_restore_file(self):
         target = self.root / "existing.json"
-        original = b'{"version":"original","providers":[]}\\n'
+        original = b'{"version":"original","providers":[]}\n'
         target.write_bytes(original)
-        real_read = __import__(
-            "projects.provider_store.catalog_interchange", fromlist=["_read_valid_catalog"]
-        )._read_valid_catalog
+        real_read = catalog_interchange._read_valid_catalog
         validations = {"count": 0}
         replacements = {"count": 0}
 
@@ -140,7 +138,7 @@ class CatalogInterchangeTests(unittest.TestCase):
             replacements["count"] += 1
             if replacements["count"] == 3:
                 raise OSError("simulated rollback replacement failure")
-            __import__("os").replace(source, destination)
+            os.replace(source, destination)
 
         with (
             patch(
