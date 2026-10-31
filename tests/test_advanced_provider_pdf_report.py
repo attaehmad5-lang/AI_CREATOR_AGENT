@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from projects.provider_store.advanced.pdf_report import write_pdf_report
@@ -64,6 +65,39 @@ class PdfReportTests(unittest.TestCase):
             path = write_pdf_report(Path(directory) / "empty.pdf", {})
             self.assertTrue(path.is_file())
             self.assertTrue(path.read_bytes().startswith(b"%PDF-1.4"))
+
+
+    def test_rejects_symlink_destination_without_touching_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "protected.pdf"
+            original = b"keep-original-pdf"
+            target.write_bytes(original)
+            link = root / "report.pdf"
+            try:
+                link.symlink_to(target)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
+
+            with self.assertRaisesRegex(ValueError, "destination must not be a symlink"):
+                write_pdf_report(link, {})
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(target.read_bytes(), original)
+
+    def test_atomic_replace_failure_preserves_existing_pdf_and_cleans_temp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "report.pdf"
+            original = b"existing-report"
+            target.write_bytes(original)
+            with patch(
+                "projects.provider_store.advanced.pdf_report.os.replace",
+                side_effect=OSError("simulated replace failure"),
+            ):
+                with self.assertRaisesRegex(OSError, "simulated replace failure"):
+                    write_pdf_report(target, {})
+            self.assertEqual(target.read_bytes(), original)
+            self.assertEqual(list(root.glob(".report.pdf.*.tmp")), [])
 
 
 if __name__ == "__main__":
