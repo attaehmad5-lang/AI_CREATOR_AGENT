@@ -66,6 +66,26 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             self.assertEqual(marker.read_text(encoding="utf-8"), "preserve")
             self.assertEqual(list(outside.iterdir()), [marker])
 
+    def test_release_writer_rejects_symlinked_parent_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            provider_root = root / "projects" / "provider_store"
+            advanced = provider_root / "advanced"
+            advanced.mkdir(parents=True)
+            (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(
+                _ledger_text(), encoding="utf-8"
+            )
+            outside = root / "outside"
+            outside.mkdir()
+            link = root / "linked-parent"
+            try:
+                link.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
+            with self.assertRaisesRegex(ValueError, "must not contain symlink path components"):
+                write_release_artifacts(link / "release-output", repo_root=root)
+            self.assertEqual(list(outside.iterdir()), [])
+
     def test_release_writer_rejects_symlinked_artifact_destination(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
