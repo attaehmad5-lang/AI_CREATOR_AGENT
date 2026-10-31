@@ -69,8 +69,11 @@ def validate_advanced_catalogs(
         if not isinstance(definition.get("name"), str) or not definition["name"].strip():
             errors.append(f"advanced category display name is missing for {category}")
         capabilities = definition.get("capabilities")
-        if not isinstance(capabilities, list) or any(
-            not isinstance(item, str) or not item.strip() for item in capabilities
+        if (
+            not isinstance(capabilities, list)
+            or not capabilities
+            or any(not isinstance(item, str) or not item.strip() for item in capabilities)
+            or len({item.casefold() for item in capabilities if isinstance(item, str)}) != len(capabilities)
         ):
             errors.append(f"advanced category capabilities are invalid for {category}")
     if set(expected) != set(advanced_index):
