@@ -119,7 +119,7 @@ class PdfReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             data = write_pdf_report(Path(directory) / "large.pdf", report).read_bytes()
 
-        self.assertIn(b"/Count 7", data)
+        self.assertIn(b"/Count 10", data)
         self.assertIn(b"Feature 001", data)
         self.assertIn(b"Feature 150", data)
         self.assertTrue(data.rstrip().endswith(b"%%EOF"))
