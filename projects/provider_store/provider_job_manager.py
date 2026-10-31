@@ -55,6 +55,13 @@ class ProviderJobManager:
         self.data: dict[str, Any] = {"version": "1.0", "jobs": {}}
         self._reload()
 
+    def _now(self) -> datetime:
+        """Return an aware UTC timestamp; reject broken injected clocks."""
+        value = self.clock()
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("provider job clock must return a timezone-aware datetime")
+        return value.astimezone(timezone.utc)
+
     def _reload(self) -> None:
         # Never read through a caller-controlled state-file symlink. In
         # particular, do this before exists(), which follows symlinks.
@@ -215,7 +222,7 @@ class ProviderJobManager:
             return {"status": "INVALID_PAYLOAD_REFERENCE", "accepted": False}
         if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
             return {"status": "INVALID_PRIORITY", "accepted": False}
-        now = self.clock().astimezone(timezone.utc).isoformat()
+        now = self._now().isoformat()
         with self._transaction():
             existing = self.data["jobs"].get(job_id)
             if isinstance(existing, dict):
@@ -279,7 +286,7 @@ class ProviderJobManager:
     def claim_next(self, *, worker_id: str) -> dict[str, Any]:
         if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
             return {"status": "INVALID_WORKER_ID", "job": None}
-        now = self.clock().astimezone(timezone.utc)
+        now = self._now()
         with self._transaction():
             changed = self._reap_expired_locked(now)
             running = sum(
