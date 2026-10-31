@@ -16,7 +16,7 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 - `advanced/advanced_provider_manager.py` implements the advanced-only facade and evidence-based status fields.
 - `provider_catalog.json` is the central catalog; `advanced/advanced_provider_catalog.json` is a compatibility/reference view, not an independent runtime registry.
 - `advanced/advanced_categories.json` separates capabilities represented by current catalog entries from planned capabilities.
-- `tests/test_advanced_provider_store.py` covers advanced-only filtering, lookup, constructor validation, status accounting, verified-state behavior, negative connection paths, exception-message sanitization, exact catalog identity/auth synchronization, and supported-versus-planned capability declarations.
+- `tests/test_advanced_provider_store.py` covers advanced-only filtering, lookup, constructor validation, status accounting, verified-state behavior, negative connection paths, exception-message sanitization, exact catalog identity/auth synchronization, supported-versus-planned capability declarations, and deep detachment of nested values returned by list/get/compatibility catalog views.
 - `tests/test_provider_store_compat.py` covers shared-catalog compatibility with the unified registry, router, and legacy facades.
 
 ## Completion gates
@@ -29,8 +29,9 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 | Status accuracy | Catalog validity, enabled/disabled, and verified-connected counts tested separately | PASS |
 | Negative-path safety | Disabled providers, invalid probes/timeouts, failed probes, exceptions, and unknown/core IDs cannot create false verified connections | PASS — PR #91 |
 | Compatibility | Existing provider-store compatibility tests remain green | PASS — PR #91/#92 CI |
-| Cross-platform CI | Compile, catalog validation, and unit/regression tests on Ubuntu and Windows | PASS — workflow run [41221773168](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41221773168), both jobs successful |
-| Release | Reviewed changes merged to main | PASS — [PR #91](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/91) and [PR #92](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/92) merged |
+| Cross-platform CI | Compile, catalog validation, and unit/regression tests on Ubuntu and Windows | PASS — workflow runs [41221773168](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41221773168) and [41222470262](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41222470262), both Ubuntu and Windows jobs successful |
+| Detached public views | Mutating nested values returned by list/get/compatibility catalog views cannot mutate the central catalog | PASS — [PR #94](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/94), Ubuntu and Windows CI passed |
+| Release | Reviewed changes merged to main | PASS — [PR #91](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/91), [PR #92](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/92), [PR #93](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/93), and [PR #94](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/94) merged |
 | Operational verification | Authorized provider-specific connection and modality tests | DEPLOYMENT GATE — requires credentials configured securely in the runtime environment and provider-specific non-billable verification endpoints where available |
 
 ## Security and correctness notes
