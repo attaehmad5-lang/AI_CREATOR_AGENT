@@ -902,8 +902,6 @@ class ConnectionManager:
     ) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER", "saved": False}
-        if not self.provider_exists(provider_id):
-            return {"status": "NOT_FOUND", "provider": provider_id}
         if not isinstance(status, str) or status not in self.VALID_STATES:
             return {"status": "INVALID_STATE", "provider": provider_id}
         if not isinstance(verified, bool):
@@ -917,17 +915,35 @@ class ConnectionManager:
                 "saved": False,
             }
 
-        with self._state_transaction():
-            existing = self.state["providers"].get(provider_id, {})
-            record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
-            record.update({
-                "status": status,
-                "verified": bool(verified),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
-            self.state["providers"][provider_id] = record
-            self._save()
-            return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
+        # Serialize eligibility checks and state writes with disable operations.
+        # A stale caller must never overwrite DISABLED after the catalog commit.
+        with self._catalog_transaction():
+            provider = next(
+                (
+                    item for item in self.catalog.get("providers", [])
+                    if isinstance(item, dict) and item.get("id") == provider_id
+                ),
+                None,
+            )
+            if provider is None:
+                return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+            state_to_save = "DISABLED" if provider.get("enabled") is False else status
+            with self._state_transaction():
+                existing = self.state["providers"].get(provider_id, {})
+                record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+                record.update({
+                    "status": state_to_save,
+                    "verified": False,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+                self.state["providers"][provider_id] = record
+                self._save()
+                if state_to_save == "DISABLED":
+                    return {
+                        "status": "DISABLED", "provider": provider_id,
+                        "saved": True, "verified": False,
+                    }
+                return {"provider": provider_id, **self._sanitize_public_data(record), "saved": True}
 
     def _mark_connected_after_probe(self, provider_id: str) -> dict[str, Any]:
         """Record CONNECTED only if the provider is still enabled after its probe."""
