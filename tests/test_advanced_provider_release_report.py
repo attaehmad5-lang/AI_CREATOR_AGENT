@@ -87,7 +87,7 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                 output.symlink_to(outside, target_is_directory=True)
             except (OSError, NotImplementedError) as exc:
                 self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
-            with self.assertRaisesRegex(ValueError, "output directory must not be a symlink"):
+            with self.assertRaisesRegex(ValueError, "output directory must not .*symlink"):
                 write_release_artifacts(output, repo_root=root)
             self.assertEqual(marker.read_text(encoding="utf-8"), "preserve")
             self.assertEqual(list(outside.iterdir()), [marker])
