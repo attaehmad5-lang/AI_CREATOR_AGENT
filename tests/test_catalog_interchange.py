@@ -94,6 +94,32 @@ class CatalogInterchangeTests(unittest.TestCase):
         self.assertFalse(target.exists())
         self.assertEqual(result["status"], "CATALOG_IMPORT_FAILED_ROLLED_BACK")
 
+    def test_post_write_verification_failure_restores_original_bytes(self):
+        target = self.root / "existing.json"
+        original = b'{"version":"original","providers":[]}\\n'
+        target.write_bytes(original)
+        real_read = __import__(
+            "projects.provider_store.catalog_interchange", fromlist=["_read_valid_catalog"]
+        )._read_valid_catalog
+        calls = {"count": 0}
+
+        def fail_second_validation(path):
+            calls["count"] += 1
+            if Path(path) == target and calls["count"] >= 2:
+                raise ValueError("simulated post-write verification failure")
+            return real_read(path)
+
+        with patch(
+            "projects.provider_store.catalog_interchange._read_valid_catalog",
+            side_effect=fail_second_validation,
+        ):
+            result = import_catalog(self.source, target)
+
+        self.assertEqual(result["status"], "CATALOG_IMPORT_FAILED_ROLLED_BACK")
+        self.assertFalse(result["imported"])
+        self.assertEqual(target.read_bytes(), original)
+        self.assertEqual(Path(str(target) + ".bak").read_bytes(), original)
+
     def test_versioned_snapshot_listing_and_restore(self):
         history = self.root / "history"
         snapshot_result = create_catalog_snapshot(self.source, history)
