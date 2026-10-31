@@ -100,5 +100,31 @@ class PdfReportTests(unittest.TestCase):
             self.assertEqual(list(root.glob(".report.pdf.*.tmp")), [])
 
 
+    def test_large_feature_ledger_is_split_across_multiple_pdf_pages(self):
+        report = {
+            "completion_status": "INCOMPLETE",
+            "points_completed": 0,
+            "points_total": 150,
+            "points_remaining": 150,
+            "release_ready": False,
+            "live_provider_verification": "NOT_CLAIMED",
+            "status_counts": {"NOT_STARTED": 150},
+            "ledger": [
+                {"id": index, "feature": f"Feature {index:03d}",
+                 "status": "NOT_STARTED", "evidence": "No evidence yet",
+                 "remaining": "Implementation and tests required"}
+                for index in range(1, 151)
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            data = write_pdf_report(Path(directory) / "large.pdf", report).read_bytes()
+
+        self.assertIn(b"/Count 7", data)
+        self.assertIn(b"Feature 001", data)
+        self.assertIn(b"Feature 150", data)
+        self.assertTrue(data.rstrip().endswith(b"%%EOF"))
+
+
+
 if __name__ == "__main__":
     unittest.main()
