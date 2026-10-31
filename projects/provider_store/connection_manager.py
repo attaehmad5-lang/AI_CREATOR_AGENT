@@ -577,6 +577,23 @@ class ConnectionManager:
                 }
             self._atomic_write_json(self.catalog_path, new_catalog)
             self.catalog = new_catalog
+            if not enabled:
+                # Revoke stale live/connecting state immediately. Preserve UNKNOWN
+                # for providers that have never had a connection attempt.
+                with self._state_transaction():
+                    existing_state = self.state["providers"].get(provider_id, {})
+                    if isinstance(existing_state, dict) and (
+                        existing_state.get("status") in {"CONNECTED", "CONNECTING"}
+                        or existing_state.get("verified") is True
+                    ):
+                        record = dict(existing_state)
+                        record.update({
+                            "status": "DISABLED",
+                            "verified": False,
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        })
+                        self.state["providers"][provider_id] = record
+                        self._save()
         if not enabled and provider_id in self._loaded_providers:
             unload_result = self.unload_provider(provider_id)
             if unload_result["status"] not in {"UNLOADED", "NOT_LOADED"}:
