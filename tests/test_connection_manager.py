@@ -1428,6 +1428,23 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "INVALID_CONFIGURATION")
         self.assertEqual(result["configuration"], {})
 
+    def test_configure_provider_rejects_malformed_existing_fields_before_merge(self):
+        self.manager.state["providers"]["public_image"] = {
+            "status": "UNKNOWN",
+            "verified": False,
+            "configuration": {"authentication_required": "yes"},
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+
+        result = self.manager.configure_provider("public_image", model="safe-model")
+        self.assertEqual(result["status"], "INVALID_AUTHENTICATION_POLICY")
+        self.assertFalse(result["saved"])
+        self.assertNotIn("safe-model", repr(result))
+        self.assertEqual(
+            self.manager.state["providers"]["public_image"]["configuration"],
+            {"authentication_required": "yes"},
+        )
+
     def test_provider_model_configuration_is_persisted_without_credentials(self):
         result = self.manager.configure_provider("public_image", model="test-model-v1")
         self.assertEqual(result["status"], "CONFIGURED")
