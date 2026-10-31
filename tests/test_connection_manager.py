@@ -1551,5 +1551,33 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertNotIn("configuration", self.manager.get_state("public_image"))
 
 
+    def test_manual_connection_rejects_oversized_integer_timeout_without_raising(self):
+        registered = self.manager.register_provider({
+            "id": "manual_timeout_provider",
+            "name": "Manual Timeout Provider",
+            "category": "image",
+            "auth_type": "ACCOUNT",
+            "connection_type": "BROWSER_SESSION",
+            "enabled": True,
+        })
+        self.assertEqual(registered["status"], "REGISTERED")
+        probe_called = False
+
+        def probe(*args, **kwargs):
+            nonlocal probe_called
+            probe_called = True
+            return True
+
+        result = self.manager.verify_manual_connection(
+            "manual_timeout_provider",
+            object(),
+            probe,
+            timeout_seconds=10 ** 10000,
+        )
+        self.assertEqual(result["status"], "INVALID_TIMEOUT")
+        self.assertFalse(result["verified"])
+        self.assertFalse(probe_called)
+
+
 if __name__ == "__main__":
     unittest.main()
