@@ -14,26 +14,31 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 ## Current implementation evidence
 
 - `advanced/advanced_provider_manager.py` implements the advanced-only facade and evidence-based status fields.
-- `provider_catalog.json` is the central catalog; the advanced catalog remains a compatibility/reference view.
-- `tests/test_provider_store_compat.py` covers shared-catalog compatibility.
-- `tests/test_advanced_provider_store.py` adds isolated regression tests for category filtering, status accounting, constructor validation, and verified connection state.
+- `provider_catalog.json` is the central catalog; `advanced/advanced_provider_catalog.json` is a compatibility/reference view, not an independent runtime registry.
+- `advanced/advanced_categories.json` separates capabilities represented by current catalog entries from planned capabilities.
+- `tests/test_advanced_provider_store.py` covers advanced-only filtering, lookup, constructor validation, status accounting, verified-state behavior, negative connection paths, exception-message sanitization, exact catalog identity/auth synchronization, and supported-versus-planned capability declarations.
+- `tests/test_provider_store_compat.py` covers shared-catalog compatibility with the unified registry, router, and legacy facades.
 
 ## Completion gates
 
 | Gate | Required evidence | State |
 |---|---|---|
-| Catalog and category filtering | Unit tests, including core providers excluded from advanced views | PASS — covered by regression suite |
-| Status accuracy | Catalog-valid, enabled, disabled, and verified-connected counts tested separately | PASS — covered by regression suite |
-| Compatibility | Existing provider-store compatibility tests remain green | PASS — full CI suite |
-| Full repository regression | Complete Python test suite on supported CI platforms | PASS — 426 tests passed on Ubuntu and Windows in workflow run 40885872101 |
-| Operational verification | Authorized provider-specific connection and modality tests | DEPLOYMENT GATE — requires credentials configured securely in the runtime environment; intentionally not simulated in CI because this store feature must not make paid calls or invent connectivity evidence |
-| Release | Review CI results and merge after code/test gates pass | COMPLETE — PR #86 merged to main; 426-test CI suite passed on Ubuntu and Windows. External provider verification is a separate deployment gate. |
+| Catalog and category filtering | Unit tests, including core providers excluded from advanced views | PASS |
+| Catalog integrity | Exact advanced-provider identity/auth metadata synchronization with the central catalog | PASS — PR #92 |
+| Capability truthfulness | Supported capabilities match current provider declarations; future capabilities remain explicitly planned | PASS — PR #92 |
+| Status accuracy | Catalog validity, enabled/disabled, and verified-connected counts tested separately | PASS |
+| Negative-path safety | Disabled providers, invalid probes/timeouts, failed probes, exceptions, and unknown/core IDs cannot create false verified connections | PASS — PR #91 |
+| Compatibility | Existing provider-store compatibility tests remain green | PASS — PR #91/#92 CI |
+| Cross-platform CI | Compile, catalog validation, and unit/regression tests on Ubuntu and Windows | PASS — workflow run [41221773168](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41221773168), both jobs successful |
+| Release | Reviewed changes merged to main | PASS — [PR #91](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/91) and [PR #92](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/92) merged |
+| Operational verification | Authorized provider-specific connection and modality tests | DEPLOYMENT GATE — requires credentials configured securely in the runtime environment and provider-specific non-billable verification endpoints where available |
 
 ## Security and correctness notes
 
 - Never store API tokens in this feature's catalog, test fixtures, commits, or CI logs.
 - A provider being enabled is not the same as being connected.
 - A verified connection is not the same as verified modality generation.
-- This feature must be tracked independently from the Task #25 A–P checklist.
+- Catalog readiness means the catalog is valid and accessible; it does not mean every provider is enabled, subscribed, authenticated, or live.
 - CI uses deterministic local fixtures; it does not claim external provider APIs were contacted.
-- The Advanced Provider Store feature is complete at the catalog, state-management, filtering, and regression-test level. Live external verification belongs to deployment setup and must use an authorized, configured provider; it is not safe to fabricate a pass or run potentially billable generation calls without authorization.
+- The Advanced Provider Store is verified at the catalog, state-management, filtering, compatibility, and regression-test levels by the merged changes and the Ubuntu/Windows CI run above.
+- Live external connection and modality verification remains a deployment gate. It must use an authorized, securely configured provider; it is not safe to fabricate a pass or run potentially billable generation calls without authorization.
