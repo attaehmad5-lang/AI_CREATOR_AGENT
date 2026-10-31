@@ -43,6 +43,51 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "each point ID"):
                 read_ledger(ledger)
 
+    def test_release_writer_rejects_symlink_output_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            provider_root = root / "projects" / "provider_store"
+            advanced = provider_root / "advanced"
+            advanced.mkdir(parents=True)
+            (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(
+                _ledger_text(), encoding="utf-8"
+            )
+            outside = root / "outside"
+            outside.mkdir()
+            marker = outside / "keep.txt"
+            marker.write_text("preserve", encoding="utf-8")
+            output = root / "release-output"
+            try:
+                output.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
+            with self.assertRaisesRegex(ValueError, "output directory must not be a symlink"):
+                write_release_artifacts(output, repo_root=root)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "preserve")
+            self.assertEqual(list(outside.iterdir()), [marker])
+
+    def test_release_writer_rejects_symlinked_artifact_destination(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            provider_root = root / "projects" / "provider_store"
+            advanced = provider_root / "advanced"
+            advanced.mkdir(parents=True)
+            (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(
+                _ledger_text(), encoding="utf-8"
+            )
+            output = root / "release-output"
+            output.mkdir()
+            outside = root / "outside.txt"
+            outside.write_text("preserve", encoding="utf-8")
+            target = output / "advanced_provider_store_report.json"
+            try:
+                target.symlink_to(outside)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
+            with self.assertRaisesRegex(ValueError, "artifact destination must not be a symlink"):
+                write_release_artifacts(output, repo_root=root)
+            self.assertEqual(outside.read_text(encoding="utf-8"), "preserve")
+
     def test_ledger_rejects_symlink_without_reading_external_target(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
