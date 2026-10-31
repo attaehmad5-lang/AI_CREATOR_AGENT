@@ -102,6 +102,8 @@ def export_catalog(
     destination_path = Path(destination)
     catalog = _read_valid_catalog(source_path)
     destination_path.parent.mkdir(parents=True, exist_ok=True)
+    if destination_path.is_symlink():
+        raise ValueError("export destination must not be a symlink")
     fd, temp_name = tempfile.mkstemp(
         prefix=f".{destination_path.name}.", suffix=".tmp", dir=destination_path.parent
     )
