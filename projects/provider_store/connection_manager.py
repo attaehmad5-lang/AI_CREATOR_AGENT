@@ -1399,6 +1399,8 @@ class ConnectionManager:
             saved = self._mark_connected_after_probe(provider_id)
         except Exception:
             saved = {"saved": False}
+        if isinstance(saved, dict) and saved.get("status") == "DISABLED":
+            return {"status": "DISABLED", "provider": provider_id, "verified": False}
         if not isinstance(saved, dict) or saved.get("saved") is not True:
             return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
         return {
