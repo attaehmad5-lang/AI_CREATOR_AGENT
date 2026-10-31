@@ -173,6 +173,29 @@ class ProviderJobManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid provider job record"):
             ProviderJobManager(self.path, clock=lambda: self.now[0])
 
+    def test_persisted_timestamps_must_be_valid_and_timezone_aware(self):
+        import json
+        malformed = {
+            "version": "1.0",
+            "jobs": {
+                "job-1": {
+                    "job_id": "job-1",
+                    "project_id": "film",
+                    "provider_id": "image",
+                    "payload_ref": "payload:job-1",
+                    "status": "QUEUED",
+                    "attempts": 0,
+                    "priority": 50,
+                    "created_at": "2026-10-16T12:00:00",
+                    "updated_at": "not-a-timestamp",
+                    "cancel_requested": False,
+                }
+            },
+        }
+        self.path.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid provider job timestamp"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
     def test_unsupported_state_schema_version_is_rejected(self):
         self.path.write_text(
             '{"version":"99.0","jobs":{}}', encoding="utf-8"
