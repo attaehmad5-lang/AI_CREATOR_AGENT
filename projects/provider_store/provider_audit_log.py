@@ -43,10 +43,11 @@ class ProviderAuditLog:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def _read_records(self) -> tuple[list[dict[str, Any]] | None, str | None]:
-        if not self.path.exists():
-            return [], None
+        # Check symlink status before exists(): broken symlinks report exists() == False.
         if self.path.is_symlink():
             return None, "AUDIT_LOG_SYMLINK_REJECTED"
+        if not self.path.exists():
+            return [], None
         try:
             raw = self.path.read_bytes()
         except OSError:
