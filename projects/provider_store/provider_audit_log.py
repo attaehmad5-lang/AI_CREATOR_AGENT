@@ -163,11 +163,16 @@ class ProviderAuditLog:
             if self.path.is_symlink():
                 return {"status": "AUDIT_LOG_SYMLINK_REJECTED", "saved": False}
             try:
-                with self.path.open("ab") as stream:
+                # O_NOFOLLOW closes the check/open race on platforms that support it.
+                flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+                descriptor = os.open(self.path, flags, 0o600)
+                with os.fdopen(descriptor, "ab") as stream:
                     stream.write(encoded)
                     stream.flush()
                     os.fsync(stream.fileno())
-            except OSError:
+            except OSError as exc:
+                if self.path.is_symlink():
+                    return {"status": "AUDIT_LOG_SYMLINK_REJECTED", "saved": False}
                 return {"status": "AUDIT_LOG_WRITE_FAILED", "saved": False}
         return {"status": "AUDIT_EVENT_RECORDED", "saved": True, "record_hash": record_hash}
 
