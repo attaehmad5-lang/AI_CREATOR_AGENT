@@ -148,7 +148,7 @@ class ProviderJobManagerTests(unittest.TestCase):
             },
         }
         self.path.write_text(json.dumps(malformed), encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "invalid provider job record"):
+        with self.assertRaisesRegex(ValueError, "invalid provider job lifecycle metadata"):
             ProviderJobManager(self.path, clock=lambda: self.now[0])
 
     def test_malformed_persisted_job_fields_fail_with_schema_error(self):
