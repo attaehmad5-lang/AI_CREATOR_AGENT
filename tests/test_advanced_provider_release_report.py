@@ -47,6 +47,34 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                 _atomic_write(target, b"replace")
             self.assertEqual(external.read_bytes(), b"keep")
 
+    def test_atomic_archive_replace_preserves_existing_zip_and_cleans_temp(self):
+        from unittest.mock import patch
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            advanced = root / "projects" / "provider_store" / "advanced"
+            advanced.mkdir(parents=True)
+            (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(
+                _ledger_text(), encoding="utf-8"
+            )
+            output = root / "release-output"
+            output.mkdir()
+            archive = output / "advanced_provider_store_source.zip"
+            archive.write_bytes(b"previous-valid-archive")
+            real_replace = os.replace
+
+            def fail_archive_replace(source, destination):
+                if Path(destination) == archive:
+                    raise OSError("injected archive replace failure")
+                return real_replace(source, destination)
+
+            with patch("projects.provider_store.advanced.release_report.os.replace", side_effect=fail_archive_replace):
+                with self.assertRaisesRegex(OSError, "injected archive replace failure"):
+                    write_release_artifacts(output, repo_root=root)
+            self.assertEqual(archive.read_bytes(), b"previous-valid-archive")
+            self.assertFalse(list(output.glob(".advanced_provider_store_source.zip.*.tmp")))
+
     def test_report_counts_150_points_without_claiming_release_ready(self):
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Path(tmp) / "ledger.md"
