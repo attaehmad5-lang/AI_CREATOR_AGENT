@@ -1157,6 +1157,52 @@ class ConnectionManager:
                     "provider": provider_id,
                     "saved": False,
                 }
+            existing_auth_policy = current.get("authentication_required")
+            if existing_auth_policy is not None and not isinstance(existing_auth_policy, bool):
+                return {
+                    "status": "INVALID_AUTHENTICATION_POLICY",
+                    "provider": provider_id,
+                    "saved": False,
+                }
+            existing_model = current.get("model")
+            if existing_model is not None and (
+                not isinstance(existing_model, str)
+                or not existing_model.strip()
+                or len(existing_model) > 200
+            ):
+                return {"status": "INVALID_MODEL", "provider": provider_id, "saved": False}
+            if isinstance(existing_model, str) and any(
+                marker in existing_model.casefold()
+                for marker in ("api_key=", "token=", "password=", "secret=", "bearer ")
+            ):
+                return {
+                    "status": "SENSITIVE_CONFIGURATION_REJECTED",
+                    "provider": provider_id,
+                    "saved": False,
+                }
+            allowed_hosts_raw = provider.get("allowed_hosts")
+            allowed_hosts = (
+                {item for item in allowed_hosts_raw if isinstance(item, str) and item.strip()}
+                if isinstance(allowed_hosts_raw, list) else None
+            )
+            for endpoint_field in ("endpoint", "probe_endpoint"):
+                existing_endpoint = current.get(endpoint_field)
+                if existing_endpoint is not None:
+                    if not allowed_hosts:
+                        return {
+                            "status": "HOST_ALLOWLIST_REQUIRED",
+                            "provider": provider_id,
+                            "saved": False,
+                        }
+                    validation = self.validate_endpoint(
+                        existing_endpoint, allowed_hosts=allowed_hosts
+                    )
+                    if not validation["valid"]:
+                        return {
+                            "status": validation["status"],
+                            "provider": provider_id,
+                            "saved": False,
+                        }
             merged = dict(current)
             merged.update(configuration)
             record["configuration"] = merged
