@@ -27,6 +27,18 @@ class ProviderJobManagerTests(unittest.TestCase):
             payload_ref=f"payload:{job_id}", priority=priority,
         )
 
+    def test_naive_clock_is_rejected_before_job_mutation(self):
+        manager = ProviderJobManager(
+            self.path,
+            clock=lambda: datetime(2026, 10, 16, 12),
+        )
+        with self.assertRaisesRegex(ValueError, "timezone-aware datetime"):
+            manager.submit(
+                job_id="job-naive-clock", project_id="film",
+                provider_id="image", payload_ref="payload:job-naive-clock",
+            )
+        self.assertFalse(self.path.exists())
+
     def test_queue_capacity_applies_backpressure_and_returns_retry_hint(self):
         self.assertTrue(self.submit("job-1")["accepted"])
         self.assertTrue(self.submit("job-2")["accepted"])
