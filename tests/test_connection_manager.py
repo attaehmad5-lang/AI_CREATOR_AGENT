@@ -1035,6 +1035,21 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(reloaded.is_provider_enabled("public_image"))
         self.assertIn("no purchase", enabled["note"].lower())
 
+    def test_disabling_connected_provider_revokes_verified_state_immediately(self):
+        connected = self.manager.verify_connectivity(
+            "public_image", lambda provider, timeout_seconds: True
+        )
+        self.assertEqual(connected["status"], "CONNECTED")
+        self.assertTrue(self.manager.get_state("public_image")["verified"])
+
+        disabled = self.manager.set_provider_enabled("public_image", False)
+
+        self.assertEqual(disabled["status"], "DISABLED")
+        state = self.manager.get_state("public_image")
+        self.assertEqual(state["status"], "DISABLED")
+        self.assertFalse(state["verified"])
+        self.assertFalse(self.manager.is_provider_enabled("public_image"))
+
     def test_disabling_unloads_runtime_instance(self):
         class Closable:
             def __init__(self):
