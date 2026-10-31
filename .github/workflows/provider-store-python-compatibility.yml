@@ -18,13 +18,14 @@ concurrency:
 
 jobs:
   python-compatibility:
-    name: Python ${{ matrix.python-version }} (ubuntu-latest)
-    runs-on: ubuntu-latest
+    name: Python ${{ matrix.python-version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        os: [ubuntu-latest, windows-latest]
+      python-version: ["3.10", "3.11", "3.12"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
