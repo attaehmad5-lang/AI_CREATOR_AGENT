@@ -105,6 +105,13 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertNotIn("actual prompt text", state)
         self.assertIn("payload:job-1", state)
 
+    def test_unsupported_state_schema_version_is_rejected(self):
+        self.path.write_text(
+            '{"version":"99.0","jobs":{}}', encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ValueError, "invalid provider job state schema"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
     def test_state_file_symlink_is_rejected_without_reading_target(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
