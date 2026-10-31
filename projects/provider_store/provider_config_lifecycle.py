@@ -186,20 +186,39 @@ class ProviderConfigLifecycleManager:
             return {"status": "CONFIG_MIGRATION_WRITE_FAILED", "migrated": False, "error_type": type(exc).__name__}
         reloaded = self.reload(result["config"])
         if reloaded.get("reloaded") is not True:
+            restore_name = None
+            fd_restore = -1
             try:
                 fd_restore, restore_name = tempfile.mkstemp(
-                    prefix=f".{config_path.name}.restore.", suffix=".tmp",
-                    dir=str(config_path.parent), text=True,
+                    prefix=f".{config_path.name}.restore.",
+                    suffix=".tmp",
+                    dir=str(config_path.parent),
                 )
-                os.close(fd_restore)
-                shutil.copy2(backup_path, restore_name)
+                with os.fdopen(fd_restore, "wb") as restore_stream:
+                    fd_restore = -1
+                    with backup_path.open("rb") as backup_stream:
+                        shutil.copyfileobj(backup_stream, restore_stream)
+                    restore_stream.flush()
+                    os.fsync(restore_stream.fileno())
                 atomic_replace_with_retry(restore_name, config_path)
+                restore_name = None
             except Exception:
                 return {
                     "status": "CONFIG_MIGRATION_ROLLBACK_FAILED",
                     "migrated": False,
                     "backup_path": str(backup_path),
                 }
+            finally:
+                if fd_restore >= 0:
+                    try:
+                        os.close(fd_restore)
+                    except OSError:
+                        pass
+                if restore_name is not None:
+                    try:
+                        os.unlink(restore_name)
+                    except FileNotFoundError:
+                        pass
             return {
                 "status": "CONFIG_MIGRATION_ROLLED_BACK",
                 "migrated": False,
