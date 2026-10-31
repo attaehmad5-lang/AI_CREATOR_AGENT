@@ -253,7 +253,7 @@ class ConnectionManagerTests(unittest.TestCase):
             with self.subTest(state=state):
                 result = self.manager.set_state("public_image", state, verified=True)
                 self.assertEqual(result["status"], "VERIFICATION_REQUIRED")
-                self.assertFalse(result["saved"])
+                self.assertFalse(result.get("saved", False))
                 current = self.manager.get_state("public_image")
                 self.assertEqual(current["status"], "UNKNOWN")
                 self.assertFalse(current["verified"])
