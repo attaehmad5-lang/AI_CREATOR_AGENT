@@ -43,6 +43,21 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "each point ID"):
                 read_ledger(ledger)
 
+    def test_ledger_rejects_symlink_without_reading_external_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outside = root / "outside.md"
+            outside.write_text(_ledger_text(), encoding="utf-8")
+            ledger = root / "ledger.md"
+            try:
+                ledger.symlink_to(outside)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
+            with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+                read_ledger(ledger)
+            self.assertTrue(ledger.is_symlink())
+            self.assertEqual(outside.read_text(encoding="utf-8"), _ledger_text())
+
     def test_require_complete_cli_blocks_incomplete_release(self):
         from unittest.mock import patch
 
