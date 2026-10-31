@@ -68,7 +68,11 @@ class ProviderJobManager:
                 loaded = json.load(stream)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValueError("invalid provider job state JSON") from exc
-        if not isinstance(loaded, dict) or not isinstance(loaded.get("jobs"), dict):
+        if (
+            not isinstance(loaded, dict)
+            or loaded.get("version") != "1.0"
+            or not isinstance(loaded.get("jobs"), dict)
+        ):
             raise ValueError("invalid provider job state schema")
         for job_id, job in loaded["jobs"].items():
             if (
