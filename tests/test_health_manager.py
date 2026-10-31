@@ -144,6 +144,13 @@ class ProviderHealthManagerTests(unittest.TestCase):
         self.assertFalse(result["eligible"])
         self.assertEqual(result["status"], "SLOW")
 
+    def test_latency_limit_fails_closed_when_latency_evidence_is_missing(self):
+        self.manager.record_result("image", success=True)
+        result = self.manager.is_eligible("image", max_latency_ms=500)
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["status"], "UNKNOWN")
+        self.assertEqual(result["reason"], "LATENCY_EVIDENCE_REQUIRED")
+
     def test_active_probe_classifies_failure_without_leaking_details(self):
         def probe(timeout_seconds):
             raise TimeoutError("private endpoint and token")
