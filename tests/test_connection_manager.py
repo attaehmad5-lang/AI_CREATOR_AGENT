@@ -242,6 +242,18 @@ class ConnectionManagerTests(unittest.TestCase):
             "INVALID_VERIFICATION_FLAG",
         )
 
+    def test_public_state_updates_cannot_override_disabled_provider(self):
+        disabled = self.manager.set_provider_enabled("public_image", False)
+        self.assertEqual(disabled["status"], "DISABLED")
+        for requested_state in ("READY", "ERROR", "CONNECTING"):
+            with self.subTest(requested_state=requested_state):
+                result = self.manager.set_state("public_image", requested_state)
+                self.assertEqual(result["status"], "DISABLED")
+                self.assertTrue(result["saved"])
+                current = self.manager.get_state("public_image")
+                self.assertEqual(current["status"], "DISABLED")
+                self.assertFalse(current["verified"])
+
     def test_connected_requires_verification(self):
         result = self.manager.set_state("public_image", "CONNECTED")
         self.assertEqual(result["status"], "VERIFICATION_REQUIRED")
