@@ -112,6 +112,49 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(recovered["status"], "CONFIG_ROLLED_BACK")
         self.assertEqual(self.manager.active_config, first)
 
+    def test_migration_rejects_symlinked_config_without_touching_target(self):
+        target = self.root / "real-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        original_bytes = json.dumps(original).encode("utf-8")
+        target.write_bytes(original_bytes)
+        link = self.root / "provider-config.json"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation is unavailable on this platform")
+
+        result = self.manager.migrate_file(
+            link, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        self.assertEqual(result["status"], "CONFIG_FILE_SYMLINK_REJECTED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(target.read_bytes(), original_bytes)
+        self.assertFalse(Path(str(link) + ".bak").exists())
+
+    def test_migration_rejects_symlinked_backup_without_touching_any_file(self):
+        path = self.root / "provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        original_bytes = json.dumps(original).encode("utf-8")
+        path.write_bytes(original_bytes)
+        target = self.root / "protected-backup-target.json"
+        target.write_bytes(b"protected")
+        backup_link = Path(str(path) + ".bak")
+        try:
+            backup_link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation is unavailable on this platform")
+
+        result = self.manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        self.assertEqual(result["status"], "CONFIG_BACKUP_SYMLINK_REJECTED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(path.read_bytes(), original_bytes)
+        self.assertEqual(target.read_bytes(), b"protected")
+        self.assertTrue(backup_link.is_symlink())
+
     def test_invalid_config_file_is_not_overwritten(self):
         path = self.root / "bad.json"
         path.write_text("{broken", encoding="utf-8")
