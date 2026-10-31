@@ -1,5 +1,6 @@
 """Provider config migration, safe reload, and rollback tests."""
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -117,6 +118,45 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         result = self.manager.migrate_file(path, target_version="2", migrations={})
         self.assertEqual(result["status"], "INVALID_CONFIG_FILE")
         self.assertEqual(path.read_text(encoding="utf-8"), "{broken")
+
+
+    def test_failed_file_rollback_cleans_restore_temp_and_keeps_backup(self):
+        path = self.root / "provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        original_bytes = json.dumps(original).encode("utf-8")
+        path.write_bytes(original_bytes)
+
+        from unittest.mock import patch
+        replacements = {"count": 0}
+
+        def fail_restore(source, destination):
+            replacements["count"] += 1
+            if replacements["count"] == 1:
+                os.replace(source, destination)
+                return
+            raise OSError("simulated rollback replacement failure")
+
+        with (
+            patch.object(self.manager, "reload", return_value={"reloaded": False}),
+            patch(
+                "projects.provider_store.provider_config_lifecycle.atomic_replace_with_retry",
+                side_effect=fail_restore,
+            ),
+        ):
+            result = self.manager.migrate_file(
+                path, target_version="2", migrations={"1": migrate_v1_to_v2}
+            )
+
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_ROLLBACK_FAILED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(
+            json.loads(Path(str(path) + ".bak").read_text(encoding="utf-8")),
+            original,
+        )
+        self.assertEqual(list(self.root.glob(".provider-config.json.restore.*.tmp")), [])
+        self.assertEqual(
+            json.loads(path.read_text(encoding="utf-8"))["schema_version"], "2"
+        )
 
 
 if __name__ == "__main__":
