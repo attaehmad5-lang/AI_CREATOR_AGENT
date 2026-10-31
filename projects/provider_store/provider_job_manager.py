@@ -92,6 +92,23 @@ class ProviderJobManager:
                 or (not (isinstance(status, str) and status in _TERMINAL) and job.get("completed_at") is not None)
             ):
                 raise ValueError("invalid provider job lifecycle metadata")
+            timestamp_fields = ["created_at", "updated_at"]
+            if job.get("started_at") is not None:
+                timestamp_fields.append("started_at")
+            if job.get("completed_at") is not None:
+                timestamp_fields.append("completed_at")
+            if job.get("lease_until") is not None:
+                timestamp_fields.append("lease_until")
+            for field in timestamp_fields:
+                value = job.get(field)
+                if not isinstance(value, str):
+                    raise ValueError("invalid provider job timestamp")
+                try:
+                    parsed = datetime.fromisoformat(value)
+                except ValueError as exc:
+                    raise ValueError("invalid provider job timestamp") from exc
+                if parsed.tzinfo is None or parsed.utcoffset() is None:
+                    raise ValueError("provider job timestamps must include a timezone")
             if (
                 not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
                 or not isinstance(job, dict)
