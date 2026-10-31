@@ -155,6 +155,10 @@ def import_catalog(
     lock_path = destination_path.with_name(destination_path.name + ".lock")
     backup_path = destination_path.with_name(destination_path.name + ".bak")
     with interprocess_file_lock(lock_path):
+        # Never replace a caller-supplied symlink: doing so would make the import
+        # target ambiguous and could conceal an unexpected filesystem change.
+        if destination_path.is_symlink():
+            return {"status": "CATALOG_IMPORT_UNSAFE_DESTINATION", "imported": False}
         original_bytes: bytes | None = (
             destination_path.read_bytes() if destination_path.exists() else None
         )
