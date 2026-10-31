@@ -56,6 +56,21 @@ class CatalogInterchangeTests(unittest.TestCase):
             [],
         )
 
+    def test_export_rejects_symlinked_destination_without_touching_target(self):
+        real_target = self.root / "real-export-target.json"
+        original = b"preserve-existing-target\\n"
+        real_target.write_bytes(original)
+        link = self.root / "linked-export.json"
+        try:
+            link.symlink_to(real_target)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
+
+        with self.assertRaisesRegex(ValueError, "export destination must not be a symlink"):
+            export_catalog(self.source, link)
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(real_target.read_bytes(), original)
+
     def test_import_rejects_symlinked_destination_without_touching_target(self):
         real_target = self.root / "real-target.json"
         original = b'{"version":"keep","providers":[]}\\n'
