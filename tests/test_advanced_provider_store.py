@@ -159,5 +159,48 @@ class AdvancedProviderStoreTests(unittest.TestCase):
             self.assertEqual(manager.by_category("not-a-real-category"), [])
 
 
+    def test_advanced_catalog_is_an_exact_identity_and_auth_view_of_central_catalog(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        central = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        advanced = json.loads((root / "advanced" / "advanced_provider_catalog.json").read_text(encoding="utf-8"))
+        categories = {
+            "script_story", "advanced_image_editing", "advanced_upscaling",
+            "advanced_transcription", "advanced_audio", "advanced_video_editing",
+        }
+        central_advanced = {
+            p["id"]: p for p in central["providers"] if p.get("category") in categories
+        }
+        advanced_by_id = {p["id"]: p for p in advanced["providers"]}
+        self.assertEqual(set(advanced_by_id), set(central_advanced))
+        for provider_id, provider in advanced_by_id.items():
+            source = central_advanced[provider_id]
+            with self.subTest(provider=provider_id):
+                for field in (
+                    "name", "category", "auth_type", "connection_type",
+                    "subscription_required", "enabled", "capabilities",
+                ):
+                    self.assertEqual(provider.get(field), source.get(field), field)
+
+    def test_category_capabilities_distinguish_supported_from_planned(self):
+        root = Path(__file__).resolve().parents[1] / "projects" / "provider_store"
+        central = json.loads((root / "provider_catalog.json").read_text(encoding="utf-8"))
+        definitions = json.loads((root / "advanced" / "advanced_categories.json").read_text(encoding="utf-8"))
+        categories = definitions["categories"]
+        for category, definition in categories.items():
+            supported = {
+                capability
+                for provider in central["providers"]
+                if provider.get("category") == category
+                for capability in provider.get("capabilities", [])
+            }
+            declared = set(definition.get("capabilities", []))
+            planned = set(definition.get("planned_capabilities", []))
+            with self.subTest(category=category):
+                self.assertTrue(declared)
+                self.assertEqual(declared, supported)
+                self.assertFalse(declared & planned)
+                self.assertTrue(all(isinstance(item, str) and item.strip() for item in planned))
+
+
 if __name__ == "__main__":
     unittest.main()
