@@ -1380,6 +1380,24 @@ class ConnectionManagerTests(unittest.TestCase):
             "INVALID_LOOPBACK_HTTP_POLICY",
         )
 
+    def test_configure_provider_rejects_secret_bearing_existing_configuration(self):
+        self.manager.state["providers"]["public_image"] = {
+            "status": "UNKNOWN",
+            "verified": False,
+            "configuration": {"api_key": "must-not-leak-this-secret"},
+        }
+        self.state_path.write_text(json.dumps(self.manager.state), encoding="utf-8")
+
+        result = self.manager.configure_provider("public_image", model="safe-model")
+        self.assertEqual(result["status"], "SENSITIVE_CONFIGURATION_REJECTED")
+        self.assertFalse(result["saved"])
+        self.assertNotIn("must-not-leak-this-secret", repr(result))
+        self.assertNotIn("safe-model", repr(result))
+        self.assertEqual(
+            self.manager.state["providers"]["public_image"]["configuration"]["api_key"],
+            "must-not-leak-this-secret",
+        )
+
     def test_provider_model_configuration_is_persisted_without_credentials(self):
         result = self.manager.configure_provider("public_image", model="test-model-v1")
         self.assertEqual(result["status"], "CONFIGURED")
