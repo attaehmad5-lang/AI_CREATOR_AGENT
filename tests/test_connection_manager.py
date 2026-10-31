@@ -631,6 +631,45 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(self.manager.is_provider_enabled("manual_disable_race"))
         self.assertNotIn("ephemeral", self.state_path.read_text(encoding="utf-8"))
 
+    def test_disabling_manual_provider_during_failed_probe_preserves_disabled_state(self):
+        for failure_kind in ("false", "exception"):
+            with self.subTest(failure_kind=failure_kind):
+                provider_id = f"manual_failure_disable_{failure_kind}"
+                self.manager.register_provider({
+                    "id": provider_id, "name": "Manual Failure Disable",
+                    "category": "music", "auth_type": "ACCOUNT",
+                    "connection_type": "BROWSER_SESSION", "enabled": True,
+                })
+                probe_started = threading.Event()
+                release_probe = threading.Event()
+
+                def blocking_probe(provider, *, session, timeout_seconds):
+                    probe_started.set()
+                    if not release_probe.wait(timeout=3):
+                        raise TimeoutError("test manual probe release timed out")
+                    if failure_kind == "exception":
+                        raise ConnectionError("private endpoint details")
+                    return False
+
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    verification = pool.submit(
+                        self.manager.verify_manual_connection,
+                        provider_id, {"ephemeral": "session"}, blocking_probe,
+                    )
+                    self.assertTrue(probe_started.wait(timeout=2))
+                    disabled = self.manager.set_provider_enabled(provider_id, False)
+                    self.assertEqual(disabled["status"], "DISABLED")
+                    release_probe.set()
+                    result = verification.result(timeout=3)
+
+                self.assertEqual(result["status"], "DISABLED")
+                self.assertFalse(result["verified"])
+                state = self.manager.get_state(provider_id)
+                self.assertEqual(state["status"], "DISABLED")
+                self.assertFalse(state["verified"])
+                self.assertFalse(self.manager.is_provider_enabled(provider_id))
+                self.assertNotIn("session", self.state_path.read_text(encoding="utf-8"))
+
     def test_manual_connection_failure_and_timeout_never_mark_connected(self):
         self.manager.register_provider({
             "id": "manual_failure", "name": "Manual Failure", "category": "music",
