@@ -88,7 +88,7 @@ class ProviderJobManager:
                     job.get("worker_id") is not None
                     or job.get("lease_until") is not None
                 ))
-                or (status in _TERMINAL and not isinstance(job.get("completed_at"), str))
+                or (isinstance(status, str) and status in _TERMINAL and not isinstance(job.get("completed_at"), str))
                 or (status not in _TERMINAL and job.get("completed_at") is not None)
             ):
                 raise ValueError("invalid provider job lifecycle metadata")
