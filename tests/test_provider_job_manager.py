@@ -105,6 +105,28 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertNotIn("actual prompt text", state)
         self.assertIn("payload:job-1", state)
 
+    def test_invalid_persisted_worker_metadata_is_rejected(self):
+        import json
+        malformed = {
+            "version": "1.0",
+            "jobs": {
+                "job-1": {
+                    "job_id": "job-1",
+                    "project_id": "film",
+                    "provider_id": "image",
+                    "payload_ref": "payload:job-1",
+                    "status": "RUNNING",
+                    "attempts": 1,
+                    "priority": 50,
+                    "cancel_requested": "false",
+                    "worker_id": "../outside",
+                }
+            },
+        }
+        self.path.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid provider job record"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
     def test_malformed_persisted_job_fields_fail_with_schema_error(self):
         malformed = {
             "version": "1.0",
