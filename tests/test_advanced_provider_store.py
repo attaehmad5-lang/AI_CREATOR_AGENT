@@ -202,5 +202,34 @@ class AdvancedProviderStoreTests(unittest.TestCase):
                 self.assertTrue(all(isinstance(item, str) and item.strip() for item in planned))
 
 
+    def test_returned_advanced_provider_views_are_deeply_detached(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            listed = manager.list_providers()
+            listed_story = next(item for item in listed if item["id"] == "advanced-story")
+            listed_story["capabilities"].append("injected_capability")
+            listed_story["allowed_hosts"].append("attacker.example.test")
+
+            fetched_story = manager.get_provider("advanced-story")
+            fetched_story["capabilities"].clear()
+            catalog_story = next(
+                item for item in manager.catalog["providers"]
+                if item["id"] == "advanced-story"
+            )
+            catalog_story["capabilities"].append("catalog_view_mutation")
+
+            persisted = manager.store.manager.get_provider("advanced-story")
+            self.assertEqual(
+                persisted["capabilities"],
+                ["story_generation"],
+            )
+            self.assertEqual(
+                persisted["allowed_hosts"],
+                ["story.example.test"],
+            )
+            self.assertNotIn("injected_capability", persisted["capabilities"])
+            self.assertNotIn("catalog_view_mutation", persisted["capabilities"])
+
+
 if __name__ == "__main__":
     unittest.main()
