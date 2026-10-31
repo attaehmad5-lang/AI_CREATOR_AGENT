@@ -43,3 +43,10 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 - CI uses deterministic local fixtures; it does not claim external provider APIs were contacted.
 - The Advanced Provider Store is verified at the catalog, state-management, filtering, compatibility, and regression-test levels by the merged changes and the Ubuntu/Windows CI run above.
 - Live external connection and modality verification remains a deployment gate. It must use an authorized, securely configured provider; it is not safe to fabricate a pass or run potentially billable generation calls without authorization.
+
+
+## Additional security verification (2026-10-31)
+
+- PR #96: provider registration now validates the complete candidate catalog before persistence; invalid metadata is rejected without changing the catalog. Ubuntu and Windows CI passed (workflow run 41223117609).
+- PR #97: credential-reference exemptions accept only exact canonical lowercase underscore keys; case and hyphen aliases are rejected. Four registration regression cases confirm rejection without persistence. Ubuntu and Windows CI passed (workflow run 41223513751).
+- Both PRs are merged to `main`. These checks do not establish live provider authentication or modality generation; operational verification remains a deployment gate.
