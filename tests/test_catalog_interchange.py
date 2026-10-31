@@ -311,5 +311,30 @@ class CatalogInterchangeTests(unittest.TestCase):
         self.assertFalse(target.exists())
 
 
+    def test_snapshot_prune_never_deletes_or_follows_symlinked_snapshot(self):
+        history = self.root / "history"
+        history.mkdir()
+        for day in range(1, 4):
+            (history / f"catalog-2026010{day}T000000000000Z.json").write_bytes(
+                self.source.read_bytes()
+            )
+        protected = self.root / "protected-catalog.json"
+        protected.write_bytes(self.source.read_bytes())
+        link = history / "catalog-20260109T000000000000Z.json"
+        try:
+            link.symlink_to(protected)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
+
+        result = prune_catalog_snapshots(history, keep=1, apply=True)
+
+        self.assertTrue(result["applied"])
+        self.assertFalse(link.exists() and not link.is_symlink())
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(protected.read_bytes(), self.source.read_bytes())
+        self.assertEqual(len(result["deleted"]), 2)
+        self.assertEqual(len(list(history.glob("catalog-*.json"))), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
