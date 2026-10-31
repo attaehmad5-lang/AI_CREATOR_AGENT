@@ -150,6 +150,21 @@ class ProviderJobManager:
                         or not _ERROR_RE.fullmatch(job["error_code"])
                     )
                 )
+                or (
+                    job.get("last_error_code") is not None
+                    and (
+                        not isinstance(job.get("last_error_code"), str)
+                        or not _ERROR_RE.fullmatch(job["last_error_code"])
+                    )
+                )
+                or (
+                    job.get("status") == "SUCCEEDED"
+                    and (not isinstance(job.get("result_ref"), str) or not _REF_RE.fullmatch(job["result_ref"]))
+                )
+                or (
+                    job.get("status") != "SUCCEEDED"
+                    and job.get("result_ref") is not None
+                )
             ):
                 raise ValueError("invalid provider job record")
         self.data = loaded
