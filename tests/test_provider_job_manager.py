@@ -222,6 +222,44 @@ class ProviderJobManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid provider job lifecycle metadata"):
             ProviderJobManager(self.path, clock=lambda: self.now[0])
 
+    def test_persisted_error_and_result_references_are_validated(self):
+        import json
+        malformed_jobs = [
+            {
+                "status": "QUEUED", "attempts": 0,
+                "last_error_code": "../secret",
+            },
+            {
+                "status": "SUCCEEDED", "attempts": 1,
+                "completed_at": "2026-10-16T12:00:00+00:00",
+                "result_ref": "../outside",
+            },
+            {
+                "status": "FAILED", "attempts": 1,
+                "completed_at": "2026-10-16T12:00:00+00:00",
+                "result_ref": "asset:unexpected",
+            },
+        ]
+        for fields in malformed_jobs:
+            with self.subTest(fields=fields):
+                job = {
+                    "job_id": "job-1",
+                    "project_id": "film",
+                    "provider_id": "image",
+                    "payload_ref": "payload:job-1",
+                    "priority": 50,
+                    "created_at": "2026-10-16T12:00:00+00:00",
+                    "updated_at": "2026-10-16T12:00:00+00:00",
+                    "cancel_requested": False,
+                    **fields,
+                }
+                self.path.write_text(
+                    json.dumps({"version": "1.0", "jobs": {"job-1": job}}),
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(ValueError, "invalid provider job record"):
+                    ProviderJobManager(self.path, clock=lambda: self.now[0])
+
     def test_unsupported_state_schema_version_is_rejected(self):
         self.path.write_text(
             '{"version":"99.0","jobs":{}}', encoding="utf-8"
