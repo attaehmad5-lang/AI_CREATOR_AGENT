@@ -56,6 +56,10 @@ class ProviderJobManager:
         self._reload()
 
     def _reload(self) -> None:
+        # Never read through a caller-controlled state-file symlink. In
+        # particular, do this before exists(), which follows symlinks.
+        if self.state_path.is_symlink():
+            raise ValueError("provider job state must not be a symlink")
         if not self.state_path.exists():
             self.data = {"version": "1.0", "jobs": {}}
             return
@@ -93,6 +97,8 @@ class ProviderJobManager:
 
     def _save(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.state_path.is_symlink():
+            raise ValueError("provider job state must not be a symlink")
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{self.state_path.name}.", suffix=".tmp",
             dir=str(self.state_path.parent), text=True,
