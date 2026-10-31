@@ -105,6 +105,23 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertNotIn("actual prompt text", state)
         self.assertIn("payload:job-1", state)
 
+    def test_state_file_symlink_is_rejected_without_reading_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "outside.json"
+            target.write_text('{"version":"1.0","jobs":{}}', encoding="utf-8")
+            link = root / "jobs.json"
+            try:
+                link.symlink_to(target)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks are unavailable on this platform")
+            with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+                ProviderJobManager(link)
+            self.assertEqual(
+                target.read_text(encoding="utf-8"),
+                '{"version":"1.0","jobs":{}}',
+            )
+
     def test_invalid_inputs_fail_closed(self):
         self.assertEqual(self.manager.submit(
             job_id="bad id", project_id="film", provider_id="image",
