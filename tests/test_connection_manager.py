@@ -737,6 +737,24 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), original_catalog)
         self.assertFalse(self.manager.provider_exists("unsafe_reference"))
 
+    def test_register_provider_rejects_noncanonical_credential_reference_keys(self):
+        original_catalog = self.catalog_path.read_text(encoding="utf-8")
+        for index, key in enumerate(("TOKEN_ENV", "token-env", "Secret-Ref", "API_KEY_ENV")):
+            with self.subTest(key=key):
+                result = self.manager.register_provider({
+                    "id": f"credential_alias_{index}",
+                    "name": "Credential Alias",
+                    "category": "image",
+                    "auth_type": "API_TOKEN",
+                    "connection_type": "API",
+                    key: "literal-private-credential-value",
+                })
+                self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
+                self.assertFalse(result["saved"])
+                self.assertNotIn("literal-private-credential-value", repr(result))
+                self.assertFalse(self.manager.provider_exists(f"credential_alias_{index}"))
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), original_catalog)
+
     def test_register_provider_rejects_duplicate_without_overwrite(self):
         provider = {
             "id": "token_image", "name": "Replacement", "category": "image",
