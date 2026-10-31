@@ -91,7 +91,7 @@ class ProviderJobManager:
                 or (isinstance(status, str) and status in _TERMINAL and not isinstance(job.get("completed_at"), str))
                 or (not (isinstance(status, str) and status in _TERMINAL) and job.get("completed_at") is not None)
                 or (status == "QUEUED" and job.get("attempts", 0) == 0 and job.get("started_at") is not None)
-                or (status == "RUNNING" and (not isinstance(job.get("started_at"), str) or job.get("attempts", 0) < 1))
+                or (status == "RUNNING" and (not isinstance(job.get("started_at"), str) or isinstance(job.get("attempts"), bool) or not isinstance(job.get("attempts"), int) or job["attempts"] < 1))
                 or (status == "CANCELLED" and job.get("cancel_requested") not in (False, True))
             ):
                 raise ValueError("invalid provider job lifecycle metadata")
