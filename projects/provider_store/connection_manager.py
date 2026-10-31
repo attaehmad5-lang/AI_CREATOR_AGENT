@@ -1180,8 +1180,40 @@ class ConnectionManager:
         if timeout_value is None or timeout_value <= 0:
             return {"status": "INVALID_TIMEOUT", "provider": provider_id, "verified": False}
 
+        disabled_during_probe = False
+
         def save_state(status: str) -> bool:
+            nonlocal disabled_during_probe
             try:
+                if status == "ERROR":
+                    # Serialize failure-state persistence with disable operations:
+                    # a late probe failure must not overwrite an administrative disable.
+                    with self._catalog_transaction():
+                        current = next(
+                            (
+                                item for item in self.catalog.get("providers", [])
+                                if isinstance(item, dict) and item.get("id") == provider_id
+                            ),
+                            None,
+                        )
+                        if current is None:
+                            return False
+                        if current.get("enabled") is False:
+                            disabled_during_probe = True
+                            status_to_save = "DISABLED"
+                        else:
+                            status_to_save = status
+                        with self._state_transaction():
+                            existing = self.state["providers"].get(provider_id, {})
+                            record = dict(existing) if isinstance(existing, dict) else {}
+                            record.update({
+                                "status": status_to_save,
+                                "verified": False,
+                                "updated_at": datetime.now(timezone.utc).isoformat(),
+                            })
+                            self.state["providers"][provider_id] = record
+                            self._save()
+                            return True
                 result = self.set_state(provider_id, status)
             except Exception:
                 return False
@@ -1197,6 +1229,8 @@ class ConnectionManager:
         if configuration_result.get("status") not in {"CONFIGURED", "NO_CONFIGURATION"}:
             if not save_state("ERROR"):
                 return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
+            if disabled_during_probe:
+                return {"status": "DISABLED", "provider": provider_id, "verified": False}
             return {
                 "status": configuration_result.get("status", "INVALID_CONFIGURATION"),
                 "provider": provider_id, "verified": False,
@@ -1213,6 +1247,8 @@ class ConnectionManager:
         if credentials["status"] in blocked_credential_states:
             if not save_state("ERROR"):
                 return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
+            if disabled_during_probe:
+                return {"status": "DISABLED", "provider": provider_id, "verified": False}
             return {
                 "status": credentials["status"], "provider": provider_id, "verified": False,
             }
@@ -1225,6 +1261,8 @@ class ConnectionManager:
             if result is not True and not (isinstance(result, dict) and result.get("ok") is True):
                 if not save_state("ERROR"):
                     return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
+                if disabled_during_probe:
+                    return {"status": "DISABLED", "provider": provider_id, "verified": False}
                 return {
                     "status": "CONNECTION_FAILED", "provider": provider_id, "verified": False,
                     "latency_ms": round((time.monotonic() - started) * 1000, 2),
@@ -1269,6 +1307,8 @@ class ConnectionManager:
                     "status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False,
                     "error_type": type(exc).__name__,
                 }
+            if disabled_during_probe:
+                return {"status": "DISABLED", "provider": provider_id, "verified": False}
             result = {
                 "status": status, "provider": provider_id, "verified": False,
                 "error_type": type(exc).__name__,
