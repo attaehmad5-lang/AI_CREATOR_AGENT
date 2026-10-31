@@ -5,7 +5,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from projects.provider_store.advanced.release_report import build_release_report, main, read_ledger, write_release_artifacts
+from projects.provider_store.advanced.release_report import _atomic_write, build_release_report, main, read_ledger, write_release_artifacts
 
 
 def _ledger_text(count=150):
@@ -21,6 +21,32 @@ def _ledger_text(count=150):
 
 
 class AdvancedProviderReleaseReportTests(unittest.TestCase):
+    def test_atomic_metadata_write_preserves_existing_file_on_replace_failure(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "report.json"
+            target.write_bytes(b"previous-valid-report")
+            with patch("projects.provider_store.advanced.release_report.os.replace", side_effect=OSError("injected")):
+                with self.assertRaisesRegex(OSError, "injected"):
+                    _atomic_write(target, b"new-report")
+            self.assertEqual(target.read_bytes(), b"previous-valid-report")
+            self.assertEqual(list(Path(tmp).iterdir()), [target])
+
+    def test_atomic_metadata_write_rejects_symlink_destination(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "report.json"
+            external = root / "external.json"
+            external.write_bytes(b"keep")
+            try:
+                target.symlink_to(external)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
+            with self.assertRaisesRegex(ValueError, "destination must not be a symlink"):
+                _atomic_write(target, b"replace")
+            self.assertEqual(external.read_bytes(), b"keep")
+
     def test_report_counts_150_points_without_claiming_release_ready(self):
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Path(tmp) / "ledger.md"
