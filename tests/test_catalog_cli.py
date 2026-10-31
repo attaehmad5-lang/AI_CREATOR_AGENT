@@ -148,6 +148,27 @@ class CatalogCliTests(unittest.TestCase):
         ]
         self.assertEqual(events, ["catalog.export.started", "catalog.export.completed"])
 
+    def test_unexpected_operation_exception_is_audited_without_traceback(self):
+        from unittest.mock import patch
+
+        destination = self.root / "unexpected-failure.json"
+        audit_path = self.root / "unexpected-audit.jsonl"
+        with patch(
+            "projects.provider_store.catalog_cli.export_catalog",
+            side_effect=RuntimeError("internal detail must not be emitted"),
+        ):
+            code, result = self.invoke(
+                "export", self.current, destination, "--audit-log", audit_path
+            )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(result["status"], "CATALOG_OPERATION_FAILED")
+        self.assertEqual(result["error_type"], "RuntimeError")
+        self.assertNotIn("internal detail", json.dumps(result))
+        self.assertTrue(result["audit"]["saved"])
+        self.assertEqual(ProviderAuditLog(audit_path).verify_chain()["count"], 2)
+        self.assertFalse(destination.exists())
+
     def test_export_command_creates_valid_catalog(self):
         destination = self.root / "exported" / "catalog.json"
         code, result = self.invoke("export", self.current, destination)
