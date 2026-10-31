@@ -196,6 +196,32 @@ class ProviderJobManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid provider job timestamp"):
             ProviderJobManager(self.path, clock=lambda: self.now[0])
 
+    def test_running_job_with_malformed_attempt_count_fails_closed(self):
+        import json
+        malformed = {
+            "version": "1.0",
+            "jobs": {
+                "job-1": {
+                    "job_id": "job-1",
+                    "project_id": "film",
+                    "provider_id": "image",
+                    "payload_ref": "payload:job-1",
+                    "status": "RUNNING",
+                    "attempts": "one",
+                    "priority": 50,
+                    "worker_id": "worker-1",
+                    "lease_until": "2026-10-16T12:00:10+00:00",
+                    "started_at": "2026-10-16T12:00:00+00:00",
+                    "created_at": "2026-10-16T12:00:00+00:00",
+                    "updated_at": "2026-10-16T12:00:00+00:00",
+                    "cancel_requested": False,
+                }
+            },
+        }
+        self.path.write_text(json.dumps(malformed), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid provider job lifecycle metadata"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
     def test_unsupported_state_schema_version_is_rejected(self):
         self.path.write_text(
             '{"version":"99.0","jobs":{}}', encoding="utf-8"
