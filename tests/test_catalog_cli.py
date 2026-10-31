@@ -177,5 +177,31 @@ class CatalogCliTests(unittest.TestCase):
         self.assertEqual(json.loads(destination.read_text(encoding="utf-8")), self.catalog)
 
 
+    def test_successful_mutation_returns_audit_failure_exit_when_completion_cannot_be_saved(self):
+        from unittest.mock import patch
+
+        destination = self.root / "audit-completion-failure.json"
+        audit_path = self.root / "audit-completion-failure.jsonl"
+        with patch.object(
+            ProviderAuditLog,
+            "record",
+            side_effect=[
+                {"status": "AUDIT_EVENT_RECORDED", "saved": True},
+                OSError("audit storage unavailable"),
+            ],
+        ):
+            code, result = self.invoke(
+                "export", self.current, destination, "--audit-log", audit_path
+            )
+
+        # The export itself is atomic and succeeds, but the CLI must not report
+        # overall success when its required terminal audit event was not saved.
+        self.assertTrue(destination.is_file())
+        self.assertEqual(code, 4)
+        self.assertTrue(result["exported"])
+        self.assertEqual(result["audit"]["status"], "AUDIT_LOG_WRITE_FAILED")
+        self.assertFalse(result["audit"]["saved"])
+
+
 if __name__ == "__main__":
     unittest.main()
