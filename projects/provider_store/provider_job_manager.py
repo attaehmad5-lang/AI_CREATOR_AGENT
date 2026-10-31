@@ -75,6 +75,23 @@ class ProviderJobManager:
         ):
             raise ValueError("invalid provider job state schema")
         for job_id, job in loaded["jobs"].items():
+            if not isinstance(job, dict):
+                raise ValueError("invalid provider job record")
+            status = job.get("status")
+            if (
+                (status == "RUNNING" and (
+                    not isinstance(job.get("worker_id"), str)
+                    or not _ID_RE.fullmatch(job["worker_id"])
+                    or not isinstance(job.get("lease_until"), str)
+                ))
+                or (status != "RUNNING" and (
+                    job.get("worker_id") is not None
+                    or job.get("lease_until") is not None
+                ))
+                or (status in _TERMINAL and not isinstance(job.get("completed_at"), str))
+                or (status not in _TERMINAL and job.get("completed_at") is not None)
+            ):
+                raise ValueError("invalid provider job lifecycle metadata")
             if (
                 not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
                 or not isinstance(job, dict)
