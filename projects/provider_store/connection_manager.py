@@ -212,6 +212,11 @@ class ConnectionManager:
             for key, item in value.items():
                 normalized = str(key).casefold().replace("-", "_")
                 if normalized in safe_reference_keys:
+                    # Only canonical lowercase underscore keys are safe references.
+                    # Case/hyphen aliases bypass exact schema validation and could
+                    # otherwise smuggle literal credentials into the catalog.
+                    if key != normalized:
+                        return True
                     continue
                 if normalized in forbidden_keys or any(
                     marker in normalized
