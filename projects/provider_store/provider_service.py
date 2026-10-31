@@ -96,6 +96,51 @@ class ProviderService:
             }
         return None
 
+    def active_probe_provider(
+        self,
+        provider_id: str,
+        probe: Any,
+        *,
+        timeout_seconds: float = 5.0,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run an injected bounded health probe and persist only safe health metadata."""
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "verified": False, "authorization": authorization,
+            }
+        if self.health_manager is None:
+            return {"status": "HEALTH_MANAGER_UNAVAILABLE", "provider": provider_id, "verified": False}
+        active_probe = getattr(self.health_manager, "active_probe", None)
+        if not callable(active_probe):
+            return {"status": "ACTIVE_PROBE_UNAVAILABLE", "provider": provider_id, "verified": False}
+        try:
+            result = active_probe(provider_id, probe, timeout_seconds=timeout_seconds)
+        except Exception as exc:
+            return {
+                "status": "ACTIVE_PROBE_FAILED", "provider": provider_id,
+                "verified": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_ACTIVE_PROBE_RESPONSE", "provider": provider_id, "verified": False}
+        # Do not return probe exceptions, response bodies, credentials, or arbitrary plugin fields.
+        safe = {
+            "status": result.get("status") if isinstance(result.get("status"), str) else "UNKNOWN",
+            "provider": provider_id,
+            "verified": result.get("verified") is True,
+        }
+        if isinstance(result.get("latency_ms"), (int, float)) and not isinstance(result.get("latency_ms"), bool):
+            latency = finite_number(result["latency_ms"], minimum=0)
+            if latency is not None:
+                safe["latency_ms"] = round(latency, 2)
+        if result.get("verified") is True and result.get("status") == "HEALTHY":
+            safe["saved"] = True
+        else:
+            safe["saved"] = result.get("status") not in {"HEALTH_RECORD_FAILED", "ACTIVE_PROBE_UNAVAILABLE"}
+        return safe
+
     def verify_provider(
         self,
         provider_id: str,
@@ -452,6 +497,9 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        require_fresh_health: bool = False,
+        health_stale_after_seconds: float = 300.0,
+        max_health_latency_ms: float | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
@@ -534,6 +582,52 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+
+        if not isinstance(require_fresh_health, bool):
+            release = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            return {
+                "status": "INVALID_HEALTH_GATE_POLICY", "executed": False,
+                "release": release,
+            }
+        if require_fresh_health:
+            health_check = getattr(self.health_manager, "is_eligible", None)
+            if not callable(health_check):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "HEALTH_GATE_UNAVAILABLE", "executed": False,
+                    "provider": provider_id, "release": release,
+                }
+            try:
+                eligibility = health_check(
+                    provider_id,
+                    stale_after_seconds=health_stale_after_seconds,
+                    max_latency_ms=max_health_latency_ms,
+                )
+            except Exception as exc:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "HEALTH_GATE_CHECK_FAILED", "executed": False,
+                    "provider": provider_id, "release": release,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(eligibility, dict) or eligibility.get("eligible") is not True:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "HEALTH_GATE_REJECTED", "executed": False,
+                    "provider": provider_id,
+                    "health": eligibility if isinstance(eligibility, dict) else {
+                        "eligible": False, "status": "INVALID_HEALTH_RESPONSE"
+                    },
+                    "release": release,
+                }
 
         data_policy_result = None
         if self.data_handling_policy is not None:
