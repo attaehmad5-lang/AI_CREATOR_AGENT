@@ -9,6 +9,8 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import tempfile
 import re
 import zipfile
 from collections import Counter
@@ -113,6 +115,31 @@ def _reject_symlink_path_components(path: Path, *, label: str) -> None:
             raise ValueError(f"{label} path cannot be inspected safely") from exc
 
 
+def _atomic_write(path: Path, data: bytes) -> None:
+    """Replace a release artifact atomically without following a destination symlink."""
+    if path.is_symlink():
+        raise ValueError("release artifact destination must not be a symlink")
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
+        ) as handle:
+            temporary = handle.name
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.is_symlink():
+            raise ValueError("release artifact destination must not be a symlink")
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+
+
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -189,7 +216,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
     artifact_paths = (report_json, report_md, manifest_json, archive, archive_checksum, pdf_report, sbom_json)
     if any(path.is_symlink() for path in artifact_paths):
         raise ValueError("release artifact destination must not be a symlink")
-    report_json.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _atomic_write(report_json, (json.dumps(report, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
     try:
         from .pdf_report import write_pdf_report
     except ImportError:  # Supports direct script execution as well as module execution.
@@ -209,7 +236,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
     for status, count in report["status_counts"].items():
         lines.append(f"- {status}: {count}")
     lines.extend(["", "## Release gate", "", "This report is not a production-readiness claim. Live provider verification requires configured credentials and explicit approval for any billable action.", ""])
-    report_md.write_text("\n".join(lines), encoding="utf-8")
+    _atomic_write(report_md, "\n".join(lines).encode("utf-8"))
     manifest = {
         "schema_version": "1.0",
         "component": "Advanced Provider Store",
@@ -218,7 +245,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
         "files": manifest_entries,
         "excluded": ["runtime state", "environment files", "backups", "credentials/secrets", "caches", "test fixtures"],
     }
-    manifest_json.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _atomic_write(manifest_json, (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
     sbom = {
         "spdxVersion": "SPDX-2.3",
         "dataLicense": "CC0-1.0",
@@ -252,7 +279,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
             "relatedSpdxElement": "SPDXRef-Package-AdvancedProviderStore",
         }],
     }
-    sbom_json.write_text(json.dumps(sbom, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _atomic_write(sbom_json, (json.dumps(sbom, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for relative, data in payloads:
             zf.writestr(relative, data)
@@ -275,7 +302,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
             if _sha256(archived_data) != entry["sha256"]:
                 raise ValueError(f"ZIP checksum mismatch for {entry['path']}")
     archive_digest = _sha256(archive.read_bytes())
-    archive_checksum.write_text(f"{archive_digest}  {archive.name}\n", encoding="ascii")
+    _atomic_write(archive_checksum, f"{archive_digest}  {archive.name}\n".encode("ascii"))
     if archive_checksum.read_text(encoding="ascii").split()[0] != _sha256(archive.read_bytes()):
         raise ValueError("release ZIP SHA-256 sidecar verification failed")
     return {
