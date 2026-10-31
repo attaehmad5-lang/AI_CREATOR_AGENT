@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import tempfile
 from typing import Any
 
 
@@ -124,5 +126,29 @@ def write_pdf_report(output_path: str | Path, report: dict[str, Any]) -> Path:
     pages = [wrapped[i:i + 48] for i in range(0, len(wrapped), 48)] or [["No report data"]]
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(_make_pdf(pages))
+    if path.is_symlink():
+        raise ValueError("PDF report destination must not be a symlink")
+    payload = _make_pdf(pages)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Recheck before replacement; refusing symlinks makes destination intent explicit.
+        if path.is_symlink():
+            raise ValueError("PDF report destination must not be a symlink")
+        os.replace(temporary_name, path)
+    except Exception:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
     return path
