@@ -1528,12 +1528,8 @@ class ConnectionManager:
             return {"status": "MANUAL_SESSION_REQUIRED", "provider": provider_id, "verified": False}
         if not callable(probe):
             return {"status": "INVALID_PROBE", "provider": provider_id, "verified": False}
-        if (
-            not isinstance(timeout_seconds, (int, float))
-            or isinstance(timeout_seconds, bool)
-            or not math.isfinite(timeout_seconds)
-            or timeout_seconds <= 0
-        ):
+        timeout_value = finite_number(timeout_seconds, minimum=0)
+        if timeout_value is None or timeout_value <= 0:
             return {"status": "INVALID_TIMEOUT", "provider": provider_id, "verified": False}
 
         try:
@@ -1587,7 +1583,7 @@ class ConnectionManager:
 
         started = time.monotonic()
         try:
-            result = probe(dict(provider), session=manual_session, timeout_seconds=float(timeout_seconds))
+            result = probe(dict(provider), session=manual_session, timeout_seconds=timeout_value)
             if result is not True and not (isinstance(result, dict) and result.get("ok") is True):
                 try:
                     disabled_during_probe = save_manual_failure()
