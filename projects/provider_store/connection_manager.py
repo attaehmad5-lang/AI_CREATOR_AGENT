@@ -701,13 +701,22 @@ class ConnectionManager:
             # A factory may allocate sockets, sessions, threads, or other resources
             # before its returned object is rejected by the modality contract.
             # Dispose of that rejected instance rather than leaking it.
-            cleanup = getattr(instance, "close", None)
-            if not callable(cleanup):
-                cleanup = getattr(instance, "shutdown", None)
             cleanup_error_type = None
+            try:
+                cleanup = getattr(instance, "close", None)
+            except Exception as exc:
+                cleanup = None
+                cleanup_error_type = type(exc).__name__
+            if not callable(cleanup):
+                try:
+                    cleanup = getattr(instance, "shutdown", None)
+                except Exception as exc:
+                    cleanup = None
+                    cleanup_error_type = type(exc).__name__
             if callable(cleanup):
                 try:
                     cleanup()
+                    cleanup_error_type = None
                 except Exception as exc:
                     cleanup_error_type = type(exc).__name__
             result = {

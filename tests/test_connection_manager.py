@@ -1013,6 +1013,25 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(instance.closed)
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
 
+    def test_rejected_provider_uses_shutdown_when_close_attribute_raises(self):
+        class RejectedProvider:
+            def __init__(self):
+                self.stopped = False
+
+            @property
+            def close(self):
+                raise RuntimeError("private close accessor detail")
+
+            def shutdown(self):
+                self.stopped = True
+
+        instance = RejectedProvider()
+        result = self.manager.load_provider("public_image", lambda metadata: instance)
+        self.assertEqual(result["status"], "CONTRACT_VIOLATION")
+        self.assertTrue(instance.stopped)
+        self.assertNotIn("cleanup_error_type", result)
+        self.assertNotIn("private close accessor detail", repr(result))
+
     def test_rejected_provider_cleanup_failure_is_reported_without_exception_text(self):
         class RejectedProvider:
             def close(self):
