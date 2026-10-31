@@ -457,6 +457,48 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
+    def test_fresh_health_gate_allows_verified_provider(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        service.verify_provider("image", lambda provider, timeout_seconds: True)
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-gate-healthy",
+            estimated_cost=0.0, adapter=lambda **kwargs: (
+                called.append(kwargs) or {"started": False, "success": False}
+            ), modality="image", require_fresh_health=True,
+        )
+        self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
+        self.assertEqual(len(called), 1)
+
+    def test_fresh_health_gate_rejects_unknown_provider_before_adapter(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(self.connections, routing_manager=router, health_manager=self.health)
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-gate-unknown",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(kwargs),
+            modality="image", require_fresh_health=True,
+        )
+        self.assertEqual(result["status"], "HEALTH_GATE_REJECTED")
+        self.assertEqual(result["health"]["status"], "UNKNOWN")
+        self.assertEqual(called, [])
+
+    def test_fresh_health_gate_fails_closed_without_health_manager(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(self.connections, routing_manager=router)
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-gate-missing",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(kwargs),
+            modality="image", require_fresh_health=True,
+        )
+        self.assertEqual(result["status"], "HEALTH_GATE_UNAVAILABLE")
+        self.assertEqual(called, [])
+
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
@@ -1260,6 +1302,115 @@ class ProviderServiceTests(unittest.TestCase):
         service = ProviderService(self.connections)
         self.assertEqual(service.route_request(category="image", project_id="film")["status"], "ROUTING_MANAGER_UNAVAILABLE")
         self.assertEqual(service.validate_output("missing.png", modality="image")["status"], "OUTPUT_VALIDATOR_UNAVAILABLE")
+
+
+    def test_fresh_health_gate_rejects_stale_or_unhealthy_evidence(self):
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        self.health.record_result("image", success=False, error_code="SIMULATED_OUTAGE")
+        self.health.record_result("image", success=False, error_code="SIMULATED_OUTAGE")
+        self.health.record_result("image", success=False, error_code="SIMULATED_OUTAGE")
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-gate-unhealthy",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(kwargs),
+            modality="image", require_fresh_health=True,
+        )
+        self.assertEqual(result["status"], "HEALTH_GATE_REJECTED")
+        self.assertEqual(called, [])
+        self.assertTrue(result["release"]["released"])
+
+    def test_fresh_health_gate_health_manager_exception_fails_closed(self):
+        class RaisingHealthManager:
+            def record_result(self, provider_id, **kwargs):
+                return {"saved": True}
+
+            def is_eligible(self, provider_id, **kwargs):
+                raise RuntimeError("health backend unavailable")
+
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            health_manager=RaisingHealthManager(),
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-gate-exception",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(kwargs),
+            modality="image", require_fresh_health=True,
+        )
+        self.assertEqual(result["status"], "HEALTH_GATE_CHECK_FAILED")
+        self.assertEqual(result["error_type"], "RuntimeError")
+        self.assertEqual(called, [])
+        self.assertTrue(result["release"]["released"])
+
+    def test_fresh_health_gate_rejects_malformed_health_response(self):
+        class MalformedHealthManager:
+            def record_result(self, provider_id, **kwargs):
+                return {"saved": True}
+
+            def is_eligible(self, provider_id, **kwargs):
+                return {"eligible": 1, "status": "MALFORMED"}
+
+        router = ProviderRoutingManager(self.connections)
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            health_manager=MalformedHealthManager(),
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        called = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="health-gate-malformed",
+            estimated_cost=0.0, adapter=lambda **kwargs: called.append(kwargs),
+            modality="image", require_fresh_health=True,
+        )
+        self.assertEqual(result["status"], "HEALTH_GATE_REJECTED")
+        self.assertEqual(result["health"]["status"], "MALFORMED")
+        self.assertEqual(called, [])
+        self.assertTrue(result["release"]["released"])
+
+
+    def test_active_probe_provider_records_safe_success(self):
+        service = ProviderService(self.connections, health_manager=self.health)
+        result = service.active_probe_provider(
+            "image", lambda timeout_seconds: {"ok": True, "secret": "must-not-escape"}
+        )
+        self.assertEqual(result["status"], "HEALTHY")
+        self.assertTrue(result["verified"])
+        self.assertTrue(result["saved"])
+        self.assertNotIn("secret", result)
+
+    def test_active_probe_provider_denies_unauthorized_probe(self):
+        authorization = ProviderAuthorizationManager(self.root / "authorization.json")
+        service = ProviderService(
+            self.connections, health_manager=self.health,
+            authorization_manager=authorization,
+        )
+        result = service.active_probe_provider(
+            "image", lambda timeout_seconds: True, principal_id="unknown-principal"
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_DENIED")
+        self.assertFalse(result["verified"])
+
+    def test_active_probe_provider_fails_closed_without_health_manager(self):
+        service = ProviderService(self.connections)
+        result = service.active_probe_provider("image", lambda timeout_seconds: True)
+        self.assertEqual(result["status"], "HEALTH_MANAGER_UNAVAILABLE")
+        self.assertFalse(result["verified"])
+
+    def test_active_probe_provider_does_not_expose_probe_exception(self):
+        service = ProviderService(self.connections, health_manager=self.health)
+        def failing_probe(timeout_seconds):
+            raise RuntimeError("private endpoint and secret")
+        result = service.active_probe_provider("image", failing_probe)
+        self.assertEqual(result["status"], "NETWORK_ERROR")
+        self.assertFalse(result["verified"])
+        self.assertNotIn("error", result)
+        self.assertNotIn("private endpoint and secret", str(result))
 
 
 if __name__ == "__main__":

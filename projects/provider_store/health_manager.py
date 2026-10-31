@@ -337,7 +337,12 @@ class ProviderHealthManager:
         if record.get("status") == "UNHEALTHY":
             return {"eligible": False, "status": "UNHEALTHY", "reason": "FAILURE_THRESHOLD_REACHED"}
         latency = record.get("last_latency_ms")
-        if max_latency_ms is not None and latency is not None and latency > max_latency_ms:
+        if max_latency_ms is not None and latency is None:
+            return {
+                "eligible": False, "status": "UNKNOWN",
+                "reason": "LATENCY_EVIDENCE_REQUIRED",
+            }
+        if max_latency_ms is not None and latency > max_latency_ms:
             return {"eligible": False, "status": "SLOW", "reason": "LATENCY_LIMIT_EXCEEDED"}
         return {"eligible": True, "status": record.get("status", "UNKNOWN"), "age_seconds": age}
 
