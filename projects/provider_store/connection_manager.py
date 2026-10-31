@@ -911,7 +911,7 @@ class ConnectionManager:
             )
             if provider is None:
                 return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
-            if provider.get("enabled") is not True:
+            if provider.get("enabled") is False:
                 with self._state_transaction():
                     existing = self.state["providers"].get(provider_id, {})
                     record: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
