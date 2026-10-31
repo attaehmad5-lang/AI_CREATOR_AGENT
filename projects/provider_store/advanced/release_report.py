@@ -161,7 +161,11 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
         manifest_entries.append({"path": relative, "size_bytes": len(data), "sha256": _sha256(data)})
         payloads.append((relative, data))
 
+    if output_dir.is_symlink():
+        raise ValueError("release output directory must not be a symlink")
     output_dir.mkdir(parents=True, exist_ok=True)
+    if output_dir.is_symlink() or not output_dir.is_dir():
+        raise ValueError("release output directory must be a real directory")
     report_json = output_dir / "advanced_provider_store_report.json"
     report_md = output_dir / "advanced_provider_store_report.md"
     manifest_json = output_dir / "advanced_provider_store_manifest.json"
@@ -169,6 +173,9 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
     archive_checksum = output_dir / "advanced_provider_store_source.zip.sha256"
     pdf_report = output_dir / "advanced_provider_store_report.pdf"
     sbom_json = output_dir / "advanced_provider_store_sbom.spdx.json"
+    artifact_paths = (report_json, report_md, manifest_json, archive, archive_checksum, pdf_report, sbom_json)
+    if any(path.is_symlink() for path in artifact_paths):
+        raise ValueError("release artifact destination must not be a symlink")
     report_json.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     try:
         from .pdf_report import write_pdf_report
