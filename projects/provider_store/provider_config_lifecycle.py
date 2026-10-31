@@ -149,6 +149,8 @@ class ProviderConfigLifecycleManager:
         migrations: dict[str, Callable[[dict[str, Any]], dict[str, Any]]],
     ) -> dict[str, Any]:
         config_path = Path(path)
+        if config_path.is_symlink():
+            return {"status": "CONFIG_FILE_SYMLINK_REJECTED", "migrated": False}
         if not config_path.is_file():
             return {"status": "CONFIG_FILE_NOT_FOUND", "migrated": False}
         try:
@@ -160,6 +162,8 @@ class ProviderConfigLifecycleManager:
         if result.get("migrated") is not True:
             return result
         backup_path = config_path.with_name(config_path.name + ".bak")
+        if backup_path.is_symlink():
+            return {"status": "CONFIG_BACKUP_SYMLINK_REJECTED", "migrated": False}
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{config_path.name}.", suffix=".tmp",
             dir=str(config_path.parent), text=True,
