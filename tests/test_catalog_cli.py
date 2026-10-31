@@ -125,6 +125,29 @@ class CatalogCliTests(unittest.TestCase):
         self.assertEqual(result["status"], "AUDIT_LOG_REQUIRED")
         self.assertFalse(destination.exists())
 
+    def test_audited_operation_failure_records_terminal_event(self):
+        missing_source = self.root / "missing-catalog.json"
+        destination = self.root / "failed-export.json"
+        audit_path = self.root / "failed-audit.jsonl"
+
+        code, result = self.invoke(
+            "export", missing_source, destination, "--audit-log", audit_path
+        )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(result["status"], "CATALOG_OPERATION_FAILED")
+        self.assertEqual(result["operation"], "export")
+        self.assertTrue(result["audit"]["saved"])
+        self.assertFalse(destination.exists())
+        chain = ProviderAuditLog(audit_path).verify_chain()
+        self.assertTrue(chain["valid"])
+        self.assertEqual(chain["count"], 2)
+        events = [
+            json.loads(line)["event"]
+            for line in audit_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(events, ["catalog.export.started", "catalog.export.completed"])
+
     def test_export_command_creates_valid_catalog(self):
         destination = self.root / "exported" / "catalog.json"
         code, result = self.invoke("export", self.current, destination)
