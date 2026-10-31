@@ -19,7 +19,7 @@ def validate_advanced_catalogs(
     def load(path: str | Path, label: str) -> dict[str, Any]:
         try:
             value = json.loads(Path(path).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             errors.append(f"{label} unreadable: {type(exc).__name__}")
             return {}
         if not isinstance(value, dict):
@@ -62,6 +62,12 @@ def validate_advanced_catalogs(
 
     if set(category_map) != ADVANCED_CATEGORIES:
         errors.append("advanced category keys differ from the supported category set")
+    for category, definition in category_map.items():
+        if not isinstance(category, str) or not isinstance(definition, dict):
+            errors.append("advanced category definitions must be objects keyed by category name")
+            continue
+        if definition.get("name") != category:
+            errors.append(f"advanced category definition name mismatch for {category}")
     if set(expected) != set(advanced_index):
         errors.append("advanced catalog provider IDs differ from the central advanced provider IDs")
     for provider_id in set(expected) & set(advanced_index):
