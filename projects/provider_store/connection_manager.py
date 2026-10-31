@@ -1378,6 +1378,8 @@ class ConnectionManager:
                 result = self.set_state(provider_id, status)
             except Exception:
                 return False
+            if isinstance(result, dict) and result.get("status") == "DISABLED":
+                disabled_during_probe = True
             return isinstance(result, dict) and result.get("saved") is True
 
         try:
@@ -1415,6 +1417,8 @@ class ConnectionManager:
             }
         if not save_state("CONNECTING"):
             return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
+        if disabled_during_probe:
+            return {"status": "DISABLED", "provider": provider_id, "verified": False}
 
         started = time.monotonic()
         try:
@@ -1558,6 +1562,8 @@ class ConnectionManager:
             saved_state = {"saved": False}
         if not isinstance(saved_state, dict) or saved_state.get("saved") is not True:
             return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
+        if saved_state.get("status") == "DISABLED":
+            return {"status": "DISABLED", "provider": provider_id, "verified": False}
 
         def save_manual_failure() -> bool:
             # Keep an administrative disable authoritative if the manual-session
