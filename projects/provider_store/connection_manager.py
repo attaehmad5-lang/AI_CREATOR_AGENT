@@ -858,18 +858,31 @@ class ConnectionManager:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "UNKNOWN", "verified": False}
         try:
-            with self._state_transaction():
-                item = self.state["providers"].get(provider_id)
-                if not isinstance(item, dict):
-                    return {"status": "UNKNOWN", "verified": False}
-                result = self._sanitize_public_data(item)
-                # Older records may say CONNECTED without any live verification evidence.
-                if result.get("status") == "CONNECTED" and result.get("verified") is not True:
-                    result["reported_status"] = "CONNECTED"
-                    result["status"] = "UNKNOWN"
-                    result["verified"] = False
-                # Return a copy so callers cannot mutate internal state without validation.
-                return result
+            # Keep lock ordering consistent with connectivity transitions (catalog -> state).
+            # Catalog eligibility is authoritative even if a prior state write failed.
+            with self._catalog_transaction():
+                provider = next(
+                    (item for item in self.catalog.get("providers", [])
+                     if isinstance(item, dict) and item.get("id") == provider_id),
+                    None,
+                )
+                disabled = isinstance(provider, dict) and provider.get("enabled") is False
+                with self._state_transaction():
+                    item = self.state["providers"].get(provider_id)
+                    if disabled:
+                        result = self._sanitize_public_data(item) if isinstance(item, dict) else {}
+                        result.update({"status": "DISABLED", "verified": False})
+                        return result
+                    if not isinstance(item, dict):
+                        return {"status": "UNKNOWN", "verified": False}
+                    result = self._sanitize_public_data(item)
+                    # Older records may say CONNECTED without any live verification evidence.
+                    if result.get("status") == "CONNECTED" and result.get("verified") is not True:
+                        result["reported_status"] = "CONNECTED"
+                        result["status"] = "UNKNOWN"
+                        result["verified"] = False
+                    # Return a copy so callers cannot mutate internal state without validation.
+                    return result
         except Exception as exc:
             return {
                 "status": "STATE_READ_FAILED",
@@ -1605,17 +1618,26 @@ class ConnectionManager:
         }
 
     def summary(self) -> dict[str, int]:
-        with self._state_transaction():
-            result = {state: 0 for state in sorted(self.VALID_STATES)}
-            for item in self.state["providers"].values():
-                status = item.get("status", "UNKNOWN") if isinstance(item, dict) else "UNKNOWN"
-                # Do not count legacy, unverified CONNECTED records as healthy connections.
-                if status == "CONNECTED" and item.get("verified") is not True:
-                    status = "UNKNOWN"
-                if status not in result:
-                    status = "UNKNOWN"
-                result[status] += 1
-            return result
+        # Disabled catalog entries must never be counted as connected, even if
+        # persisted state is stale or its revocation write previously failed.
+        with self._catalog_transaction():
+            disabled_ids = {
+                item.get("id") for item in self.catalog.get("providers", [])
+                if isinstance(item, dict) and item.get("enabled") is False
+            }
+            with self._state_transaction():
+                result = {state: 0 for state in sorted(self.VALID_STATES)}
+                for provider_id, item in self.state["providers"].items():
+                    status = item.get("status", "UNKNOWN") if isinstance(item, dict) else "UNKNOWN"
+                    if provider_id in disabled_ids:
+                        status = "DISABLED"
+                    # Do not count legacy, unverified CONNECTED records as healthy connections.
+                    elif status == "CONNECTED" and item.get("verified") is not True:
+                        status = "UNKNOWN"
+                    if status not in result:
+                        status = "UNKNOWN"
+                    result[status] += 1
+                return result
 
 
 if __name__ == "__main__":
