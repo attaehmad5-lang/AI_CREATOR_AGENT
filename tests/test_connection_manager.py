@@ -719,6 +719,24 @@ class ConnectionManagerTests(unittest.TestCase):
         reloaded = ConnectionManager(self.catalog_path, self.state_path)
         self.assertEqual(reloaded.get_provider("local_image")["name"], "Local Image")
 
+    def test_register_provider_validates_full_catalog_before_persisting(self):
+        original_catalog = self.catalog_path.read_text(encoding="utf-8")
+        result = self.manager.register_provider({
+            "id": "unsafe_reference",
+            "name": "Unsafe Reference",
+            "category": "image",
+            "auth_type": "API_TOKEN",
+            "connection_type": "API",
+            # Safe-reference keys are exempt from literal-secret-key detection,
+            # but their values must still satisfy the catalog schema.
+            "token_env": "secret-token-value",
+        })
+        self.assertEqual(result["status"], "INVALID_PROVIDER_METADATA")
+        self.assertFalse(result["saved"])
+        self.assertTrue(any("token_env" in error for error in result["errors"]))
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), original_catalog)
+        self.assertFalse(self.manager.provider_exists("unsafe_reference"))
+
     def test_register_provider_rejects_duplicate_without_overwrite(self):
         provider = {
             "id": "token_image", "name": "Replacement", "category": "image",
