@@ -869,12 +869,15 @@ class ConnectionManager:
                 disabled = isinstance(provider, dict) and provider.get("enabled") is False
                 with self._state_transaction():
                     item = self.state["providers"].get(provider_id)
-                    if disabled:
-                        result = self._sanitize_public_data(item) if isinstance(item, dict) else {}
-                        result.update({"status": "DISABLED", "verified": False})
-                        return result
                     if not isinstance(item, dict):
                         return {"status": "UNKNOWN", "verified": False}
+                    if disabled and (
+                        item.get("status") in {"CONNECTED", "CONNECTING"}
+                        or item.get("verified") is True
+                    ):
+                        result = self._sanitize_public_data(item)
+                        result.update({"status": "DISABLED", "verified": False})
+                        return result
                     result = self._sanitize_public_data(item)
                     # Older records may say CONNECTED without any live verification evidence.
                     if result.get("status") == "CONNECTED" and result.get("verified") is not True:
@@ -1629,7 +1632,10 @@ class ConnectionManager:
                 result = {state: 0 for state in sorted(self.VALID_STATES)}
                 for provider_id, item in self.state["providers"].items():
                     status = item.get("status", "UNKNOWN") if isinstance(item, dict) else "UNKNOWN"
-                    if provider_id in disabled_ids:
+                    if provider_id in disabled_ids and (
+                        status in {"CONNECTED", "CONNECTING"}
+                        or (isinstance(item, dict) and item.get("verified") is True)
+                    ):
                         status = "DISABLED"
                     # Do not count legacy, unverified CONNECTED records as healthy connections.
                     elif status == "CONNECTED" and item.get("verified") is not True:
