@@ -126,7 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             parser.error("unsupported command")
             return 2
-    except (OSError, ValueError) as exc:
+    except Exception as exc:
         # Keep operational failures in the JSON result so the audit chain can
         # record a terminal event instead of leaving a misleading "started" entry.
         result = {
