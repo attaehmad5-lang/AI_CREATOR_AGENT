@@ -881,7 +881,7 @@ class ConnectionManager:
             )
             for key, item in value.items():
                 normalized = str(key).casefold().replace("-", "_")
-                if normalized in safe_reference_keys:
+                if key in safe_reference_keys:
                     safe[key] = item
                 elif normalized == "token" or any(part in normalized for part in secret_fragments):
                     continue
