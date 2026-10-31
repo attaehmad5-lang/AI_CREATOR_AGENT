@@ -1579,5 +1579,69 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(probe_called)
 
 
+    def test_connectivity_probe_is_not_started_if_disable_wins_connecting_transition(self):
+        original_set_state = self.manager.set_state
+        probe_called = False
+
+        def disable_wins(provider_id, status, **kwargs):
+            if status == "CONNECTING":
+                return {
+                    "status": "DISABLED",
+                    "provider": provider_id,
+                    "saved": True,
+                    "verified": False,
+                }
+            return original_set_state(provider_id, status, **kwargs)
+
+        self.manager.set_state = disable_wins
+
+        def probe(*args, **kwargs):
+            nonlocal probe_called
+            probe_called = True
+            return True
+
+        result = self.manager.verify_connectivity("public_image", probe)
+        self.assertEqual(result["status"], "DISABLED")
+        self.assertFalse(result["verified"])
+        self.assertFalse(probe_called)
+
+    def test_manual_probe_is_not_started_if_disable_wins_connecting_transition(self):
+        registered = self.manager.register_provider({
+            "id": "manual_disable_provider",
+            "name": "Manual Disable Provider",
+            "category": "image",
+            "auth_type": "ACCOUNT",
+            "connection_type": "BROWSER_SESSION",
+            "enabled": True,
+        })
+        self.assertEqual(registered["status"], "REGISTERED")
+        original_set_state = self.manager.set_state
+        probe_called = False
+
+        def disable_wins(provider_id, status, **kwargs):
+            if status == "CONNECTING":
+                return {
+                    "status": "DISABLED",
+                    "provider": provider_id,
+                    "saved": True,
+                    "verified": False,
+                }
+            return original_set_state(provider_id, status, **kwargs)
+
+        self.manager.set_state = disable_wins
+
+        def probe(*args, **kwargs):
+            nonlocal probe_called
+            probe_called = True
+            return True
+
+        result = self.manager.verify_manual_connection(
+            "manual_disable_provider", object(), probe
+        )
+        self.assertEqual(result["status"], "DISABLED")
+        self.assertFalse(result["verified"])
+        self.assertFalse(probe_called)
+
+
 if __name__ == "__main__":
     unittest.main()
