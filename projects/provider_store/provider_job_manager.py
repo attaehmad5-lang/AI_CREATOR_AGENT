@@ -79,10 +79,14 @@ class ProviderJobManager:
                 not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
                 or not isinstance(job, dict)
                 or job.get("job_id") != job_id
-                or job.get("status") not in {"QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"}
+                or not isinstance(job.get("status"), str)
+                or job["status"] not in {"QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"}
                 or not isinstance(job.get("project_id"), str)
+                or not _ID_RE.fullmatch(job["project_id"])
                 or not isinstance(job.get("provider_id"), str)
+                or not _ID_RE.fullmatch(job["provider_id"])
                 or not isinstance(job.get("payload_ref"), str)
+                or not _REF_RE.fullmatch(job["payload_ref"])
                 or isinstance(job.get("attempts"), bool)
                 or not isinstance(job.get("attempts"), int) or job["attempts"] < 0
                 or isinstance(job.get("priority"), bool)
