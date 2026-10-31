@@ -159,5 +159,86 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         )
 
 
+    def test_migration_cycle_and_step_limit_are_rejected_without_mutating_source(self):
+        original = {"schema_version": "1", "providers": {}}
+        cycle = self.manager.migrate(
+            original,
+            target_version="3",
+            migrations={
+                "1": lambda value: {**value, "schema_version": "2"},
+                "2": lambda value: {**value, "schema_version": "1"},
+            },
+        )
+        self.assertEqual(cycle["status"], "MIGRATION_CYCLE_OR_LIMIT")
+        self.assertFalse(cycle["migrated"])
+        self.assertEqual(original["schema_version"], "1")
+
+        migrations = {
+            str(index): (
+                lambda value, next_version=str(index + 1): {
+                    **value,
+                    "schema_version": next_version,
+                }
+            )
+            for index in range(1, 22)
+        }
+        limited = self.manager.migrate(
+            original, target_version="22", migrations=migrations
+        )
+        self.assertEqual(limited["status"], "MIGRATION_CYCLE_OR_LIMIT")
+        self.assertFalse(limited["migrated"])
+
+    def test_migration_rejects_non_mapping_and_non_advancing_results(self):
+        original = {"schema_version": "1", "providers": {}}
+        for migration in (
+            lambda value: ["not", "a", "mapping"],
+            lambda value: {**value, "schema_version": "1"},
+            lambda value: {**value, "schema_version": 2},
+        ):
+            with self.subTest(migration=migration):
+                result = self.manager.migrate(
+                    original, target_version="2", migrations={"1": migration}
+                )
+                self.assertEqual(result["status"], "INVALID_MIGRATION_RESULT")
+                self.assertFalse(result["migrated"])
+        self.assertEqual(original["schema_version"], "1")
+
+    def test_validator_receives_copy_and_non_finite_json_values_are_rejected(self):
+        seen = []
+
+        def mutating_validator(config):
+            config["mutated_by_validator"] = True
+            seen.append(config)
+            return True
+
+        manager = ProviderConfigLifecycleManager(mutating_validator)
+        candidate = {"schema_version": "1", "providers": {}}
+        result = manager.reload(candidate)
+        self.assertTrue(result["reloaded"])
+        self.assertNotIn("mutated_by_validator", candidate)
+        self.assertNotIn("mutated_by_validator", manager.active_config)
+
+        invalid = {"schema_version": "1", "providers": {}, "cost": float("nan")}
+        rejected = manager.reload(invalid)
+        self.assertEqual(rejected["status"], "HOT_RELOAD_REJECTED")
+        self.assertEqual(manager.generation, 1)
+
+    def test_history_is_bounded_and_rollback_keeps_latest_generations(self):
+        manager = ProviderConfigLifecycleManager(valid_config, max_history=2)
+        configs = [
+            {"schema_version": str(index), "providers": {"p": {}}}
+            for index in range(1, 5)
+        ]
+        for config in configs:
+            manager.reload(config)
+        self.assertEqual(len(manager._history), 2)
+        manager.rollback()
+        self.assertEqual(manager.active_config, configs[2])
+        manager.rollback()
+        self.assertEqual(manager.active_config, configs[1])
+        unavailable = manager.rollback()
+        self.assertEqual(unavailable["status"], "NO_CONFIG_ROLLBACK_AVAILABLE")
+
+
 if __name__ == "__main__":
     unittest.main()
