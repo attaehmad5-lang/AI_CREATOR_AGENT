@@ -232,12 +232,15 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         for config in configs:
             manager.reload(config)
         self.assertEqual(len(manager._history), 2)
-        manager.rollback()
+        first = manager.rollback()
+        self.assertTrue(first["rolled_back"])
         self.assertEqual(manager.active_config, configs[2])
-        manager.rollback()
-        self.assertEqual(manager.active_config, configs[1])
-        unavailable = manager.rollback()
-        self.assertEqual(unavailable["status"], "NO_CONFIG_ROLLBACK_AVAILABLE")
+        second = manager.rollback()
+        self.assertTrue(second["rolled_back"])
+        self.assertEqual(manager.active_config, configs[3])
+        third = manager.rollback()
+        self.assertTrue(third["rolled_back"])
+        self.assertEqual(manager.active_config, configs[2])
 
 
 if __name__ == "__main__":
