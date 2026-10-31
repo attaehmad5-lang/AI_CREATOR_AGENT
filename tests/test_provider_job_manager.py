@@ -186,7 +186,7 @@ class ProviderJobManagerTests(unittest.TestCase):
                     "status": "QUEUED",
                     "attempts": 0,
                     "priority": 50,
-                    "created_at": "2026-10-16T12:00:00",
+                    "created_at": "2026-10-16T12:00:00+00:00",
                     "updated_at": "not-a-timestamp",
                     "cancel_requested": False,
                 }
