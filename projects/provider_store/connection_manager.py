@@ -748,9 +748,25 @@ class ConnectionManager:
         if provider_id not in self._loaded_providers:
             return {"status": "NOT_LOADED", "provider": provider_id, "unloaded": False}
         instance = self._loaded_providers[provider_id]
-        cleanup = getattr(instance, "close", None)
+        try:
+            cleanup = getattr(instance, "close", None)
+        except Exception as exc:
+            return {
+                "status": "UNLOAD_FAILED",
+                "provider": provider_id,
+                "error_type": type(exc).__name__,
+                "unloaded": False,
+            }
         if not callable(cleanup):
-            cleanup = getattr(instance, "shutdown", None)
+            try:
+                cleanup = getattr(instance, "shutdown", None)
+            except Exception as exc:
+                return {
+                    "status": "UNLOAD_FAILED",
+                    "provider": provider_id,
+                    "error_type": type(exc).__name__,
+                    "unloaded": False,
+                }
         if callable(cleanup):
             try:
                 cleanup()
