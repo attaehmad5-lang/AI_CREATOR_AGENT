@@ -60,5 +60,32 @@ class AdvancedCatalogIntegrityTests(unittest.TestCase):
         self.assertIn("policy auto_purchase must be false", result["errors"])
 
 
+    def test_empty_and_duplicate_category_capabilities_are_rejected(self):
+        for capabilities in ([], ["image", "IMAGE"]):
+            with self.subTest(capabilities=capabilities):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    central = root / "central.json"
+                    advanced = root / "advanced.json"
+                    categories = root / "categories.json"
+                    central.write_text(json.dumps({"providers": []}), encoding="utf-8")
+                    advanced.write_text(json.dumps({"providers": [], "policy": {
+                        "auto_purchase": False, "subscription_bypass": False,
+                        "api_key_logging": False}}), encoding="utf-8")
+                    categories.write_text(json.dumps({"categories": {
+                        key: {"name": key, "capabilities": ["ok"]}
+                        for key in (
+                            "script_story", "advanced_image_editing", "advanced_upscaling",
+                            "advanced_transcription", "advanced_audio", "advanced_video_editing"
+                        )
+                    }}), encoding="utf-8")
+                    value = json.loads(categories.read_text(encoding="utf-8"))
+                    value["categories"]["advanced_audio"]["capabilities"] = capabilities
+                    categories.write_text(json.dumps(value), encoding="utf-8")
+                    result = validate_advanced_catalogs(central, advanced, categories)
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("capabilities are invalid" in error for error in result["errors"]))
+
+
 if __name__ == "__main__":
     unittest.main()
