@@ -999,6 +999,32 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(loaded["status"], "CONTRACT_VIOLATION")
         self.assertIsNone(self.manager.get_loaded_provider("public_image"))
 
+    def test_rejected_provider_instance_is_cleaned_up(self):
+        class RejectedProvider:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        instance = RejectedProvider()
+        result = self.manager.load_provider("public_image", lambda metadata: instance)
+        self.assertEqual(result["status"], "CONTRACT_VIOLATION")
+        self.assertTrue(instance.closed)
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_rejected_provider_cleanup_failure_is_reported_without_exception_text(self):
+        class RejectedProvider:
+            def close(self):
+                raise RuntimeError("sensitive internal cleanup details")
+
+        instance = RejectedProvider()
+        result = self.manager.load_provider("public_image", lambda metadata: instance)
+        self.assertEqual(result["status"], "CONTRACT_VIOLATION")
+        self.assertEqual(result["cleanup_error_type"], "RuntimeError")
+        self.assertNotIn("sensitive internal cleanup details", repr(result))
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
     def test_provider_contract_fails_closed_when_method_attribute_raises(self):
         class BrokenProvider:
             @property

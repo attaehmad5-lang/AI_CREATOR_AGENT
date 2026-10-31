@@ -698,13 +698,28 @@ class ConnectionManager:
             return {"status": "LOAD_FAILED", "provider": provider_id, "loaded": False}
         contract = self.validate_provider_contract(provider_id, instance)
         if not contract["valid"]:
-            return {
+            # A factory may allocate sockets, sessions, threads, or other resources
+            # before its returned object is rejected by the modality contract.
+            # Dispose of that rejected instance rather than leaking it.
+            cleanup = getattr(instance, "close", None)
+            if not callable(cleanup):
+                cleanup = getattr(instance, "shutdown", None)
+            cleanup_error_type = None
+            if callable(cleanup):
+                try:
+                    cleanup()
+                except Exception as exc:
+                    cleanup_error_type = type(exc).__name__
+            result = {
                 "status": "CONTRACT_VIOLATION",
                 "provider": provider_id,
                 "loaded": False,
                 "contract_status": contract["status"],
                 "missing_methods": contract.get("missing_methods", []),
             }
+            if cleanup_error_type is not None:
+                result["cleanup_error_type"] = cleanup_error_type
+            return result
         self._loaded_providers[provider_id] = instance
         return {"status": "LOADED", "provider": provider_id, "loaded": True}
 
