@@ -1398,30 +1398,56 @@ class ConnectionManager:
         if not isinstance(saved_state, dict) or saved_state.get("saved") is not True:
             return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
 
+        def save_manual_failure() -> bool:
+            # Keep an administrative disable authoritative if the manual-session
+            # probe finishes after the provider was disabled.
+            with self._catalog_transaction():
+                current = next(
+                    (
+                        item for item in self.catalog.get("providers", [])
+                        if isinstance(item, dict) and item.get("id") == provider_id
+                    ),
+                    None,
+                )
+                if current is None:
+                    return False
+                status_to_save = "DISABLED" if current.get("enabled") is False else "ERROR"
+                with self._state_transaction():
+                    existing = self.state["providers"].get(provider_id, {})
+                    record = dict(existing) if isinstance(existing, dict) else {}
+                    record.update({
+                        "status": status_to_save,
+                        "verified": False,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    self.state["providers"][provider_id] = record
+                    self._save()
+                return status_to_save == "DISABLED"
+
         started = time.monotonic()
         try:
             result = probe(dict(provider), session=manual_session, timeout_seconds=float(timeout_seconds))
             if result is not True and not (isinstance(result, dict) and result.get("ok") is True):
                 try:
-                    error_state = self.set_state(provider_id, "ERROR")
+                    disabled_during_probe = save_manual_failure()
                 except Exception:
-                    error_state = {"saved": False}
-                if not isinstance(error_state, dict) or error_state.get("saved") is not True:
                     return {"status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False}
+                if disabled_during_probe:
+                    return {"status": "DISABLED", "provider": provider_id, "verified": False}
                 return {
                     "status": "MANUAL_CONNECTION_FAILED", "provider": provider_id, "verified": False,
                     "latency_ms": round((time.monotonic() - started) * 1000, 2),
                 }
         except Exception as exc:
             try:
-                error_state = self.set_state(provider_id, "ERROR")
+                disabled_during_probe = save_manual_failure()
             except Exception:
-                error_state = {"saved": False}
-            if not isinstance(error_state, dict) or error_state.get("saved") is not True:
                 return {
                     "status": "STATE_SAVE_FAILED", "provider": provider_id, "verified": False,
                     "error_type": type(exc).__name__,
                 }
+            if disabled_during_probe:
+                return {"status": "DISABLED", "provider": provider_id, "verified": False}
             name = type(exc).__name__.casefold()
             status = (
                 "TIMEOUT" if isinstance(exc, TimeoutError) or "timeout" in name
