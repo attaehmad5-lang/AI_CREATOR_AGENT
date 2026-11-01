@@ -223,6 +223,49 @@ class ProviderCostPolicy:
                 "approval_recorded": True,
             }
 
+    def evaluate_priced_request(
+        self,
+        provider: dict[str, Any],
+        *,
+        pricing_catalog: Any,
+        model_id: str,
+        modality: str,
+        units: float,
+        currency: str,
+        project_id: str,
+        paid_usage_approved: bool = False,
+        as_of: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve an exact catalog price, then apply ordinary budget/approval gates."""
+        if (
+            not isinstance(provider, dict)
+            or not isinstance(provider.get("id"), str)
+            or not callable(getattr(pricing_catalog, "estimate", None))
+        ):
+            return {"allowed": False, "status": "INVALID_PRICING_INPUT"}
+        estimate = pricing_catalog.estimate(
+            provider_id=provider["id"],
+            model_id=model_id,
+            modality=modality,
+            units=units,
+            currency=currency,
+            as_of=as_of,
+        )
+        if not isinstance(estimate, dict) or estimate.get("estimated") is not True:
+            return {
+                "allowed": False,
+                "status": "COST_ESTIMATE_UNAVAILABLE",
+                "provider": provider["id"],
+                "cost_estimate": estimate if isinstance(estimate, dict) else {},
+            }
+        decision = self.evaluate_request(
+            provider,
+            project_id=project_id,
+            estimated_cost=estimate["estimated_cost"],
+            paid_usage_approved=paid_usage_approved,
+        )
+        return {**decision, "cost_estimate": estimate}
+
     @classmethod
     def _sortable_credit_amount(cls, value: Any) -> float:
         """Return a safe sort key; the policy validator still rejects invalid input."""
