@@ -285,6 +285,26 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
             ("image", 1, b"unsafe-tail"),
         ])
 
+    def test_execute_stream_validates_utf8_encoding_before_callback_and_sanitizes_surrogates(self):
+        self.registry.register(
+            "test-image", lambda **kwargs: iter(("valid-\u2603", "\ud800")),
+            modalities=("image",), streaming_modalities=("image",),
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        seen = []
+        result = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-surrogate-validator",
+            chunk_validator=lambda modality, sequence, payload: seen.append(
+                (modality, sequence, payload)
+            ) or True,
+        )
+        self.assertEqual(result["status"], "STREAM_CHUNK_VALIDATION_ERROR")
+        self.assertEqual(seen, [("image", 0, "valid-\u2603".encode("utf-8"))])
+        self.assertEqual(result["error_type"], "UnicodeEncodeError")
+        self.assertNotIn("\\ud800", json.dumps(result))
+
     def test_execute_stream_sanitizes_chunk_validator_exceptions_and_rejects_invalid_validator(self):
         self.registry.register(
             "test-image", lambda **kwargs: iter((b"payload",)),
