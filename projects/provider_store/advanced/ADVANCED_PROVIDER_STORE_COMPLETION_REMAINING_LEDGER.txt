@@ -584,7 +584,7 @@ Remaining work: Added injected pricing-catalog atomic-replace failure; original 
 Feature 113: Security Testing
 Status: PARTIAL
 Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
-Remaining work: Added security regressions for secret-bearing records, duplicate JSON keys, symlinked pricing files, malformed fuzz inputs, Unicode control credentials and raster pixel bombs. CI #41315549531 passed on Python 3.10/3.11/3.12. Full external security review and DNS/network adversarial testing remain.
+Remaining work: Hardened persisted webhook replay-state parsing against symlinks, oversized files, duplicate keys and non-standard JSON; require timezone-aware persisted timestamps and runtime clocks, and reject Unicode C1/line-separator secret characters. CI #41317659544 passed on Python 3.10/3.11/3.12. External security review, dependency inventory and DNS-rebinding/network security matrix remain.
 
 Feature 114: Fuzz Testing
 Status: PARTIAL
