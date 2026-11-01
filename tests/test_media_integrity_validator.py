@@ -76,7 +76,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
     def test_mp4_extracts_version_one_extended_duration(self):
         path = self.root / "duration-v1.mp4"
         mvhd_payload = (
-            b"\\x01\\x00\\x00\\x00"
+            b"\x01\x00\x00\x00"
             + (0).to_bytes(8, "big")
             + (0).to_bytes(8, "big")
             + (1000).to_bytes(4, "big")
