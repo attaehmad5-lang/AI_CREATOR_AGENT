@@ -183,6 +183,48 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         self.assertEqual(result["error_type"], "RuntimeError")
         self.assertNotIn("secret vendor detail", json.dumps(result))
 
+
+    def test_execute_stream_enforces_model_allowlist_before_vendor_call(self):
+        calls = []
+        self.registry.register(
+            "test-image",
+            lambda **kwargs: calls.append(kwargs) or iter((b"must-not-run",)),
+            modalities=("image",), model_ids=("image-v1",),
+            streaming_modalities=("image",),
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        denied = self.registry.execute_stream(
+            "test-image", modality="image", model_id="unlisted-model",
+            request_id="stream-model-denied",
+        )
+        self.assertEqual(denied["status"], "MODEL_UNSUPPORTED")
+        self.assertFalse(denied["started"])
+        self.assertEqual(calls, [])
+
+    def test_execute_stream_generator_failure_after_partial_output_is_ambiguous(self):
+        def broken_stream(**kwargs):
+            yield b"partial-private-payload"
+            raise ConnectionError("vendor connection dropped")
+
+        self.registry.register(
+            "test-image", broken_stream, modalities=("image",),
+            streaming_modalities=("image",),
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        result = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-midflight-failure",
+        )
+        self.assertEqual(result["status"], "ADAPTER_STREAM_OUTCOME_UNKNOWN")
+        self.assertTrue(result["started"])
+        self.assertTrue(result["reservations_retained"])
+        self.assertEqual(result["error_type"], "ConnectionError")
+        self.assertNotIn("partial-private-payload", json.dumps(result))
+        self.assertNotIn("vendor connection dropped", json.dumps(result))
+
     def test_execute_stream_enforces_session_limits_and_invalid_adapter_shape(self):
         self.registry.register(
             "test-image", lambda **kwargs: iter((b"123", b"456")),
