@@ -1,5 +1,6 @@
 """Queue capacity, idempotency, async lifecycle, and backpressure tests."""
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -97,6 +98,46 @@ class ProviderJobManagerTests(unittest.TestCase):
     def test_fair_scheduling_flag_must_be_boolean(self):
         with self.assertRaisesRegex(ValueError, "fair_scheduling"):
             ProviderJobManager(self.path, fair_scheduling="yes")
+
+    def test_concurrent_load_respects_queue_capacity_and_worker_limit(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=50, max_concurrent=4,
+            clock=lambda: self.now[0],
+        )
+        def submit(index):
+            return manager.submit(
+                job_id=f"load-job-{index:03d}",
+                project_id=f"project-{index % 5}",
+                provider_id="provider-a",
+                payload_ref=f"payload:{index}",
+                priority=index % 100,
+            )
+
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            results = list(pool.map(submit, range(120)))
+        accepted = [item for item in results if item["accepted"]]
+        rejected = [item for item in results if not item["accepted"]]
+        self.assertEqual(len(accepted), 50)
+        self.assertEqual(len(rejected), 70)
+        self.assertTrue(all(item["status"] == "QUEUE_FULL" for item in rejected))
+
+        reloaded = ProviderJobManager(
+            self.path, max_queue_size=50, max_concurrent=4,
+            clock=lambda: self.now[0],
+        )
+        self.assertEqual(
+            sum(job["status"] == "QUEUED" for job in reloaded.data["jobs"].values()),
+            50,
+        )
+        claimed = [
+            reloaded.claim_next(worker_id=f"load-worker-{index}")
+            for index in range(4)
+        ]
+        self.assertTrue(all(item["status"] == "JOB_CLAIMED" for item in claimed))
+        self.assertEqual(
+            reloaded.claim_next(worker_id="load-worker-overflow")["status"],
+            "CONCURRENCY_LIMIT",
+        )
 
     def test_priority_order_and_concurrency_limit(self):
         self.submit("low", priority=10)
