@@ -128,7 +128,7 @@ class PricingCatalogTests(unittest.TestCase):
                 self.assertEqual(result["status"], "PRICING_NOT_FOUND")
 
     def test_upsert_atomically_adds_and_replaces_valid_price_records(self):
-        record = dict(self.records[0], price_id="managed-price")
+        record = dict(self.records[0], price_id="managed-price", model_id="image-v3")
         saved = self.catalog.upsert_price(record)
         self.assertEqual(saved["status"], "PRICE_SAVED")
         self.assertTrue(saved["saved"])
@@ -140,7 +140,7 @@ class PricingCatalogTests(unittest.TestCase):
         self.assertEqual(updated["count"], 3)
         reloaded = PricingCatalog(self.path)
         result = reloaded.estimate(
-            provider_id="provider-a", model_id="image-v2",
+            provider_id="provider-a", model_id="image-v3",
             modality="image", units=2, currency="USD",
             as_of="2026-06-01",
         )
