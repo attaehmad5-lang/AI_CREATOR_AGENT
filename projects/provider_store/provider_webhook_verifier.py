@@ -98,6 +98,8 @@ class ProviderWebhookVerifier:
                 yield
 
     def _save(self) -> None:
+        if self.state_path.is_symlink():
+            raise ValueError("webhook replay state must not be a symlink")
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{self.state_path.name}.", suffix=".tmp",
@@ -176,6 +178,8 @@ class ProviderWebhookVerifier:
             if event_key in self.data["events"]:
                 self._save()
                 return {"verified": False, "status": "WEBHOOK_REPLAY_REJECTED", "provider": provider_id}
+            if len(self.data["events"]) >= 100_000:
+                return {"verified": False, "status": "WEBHOOK_REPLAY_STORE_FULL", "provider": provider_id}
             self.data["events"][event_key] = {
                 "provider_id": provider_id,
                 "received_at": now_iso,
