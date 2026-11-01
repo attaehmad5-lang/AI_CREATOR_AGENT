@@ -115,7 +115,7 @@ class ProviderJSONBalanceProbe:
             return {"status": "INVALID_PROVIDER", "verified": False}
         token = self.environ.get(self.token_env)
         if not isinstance(token, str) or not token.strip() or len(token) > 16384 or any(
-            unicodedata.category(char) == "Cc" or char in "\\u2028\\u2029"
+            unicodedata.category(char) == "Cc" or char in "\u2028\u2029"
             for char in token
         ):
             return {"status": "CREDENTIAL_MISSING_OR_INVALID", "provider": provider_id, "verified": False}
