@@ -21,6 +21,21 @@ def _reserve_quota_in_process(args):
     )["status"]
 
 
+
+
+def _reserve_same_key_across_processes(args):
+    state_path, provider_id = args
+    fixed_now = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+    manager = ProviderQuotaManager(
+        state_path,
+        limits={"image": {"hourly": 10}, "video": {"hourly": 10}},
+        clock=lambda: fixed_now,
+    )
+    return manager.reserve(
+        provider_id=provider_id, request_id="shared-idempotency-key"
+    )["status"]
+
+
 class ProviderQuotaManagerTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -44,6 +59,26 @@ class ProviderQuotaManagerTests(unittest.TestCase):
         self.assertEqual(committed["status"], "COMMITTED")
         self.assertEqual(committed_again["status"], "ALREADY_COMMITTED")
         self.assertEqual(self.manager.usage(provider_id="image")["hourly"], 1)
+
+    def test_same_idempotency_key_is_single_provider_bound_across_processes(self):
+        path = self.root / "same-key-process-state.json"
+        path.write_text(
+            json.dumps({"version": "1.0", "requests": {}}),
+            encoding="utf-8",
+        )
+        args = [(str(path), "image") for _ in range(12)]
+        with ProcessPoolExecutor(max_workers=4) as pool:
+            statuses = list(pool.map(_reserve_same_key_across_processes, args))
+        self.assertEqual(statuses.count("RESERVED"), 1)
+        self.assertEqual(statuses.count("ALREADY_RESERVED"), 11)
+
+        conflict = ProviderQuotaManager(
+            path,
+            limits={"image": {"hourly": 10}, "video": {"hourly": 10}},
+            clock=lambda: datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc),
+        ).reserve(provider_id="video", request_id="shared-idempotency-key")
+        self.assertEqual(conflict["status"], "REQUEST_ID_CONFLICT")
+        self.assertFalse(conflict["reserved"])
 
     def test_quota_limits_count_reservations_and_committed_requests(self):
         self.manager.reserve(provider_id="image", request_id="job-1")
