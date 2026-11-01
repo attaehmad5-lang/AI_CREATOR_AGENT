@@ -333,6 +333,31 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         self.assertEqual(failed["error_type"], "RuntimeError")
         self.assertNotIn("private validator detail", json.dumps(failed))
 
+    def test_execute_stream_closes_vendor_iterator_after_local_chunk_rejection(self):
+        closed = []
+
+        class ClosableChunks:
+            def __iter__(self):
+                yield b"first"
+                yield b"second"
+
+            def close(self):
+                closed.append(True)
+
+        self.registry.register(
+            "test-image", lambda **kwargs: ClosableChunks(),
+            modalities=("image",), streaming_modalities=("image",),
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        result = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-close-on-reject",
+            chunk_validator=lambda modality, sequence, payload: sequence == 0,
+        )
+        self.assertEqual(result["status"], "STREAM_CHUNK_VALIDATION_FAILED")
+        self.assertEqual(closed, [True])
+
     def test_execute_stream_enforces_session_limits_and_invalid_adapter_shape(self):
         self.registry.register(
             "test-image", lambda **kwargs: iter((b"123", b"456")),
