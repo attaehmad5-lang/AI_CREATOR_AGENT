@@ -63,6 +63,18 @@ class ProviderStreamSessionTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     operation()
 
+    def test_backward_clock_is_rejected_without_mutating_stream_state(self):
+        now = [5.0]
+        stream = ProviderStreamSession("request-clock-back", clock=lambda: now[0])
+        self.assertEqual(stream.append(sequence=0, chunk=b"safe")["status"], "CHUNK_ACCEPTED")
+        now[0] = 4.0
+        with self.assertRaisesRegex(ValueError, "monotonic"):
+            stream.snapshot()
+        self.assertEqual(stream._state, "OPEN")
+        now[0] = 6.0
+        self.assertEqual(stream.snapshot()["state"], "OPEN")
+        self.assertEqual(stream.finish()["status"], "STREAM_COMPLETED")
+
     def test_cancel_discards_buffer_and_terminal_states_reject_writes(self):
         stream = ProviderStreamSession("request-6")
         stream.append(sequence=0, chunk=b"secret output")
