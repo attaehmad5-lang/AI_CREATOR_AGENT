@@ -116,7 +116,7 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
                 self.assertFalse(result["verified"])
 
     def test_unicode_control_and_line_separator_credentials_fail_before_network(self):
-        for secret in ("token\u0085injected", "token\u2028injected", "token\u2029injected"):
+        for secret in ("token" + chr(0x85) + "injected", "token" + chr(0x2028) + "injected", "token" + chr(0x2029) + "injected"):
             with self.subTest(secret=repr(secret)):
                 opener = _Opener()
                 result = self.make_probe(opener, environ={"PROVIDER_TOKEN": secret})("provider")
