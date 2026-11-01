@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+import unicodedata
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -43,15 +44,32 @@ class ProviderWebhookVerifier:
         self._reload()
 
     def _reload(self) -> None:
+        if self.state_path.is_symlink():
+            raise ValueError("webhook replay state must not be a symlink")
         if not self.state_path.exists():
             self.data = {"version": "1.0", "events": {}}
             return
         try:
+            if self.state_path.stat().st_size > 16_000_000:
+                raise ValueError("webhook replay state exceeds size limit")
+            def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                result: dict[str, Any] = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("duplicate webhook replay state key")
+                    result[key] = value
+                return result
             with self.state_path.open("r", encoding="utf-8") as stream:
-                loaded = json.load(stream)
+                loaded = json.load(
+                    stream,
+                    object_pairs_hook=reject_duplicate_keys,
+                    parse_constant=lambda _value: (_ for _ in ()).throw(
+                        ValueError("non-standard JSON constant")
+                    ),
+                )
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValueError("invalid webhook replay state JSON") from exc
-        if not isinstance(loaded, dict) or not isinstance(loaded.get("events"), dict):
+        if not isinstance(loaded, dict) or loaded.get("version") != "1.0" or not isinstance(loaded.get("events"), dict) or len(loaded["events"]) > 100_000:
             raise ValueError("invalid webhook replay state schema")
         for event_key, event in loaded["events"].items():
             if (
@@ -63,6 +81,12 @@ class ProviderWebhookVerifier:
                 or not re.fullmatch(r"[0-9a-f]{64}", event["payload_sha256"])
             ):
                 raise ValueError("invalid webhook replay record")
+            try:
+                received_at = datetime.fromisoformat(event["received_at"])
+            except ValueError as exc:
+                raise ValueError("invalid webhook replay timestamp") from exc
+            if received_at.tzinfo is None or received_at.utcoffset() is None:
+                raise ValueError("webhook replay timestamp must include a timezone")
         self.data = loaded
 
     @contextmanager
@@ -111,12 +135,22 @@ class ProviderWebhookVerifier:
             return {"verified": False, "status": "INVALID_WEBHOOK_PAYLOAD"}
         if len(payload) > self.max_payload_bytes:
             return {"verified": False, "status": "WEBHOOK_PAYLOAD_TOO_LARGE"}
-        if not isinstance(secret, str) or len(secret) < 16 or len(secret) > 16384 or any(ord(c) < 32 or ord(c) == 127 for c in secret):
+        if (
+            not isinstance(secret, str) or len(secret) < 16 or len(secret) > 16384
+            or any(unicodedata.category(char) == "Cc" or char in "\u2028\u2029" for char in secret)
+        ):
             return {"verified": False, "status": "WEBHOOK_SECRET_INVALID"}
         if isinstance(timestamp, bool) or not isinstance(timestamp, (int, str)) or not re.fullmatch(r"\d{1,12}", str(timestamp)):
             return {"verified": False, "status": "INVALID_WEBHOOK_TIMESTAMP"}
         timestamp_value = int(timestamp)
-        now_dt = self.clock().astimezone(timezone.utc)
+        now_value = self.clock()
+        if (
+            not isinstance(now_value, datetime)
+            or now_value.tzinfo is None
+            or now_value.utcoffset() is None
+        ):
+            return {"verified": False, "status": "WEBHOOK_CLOCK_INVALID"}
+        now_dt = now_value.astimezone(timezone.utc)
         now = int(now_dt.timestamp())
         if abs(now - timestamp_value) > self.max_skew_seconds:
             return {"verified": False, "status": "WEBHOOK_TIMESTAMP_OUT_OF_RANGE"}
