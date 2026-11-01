@@ -921,7 +921,12 @@ class ConnectionManager:
                      if isinstance(item, dict) and item.get("id") == provider_id),
                     None,
                 )
-                disabled = isinstance(provider, dict) and provider.get("enabled") is False
+                # State records can outlive catalog entries after manual edits or
+                # interrupted migrations. An orphan record must never be presented as
+                # current provider connectivity, even if it claims verified CONNECTED.
+                if provider is None:
+                    return {"status": "UNKNOWN", "verified": False}
+                disabled = provider.get("enabled") is False
                 with self._state_transaction():
                     item = self.state["providers"].get(provider_id)
                     if not isinstance(item, dict):
