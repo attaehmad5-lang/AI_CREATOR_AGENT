@@ -806,10 +806,10 @@ class ProviderRoutingManager:
                                     "status": "COST_RESERVATION_RELEASE_FAILED",
                                     "failed_provider": failed_provider,
                                 }
-                        else:
-                            return {"allowed": False, "status": "COST_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
                         except Exception:
                             return {"allowed": False, "status": "COST_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
+                    else:
+                        return {"allowed": False, "status": "COST_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
         if self.credit_manager is not None and isinstance(old_request_id, str):
             raw_data = getattr(self.credit_manager, "data", {})
             reservations = raw_data.get("reservations", {}) if isinstance(raw_data, dict) else {}
