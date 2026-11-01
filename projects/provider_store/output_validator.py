@@ -121,20 +121,20 @@ class ProviderOutputValidator:
             height = 1 + int.from_bytes(header[27:30], "little")
             return width, height
         if mime == "image/jpeg":
-            if stream.read(2) != b"\\xff\\xd8":
+            if stream.read(2) != b"\xff\xd8":
                 return None
             for _ in range(10000):
                 marker_prefix = stream.read(1)
                 if not marker_prefix:
                     return None
-                if marker_prefix != b"\\xff":
+                if marker_prefix != b"\xff":
                     continue
                 marker = stream.read(1)
-                while marker == b"\\xff":
+                while marker == b"\xff":
                     marker = stream.read(1)
-                if not marker or marker in {b"\\xd8", b"\\xd9"}:
+                if not marker or marker in {b"\xd8", b"\xd9"}:
                     continue
-                if marker in {b"\\xda"}:
+                if marker in {b"\xda"}:
                     return None
                 length_bytes = stream.read(2)
                 if len(length_bytes) != 2:
