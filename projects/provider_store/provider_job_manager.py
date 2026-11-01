@@ -31,6 +31,7 @@ class ProviderJobManager:
         lease_seconds: int = 120,
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
+        fair_scheduling: bool = True,
         clock: Any = None,
     ) -> None:
         for value, name, minimum, maximum in (
@@ -42,8 +43,11 @@ class ProviderJobManager:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise ValueError(f"{name} is outside safe limits")
+        if not isinstance(fair_scheduling, bool):
+            raise ValueError("fair_scheduling must be a boolean")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
+        self.fair_scheduling = fair_scheduling
         self.state_path = Path(state_path)
         self.max_queue_size = max_queue_size
         self.max_concurrent = max_concurrent
@@ -52,7 +56,9 @@ class ProviderJobManager:
         self.backpressure_retry_seconds = backpressure_retry_seconds
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
-        self.data: dict[str, Any] = {"version": "1.0", "jobs": {}}
+        self.data: dict[str, Any] = {
+            "version": "1.0", "jobs": {}, "last_scheduled_project": None
+        }
         self._reload()
 
     def _now(self) -> datetime:
@@ -68,7 +74,9 @@ class ProviderJobManager:
         if self.state_path.is_symlink():
             raise ValueError("provider job state must not be a symlink")
         if not self.state_path.exists():
-            self.data = {"version": "1.0", "jobs": {}}
+            self.data = {
+                "version": "1.0", "jobs": {}, "last_scheduled_project": None
+            }
             return
         try:
             with self.state_path.open("r", encoding="utf-8") as stream:
@@ -81,6 +89,11 @@ class ProviderJobManager:
             or not isinstance(loaded.get("jobs"), dict)
         ):
             raise ValueError("invalid provider job state schema")
+        last_project = loaded.get("last_scheduled_project")
+        if last_project is not None and (
+            not isinstance(last_project, str) or not _ID_RE.fullmatch(last_project)
+        ):
+            raise ValueError("invalid provider job scheduling metadata")
         for job_id, job in loaded["jobs"].items():
             if not isinstance(job, dict):
                 raise ValueError("invalid provider job record")
@@ -301,12 +314,30 @@ class ProviderJobManager:
                 job for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "QUEUED"
             ]
-            queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
             if not queued:
                 if changed:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
-            job = queued[0]
+            if self.fair_scheduling:
+                # Give each project one dispatch turn before any project receives
+                # another, while preserving priority/FIFO order within a project.
+                projects = sorted({job["project_id"] for job in queued})
+                last_project = self.data.get("last_scheduled_project")
+                next_project = next(
+                    (project for project in projects if last_project is None or project > last_project),
+                    projects[0],
+                )
+                project_queue = [
+                    job for job in queued if job["project_id"] == next_project
+                ]
+                project_queue.sort(
+                    key=lambda job: (-job["priority"], job["created_at"], job["job_id"])
+                )
+                job = project_queue[0]
+                self.data["last_scheduled_project"] = next_project
+            else:
+                queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
+                job = queued[0]
             job["status"] = "RUNNING"
             job["worker_id"] = worker_id
             job["attempts"] += 1
