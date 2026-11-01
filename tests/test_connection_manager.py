@@ -1264,6 +1264,40 @@ class ConnectionManagerTests(unittest.TestCase):
             "INVALID_LOOPBACK_HTTP_POLICY",
         )
 
+    def test_endpoint_validation_canonicalizes_idna_and_ip_literals(self):
+        unicode_host = ConnectionManager.validate_endpoint(
+            "https://bücher.example/health",
+            allowed_hosts={"xn--bcher-kva.example"},
+        )
+        self.assertTrue(unicode_host["valid"], unicode_host)
+        self.assertEqual(unicode_host["hostname"], "xn--bcher-kva.example")
+        ipv6 = ConnectionManager.validate_endpoint(
+            "https://[2606:4700:4700::1111]/health",
+            allowed_hosts={"2606:4700:4700::1111"},
+        )
+        self.assertTrue(ipv6["valid"], ipv6)
+        self.assertEqual(ipv6["hostname"], "2606:4700:4700::1111")
+
+    def test_endpoint_validation_rejects_ambiguous_or_invalid_hostnames(self):
+        for endpoint in (
+            "https://provider..example/health",
+            "https://-provider.example/health",
+            "https://provider_.example/health",
+            "https://[fe80::1%25eth0]/health",
+        ):
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(
+                    ConnectionManager.validate_endpoint(endpoint)["status"],
+                    "INVALID_HOSTNAME",
+                )
+        self.assertEqual(
+            ConnectionManager.validate_endpoint(
+                "https://provider.example/health",
+                allowed_hosts={"provider..example"},
+            )["status"],
+            "INVALID_HOST_ALLOWLIST",
+        )
+
     def test_provider_model_configuration_is_persisted_without_credentials(self):
         result = self.manager.configure_provider("public_image", model="test-model-v1")
         self.assertEqual(result["status"], "CONFIGURED")
