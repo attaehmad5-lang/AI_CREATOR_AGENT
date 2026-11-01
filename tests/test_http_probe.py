@@ -300,6 +300,34 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         self.assertNotIn(secret_body.decode(), str(caught.exception))
         self.assertEqual(len(opener.calls), 1)
 
+    def test_http_error_cleanup_failure_does_not_mask_auth_status(self):
+        from urllib.error import HTTPError
+
+        class BrokenHTTPError(HTTPError):
+            def close(self):
+                raise RuntimeError("cleanup failure")
+
+        class Opener:
+            def open(self, request, timeout):
+                raise BrokenHTTPError(
+                    request.full_url, 401, "unauthorized", {}, None
+                )
+
+        probe = ProviderHTTPConnectivityProbe(
+            environ={},
+            opener=Opener(),
+        )
+        with self.assertRaises(PermissionError) as caught:
+            probe(
+                {
+                    "id": "public_image",
+                    "auth_type": "NONE",
+                    "allowed_hosts": ["provider.example"],
+                    "configuration": {"endpoint": "https://provider.example/health"},
+                }
+            )
+        self.assertEqual(caught.exception.status_code, 401)
+
     def test_redirects_are_rejected_and_http_error_response_is_closed(self):
         error = HTTPError(
             "https://api.example.com/health", 302, "Found",

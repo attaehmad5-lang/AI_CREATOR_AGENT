@@ -200,7 +200,11 @@ class ProviderHTTPConnectivityProbe:
             response = self.opener.open(request, timeout=timeout_value)
         except HTTPError as exc:
             status_code = exc.code
-            exc.close()
+            # Cleanup failures must not replace the safe HTTP status classification.
+            try:
+                exc.close()
+            except Exception:
+                pass
             if status_code in {401, 403}:
                 raise ProviderHTTPAuthError(status_code) from None
             if 300 <= status_code < 400:
