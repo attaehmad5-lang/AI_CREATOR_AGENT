@@ -174,5 +174,29 @@ class RoutingSimulationTests(unittest.TestCase):
         self.assertEqual(self.quota.calls, [])
 
 
+    def test_malformed_project_policy_fails_closed_without_reservation(self):
+        class MalformedPolicyManager:
+            def get_policy(self, project_id):
+                return {
+                    "status": "PROJECT_POLICY_FOUND",
+                    "project_id": project_id,
+                    "policy": {"allowed_models": "not-a-list"},
+                }
+
+        router = ProviderRoutingManager(
+            self.connections,
+            quota_manager=self.quota,
+            project_policy_manager=MalformedPolicyManager(),
+        )
+        result = router.route(
+            category="image",
+            project_id="demo",
+            request_id="malformed-policy",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "PROJECT_POLICY_INVALID")
+        self.assertEqual(self.quota.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()
