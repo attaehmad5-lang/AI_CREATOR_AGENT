@@ -56,6 +56,45 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         malformed.write_bytes((1000).to_bytes(4, "big") + b"ftyp" + b"tiny")
         self.assertEqual(self.validator.validate(malformed, modality="video")["status"], "MP4_BOX_SIZE_INVALID")
 
+    def test_mp4_extracts_movie_duration_from_version_zero_mvhd(self):
+        path = self.root / "duration.mp4"
+        mvhd_payload = b"\\x00\\x00\\x00\\x00" + (0).to_bytes(4, "big") * 2 + (1000).to_bytes(4, "big") + (12500).to_bytes(4, "big")
+        mvhd = (8 + len(mvhd_payload)).to_bytes(4, "big") + b"mvhd" + mvhd_payload
+        moov = (8 + len(mvhd)).to_bytes(4, "big") + b"moov" + mvhd
+        ftyp_body = b"isom0000"
+        ftyp = (8 + len(ftyp_body)).to_bytes(4, "big") + b"ftyp" + ftyp_body
+        mdat = (9).to_bytes(4, "big") + b"mdatx"
+        path.write_bytes(ftyp + moov + mdat)
+
+        result = self.validator.validate(path, modality="video")
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["container"], "MP4")
+        self.assertEqual(result["timescale"], 1000)
+        self.assertEqual(result["duration_seconds"], 12.5)
+
+    def test_mp4_duration_limit_and_invalid_movie_header_fail_closed(self):
+        path = self.root / "too-long.mp4"
+        mvhd_payload = b"\\x00\\x00\\x00\\x00" + (0).to_bytes(4, "big") * 2 + (1).to_bytes(4, "big") + (31).to_bytes(4, "big")
+        mvhd = (8 + len(mvhd_payload)).to_bytes(4, "big") + b"mvhd" + mvhd_payload
+        moov = (8 + len(mvhd)).to_bytes(4, "big") + b"moov" + mvhd
+        ftyp_body = b"isom0000"
+        ftyp = (8 + len(ftyp_body)).to_bytes(4, "big") + b"ftyp" + ftyp_body
+        mdat = (9).to_bytes(4, "big") + b"mdatx"
+        path.write_bytes(ftyp + moov + mdat)
+        self.assertEqual(
+            self.validator.validate(path, modality="video")["status"],
+            "MEDIA_DURATION_EXCEEDED",
+        )
+
+        malformed_mvhd = (10).to_bytes(4, "big") + b"mvhdxx"
+        malformed_moov = (8 + len(malformed_mvhd)).to_bytes(4, "big") + b"moov" + malformed_mvhd
+        path.write_bytes(ftyp + malformed_moov + mdat)
+        self.assertEqual(
+            self.validator.validate(path, modality="video")["status"],
+            "MP4_MOVIE_HEADER_INVALID",
+        )
+
     def test_mp4_validation_skips_media_payload_without_loading_whole_file(self):
         path = self.root / "large.mp4"
         boxes = (
