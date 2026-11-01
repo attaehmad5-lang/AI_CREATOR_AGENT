@@ -151,6 +151,18 @@ class PricingCatalogTests(unittest.TestCase):
                 result = PricingCatalog(self.path).list_prices()
                 self.assertEqual(result["status"], "PRICING_NOT_FOUND")
 
+    def test_pricing_units_must_match_media_modality(self):
+        invalid = [
+            dict(self.records[0], price_id="bad-image-token-unit", pricing_unit="1k_tokens"),
+            dict(self.records[0], price_id="bad-text-image-unit", model_id="text-v4", modality="text", pricing_unit="image"),
+            dict(self.records[0], price_id="bad-video-audio-unit", modality="video", pricing_unit="audio_minute"),
+        ]
+        for record in invalid:
+            with self.subTest(price_id=record["price_id"]):
+                result = self.catalog.upsert_price(record)
+                self.assertEqual(result["status"], "INVALID_PRICE_RECORD")
+                self.assertFalse(result["saved"])
+
     def test_upsert_atomically_adds_and_replaces_valid_price_records(self):
         record = dict(self.records[0], price_id="managed-price", model_id="image-v3")
         saved = self.catalog.upsert_price(record)
