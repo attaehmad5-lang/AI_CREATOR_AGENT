@@ -337,9 +337,14 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         closed = []
 
         class ClosableChunks:
+            def __init__(self):
+                self._chunks = iter((b"first", b"second"))
+
             def __iter__(self):
-                yield b"first"
-                yield b"second"
+                return self
+
+            def __next__(self):
+                return next(self._chunks)
 
             def close(self):
                 closed.append(True)
