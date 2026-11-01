@@ -97,6 +97,8 @@ class ProviderCostPolicy:
             reservations = project.get("reservations", {})
             if not isinstance(reservations, dict):
                 raise ValueError("Invalid usage ledger reservations")
+            if set(requests).intersection(reservations):
+                raise ValueError("usage request cannot be both reserved and finalized")
             if any(
                 not isinstance(request_id, str) or not request_id.strip()
                 or not isinstance(record, dict)
