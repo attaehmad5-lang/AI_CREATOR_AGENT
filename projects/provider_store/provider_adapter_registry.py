@@ -32,6 +32,7 @@ class ProviderAdapterRegistry:
         *,
         modalities: list[str] | tuple[str, ...],
         model_ids: list[str] | tuple[str, ...] | None = None,
+        streaming_modalities: list[str] | tuple[str, ...] | None = None,
         replace: bool = False,
     ) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not _IDENTIFIER.fullmatch(provider_id):
@@ -55,6 +56,19 @@ class ProviderAdapterRegistry:
             normalized_models = set(model_ids)
         else:
             normalized_models = None
+        if streaming_modalities is None:
+            normalized_streaming: set[str] = set()
+        elif not isinstance(streaming_modalities, (list, tuple)):
+            return {"status": "INVALID_STREAMING_MODALITIES", "registered": False}
+        else:
+            if any(
+                not isinstance(modality, str) or not _IDENTIFIER.fullmatch(modality)
+                for modality in streaming_modalities
+            ):
+                return {"status": "INVALID_STREAMING_MODALITIES", "registered": False}
+            normalized_streaming = set(streaming_modalities)
+            if not normalized_streaming.issubset(normalized_modalities):
+                return {"status": "STREAMING_MODALITY_NOT_REGISTERED", "registered": False}
         provider = self.connection_manager.get_provider(provider_id)
         if provider is None:
             return {"status": "PROVIDER_NOT_FOUND", "registered": False}
@@ -65,6 +79,7 @@ class ProviderAdapterRegistry:
                 "adapter": adapter,
                 "modalities": frozenset(normalized_modalities),
                 "model_ids": None if normalized_models is None else frozenset(normalized_models),
+                "streaming_modalities": frozenset(normalized_streaming),
             }
         return {"status": "ADAPTER_REGISTERED", "registered": True, "provider_id": provider_id}
 
@@ -84,6 +99,7 @@ class ProviderAdapterRegistry:
                     "provider_id": provider_id,
                     "modalities": sorted(entry["modalities"]),
                     "model_ids": sorted(entry["model_ids"]) if entry["model_ids"] is not None else None,
+                    "streaming_modalities": sorted(entry["streaming_modalities"]),
                 }
                 for provider_id, entry in sorted(self._adapters.items())
             ]
@@ -123,6 +139,25 @@ class ProviderAdapterRegistry:
             if model_id not in catalog_model_ids:
                 return {"status": "MODEL_NOT_IN_CATALOG", "resolved": False}
         return {"status": "ADAPTER_RESOLVED", "resolved": True, "adapter": entry["adapter"], "provider_id": provider_id}
+
+    def resolve_streaming(
+        self, provider_id: str, *, modality: str, model_id: str | None = None
+    ) -> dict[str, Any]:
+        """Resolve only adapters that explicitly advertise streaming for this modality."""
+        resolved = self.resolve(provider_id, modality=modality, model_id=model_id)
+        if resolved.get("resolved") is not True:
+            return resolved
+        with self._lock:
+            entry = self._adapters.get(provider_id)
+        if entry is None or modality not in entry["streaming_modalities"]:
+            return {"status": "STREAMING_UNSUPPORTED", "resolved": False}
+        return {
+            "status": "STREAMING_ADAPTER_RESOLVED",
+            "resolved": True,
+            "adapter": resolved["adapter"],
+            "provider_id": provider_id,
+            "modality": modality,
+        }
 
     def as_callable(
         self,
