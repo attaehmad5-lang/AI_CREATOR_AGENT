@@ -59,6 +59,10 @@ Use the configuration lifecycle manager for version-validated candidate reload, 
 
 Use migrate_file(..., dry_run=True) to preview the validated target configuration and migration step count without writing the source file, creating a backup or changing the active generation. The default remains mutating for backwards compatibility; pass dry_run=True explicitly for preview behavior.
 
+## Project routing policy store
+
+`ProviderProjectPolicyManager` persists validated per-project provider, model, capability, cost, health, fallback and data-residency constraints. Its JSON store rejects duplicate keys, non-standard JSON constants, oversized files and symlinked store paths before accepting policy data. Invalid or unreadable policy state is a hard error; routing revalidates policy objects at the decision boundary and fails closed.
+
 ## Routing simulation
 
 The route planner supports an explicit side-effect-free preview:
