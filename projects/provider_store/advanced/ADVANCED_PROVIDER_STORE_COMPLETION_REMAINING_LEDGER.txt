@@ -479,8 +479,8 @@ Remaining work: Catalog snapshots and .bak import backups exist. Snapshot retent
 
 Feature 092: Restore Management
 Status: PARTIAL
-Implementation/evidence inspected: connection_manager.py; tests/test_connection_manager.py
-Remaining work: Explicit validated restore from the master catalog exists; broader state, quota, credential and billing recovery remains incomplete.
+Implementation/evidence inspected: connection_manager.py:restore_catalog_from_master; strict _load_json parser; tests/test_connection_manager.py; CI #41316328356
+Remaining work: Restore rejects symlinked source/destination, duplicate JSON keys, non-standard JSON constants and oversized files; invalid master and injected write failure tests prove the target is preserved and temp files are cleaned. CI #41316328356 passed on Python 3.10/3.11/3.12. Cross-manager state, quota, credential and billing recovery remain.
 
 Feature 093: Atomic Storage Updates
 Status: COMPLETED
