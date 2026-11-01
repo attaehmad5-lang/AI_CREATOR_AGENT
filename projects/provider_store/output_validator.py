@@ -7,6 +7,7 @@ import io
 import json
 import os
 import stat
+import struct
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +45,7 @@ class ProviderOutputValidator:
 
     def __init__(
         self, *, min_size_bytes: int = 1, max_size_bytes: int = 1_000_000_000,
-        max_json_depth: int = 128,
+        max_json_depth: int = 128, max_image_pixels: int = 100_000_000,
     ) -> None:
         if (
             not isinstance(min_size_bytes, int)
@@ -62,9 +63,17 @@ class ProviderOutputValidator:
             or max_json_depth > 4096
         ):
             raise ValueError("max_json_depth must be an integer between 1 and 4096")
+        if (
+            not isinstance(max_image_pixels, int)
+            or isinstance(max_image_pixels, bool)
+            or max_image_pixels < 1
+            or max_image_pixels > 1_000_000_000
+        ):
+            raise ValueError("max_image_pixels must be an integer between 1 and 1000000000")
         self.min_size_bytes = min_size_bytes
         self.max_size_bytes = max_size_bytes
         self.max_json_depth = max_json_depth
+        self.max_image_pixels = max_image_pixels
 
     @staticmethod
     def _json_depth_within_limit(stream: Any, max_depth: int) -> bool:
@@ -90,6 +99,62 @@ class ProviderOutputValidator:
                 elif byte in (0x7D, 0x5D):
                     depth -= 1
         return True
+
+    def _image_dimensions(self, stream: Any, mime: str) -> tuple[int, int] | None:
+        """Read bounded image dimensions for common raster formats without decoding pixels."""
+        stream.seek(0)
+        if mime == "image/png":
+            header = stream.read(24)
+            if len(header) < 24 or header[12:16] != b"IHDR":
+                return None
+            return struct.unpack(">II", header[16:24])
+        if mime == "image/gif":
+            header = stream.read(10)
+            if len(header) < 10:
+                return None
+            return struct.unpack("<HH", header[6:10])
+        if mime == "image/webp":
+            header = stream.read(30)
+            if len(header) < 30 or header[12:16] != b"VP8X":
+                return None
+            width = 1 + int.from_bytes(header[24:27], "little")
+            height = 1 + int.from_bytes(header[27:30], "little")
+            return width, height
+        if mime == "image/jpeg":
+            if stream.read(2) != b"\\xff\\xd8":
+                return None
+            for _ in range(10000):
+                marker_prefix = stream.read(1)
+                if not marker_prefix:
+                    return None
+                if marker_prefix != b"\\xff":
+                    continue
+                marker = stream.read(1)
+                while marker == b"\\xff":
+                    marker = stream.read(1)
+                if not marker or marker in {b"\\xd8", b"\\xd9"}:
+                    continue
+                if marker in {b"\\xda"}:
+                    return None
+                length_bytes = stream.read(2)
+                if len(length_bytes) != 2:
+                    return None
+                segment_length = int.from_bytes(length_bytes, "big")
+                if segment_length < 2:
+                    return None
+                if marker[0] in {
+                    0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                    0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+                }:
+                    frame = stream.read(5)
+                    if len(frame) != 5:
+                        return None
+                    height = int.from_bytes(frame[1:3], "big")
+                    width = int.from_bytes(frame[3:5], "big")
+                    return width, height
+                stream.seek(segment_length - 2, os.SEEK_CUR)
+            return None
+        return None
 
     def validate_file(self, path: str | Path, *, modality: str) -> dict[str, Any]:
         """Validate existence, size, extension, signature/content, and compute SHA-256."""
@@ -135,6 +200,19 @@ class ProviderOutputValidator:
                     mime = self._match_signature(normalized_modality, header)
                     if mime is None:
                         return {"valid": False, "status": "SIGNATURE_MISMATCH"}
+                    if normalized_modality == "image":
+                        dimensions = self._image_dimensions(stream, mime)
+                        if dimensions is None:
+                            return {"valid": False, "status": "IMAGE_DIMENSIONS_INVALID"}
+                        width, height = dimensions
+                        if width <= 0 or height <= 0:
+                            return {"valid": False, "status": "IMAGE_DIMENSIONS_INVALID"}
+                        if width * height > self.max_image_pixels:
+                            return {
+                                "valid": False, "status": "IMAGE_PIXEL_LIMIT_EXCEEDED",
+                                "width": width, "height": height,
+                                "max_image_pixels": self.max_image_pixels,
+                            }
                 elif normalized_modality == "text":
                     stream.seek(0)
                     decoder = codecs.getincrementaldecoder("utf-8")()
@@ -197,6 +275,10 @@ class ProviderOutputValidator:
             "mime_type": mime,
             "size_bytes": size,
             "sha256": digest.hexdigest(),
+            **(
+                {"width": width, "height": height, "pixel_count": width * height}
+                if normalized_modality == "image" else {}
+            ),
         }
 
     @classmethod
