@@ -86,10 +86,13 @@ jobs:
           tests/test_catalog_interchange.py
           tests/test_catalog_diff.py
           tests/test_provider_store_performance_benchmark.py
-      - name: Check formatting of catalog and benchmark modules
+      - name: Check formatting of catalog, policy and benchmark modules
         run: >-
           python -m ruff format --check
           projects/provider_store/catalog_interchange.py
+          projects/provider_store/pricing_catalog.py
+          projects/provider_store/project_policy_manager.py
+          projects/provider_store/cost_policy.py
           projects/provider_store/catalog_diff.py
           projects/provider_store/advanced/performance_benchmark.py
           projects/provider_store/generate_api_reference.py
@@ -97,6 +100,10 @@ jobs:
           tests/test_provider_store_fuzz_regressions.py
           tests/test_routing_simulation.py
           tests/test_catalog_interchange.py
+          tests/test_pricing_catalog.py
+          tests/test_pricing_catalog_fuzz.py
+          tests/test_project_policy_manager.py
+          tests/test_cost_policy.py
           tests/test_catalog_diff.py
           tests/test_provider_store_performance_benchmark.py
       - name: Install focused coverage gate
