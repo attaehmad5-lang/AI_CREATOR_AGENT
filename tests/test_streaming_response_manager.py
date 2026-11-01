@@ -94,10 +94,8 @@ class ProviderStreamSessionTests(unittest.TestCase):
             stream.append(sequence=0, chunk=chr(0xD800))["status"],
             "INVALID_CHUNK",
         )
-        self.assertEqual(
-            ProviderStreamSession("bad\\nrequest").snapshot()["state"],
-            "OPEN",
-        )
+        with self.assertRaises(ValueError):
+            ProviderStreamSession("bad\\nrequest")
 
     def test_concurrent_duplicate_chunk_delivery_is_thread_safe(self):
         stream = ProviderStreamSession("request-8")
