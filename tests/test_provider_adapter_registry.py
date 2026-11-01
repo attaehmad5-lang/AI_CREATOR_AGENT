@@ -130,7 +130,7 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         self.assertEqual(session.append(sequence=0, chunk=b"four")["status"], "CHUNK_ACCEPTED")
         self.assertEqual(session.append(sequence=1, chunk=b"five")["status"], "CHUNK_ACCEPTED")
         self.assertEqual(session.append(sequence=2, chunk=b"x")["status"], "CHUNK_LIMIT_EXCEEDED")
-        self.assertEqual(session.finish()["status"], "STREAM_COMPLETED")
+        self.assertEqual(session.finish()["status"], "STREAM_NOT_OPEN")
 
     def test_streaming_capability_must_be_subset_of_registered_modalities(self):
         result = self.registry.register(
