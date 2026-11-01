@@ -169,6 +169,36 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         self.assertFalse(denied["executed"])
         self.assertEqual(called, [])
 
+    def test_execute_stream_handles_adapter_removed_between_session_open_and_dispatch(self):
+        called = []
+        self.registry.register(
+            "test-image",
+            lambda **kwargs: called.append(True) or iter((b"x",)),
+            modalities=("image",), streaming_modalities=("image",),
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        original_resolve = self.registry.resolve_streaming
+        resolutions = []
+
+        def remove_after_open(provider_id, *, modality, model_id=None):
+            resolutions.append(True)
+            if len(resolutions) == 2:
+                self.registry.unregister(provider_id)
+            return original_resolve(
+                provider_id, modality=modality, model_id=model_id
+            )
+
+        self.registry.resolve_streaming = remove_after_open
+        result = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-race",
+        )
+        self.assertEqual(result["status"], "STREAMING_ADAPTER_UNAVAILABLE")
+        self.assertFalse(result["started"])
+        self.assertTrue(result["reservations_retained"])
+        self.assertEqual(called, [])
+
     def test_execute_stream_retains_reservations_for_ambiguous_adapter_failure(self):
         self.registry.register(
             "test-image",
