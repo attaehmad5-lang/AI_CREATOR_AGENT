@@ -189,6 +189,9 @@ class ProviderConfigLifecycleManager:
                 with config_path.open("r", encoding="utf-8") as stream:
                     latest = json.load(stream)
                 if latest != original:
+                    os.close(fd)
+                    fd = -1
+                    os.unlink(temp_name)
                     return {
                         "status": "CONFIG_CHANGED_DURING_MIGRATION",
                         "migrated": False,
