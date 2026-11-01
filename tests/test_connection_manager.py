@@ -53,6 +53,26 @@ class ConnectionManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_orphaned_verified_state_does_not_claim_connectivity(self):
+        self.state_path.write_text(
+            json.dumps({
+                "version": "1.0",
+                "policy": "USER_CONTROLLED",
+                "providers": {
+                    "removed_provider": {
+                        "status": "CONNECTED",
+                        "verified": True,
+                        "updated_at": "2026-11-01T00:00:00+00:00",
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+
+        result = self.manager.get_state("removed_provider")
+
+        self.assertEqual(result, {"status": "UNKNOWN", "verified": False})
+
     def test_state_sanitizer_rejects_reference_aliases_and_malformed_values(self):
         self.state_path.write_text(
             json.dumps({
