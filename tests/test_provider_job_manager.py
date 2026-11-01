@@ -38,7 +38,8 @@ class ProviderJobManagerTests(unittest.TestCase):
         )
         claimed = limited.claim_next(worker_id="worker-1")
         completed = limited.complete(
-            job_id="job-1", worker_id="worker-1", success=True,
+            job_id="job-1", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"], success=True,
             result_ref="asset:job-1",
         )
         second = limited.submit(
@@ -96,6 +97,34 @@ class ProviderJobManagerTests(unittest.TestCase):
         )
         self.assertEqual(done["job"]["status"], "SUCCEEDED")
         self.assertEqual(self.manager.poll(job_id="job-1")["job"]["result_ref"], "asset:result-1")
+
+    def test_worker_can_renew_current_lease_and_stale_token_cannot(self):
+        self.submit("job-1")
+        first = self.manager.claim_next(worker_id="worker-1")
+        old_token = first["job"]["lease_token"]
+        self.now[0] += timedelta(seconds=8)
+        renewed = self.manager.renew_lease(
+            job_id="job-1", worker_id="worker-1", lease_token=old_token
+        )
+        self.assertEqual(renewed["status"], "JOB_LEASE_RENEWED")
+        self.assertTrue(renewed["renewed"])
+        self.assertEqual(
+            datetime.fromisoformat(renewed["lease_until"]),
+            self.now[0] + timedelta(seconds=10),
+        )
+
+        self.now[0] += timedelta(seconds=11)
+        next_claim = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(next_claim["status"], "JOB_CLAIMED")
+        stale = self.manager.renew_lease(
+            job_id="job-1", worker_id="worker-1", lease_token=old_token
+        )
+        self.assertEqual(stale["status"], "JOB_LEASE_NOT_OWNED")
+        current = self.manager.renew_lease(
+            job_id="job-1", worker_id="worker-1",
+            lease_token=next_claim["job"]["lease_token"],
+        )
+        self.assertEqual(current["status"], "JOB_LEASE_RENEWED")
 
     def test_stale_lease_token_cannot_complete_reclaimed_job_even_for_same_worker(self):
         self.submit("job-1")

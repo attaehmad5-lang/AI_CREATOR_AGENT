@@ -991,6 +991,20 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "WEBHOOK_VERIFIED")
         self.assertNotIn(secret, repr(result))
 
+    def test_job_lease_renewal_facade_requires_authorized_principal(self):
+        jobs = ProviderJobManager(self.root / "lease-renewal-jobs.json")
+        authorization = ProviderAuthorizationManager(self.root / "lease-renewal-auth.json")
+        authorization.assign_role("viewer-job-user", "viewer")
+        service = ProviderService(
+            self.connections, job_manager=jobs,
+            authorization_manager=authorization,
+        )
+        denied = service.renew_job_lease(
+            job_id="job-1", worker_id="worker-1", lease_token="x" * 43,
+            principal_id="viewer-job-user",
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+
     def test_async_job_queue_facade_enforces_access_and_backpressure(self):
         jobs = ProviderJobManager(
             self.root / "service-jobs.json",
