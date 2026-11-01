@@ -48,6 +48,40 @@ class ProviderStoreFuzzRegressionTests(unittest.TestCase):
                     all(isinstance(item, dict) for item in candidate["providers"])
                 )
 
+
+    def test_endpoint_validator_is_total_for_seeded_arbitrary_endpoint_text(self):
+        rng = random.Random(250116)
+        alphabet = string.ascii_letters + string.digits + "-._:/@[]?#%\\\\ \t"
+        for index in range(1500):
+            candidate = "".join(
+                rng.choice(alphabet) for _ in range(rng.randrange(0, 180))
+            )
+            result = ConnectionManager.validate_endpoint(
+                candidate, allowed_hosts={"api.example.com"}
+            )
+            self.assertIsInstance(result, dict, msg=f"case={index}")
+            self.assertIn("valid", result, msg=f"case={index}")
+            self.assertIsInstance(result["valid"], bool, msg=f"case={index}")
+            if result["valid"]:
+                self.assertEqual(result["scheme"], "https")
+                self.assertEqual(result["hostname"], "api.example.com")
+
+    def test_endpoint_validator_rejects_ambiguous_authority_and_encoded_hosts(self):
+        candidates = (
+            "https://api.example.com\\\\@127.0.0.1/health",
+            "https://api.example.com%2eattacker.invalid/health",
+            "https://user@api.example.com/health",
+            "https://api.example.com:bad/health",
+            "https://api.example.com:65536/health",
+            "https://api.example.com\\n@127.0.0.1/health",
+        )
+        for candidate in candidates:
+            with self.subTest(candidate=candidate):
+                result = ConnectionManager.validate_endpoint(
+                    candidate, allowed_hosts={"api.example.com"}
+                )
+                self.assertFalse(result["valid"])
+
     def test_traceparent_parser_handles_seeded_arbitrary_text_without_exceptions(self):
         rng = random.Random(250115)
         alphabet = string.ascii_letters + string.digits + "-_:. /\t\n"
