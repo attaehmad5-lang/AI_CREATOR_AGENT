@@ -159,6 +159,9 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
             "test-image", lambda **kwargs: called.append(True) or iter((b"x",)),
             modalities=("image",),
         )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
         denied = self.registry.execute_stream(
             "test-image", modality="image", request_id="stream-denied",
         )
