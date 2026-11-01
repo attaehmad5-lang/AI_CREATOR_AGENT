@@ -359,8 +359,8 @@ Remaining work: Reservation/provider/estimate mismatch is rejected and actual-co
 
 Feature 068: Pricing Catalog
 Status: PARTIAL
-Implementation/evidence inspected: pricing_catalog.py; tests/test_pricing_catalog.py; cost_policy.py:evaluate_priced_request; CI #41314260671
-Remaining work: Read-only catalog supports strict records, official source attribution, verification timestamps, currencies, effective dates, exact provider/model matching and unit-aware estimates; ambiguity and missing prices fail closed. Estimates integrate with budget and explicit paid-approval gates. CI #41314260671 passed on Python 3.10/3.11/3.12. Official current vendor pricing records still need verification and population; none are invented.
+Implementation/evidence inspected: pricing_catalog.py; pricing_catalog.json; tests/test_pricing_catalog.py; tests/test_pricing_catalog_fuzz.py; cost_policy.py:evaluate_priced_request; CI #41315421000
+Remaining work: Catalog supports strict records and atomic cross-process upsert with source attribution, verification timestamps, currency/effective dates, exact model matching, unit-aware estimates and fail-closed ambiguity. Estimates integrate with project budget and paid-approval gates. CI #41315421000 passed on Python 3.10/3.11/3.12. The checked-in catalog remains empty until official current vendor prices are verified; no values are fabricated.
 
 Feature 069: Budget Alerts
 Status: COMPLETED
