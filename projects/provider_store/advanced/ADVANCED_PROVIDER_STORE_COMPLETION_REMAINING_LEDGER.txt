@@ -1,7 +1,7 @@
 ADVANCED PROVIDER STORE — COMPLETION / REMAINING WORK LEDGER
 Project: AI_CREATOR_AGENT
 Scope: canonical 150-point feature inventory
-Last audited: 2026-11-01
+Last audited: 2026-11-01 (routing policy matrix and project data-residency policy CI #41311864851 passed on Python 3.10/3.11/3.12)
 
 STATUS RULES
 COMPLETED = implementation and relevant tests passed with evidence.
@@ -530,7 +530,7 @@ Remaining work: Catalog apply is dry-run by default and tested; other manager wo
 Feature 102: Routing Policy Simulation
 Status: PARTIAL
 Implementation/evidence inspected: routing_manager.py; project_policy_manager.py; tests/test_routing_simulation.py; CI #41306670887; PROVIDER_STORE_API_REFERENCE.md
-Remaining work: route(dry_run=True) returns ROUTE_SIMULATED with selected provider, policy decisions, estimated cost and would_reserve fields. Tests verify no quota mutation, no round-robin cursor advance, and no paid-cost or free-credit reservation. A complete policy-matrix report covering quota/budget/health/fallback combinations remains.
+Remaining work: Dry-run returns ROUTE_SIMULATED with selected provider, eligible/rejected provider IDs, fallback state and reservation plan. Project policies validate and enforce required data-residency region. Tests cover no quota/credit/cost reservation, no round-robin advance, provider allowlist filtering, malformed/invalid policy rejection and region enforcement. Exact live quota/budget availability simulation and broader health/fallback combinations remain. CI #41311864851 passed compile, catalog validation, full tests and reproducible wheel/clean install on Python 3.10/3.11/3.12.
 Feature 103: Provider Benchmarking
 Status: COMPLETED
 Implementation/evidence inspected: provider_benchmark_manager.py; tests/test_provider_benchmark_manager.py; CI #40560954116
