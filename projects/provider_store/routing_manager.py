@@ -180,6 +180,13 @@ class ProviderRoutingManager:
             ):
                 return {"allowed": False, "status": "PROJECT_POLICY_REQUIRED"}
             project_policy = policy_result["policy"]
+            # Treat injected/persisted policy data as untrusted at the routing
+            # boundary too; never let malformed policy values raise during
+            # membership checks or weaken provider eligibility.
+            from .project_policy_manager import ProviderProjectPolicyManager
+
+            if ProviderProjectPolicyManager._validate_policy(project_id, project_policy):
+                return {"allowed": False, "status": "PROJECT_POLICY_INVALID"}
             policy_region = project_policy.get("required_region")
             if policy_region is not None:
                 if not isinstance(policy_region, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", policy_region):
