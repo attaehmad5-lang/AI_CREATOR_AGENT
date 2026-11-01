@@ -308,6 +308,8 @@ class ProviderJobManager:
             changed = self._reap_expired_locked(now_dt)
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
+                if changed:
+                    self._save()
                 return {"status": "JOB_NOT_FOUND", "saved": False}
             if changed:
                 self._save()
