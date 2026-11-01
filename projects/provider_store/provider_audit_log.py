@@ -171,7 +171,7 @@ class ProviderAuditLog:
                     stream.write(encoded)
                     stream.flush()
                     os.fsync(stream.fileno())
-            except OSError as exc:
+            except OSError:
                 if self.path.is_symlink():
                     return {"status": "AUDIT_LOG_SYMLINK_REJECTED", "saved": False}
                 return {"status": "AUDIT_LOG_WRITE_FAILED", "saved": False}
