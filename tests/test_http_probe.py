@@ -40,22 +40,33 @@ class _Opener:
 
 
 class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
-    def test_public_https_probe_uses_timeout_and_bounds_response_read(self):
+    def test_public_https_probe_rejects_oversized_response_with_bounded_read(self):
         opener = _Opener(_Response(body=b"x" * 5000))
         probe = ProviderHTTPConnectivityProbe(opener=opener, max_response_bytes=16)
-        result = probe(
-            {
-                "id": "public_provider",
-                "auth_type": "NONE",
-                "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
-            },
-            timeout_seconds=2.5,
-        )
-        self.assertEqual(result, {"ok": True, "http_status": 200})
+        with self.assertRaisesRegex(ConnectionError, "configured size limit"):
+            probe(
+                {
+                    "id": "public_provider",
+                    "auth_type": "NONE",
+                    "allowed_hosts": ["api.example.com"],
+                    "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
+                },
+                timeout_seconds=2.5,
+            )
         self.assertEqual(opener.calls[0][1], 2.5)
         self.assertEqual(opener.calls[0][0].get_method(), "GET")
         self.assertEqual(len(opener.response.body), 5000)
+        self.assertTrue(opener.response.closed)
+
+    def test_public_https_probe_accepts_response_at_exact_size_limit(self):
+        opener = _Opener(_Response(body=b"x" * 16))
+        probe = ProviderHTTPConnectivityProbe(opener=opener, max_response_bytes=16)
+        result = probe({
+            "id": "public_provider", "auth_type": "NONE",
+            "allowed_hosts": ["api.example.com"],
+            "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
+        })
+        self.assertEqual(result, {"ok": True, "http_status": 200})
         self.assertTrue(opener.response.closed)
 
     def test_credentialed_probe_requires_explicit_auth_protected_endpoint(self):
