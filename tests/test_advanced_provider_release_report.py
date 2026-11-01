@@ -359,5 +359,37 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
                     )
 
 
+    def test_archive_fsync_uses_writable_descriptor_on_windows(self):
+        from unittest.mock import patch
+        import builtins
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            provider_root = root / "projects" / "provider_store"
+            advanced = provider_root / "advanced"
+            advanced.mkdir(parents=True)
+            (advanced / "ADVANCED_PROVIDER_STORE_COMPLETION_LEDGER.md").write_text(
+                _ledger_text(), encoding="utf-8"
+            )
+            (provider_root / "example.py").write_text("VALUE = 1\\n", encoding="utf-8")
+            output = root / "build"
+            real_open = builtins.open
+            archive_fsync_modes = []
+
+            def tracking_open(file, mode="r", *args, **kwargs):
+                if str(file).endswith(".tmp") and "advanced_provider_store_source.zip." in str(file):
+                    archive_fsync_modes.append(mode)
+                return real_open(file, mode, *args, **kwargs)
+
+            with patch("builtins.open", side_effect=tracking_open):
+                result = write_release_artifacts(output, repo_root=root)
+
+            self.assertEqual(result["zip_integrity"], "PASS")
+            self.assertIn("r+b", archive_fsync_modes)
+            with zipfile.ZipFile(result["archive"]) as archive:
+                self.assertIsNone(archive.testzip())
+
+
 if __name__ == "__main__":
     unittest.main()
