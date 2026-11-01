@@ -628,7 +628,7 @@ Remaining work: Focused mypy gate passes on the maintenance/release, outage and 
 Feature 122: Test Coverage Enforcement
 Status: PARTIAL
 Implementation/evidence inspected: .github/workflows/task-25-tests.yml; coverage 7.13.1; focused provider-store modules; CI #40582600249
-Remaining work: Coverage gate passed with 82% combined statement coverage across nine catalog/config/release/benchmark/health modules while all 489 tests passed; repository-wide coverage threshold remains undefined.
+Remaining work: Focused coverage now includes streaming_response_manager, provider_webhook_verifier and state_reconciliation_manager alongside catalog/config/release modules; coverage and full tests/build passed in CI #41318740730 on Python 3.10/3.11/3.12. Repository-wide coverage threshold and all runtime managers remain.
 
 Feature 123: Build Verification
 Status: COMPLETED
