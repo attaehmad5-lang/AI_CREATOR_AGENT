@@ -285,8 +285,13 @@ class ProviderHTTPConnectivityProbe:
             status = response.getcode() if callable(getattr(response, "getcode", None)) else getattr(response, "status", None)
             if not isinstance(status, int) or not 200 <= status < 300:
                 raise ConnectionError("provider did not return a successful HTTP status")
-            # Bound any response read and never return or log response content.
-            response.read(self.max_response_bytes + 1)
+            # Read at most one byte beyond the configured limit so oversized
+            # health responses are rejected without unbounded memory consumption.
+            body = response.read(self.max_response_bytes + 1)
+            if not isinstance(body, (bytes, bytearray)):
+                raise ConnectionError("provider returned an invalid response body")
+            if len(body) > self.max_response_bytes:
+                raise ConnectionError("provider response exceeded the configured size limit")
             result = {"ok": True, "http_status": status}
             if credentialed_auth:
                 result["authentication_verified"] = True
