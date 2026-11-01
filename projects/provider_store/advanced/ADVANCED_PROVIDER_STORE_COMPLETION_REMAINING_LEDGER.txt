@@ -475,7 +475,7 @@ Completion evidence: Added immutable timestamped catalog snapshots, safe history
 Feature 091: Backup Management
 Status: PARTIAL
 Implementation/evidence inspected: catalog_interchange.py; catalog_cli.py; tests/test_catalog_interchange.py; tests/test_catalog_cli.py; PROVIDER_MANAGER_GUIDE.md
-Remaining work: Catalog snapshots and .bak import backups exist. Snapshot retention now previews by default and requires --apply for deletion, validates candidates, skips invalid files/symlinks, and preserves at least the requested number of valid snapshots. Migration-wide retention, crash-at-every-write and cross-manager recovery remain.
+Remaining work: Added a 24-way concurrent process snapshot-creation test using six workers; unique snapshot names, validated content and persisted history listing are asserted. CI #41316756565 passed on Python 3.10/3.11/3.12. Migration-wide retention, crash-at-every-write and cross-manager recovery remain.
 
 Feature 092: Restore Management
 Status: PARTIAL
