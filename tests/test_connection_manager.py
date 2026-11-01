@@ -474,6 +474,34 @@ class ConnectionManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ConnectionManager._load_json(link)
 
+    def test_catalog_recovery_write_failure_preserves_target_and_cleans_temp(self):
+        from unittest.mock import patch
+        master_path = self.root / "recovery-master.json"
+        master = {
+            "version": "3.0",
+            "providers": [{
+                "id": "safe_api", "name": "Safe API", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "subscription_required": False, "allowed_hosts": ["api.example.com"],
+                "official_api_url": "https://api.example.com/docs",
+                "capabilities": ["image_generation"],
+            }],
+        }
+        master_path.write_text(json.dumps(master), encoding="utf-8")
+        self.catalog_path.write_text("{corrupt-target", encoding="utf-8")
+        original = self.catalog_path.read_bytes()
+        with patch.object(
+            ConnectionManager, "_atomic_write_json",
+            side_effect=OSError("simulated recovery write failure"),
+        ):
+            result = ConnectionManager.restore_catalog_from_master(
+                self.catalog_path, master_path
+            )
+        self.assertEqual(result["status"], "CATALOG_RECOVERY_WRITE_FAILED")
+        self.assertFalse(result["restored"])
+        self.assertEqual(self.catalog_path.read_bytes(), original)
+        self.assertEqual(list(self.root.glob(".provider_catalog.json.*.tmp")), [])
+
     def test_catalog_recovery_fails_closed_when_master_is_invalid(self):
         master_path = self.root / "invalid_master.json"
         master_path.write_text("{invalid", encoding="utf-8")
