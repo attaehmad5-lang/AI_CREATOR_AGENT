@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .catalog_integrity import validate_advanced_catalogs
-from ..streaming_response_manager import ProviderStreamSession
+from projects.provider_store.streaming_response_manager import ProviderStreamSession
 
 
 def run_benchmark(
