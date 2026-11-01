@@ -28,6 +28,7 @@ class ProviderWebhookVerifier:
         max_skew_seconds: int = 300,
         max_payload_bytes: int = 1_000_000,
         clock: Any = None,
+        audit_log: Any = None,
     ) -> None:
         if isinstance(max_skew_seconds, bool) or not isinstance(max_skew_seconds, int) or not 1 <= max_skew_seconds <= 3600:
             raise ValueError("max_skew_seconds must be within 1..3600")
@@ -35,10 +36,13 @@ class ProviderWebhookVerifier:
             raise ValueError("max_payload_bytes must be within 1..10000000")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
+        if audit_log is not None and not callable(getattr(audit_log, "record", None)):
+            raise ValueError("audit_log must provide a record method")
         self.state_path = Path(state_path)
         self.max_skew_seconds = max_skew_seconds
         self.max_payload_bytes = max_payload_bytes
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.audit_log = audit_log
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "events": {}}
         self._reload()
@@ -119,6 +123,24 @@ class ProviderWebhookVerifier:
                 pass
             raise
 
+    def _audit_outcome(self, provider_id: str, event_id: str, status: str) -> None:
+        if self.audit_log is None:
+            return
+        outcome = "OK" if status == "WEBHOOK_VERIFIED" else "DENIED"
+        try:
+            self.audit_log.record(
+                "provider.webhook.verify",
+                status=status,
+                outcome=outcome,
+                provider_id=provider_id,
+                request_id=event_id,
+                reason_code=None if outcome == "OK" else status,
+            )
+        except Exception:
+            # Audit shipping/storage failure must not convert a valid signature
+            # into a false provider result; the audit component owns its health alert.
+            return
+
     def verify(
         self,
         *,
@@ -177,6 +199,7 @@ class ProviderWebhookVerifier:
                     del self.data["events"][key]
             if event_key in self.data["events"]:
                 self._save()
+                self._audit_outcome(provider_id, event_id, "WEBHOOK_REPLAY_REJECTED")
                 return {"verified": False, "status": "WEBHOOK_REPLAY_REJECTED", "provider": provider_id}
             if len(self.data["events"]) >= 100_000:
                 return {"verified": False, "status": "WEBHOOK_REPLAY_STORE_FULL", "provider": provider_id}
@@ -186,6 +209,7 @@ class ProviderWebhookVerifier:
                 "payload_sha256": payload_hash,
             }
             self._save()
+        self._audit_outcome(provider_id, event_id, "WEBHOOK_VERIFIED")
         return {
             "verified": True,
             "status": "WEBHOOK_VERIFIED",
