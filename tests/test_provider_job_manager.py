@@ -176,6 +176,28 @@ class ProviderJobManagerTests(unittest.TestCase):
         )
         self.assertEqual(finished["job"]["status"], "CANCELLED")
 
+    def test_malformed_or_missing_lease_deadlines_reap_running_jobs_safely(self):
+        for index, bad_lease in enumerate(
+            ("2026-10-16T12:00:00", None, "not-a-timestamp")
+        ):
+            path = Path(self.temp_dir.name) / f"malformed-lease-{index}.json"
+            manager = ProviderJobManager(
+                path, clock=lambda: self.now[0], lease_seconds=10
+            )
+            manager.submit(
+                job_id="job-1", project_id="film", provider_id="image",
+                payload_ref="payload:job-1",
+            )
+            claimed = manager.claim_next(worker_id="worker-1")
+            self.assertEqual(claimed["status"], "JOB_CLAIMED")
+            manager.data["jobs"]["job-1"]["lease_until"] = bad_lease
+            manager._save()
+
+            reclaimed = manager.claim_next(worker_id="worker-2")
+            self.assertEqual(reclaimed["status"], "JOB_CLAIMED")
+            self.assertEqual(reclaimed["job"]["worker_id"], "worker-2")
+            self.assertEqual(reclaimed["job"]["attempts"], 2)
+
     def test_expired_worker_lease_requeues_then_fails_at_attempt_limit(self):
         self.submit("job-1")
         self.manager.claim_next(worker_id="worker-1")

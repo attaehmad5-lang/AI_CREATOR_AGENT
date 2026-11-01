@@ -178,8 +178,15 @@ class ProviderJobManager:
                 continue
             lease_until = job.get("lease_until")
             try:
-                expired = isinstance(lease_until, str) and datetime.fromisoformat(lease_until) <= now
-            except ValueError:
+                if not isinstance(lease_until, str):
+                    expired = True
+                else:
+                    parsed_lease = datetime.fromisoformat(lease_until)
+                    if parsed_lease.tzinfo is None:
+                        expired = True
+                    else:
+                        expired = parsed_lease.astimezone(timezone.utc) <= now
+            except (ValueError, TypeError, OverflowError):
                 expired = True
             if not expired:
                 continue
