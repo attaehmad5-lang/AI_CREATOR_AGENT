@@ -651,6 +651,16 @@ class ProviderRoutingManager:
                     "billing_mode": billing_mode,
                     "would_reserve": would_reserve,
                     "prior_decisions": decisions,
+                    "policy_matrix": {
+                        "eligible_provider_ids": [
+                            item["id"] for item in candidates
+                            if isinstance(item.get("id"), str)
+                        ],
+                        "rejected_providers": [dict(item) for item in decisions],
+                        "selected_provider": provider_id,
+                        "fallback_enabled": automatic_fallback and selected_strategy != "PRIMARY_ONLY",
+                        "reservation_plan": list(would_reserve),
+                    },
                 }
                 if confidence_status is not None:
                     result["confidence_routing_status"] = confidence_status
