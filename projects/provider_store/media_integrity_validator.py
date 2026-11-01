@@ -146,7 +146,7 @@ class MediaIntegrityValidator:
                             return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
                         stream.seek(child_offset + child_header_size)
                         full_header = stream.read(4)
-                        if len(full_header) != 4 or full_header[1:] != b"\\x00\\x00\\x00":
+                        if len(full_header) != 4 or full_header[1:] != b"\x00\x00\x00":
                             return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
                         version = full_header[0]
                         if version == 0:
