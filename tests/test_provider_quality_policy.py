@@ -41,5 +41,45 @@ class ProviderOutputQualityPolicyTests(unittest.TestCase):
             ProviderOutputQualityPolicy(lambda *_: 0.5, thresholds={"image": float("nan")})
 
 
+    def test_score_boundaries_and_boolean_scores_are_handled_strictly(self):
+        accepted = ProviderOutputQualityPolicy(
+            lambda path, **kwargs: {"score": 1},
+            thresholds={"image:image": 1},
+        ).evaluate("asset:1", modality="image", category="image")
+        self.assertTrue(accepted["allowed"])
+        self.assertEqual(accepted["score"], 1.0)
+
+        rejected = ProviderOutputQualityPolicy(
+            lambda path, **kwargs: 0,
+            thresholds={"image:image": 0.1},
+        ).evaluate("asset:2", modality="image", category="image")
+        self.assertFalse(rejected["allowed"])
+        self.assertEqual(rejected["score"], 0.0)
+
+        for value in (True, False, {}, {"score": True}, {"score": None}):
+            with self.subTest(value=value):
+                result = ProviderOutputQualityPolicy(
+                    lambda path, **kwargs: value
+                ).evaluate("asset:3", modality="image", category="image")
+                self.assertFalse(result["allowed"])
+                self.assertEqual(result["status"], "INVALID_QUALITY_SCORE")
+
+    def test_scorer_receives_only_requested_asset_context(self):
+        calls = []
+        policy = ProviderOutputQualityPolicy(
+            lambda path, **kwargs: calls.append((path, kwargs)) or 0.9,
+            thresholds={"documentary": 0.8},
+        )
+        result = policy.evaluate(
+            "/private/output.mp4", modality="video", category="documentary"
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(calls, [(
+            "/private/output.mp4",
+            {"modality": "video", "category": "documentary"},
+        )])
+        self.assertNotIn("/private/output.mp4", repr(result))
+
+
 if __name__ == "__main__":
     unittest.main()
