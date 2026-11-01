@@ -101,6 +101,22 @@ Use catalog.upsert_price(record) to add or replace one fully validated price rec
 
 A returned estimate is not an invoice, live quote, account balance or guarantee of provider billing. evaluate_priced_request passes the estimate into the existing project-budget and explicit paid-approval gate. Do not populate the catalog with guessed prices; use provider-published sources and record when they were verified.
 
+## Bounded streaming response sessions
+
+Use `ProviderStreamSession` to validate and assemble chunks from an upstream streaming adapter. This class is an in-process stream-lifecycle primitive; it does not open network connections or imply that a provider/model supports streaming.
+
+    stream = ProviderStreamSession(
+        "request-id",
+        max_chunks=10000,
+        max_bytes=64 * 1024 * 1024,
+        timeout_seconds=300,
+    )
+    stream.append(sequence=0, chunk=b"first chunk")
+    stream.heartbeat()
+    result = stream.finish()
+
+Sequences must be contiguous from zero. Identical repeated chunks are idempotently rejected; conflicting duplicates and gaps fail. Chunk count, total bytes and inactivity are bounded. Cancellation clears buffered output. Terminal sessions reject further writes. Integrate this primitive only behind a provider adapter that explicitly advertises streaming and applies modality-specific output validation.
+
 ## Runtime and policy modules
 
 | Module | Responsibility |
