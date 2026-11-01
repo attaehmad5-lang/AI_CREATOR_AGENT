@@ -51,7 +51,9 @@ class ProviderStoreReconciliationManager:
         index[request_id].append({
             "source": source,
             "provider_id": record.get("provider_id"),
-            "status": record.get("status"),
+            "status": record.get("status") or (
+                "RESERVED" if source in {"credit_reservation", "cost_reservation"} else None
+            ),
             "project_id": project_id,
         })
 
