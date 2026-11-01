@@ -25,7 +25,11 @@ class ProviderCostPolicy:
         ledger_path: str | os.PathLike[str] | None = None,
         *,
         project_budgets: dict[str, float] | None = None,
+        max_records: int = 100_000,
     ) -> None:
+        if isinstance(max_records, bool) or not isinstance(max_records, int) or not 1 <= max_records <= 1_000_000:
+            raise ValueError("max_records must be within 1..1000000")
+        self.max_records = max_records
         self.ledger_path = Path(ledger_path) if ledger_path else None
         self._lock = threading.RLock()
         if project_budgets is not None and not isinstance(project_budgets, dict):
@@ -57,6 +61,9 @@ class ProviderCostPolicy:
             raise ValueError("Invalid usage ledger JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("projects", {}), dict):
             raise ValueError("Invalid usage ledger schema")
+        record_count = 0
+        if len(loaded.get("projects", {})) > self.max_records:
+            raise ValueError("usage ledger exceeds configured record limit")
         for project_id, project in loaded.get("projects", {}).items():
             if not isinstance(project_id, str) or not project_id.strip() or not isinstance(project, dict):
                 raise ValueError("Invalid usage ledger project record")
@@ -97,6 +104,9 @@ class ProviderCostPolicy:
             reservations = project.get("reservations", {})
             if not isinstance(reservations, dict):
                 raise ValueError("Invalid usage ledger reservations")
+            record_count += len(requests) + len(reservations)
+            if record_count > self.max_records:
+                raise ValueError("usage ledger exceeds configured record limit")
             if set(requests).intersection(reservations):
                 raise ValueError("usage request cannot be both reserved and finalized")
             if any(
@@ -133,6 +143,15 @@ class ProviderCostPolicy:
     @staticmethod
     def _valid_amount(value: Any) -> bool:
         return finite_number(value, minimum=0) is not None
+
+    def _record_count(self) -> int:
+        return sum(
+            len(project.get("requests", {})) + len(project.get("reservations", {}))
+            for project in self.ledger["projects"].values()
+            if isinstance(project, dict)
+            and isinstance(project.get("requests", {}), dict)
+            and isinstance(project.get("reservations", {}), dict)
+        )
 
     def _spent(self, project_id: str) -> float:
         project = self.ledger["projects"].get(project_id, {})
@@ -317,6 +336,8 @@ class ProviderCostPolicy:
                 ):
                     return {"status": "ALREADY_RESERVED", "saved": False, "request_id": request_id}
                 return {"status": "REQUEST_ID_CONFLICT", "saved": False, "request_id": request_id}
+            if self._record_count() >= self.max_records:
+                return {"status": "USAGE_LEDGER_CAPACITY_REACHED", "saved": False}
             spent = float(project.get("actual_spend", 0.0))
             reserved = self._reserved(project_id)
             remaining = max(0.0, budget - spent - reserved)
@@ -478,6 +499,8 @@ class ProviderCostPolicy:
                     return {"status": "DUPLICATE_REQUEST", "saved": True, "request_id": request_id}
                 return {"status": "REQUEST_ID_CONFLICT", "saved": False, "request_id": request_id}
             reservations = project.setdefault("reservations", {})
+            if request_id not in reservations and self._record_count() >= self.max_records:
+                return {"status": "USAGE_LEDGER_CAPACITY_REACHED", "saved": False}
             reservation = reservations.get(request_id)
             if reservation is not None and (
                 not isinstance(reservation, dict)
@@ -617,6 +640,8 @@ class ProviderCostPolicy:
             }
         reservations = project.setdefault("reservations", {})
         reservation = reservations.get(request_id)
+        if reservation is None and self._record_count() >= self.max_records:
+            return {"status": "USAGE_LEDGER_CAPACITY_REACHED", "saved": False}
         if reservation is not None and (
             not isinstance(reservation, dict)
             or reservation.get("provider_id") != provider_id
