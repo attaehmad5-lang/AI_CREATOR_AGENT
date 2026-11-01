@@ -74,21 +74,12 @@ jobs:
       - name: Show formatting diff for catalog and benchmark modules
         run: >-
           python -m ruff format --diff
-          projects/provider_store/catalog_interchange.py
-          projects/provider_store/pricing_catalog.py
-          projects/provider_store/project_policy_manager.py
-          projects/provider_store/cost_policy.py
           projects/provider_store/catalog_diff.py
           projects/provider_store/advanced/performance_benchmark.py || true
       - name: Check formatting of catalog, policy and benchmark modules
         run: >-
           python -m ruff format --check
-          projects/provider_store/catalog_interchange.py
-          projects/provider_store/pricing_catalog.py
-          projects/provider_store/project_policy_manager.py
-          projects/provider_store/cost_policy.py
           projects/provider_store/catalog_diff.py
-          projects/provider_store/advanced/performance_benchmark.py
           projects/provider_store/generate_api_reference.py
       - name: Install focused coverage gate
         run: python -m pip install coverage==7.13.1
