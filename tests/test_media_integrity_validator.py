@@ -80,7 +80,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
             + (0).to_bytes(8, "big")
             + (0).to_bytes(8, "big")
             + (1000).to_bytes(4, "big")
-            + (98765).to_bytes(8, "big")
+            + (28765).to_bytes(8, "big")
         )
         mvhd = (8 + len(mvhd_payload)).to_bytes(4, "big") + b"mvhd" + mvhd_payload
         moov = (8 + len(mvhd)).to_bytes(4, "big") + b"moov" + mvhd
@@ -93,7 +93,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
 
         self.assertTrue(result["valid"])
         self.assertEqual(result["timescale"], 1000)
-        self.assertEqual(result["duration_seconds"], 98.765)
+        self.assertEqual(result["duration_seconds"], 28.765)
         self.assertEqual(result["container"], "MP4")
 
     def test_mp4_duration_limit_and_invalid_movie_header_fail_closed(self):
