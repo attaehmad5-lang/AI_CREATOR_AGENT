@@ -132,6 +132,82 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         self.assertEqual(session.append(sequence=2, chunk=b"x")["status"], "CHUNK_LIMIT_EXCEEDED")
         self.assertEqual(session.finish()["status"], "STREAM_NOT_OPEN")
 
+
+    def test_execute_stream_dispatches_and_assembles_ordered_vendor_chunks(self):
+        self.registry.register(
+            "test-image",
+            lambda **kwargs: iter((b"frame-1", "frame-2")),
+            modalities=("image",), model_ids=("image-v1",),
+            streaming_modalities=("image",),
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        result = self.registry.execute_stream(
+            "test-image", modality="image", model_id="image-v1",
+            request_id="stream-dispatch-1",
+        )
+        self.assertEqual(result["status"], "STREAM_EXECUTED")
+        self.assertTrue(result["executed"])
+        self.assertEqual(result["result"]["content"], b"frame-1frame-2")
+        self.assertEqual(result["result"]["chunk_count"], 2)
+        self.assertEqual(len(result["result"]["sha256"]), 64)
+
+    def test_execute_stream_rejects_unverified_or_non_streaming_adapter_before_call(self):
+        called = []
+        self.registry.register(
+            "test-image", lambda **kwargs: called.append(True) or iter((b"x",)),
+            modalities=("image",),
+        )
+        denied = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-denied",
+        )
+        self.assertEqual(denied["status"], "STREAMING_UNSUPPORTED")
+        self.assertFalse(denied["executed"])
+        self.assertEqual(called, [])
+
+    def test_execute_stream_retains_reservations_for_ambiguous_adapter_failure(self):
+        self.registry.register(
+            "test-image",
+            lambda **kwargs: (_ for _ in ()).throw(RuntimeError("secret vendor detail")),
+            modalities=("image",), streaming_modalities=("image",),
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        result = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-error",
+        )
+        self.assertEqual(result["status"], "ADAPTER_STREAM_OUTCOME_UNKNOWN")
+        self.assertTrue(result["reservations_retained"])
+        self.assertEqual(result["error_type"], "RuntimeError")
+        self.assertNotIn("secret vendor detail", json.dumps(result))
+
+    def test_execute_stream_enforces_session_limits_and_invalid_adapter_shape(self):
+        self.registry.register(
+            "test-image", lambda **kwargs: iter((b"123", b"456")),
+            modalities=("image",), streaming_modalities=("image",),
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        limited = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-limit",
+            max_bytes=4,
+        )
+        self.assertEqual(limited["status"], "BYTE_LIMIT_EXCEEDED")
+        self.assertTrue(limited["reservations_retained"])
+
+        self.registry.register(
+            "test-image", lambda **kwargs: {"not": "an iterator"},
+            modalities=("image",), streaming_modalities=("image",), replace=True,
+        )
+        invalid = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-shape",
+        )
+        self.assertEqual(invalid["status"], "ADAPTER_STREAM_INVALID")
+        self.assertTrue(invalid["reservations_retained"])
+
     def test_streaming_capability_must_be_subset_of_registered_modalities(self):
         result = self.registry.register(
             "test-image", self.adapter, modalities=("image",),
