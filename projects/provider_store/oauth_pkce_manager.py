@@ -236,7 +236,11 @@ class ProviderOAuthPKCEManager:
             response = self.opener.open(request, timeout=timeout_value)
         except HTTPError as exc:
             status_code = exc.code
-            exc.close()
+            # Cleanup is best-effort; preserve the safe HTTP status result.
+            try:
+                exc.close()
+            except Exception:
+                pass
             return {"status": "OAUTH_TOKEN_HTTP_ERROR", "http_status": status_code}
         except URLError as exc:
             reason = getattr(exc, "reason", None)
@@ -269,9 +273,13 @@ class ProviderOAuthPKCEManager:
                 return {"status": "OAUTH_TOKEN_RESPONSE_INVALID"}
             return {"status": "OK", "data": data}
         finally:
-            close = getattr(response, "close", None)
-            if callable(close):
-                close()
+            # A faulty response cleanup hook must not mask token-response handling.
+            try:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+            except Exception:
+                pass
 
     def _install_tokens(self, provider_id: str, pending: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
         access_token = data.get("access_token")
