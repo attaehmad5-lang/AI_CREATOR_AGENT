@@ -234,6 +234,43 @@ class ProviderJobManager:
             self._save()
             return {"status": "JOB_CLAIMED", "job": dict(job)}
 
+    def renew_lease(
+        self, *, job_id: str, worker_id: str, lease_token: str
+    ) -> dict[str, Any]:
+        if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
+            return {"status": "INVALID_JOB_ID", "renewed": False}
+        if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
+            return {"status": "INVALID_WORKER_ID", "renewed": False}
+        if not isinstance(lease_token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", lease_token):
+            return {"status": "INVALID_LEASE_TOKEN", "renewed": False}
+        now = self.clock().astimezone(timezone.utc)
+        with self._transaction():
+            changed = self._reap_expired_locked(now)
+            job = self.data["jobs"].get(job_id)
+            if not isinstance(job, dict):
+                if changed:
+                    self._save()
+                return {"status": "JOB_NOT_FOUND", "renewed": False}
+            if (
+                job.get("status") != "RUNNING"
+                or job.get("worker_id") != worker_id
+                or not secrets.compare_digest(str(job.get("lease_token", "")), lease_token)
+            ):
+                if changed:
+                    self._save()
+                return {"status": "JOB_LEASE_NOT_OWNED", "renewed": False}
+            job["lease_until"] = (
+                now + timedelta(seconds=self.lease_seconds)
+            ).isoformat()
+            job["updated_at"] = now.isoformat()
+            self._save()
+            return {
+                "status": "JOB_LEASE_RENEWED",
+                "renewed": True,
+                "lease_until": job["lease_until"],
+                "job": dict(job),
+            }
+
     def complete(
         self,
         *,
