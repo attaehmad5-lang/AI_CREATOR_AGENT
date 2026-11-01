@@ -140,6 +140,7 @@ class ProviderStreamSession:
                 "status": "STREAM_COMPLETED", "finished": True,
                 "chunk_count": len(self._chunks), "total_bytes": self._total_bytes,
                 "sha256": hashlib.sha256(payload).hexdigest(),
+                "chunk_sha256": list(self._digests),
                 "content": payload,
             }
 
