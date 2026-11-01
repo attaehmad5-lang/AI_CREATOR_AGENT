@@ -6,9 +6,14 @@ network I/O or claim that a provider supports streaming.
 from __future__ import annotations
 
 import hashlib
+import math
+import re
 import threading
 import time
 from typing import Any, Callable
+
+
+_REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\\Z")
 
 
 class ProviderStreamSession:
@@ -23,26 +28,37 @@ class ProviderStreamSession:
         timeout_seconds: float = 300.0,
         clock: Callable[[], float] | None = None,
     ) -> None:
-        if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 200:
+        if not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id):
             raise ValueError("request_id must be a non-empty bounded string")
         if not isinstance(max_chunks, int) or isinstance(max_chunks, bool) or not 1 <= max_chunks <= 1_000_000:
             raise ValueError("max_chunks must be a positive bounded integer")
         if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 1 <= max_bytes <= 2**31:
             raise ValueError("max_bytes must be a positive bounded integer")
-        if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+        ):
+            raise ValueError("timeout_seconds must be finite and positive")
         self.request_id = request_id
         self.max_chunks = max_chunks
         self.max_bytes = max_bytes
         self.timeout_seconds = float(timeout_seconds)
         self._clock = clock or time.monotonic
-        self._created_at = self._clock()
+        self._created_at = self._read_clock()
         self._last_activity = self._created_at
         self._chunks: list[bytes] = []
         self._digests: list[str] = []
         self._total_bytes = 0
         self._state = "OPEN"
         self._lock = threading.RLock()
+
+    def _read_clock(self) -> float:
+        value = self._clock()
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError("stream clock must return a finite number")
+        return float(value)
 
     def _expire_if_needed(self, now: float) -> bool:
         if self._state == "OPEN" and now - self._last_activity > self.timeout_seconds:
@@ -53,14 +69,17 @@ class ProviderStreamSession:
         if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
             return {"status": "INVALID_SEQUENCE", "accepted": False}
         if isinstance(chunk, str):
-            payload = chunk.encode("utf-8")
+            try:
+                payload = chunk.encode("utf-8", errors="strict")
+            except UnicodeEncodeError:
+                return {"status": "INVALID_CHUNK", "accepted": False}
         elif isinstance(chunk, bytes):
             payload = chunk
         else:
             return {"status": "INVALID_CHUNK", "accepted": False}
         digest = hashlib.sha256(payload).hexdigest()
         with self._lock:
-            if self._expire_if_needed(self._clock()):
+            if self._expire_if_needed(self._read_clock()):
                 return {"status": "STREAM_TIMED_OUT", "accepted": False}
             if self._state != "OPEN":
                 return {"status": "STREAM_NOT_OPEN", "accepted": False, "state": self._state}
@@ -79,7 +98,7 @@ class ProviderStreamSession:
             self._chunks.append(payload)
             self._digests.append(digest)
             self._total_bytes += len(payload)
-            self._last_activity = self._clock()
+            self._last_activity = self._read_clock()
             return {
                 "status": "CHUNK_ACCEPTED", "accepted": True,
                 "sequence": sequence, "chunk_bytes": len(payload),
@@ -128,5 +147,5 @@ class ProviderStreamSession:
             return {
                 "request_id": self.request_id, "state": self._state,
                 "chunk_count": len(self._chunks), "total_bytes": self._total_bytes,
-                "age_seconds": max(0.0, self._clock() - self._created_at),
+                "age_seconds": max(0.0, self._read_clock() - self._created_at),
             }
