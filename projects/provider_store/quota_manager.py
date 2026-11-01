@@ -23,6 +23,7 @@ class ProviderQuotaManager:
         *,
         limits: dict[str, dict[str, int]],
         clock: Callable[[], datetime] | None = None,
+        max_records: int = 100_000,
     ) -> None:
         if not isinstance(limits, dict):
             raise ValueError("limits must be a provider-to-limit mapping")
@@ -37,10 +38,13 @@ class ProviderQuotaManager:
                 if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
                     raise ValueError("quota limits must be positive integers")
                 normalized[provider_id][period] = limit
+        if isinstance(max_records, bool) or not isinstance(max_records, int) or not 1 <= max_records <= 1_000_000:
+            raise ValueError("max_records must be within 1..1000000")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.limits = normalized
+        self.max_records = max_records
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "requests": {}}
@@ -58,6 +62,8 @@ class ProviderQuotaManager:
             raise ValueError("invalid quota state JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("requests"), dict):
             raise ValueError("invalid quota state schema")
+        if len(loaded["requests"]) > self.max_records:
+            raise ValueError("quota request state exceeds configured record limit")
         for request_id, record in loaded["requests"].items():
             if (
                 not isinstance(request_id, str)
@@ -153,6 +159,14 @@ class ProviderQuotaManager:
                     "RELEASED": "ALREADY_RELEASED",
                 }[existing_status]
                 return {"status": status, "request_id": request_id, "reserved": False}
+            if len(self.data["requests"]) >= self.max_records:
+                # Keep idempotency/audit records: never evict old request IDs
+                # merely to make room for a new potentially billable attempt.
+                return {
+                    "status": "QUOTA_STATE_CAPACITY_REACHED",
+                    "provider": provider_id,
+                    "reserved": False,
+                }
             for period, limit in self.limits[provider_id].items():
                 count = self._count_in_period(provider_id, period, now)
                 if count >= limit:
