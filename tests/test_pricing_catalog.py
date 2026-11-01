@@ -236,7 +236,7 @@ class PricingCatalogTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(), self.path.read_bytes())
 
     def test_concurrent_process_upserts_preserve_every_price_record(self):
-        path = self.root / "parallel-pricing.json"
+        path = Path(self.temp_dir.name) / "parallel-pricing.json"
         PricingCatalog(path)
         with ProcessPoolExecutor(max_workers=4) as pool:
             statuses = list(pool.map(
