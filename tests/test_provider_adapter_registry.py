@@ -115,7 +115,7 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         )
         invalid = self.registry.open_stream_session(
             "test-image", modality="image", request_id="stream-invalid",
-            max_chunks=0,
+            model_id="image-v1", max_chunks=0,
         )
         self.assertFalse(invalid["opened"])
         self.assertEqual(invalid["status"], "INVALID_STREAM_SESSION_OPTIONS")
