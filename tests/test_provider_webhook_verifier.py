@@ -98,7 +98,7 @@ class ProviderWebhookVerifierTests(unittest.TestCase):
             event_id="event-clock", secret=self.secret,
         )
         self.assertEqual(result["status"], "WEBHOOK_CLOCK_INVALID")
-        for control in ("\\u0085", "\\u2028", "\\u2029"):
+        for control in (chr(0x0085), chr(0x2028), chr(0x2029)):
             with self.subTest(control=control):
                 result = self.verifier.verify(
                     provider_id="video", payload=self.payload,
