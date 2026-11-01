@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 
 from projects.provider_store.connection_manager import ConnectionManager
-from projects.provider_store.http_probe import ProviderHTTPConnectivityProbe, _PinnedHTTPSConnection
+from projects.provider_store.http_probe import ProviderHTTPConnectivityProbe, _PinnedHTTPSConnection, _PinnedHTTPSHandler
 
 
 class _Response:
@@ -594,6 +594,43 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         records = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('1.1.1.1', 443)), (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('127.0.0.1', 443))]
         with patch('projects.provider_store.http_probe.socket.getaddrinfo', return_value=records), patch('projects.provider_store.http_probe.socket.create_connection') as connect:
             with self.assertRaisesRegex(OSError, 'non-public'):
+                connection.connect()
+        connect.assert_not_called()
+
+    def test_default_opener_uses_pinned_https_transport(self):
+        probe = ProviderHTTPConnectivityProbe()
+        handlers = [
+            handler for handler in probe.opener.handlers
+            if isinstance(handler, _PinnedHTTPSHandler)
+        ]
+        self.assertEqual(len(handlers), 1)
+
+    def test_pinned_transport_rejects_proxy_tunnel_before_dns(self):
+        connection = _PinnedHTTPSConnection("api.example.com", timeout=3)
+        connection.set_tunnel("proxy.internal", 8080)
+        with patch("projects.provider_store.http_probe.socket.getaddrinfo") as resolve:
+            with self.assertRaisesRegex(OSError, "proxies are not supported"):
+                connection.connect()
+        resolve.assert_not_called()
+
+    def test_pinned_transport_accepts_public_ipv6_and_connects_to_literal(self):
+        connection = _PinnedHTTPSConnection("api.example.com", timeout=3)
+        raw_socket = object()
+        tls_socket = object()
+        context = Mock()
+        context.wrap_socket.return_value = tls_socket
+        connection._context = context
+        records = [(socket.AF_INET6, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("2606:4700:4700::1111", 443, 0, 0))]
+        with patch("projects.provider_store.http_probe.socket.getaddrinfo", return_value=records), patch("projects.provider_store.http_probe.socket.create_connection", return_value=raw_socket) as connect:
+            connection.connect()
+        connect.assert_called_once_with(("2606:4700:4700::1111", 443), 3, None)
+        context.wrap_socket.assert_called_once_with(raw_socket, server_hostname="api.example.com")
+        self.assertIs(connection.sock, tls_socket)
+
+    def test_pinned_transport_fails_closed_when_dns_resolution_fails(self):
+        connection = _PinnedHTTPSConnection("api.example.com", timeout=3)
+        with patch("projects.provider_store.http_probe.socket.getaddrinfo", side_effect=socket.gaierror("temporary failure")), patch("projects.provider_store.http_probe.socket.create_connection") as connect:
+            with self.assertRaisesRegex(OSError, "could not be resolved"):
                 connection.connect()
         connect.assert_not_called()
 
