@@ -49,6 +49,8 @@ jobs:
           projects/provider_store/provider_service.py
           projects/provider_store/http_probe.py
           projects/provider_store/provider_adapter_registry.py
+          projects/provider_store/provider_config_lifecycle.py
+          projects/provider_store/state_reconciliation_manager.py
           projects/provider_store/provider_audit_log.py
           tests/test_provider_adapter_registry.py
           tests/test_http_probe.py
