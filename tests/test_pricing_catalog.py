@@ -141,7 +141,7 @@ class PricingCatalogTests(unittest.TestCase):
             {"currency": []},
             {"unit_price": True},
             {"provider_id": "../bad"},
-            {"api_key": "must-not-be-stored"},
+            {"api_key": "must-not-be-stored"},\n            {"apiKey": "must-not-be-stored"},\n            {"clientSecret": "must-not-be-stored"},\n            {"private-key": "must-not-be-stored"},
         ):
             with self.subTest(patch=patch):
                 self.write_catalog([dict(self.records[0], **patch)])
