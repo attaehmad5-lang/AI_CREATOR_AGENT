@@ -92,6 +92,46 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         self.assertEqual(resolved["status"], "STREAMING_ADAPTER_RESOLVED")
         self.assertIs(resolved["adapter"], self.adapter)
 
+    def test_open_stream_session_requires_verified_streaming_adapter_and_bounds(self):
+        denied = self.registry.open_stream_session(
+            "test-image", modality="image", request_id="stream-before-verify"
+        )
+        self.assertFalse(denied["opened"])
+        self.assertEqual(denied["status"], "ADAPTER_NOT_REGISTERED")
+
+        self.registry.register(
+            "test-image", self.adapter, modalities=("image",),
+            model_ids=("image-v1",), streaming_modalities=("image",),
+        )
+        unverified = self.registry.open_stream_session(
+            "test-image", modality="image", request_id="stream-unverified",
+            model_id="image-v1",
+        )
+        self.assertFalse(unverified["opened"])
+        self.assertEqual(unverified["status"], "PROVIDER_NOT_VERIFIED")
+
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        invalid = self.registry.open_stream_session(
+            "test-image", modality="image", request_id="stream-invalid",
+            max_chunks=0,
+        )
+        self.assertFalse(invalid["opened"])
+        self.assertEqual(invalid["status"], "INVALID_STREAM_SESSION_OPTIONS")
+
+        opened = self.registry.open_stream_session(
+            "test-image", modality="image", request_id="stream-valid",
+            model_id="image-v1", max_chunks=2, max_bytes=8,
+        )
+        self.assertTrue(opened["opened"])
+        self.assertEqual(opened["status"], "STREAM_SESSION_OPENED")
+        session = opened["session"]
+        self.assertEqual(session.append(sequence=0, chunk=b"four")["status"], "CHUNK_ACCEPTED")
+        self.assertEqual(session.append(sequence=1, chunk=b"five")["status"], "CHUNK_ACCEPTED")
+        self.assertEqual(session.append(sequence=2, chunk=b"x")["status"], "CHUNK_LIMIT_EXCEEDED")
+        self.assertEqual(session.finish()["status"], "STREAM_COMPLETED")
+
     def test_streaming_capability_must_be_subset_of_registered_modalities(self):
         result = self.registry.register(
             "test-image", self.adapter, modalities=("image",),
