@@ -362,7 +362,6 @@ class AdvancedProviderReleaseReportTests(unittest.TestCase):
     def test_archive_fsync_uses_writable_descriptor_on_windows(self):
         from unittest.mock import patch
         import builtins
-        import os
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
