@@ -59,6 +59,34 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.active_config, first)
         self.assertEqual(self.manager.generation, 3)
 
+    def test_rejected_rollback_preserves_history_and_active_config(self):
+        allow_old = {"value": True}
+
+        def changing_validator(config):
+            return (
+                isinstance(config.get("schema_version"), str)
+                and isinstance(config.get("providers"), dict)
+                and (config.get("schema_version") != "1" or allow_old["value"])
+            )
+
+        manager = ProviderConfigLifecycleManager(changing_validator)
+        first = {"schema_version": "1", "providers": {"image": {}}}
+        second = {"schema_version": "2", "providers": {"video": {}}}
+        self.assertTrue(manager.reload(first)["reloaded"])
+        self.assertTrue(manager.reload(second)["reloaded"])
+
+        allow_old["value"] = False
+        rejected = manager.rollback()
+        self.assertEqual(rejected["status"], "ROLLBACK_CONFIG_INVALID")
+        self.assertEqual(manager.active_config, second)
+        self.assertEqual(manager.generation, 2)
+
+        allow_old["value"] = True
+        retried = manager.rollback()
+        self.assertEqual(retried["status"], "CONFIG_ROLLED_BACK")
+        self.assertEqual(manager.active_config, first)
+        self.assertEqual(manager.generation, 3)
+
     def test_file_migration_creates_backup_and_writes_atomically(self):
         path = self.root / "provider-config.json"
         original = {"schema_version": "1", "providers": {"image": {}}}
