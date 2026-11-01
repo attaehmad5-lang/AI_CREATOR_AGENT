@@ -564,7 +564,7 @@ class ProviderServiceTests(unittest.TestCase):
             cost_policy=self.cost, quota_manager=self.quota,
         )
         output_path = self.root / "generated.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        output_path.write_bytes(valid_test_png())
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-success",
             estimated_cost=0.0, output_path=str(output_path),
@@ -604,7 +604,7 @@ class ProviderServiceTests(unittest.TestCase):
             quota_manager=self.quota,
         )
         output_path = self.root / "registry-dispatch.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        output_path.write_bytes(valid_test_png())
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="registry-dispatch",
             estimated_cost=0.0, output_path=str(output_path),
@@ -637,7 +637,7 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertTrue(verified["verified"])
         output_path = self.root / "audit-generated.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        output_path.write_bytes(valid_test_png())
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="audit-request",
             estimated_cost=0.0, output_path=str(output_path),
@@ -693,7 +693,7 @@ class ProviderServiceTests(unittest.TestCase):
             output_validator=self.validator, cost_policy=cost, quota_manager=quota,
         )
         output_path = self.root / "model-routed.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        output_path.write_bytes(valid_test_png())
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="model-routed",
             estimated_cost=0.0, output_path=str(output_path),
@@ -723,7 +723,7 @@ class ProviderServiceTests(unittest.TestCase):
             trace_manager=trace,
         )
         output_path = self.root / "traced.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        output_path.write_bytes(valid_test_png())
         traceparent = "00-" + "c" * 32 + "-" + "d" * 16 + "-01"
         result = service.execute_routed_request(
             category="image",
@@ -782,7 +782,7 @@ class ProviderServiceTests(unittest.TestCase):
             trace_manager=BrokenTrace(),
         )
         output_path = self.root / "telemetry-failure.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        output_path.write_bytes(valid_test_png())
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="telemetry-failure",
             estimated_cost=0.0, output_path=str(output_path),
@@ -904,7 +904,7 @@ class ProviderServiceTests(unittest.TestCase):
             output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
         )
         output_path = self.root / "cost-report.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        output_path.write_bytes(valid_test_png())
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="execute-invalid-cost",
             estimated_cost=1.0, paid_approved_providers={"image"},
@@ -1406,7 +1406,7 @@ class ProviderServiceTests(unittest.TestCase):
             quality_policy=quality,
         )
         output_path = self.root / "low-quality.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        output_path.write_bytes(valid_test_png())
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="low-quality-job",
             estimated_cost=0.0, output_path=str(output_path),
@@ -1450,7 +1450,7 @@ class ProviderServiceTests(unittest.TestCase):
             benchmark_manager=benchmark,
         )
         output_path = self.root / "benchmark-output.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        output_path.write_bytes(valid_test_png())
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="benchmark-job",
             estimated_cost=1.0, output_path=str(output_path),
