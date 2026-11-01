@@ -40,11 +40,11 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     """Connect to a validated public DNS address while retaining hostname TLS verification."""
 
     def connect(self) -> None:
-        if self._tunnel_host:
+        if getattr(self, "_tunnel_host", None):
             raise OSError("HTTPS proxies are not supported by the pinned provider transport")
         try:
             records = socket.getaddrinfo(
-                self.host, self.port, type=socket.SOCK_STREAM
+                str(self.host), self.port, type=socket.SOCK_STREAM
             )
         except OSError:
             raise OSError("provider hostname could not be resolved") from None
@@ -66,10 +66,10 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
             raw = None
             try:
                 raw = socket.create_connection(
-                    (address, self.port), self.timeout, self.source_address
+                    (address, self.port), self.timeout, getattr(self, "source_address", None)
                 )
-                self.sock = self._context.wrap_socket(
-                    raw, server_hostname=self.host
+                self.sock = getattr(self, "_context").wrap_socket(
+                    raw, server_hostname=str(self.host)
                 )
                 return
             except OSError as exc:
