@@ -71,6 +71,52 @@ class ProviderWebhookVerifierTests(unittest.TestCase):
         )
         self.assertEqual(stale["status"], "WEBHOOK_TIMESTAMP_OUT_OF_RANGE")
 
+    def test_replay_store_capacity_rejects_new_events_without_evicting_live_keys(self):
+        verifier = ProviderWebhookVerifier(
+            self.path, clock=lambda: self.now, max_payload_bytes=128, max_events=1
+        )
+        first = verifier.verify(
+            provider_id="video", payload=self.payload, signature=self.signature(),
+            timestamp=self.timestamp, event_id="event-cap-1", secret=self.secret,
+        )
+        self.assertTrue(first["verified"])
+        full = verifier.verify(
+            provider_id="video", payload=self.payload, signature=self.signature(),
+            timestamp=self.timestamp, event_id="event-cap-2", secret=self.secret,
+        )
+        self.assertEqual(full["status"], "WEBHOOK_REPLAY_STORE_FULL")
+        replay = verifier.verify(
+            provider_id="video", payload=self.payload, signature=self.signature(),
+            timestamp=self.timestamp, event_id="event-cap-1", secret=self.secret,
+        )
+        self.assertEqual(replay["status"], "WEBHOOK_REPLAY_REJECTED")
+        self.assertEqual(len(verifier.data["events"]), 1)
+
+        self.now = self.now.replace(minute=11)
+        next_timestamp = int(self.now.timestamp())
+        next_signature = self.signature(timestamp=next_timestamp)
+        accepted_after_expiry = verifier.verify(
+            provider_id="video", payload=self.payload, signature=next_signature,
+            timestamp=next_timestamp, event_id="event-cap-2", secret=self.secret,
+        )
+        self.assertTrue(accepted_after_expiry["verified"])
+        self.assertEqual(len(verifier.data["events"]), 1)
+
+    def test_replay_store_rejects_existing_state_above_configured_limit(self):
+        verifier = ProviderWebhookVerifier(
+            self.path, clock=lambda: self.now, max_payload_bytes=128, max_events=2
+        )
+        kwargs = dict(
+            provider_id="video", payload=self.payload, signature=self.signature(),
+            timestamp=self.timestamp, secret=self.secret,
+        )
+        self.assertTrue(verifier.verify(event_id="event-over-1", **kwargs)["verified"])
+        self.assertTrue(verifier.verify(event_id="event-over-2", **kwargs)["verified"])
+        with self.assertRaisesRegex(ValueError, "exceeds configured event limit"):
+            ProviderWebhookVerifier(
+                self.path, clock=lambda: self.now, max_payload_bytes=128, max_events=1
+            )
+
     def test_oversized_payload_and_malformed_fields_fail_closed(self):
         oversized = self.verifier.verify(
             provider_id="video", payload=b"x" * 129,
