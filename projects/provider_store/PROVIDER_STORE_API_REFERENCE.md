@@ -72,6 +72,31 @@ The route planner supports an explicit side-effect-free preview:
 
 A successful preview returns status ROUTE_SIMULATED, the selected provider, policy decisions, estimated cost/unit, a would_reserve list, and a policy_matrix containing eligible provider IDs, rejected-provider decisions, the selected provider, fallback state and reservation plan. Project policies may constrain allowed/denied providers, models, capabilities, maximum estimated cost, health/verified-connection evidence, automatic fallback and required data-residency region. Region identifiers are validated and a provider without matching, declared region metadata is rejected. A preview does not reserve paid budget, free credits or quota, and does not advance the round-robin cursor. A preview does not guarantee that quota or balances will still be available when a real request is submitted. Omit dry_run (or set it to False) only when the caller intends normal routing and reservation behavior.
 
+## Pricing catalog and estimates
+
+The pricing catalog is a read-only, source-attributed metadata store. Each price record identifies an exact provider, model, modality, unit, currency, effective date range, source and verification timestamp. Estimates fail closed when no unique applicable price exists.
+
+    catalog = PricingCatalog("projects/provider_store/pricing_catalog.json")
+    estimate = catalog.estimate(
+        provider_id="provider-id",
+        model_id="model-id",
+        modality="image",
+        units=4,
+        currency="USD",
+    )
+    decision = cost_policy.evaluate_priced_request(
+        provider_metadata,
+        pricing_catalog=catalog,
+        model_id="model-id",
+        modality="image",
+        units=4,
+        currency="USD",
+        project_id="demo",
+        paid_usage_approved=False,
+    )
+
+A returned estimate is not an invoice, live quote, account balance or guarantee of provider billing. evaluate_priced_request passes the estimate into the existing project-budget and explicit paid-approval gate. Do not populate the catalog with guessed prices; use provider-published sources and record when they were verified.
+
 ## Runtime and policy modules
 
 | Module | Responsibility |
@@ -80,8 +105,8 @@ A successful preview returns status ROUTE_SIMULATED, the selected provider, poli
 | http_probe.py | Bounded allowlisted HTTPS probes with TLS verification, redirects rejected, and safe result metadata |
 | oauth_pkce_manager.py | OAuth authorization-code PKCE, expiring state and in-memory token handling |
 | routing_manager.py | Policy-aware provider/model selection, fallback and reservation checks |
-| cost_policy.py | Paid approval, budget reservations and idempotent usage reconciliation |
-| credit_manager.py | Verified credit snapshots and local reserve/commit/release |
+| cost_policy.py | Paid approval, budget reservations, pricing-estimate integration and idempotent usage reconciliation |
+| pricing_catalog.py | Source-attributed provider/model pricing metadata and date-aware unit cost estimates |\n| credit_manager.py | Verified credit snapshots and local reserve/commit/release |
 | quota_manager.py | UTC quota windows and request reservation lifecycle |
 | provider_job_manager.py | Bounded asynchronous job queue, ownership, polling, cancellation and recovery |
 | health_manager.py | Health history, active probes, eligibility and recovery |
