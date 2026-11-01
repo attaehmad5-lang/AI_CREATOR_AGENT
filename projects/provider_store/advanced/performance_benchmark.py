@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .catalog_integrity import validate_advanced_catalogs
+from ..streaming_response_manager import ProviderStreamSession
 
 
 def run_benchmark(
@@ -89,6 +90,73 @@ def run_benchmark(
         "advanced_provider_count": last_result["advanced_provider_count"],
         "category_count": last_result["category_count"],
         "scope_limit": "metadata validation only; no live network/provider generation",
+    }
+
+
+
+def run_stream_benchmark(
+    *,
+    iterations: int = 25,
+    chunks_per_stream: int = 64,
+    chunk_size_bytes: int = 1024,
+    workers: int = 1,
+    max_seconds: float = 15.0,
+) -> dict[str, Any]:
+    """Measure bounded in-memory stream assembly, not upstream provider throughput."""
+    for name, value, maximum in (
+        ("iterations", iterations, 10000),
+        ("chunks_per_stream", chunks_per_stream, 10000),
+        ("chunk_size_bytes", chunk_size_bytes, 1024 * 1024),
+        ("workers", workers, 32),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
+            raise ValueError(f"{name} must be an integer between 1 and {maximum}")
+    if (
+        isinstance(max_seconds, bool) or not isinstance(max_seconds, (int, float))
+        or not math.isfinite(max_seconds) or max_seconds <= 0
+    ):
+        raise ValueError("max_seconds must be positive")
+    total_per_stream = chunks_per_stream * chunk_size_bytes
+    if total_per_stream > 64 * 1024 * 1024:
+        raise ValueError("stream benchmark payload exceeds 64 MiB per session")
+    payload = b"x" * chunk_size_bytes
+
+    def run_one(index: int) -> dict[str, Any]:
+        stream = ProviderStreamSession(
+            f"benchmark-{index}", max_chunks=chunks_per_stream,
+            max_bytes=total_per_stream,
+        )
+        for sequence in range(chunks_per_stream):
+            accepted = stream.append(sequence=sequence, chunk=payload)
+            if accepted.get("accepted") is not True:
+                raise RuntimeError("stream benchmark chunk rejected")
+        result = stream.finish()
+        if result.get("finished") is not True or result.get("total_bytes") != total_per_stream:
+            raise RuntimeError("stream benchmark session did not complete")
+        return result
+
+    start = time.perf_counter()
+    if workers == 1:
+        results = [run_one(index) for index in range(iterations)]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(run_one, range(iterations)))
+    elapsed = time.perf_counter() - start
+    if elapsed > max_seconds:
+        raise TimeoutError(f"stream benchmark exceeded {max_seconds:g}s budget")
+    total_bytes = iterations * total_per_stream
+    return {
+        "benchmark": "bounded_stream_assembly",
+        "iterations": iterations,
+        "workers": workers,
+        "chunks_per_stream": chunks_per_stream,
+        "chunk_size_bytes": chunk_size_bytes,
+        "total_bytes": total_bytes,
+        "elapsed_seconds": round(elapsed, 6),
+        "streams_per_second": round(iterations / elapsed, 3) if elapsed else None,
+        "bytes_per_second": round(total_bytes / elapsed, 3) if elapsed else None,
+        "sha256_verified": all(len(item.get("sha256", "")) == 64 for item in results),
+        "scope_limit": "in-memory stream assembly only; no provider network or codec throughput",
     }
 
 
