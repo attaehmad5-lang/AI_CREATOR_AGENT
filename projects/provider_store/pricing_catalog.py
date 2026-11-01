@@ -6,11 +6,15 @@ quotes, or guarantees of provider billing.
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
+import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .safe_numbers import finite_number
 
 
@@ -22,13 +26,14 @@ _SECRET_MARKERS = ("api_key", "token", "password", "secret", "credential", "auth
 
 
 class PricingCatalog:
-    """Read-only pricing catalog with exact-match, date-aware estimation."""
+    """Source-attributed pricing catalog with atomic updates and date-aware estimation."""
 
     def __init__(self, path: str | Path) -> None:
         if not isinstance(path, (str, Path)) or not str(path).strip():
             raise ValueError("pricing catalog path is required")
         self.path = Path(path)
         self._prices: list[dict[str, Any]] = []
+        self._lock = threading.RLock()
         self.reload()
 
     @staticmethod
@@ -146,6 +151,68 @@ class PricingCatalog:
             return {"status": "PRICING_CATALOG_INVALID", "count": 0}
         self._prices = [dict(item) for item in prices]
         return {"status": "PRICING_CATALOG_READY" if prices else "PRICING_CATALOG_EMPTY", "count": len(prices)}
+
+    def upsert_price(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Atomically add or replace one fully validated price record."""
+        if not self._validate_record(record):
+            return {"status": "INVALID_PRICE_RECORD", "saved": False}
+        if self.path.is_symlink():
+            return {"status": "PRICING_CATALOG_SYMLINK_REJECTED", "saved": False}
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            lock_path = self.path.with_name(self.path.name + ".lock")
+            with self._lock, interprocess_file_lock(lock_path):
+                if self.path.is_symlink():
+                    return {"status": "PRICING_CATALOG_SYMLINK_REJECTED", "saved": False}
+                loaded = self.reload()
+                if loaded["status"] == "PRICING_CATALOG_INVALID":
+                    return {"status": "PRICING_CATALOG_INVALID", "saved": False}
+                candidate = [
+                    dict(item) for item in self._prices
+                    if item["price_id"] != record["price_id"]
+                ]
+                candidate.append(dict(record))
+                if len(candidate) > 100_000:
+                    return {"status": "PRICING_CATALOG_CAPACITY_EXCEEDED", "saved": False}
+                fd, temp_name = tempfile.mkstemp(
+                    prefix=f".{self.path.name}.", suffix=".tmp",
+                    dir=str(self.path.parent), text=True,
+                )
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                        fd = -1
+                        json.dump(
+                            {"version": "1.0", "prices": candidate},
+                            stream, indent=2, ensure_ascii=False, allow_nan=False,
+                        )
+                        stream.write("\\n")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    atomic_replace_with_retry(temp_name, self.path)
+                except Exception as exc:
+                    if fd >= 0:
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            pass
+                    try:
+                        os.unlink(temp_name)
+                    except FileNotFoundError:
+                        pass
+                    return {
+                        "status": "PRICING_CATALOG_WRITE_FAILED",
+                        "saved": False,
+                        "error_type": type(exc).__name__,
+                    }
+                self._prices = candidate
+                return {
+                    "status": "PRICE_SAVED",
+                    "saved": True,
+                    "price_id": record["price_id"],
+                    "count": len(candidate),
+                }
+        except (OSError, ValueError):
+            return {"status": "PRICING_CATALOG_WRITE_FAILED", "saved": False}
 
     def list_prices(
         self, *, provider_id: str | None = None, model_id: str | None = None,
