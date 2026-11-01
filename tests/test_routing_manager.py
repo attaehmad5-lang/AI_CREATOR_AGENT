@@ -403,6 +403,45 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             for decision in capability_denied["decisions"]
         ))
 
+    def test_project_policy_enforces_validated_data_residency_region(self):
+        catalog = self.root / "policy-region-providers.json"
+        state = self.root / "policy-region-connections.json"
+        catalog.write_text(json.dumps({
+            "providers": [
+                {"id": "eu-provider", "name": "EU Provider", "category": "image",
+                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                 "zero_cost_allowed": True, "priority": 1, "capabilities": ["image"],
+                 "supported_regions": ["eu-west"]},
+                {"id": "sa-provider", "name": "Saudi Provider", "category": "image",
+                 "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                 "zero_cost_allowed": True, "priority": 2, "capabilities": ["image"],
+                 "data_residency_regions": ["saudi-arabia"]},
+            ]
+        }), encoding="utf-8")
+        state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        connections = ConnectionManager(catalog, state)
+        for provider_id in ("eu-provider", "sa-provider"):
+            self.assertTrue(connections.verify_connectivity(
+                provider_id, lambda provider, **kwargs: {"ok": True}
+            )["verified"])
+
+        policies = ProviderProjectPolicyManager(self.root / "policy-region.json")
+        saved = policies.set_policy("film", {"required_region": "saudi-arabia"})
+        self.assertTrue(saved["saved"])
+        router = ProviderRoutingManager(connections, project_policy_manager=policies)
+        result = router.route(category="image", project_id="film")
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "sa-provider")
+        self.assertEqual(result["required_region"], "saudi-arabia")
+        self.assertIn(
+            {"provider": "eu-provider", "status": "DATA_RESIDENCY_REGION_NOT_SUPPORTED"},
+            result["prior_decisions"],
+        )
+
+        invalid = policies.set_policy("bad-region", {"required_region": "not a region"})
+        self.assertFalse(invalid["saved"])
+        self.assertEqual(invalid["status"], "INVALID_PROJECT_POLICY")
+
     def test_project_policy_can_require_health_evidence(self):
         policies = ProviderProjectPolicyManager(self.root / "project-policies.json")
         policies.set_policy("film", {"require_health_evidence": True})
