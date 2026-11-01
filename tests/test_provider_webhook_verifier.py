@@ -86,6 +86,49 @@ class ProviderWebhookVerifierTests(unittest.TestCase):
         )
         self.assertEqual(stale["status"], "WEBHOOK_TIMESTAMP_OUT_OF_RANGE")
 
+    def test_webhook_outcomes_emit_allowlisted_audit_events_without_payload_or_secret(self):
+        class Audit:
+            def __init__(self):
+                self.events = []
+            def record(self, event, **fields):
+                self.events.append((event, fields))
+                return {"saved": True}
+
+        audit = Audit()
+        verifier = ProviderWebhookVerifier(
+            self.path, clock=lambda: self.now, audit_log=audit
+        )
+        kwargs = dict(
+            provider_id="video", payload=self.payload,
+            signature=self.signature(), timestamp=self.timestamp,
+            event_id="audited-event", secret=self.secret,
+        )
+        self.assertEqual(verifier.verify(**kwargs)["status"], "WEBHOOK_VERIFIED")
+        self.assertEqual(verifier.verify(**kwargs)["status"], "WEBHOOK_REPLAY_REJECTED")
+        self.assertEqual(len(audit.events), 2)
+        self.assertEqual(audit.events[0][0], "provider.webhook.verify")
+        self.assertEqual(audit.events[0][1]["outcome"], "OK")
+        self.assertEqual(audit.events[1][1]["outcome"], "DENIED")
+        serialized = repr(audit.events)
+        self.assertNotIn(self.secret, serialized)
+        self.assertNotIn(self.payload.decode(), serialized)
+
+    def test_audit_failure_does_not_change_webhook_verification_outcome(self):
+        class BrokenAudit:
+            def record(self, *args, **kwargs):
+                raise OSError("audit store unavailable")
+
+        verifier = ProviderWebhookVerifier(
+            self.path, clock=lambda: self.now, audit_log=BrokenAudit()
+        )
+        result = verifier.verify(
+            provider_id="video", payload=self.payload,
+            signature=self.signature(), timestamp=self.timestamp,
+            event_id="audit-failure", secret=self.secret,
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["status"], "WEBHOOK_VERIFIED")
+
     def test_same_signed_event_is_accepted_once_across_processes(self):
         payload = b'{"event":"generation.completed","job_id":"shared-job"}'
         secret = "shared-process-webhook-secret"
