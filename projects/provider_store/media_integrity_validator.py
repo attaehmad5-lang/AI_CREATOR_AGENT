@@ -83,6 +83,7 @@ class MediaIntegrityValidator:
     def _validate_mp4(self, path: Path, size: int) -> dict[str, Any]:
         boxes: list[str] = []
         offset = 0
+        moov: tuple[int, int, int] | None = None
         with path.open("rb") as stream:
             while offset < size:
                 if len(boxes) >= 10000 or size - offset < 8:
@@ -108,10 +109,73 @@ class MediaIntegrityValidator:
                 if box_size < header_size or box_size > size - offset:
                     return {"valid": False, "status": "MP4_BOX_SIZE_INVALID", "size_bytes": size}
                 boxes.append(box_type)
+                if box_type == "moov":
+                    moov = (offset + header_size, box_size - header_size, header_size)
                 offset += box_size
-        if "ftyp" not in boxes or "mdat" not in boxes or not ({"moov", "moof"} & set(boxes)):
-            return {"valid": False, "status": "MP4_REQUIRED_BOX_MISSING", "boxes": boxes, "size_bytes": size}
-        return {"valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "MP4", "boxes": boxes, "size_bytes": size}
+            if "ftyp" not in boxes or "mdat" not in boxes or not ({"moov", "moof"} & set(boxes)):
+                return {"valid": False, "status": "MP4_REQUIRED_BOX_MISSING", "boxes": boxes, "size_bytes": size}
+            metadata: dict[str, Any] = {}
+            if moov is not None:
+                child_offset, child_bytes, _ = moov
+                child_end = child_offset + child_bytes
+                children = 0
+                while child_offset < child_end:
+                    children += 1
+                    if children > 10000 or child_end - child_offset < 8:
+                        return {"valid": False, "status": "MP4_MOVIE_BOX_STRUCTURE_INVALID", "size_bytes": size}
+                    stream.seek(child_offset)
+                    child_header = stream.read(8)
+                    if len(child_header) != 8:
+                        return {"valid": False, "status": "MP4_MOVIE_BOX_STRUCTURE_INVALID", "size_bytes": size}
+                    child_size = struct.unpack(">I", child_header[:4])[0]
+                    child_type = child_header[4:8]
+                    child_header_size = 8
+                    if child_size == 1:
+                        extended = stream.read(8)
+                        if len(extended) != 8:
+                            return {"valid": False, "status": "MP4_MOVIE_BOX_STRUCTURE_INVALID", "size_bytes": size}
+                        child_size = struct.unpack(">Q", extended)[0]
+                        child_header_size = 16
+                    elif child_size == 0:
+                        child_size = child_end - child_offset
+                    if child_size < child_header_size or child_size > child_end - child_offset:
+                        return {"valid": False, "status": "MP4_MOVIE_BOX_SIZE_INVALID", "size_bytes": size}
+                    if child_type == b"mvhd":
+                        payload_size = child_size - child_header_size
+                        if payload_size < 20:
+                            return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
+                        stream.seek(child_offset + child_header_size)
+                        full_header = stream.read(4)
+                        if len(full_header) != 4 or full_header[1:] != b"\\x00\\x00\\x00":
+                            return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
+                        version = full_header[0]
+                        if version == 0:
+                            values = stream.read(16)
+                            if len(values) != 16:
+                                return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
+                            timescale, duration_units = struct.unpack(">II", values[8:16])
+                        elif version == 1:
+                            if payload_size < 32:
+                                return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
+                            values = stream.read(24)
+                            if len(values) != 24:
+                                return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
+                            timescale = struct.unpack(">I", values[16:20])[0]
+                            duration_units = struct.unpack(">Q", values[20:28])[0]
+                        else:
+                            return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
+                        if timescale <= 0 or duration_units == (0xFFFFFFFF if version == 0 else 0xFFFFFFFFFFFFFFFF):
+                            return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
+                        duration = duration_units / timescale
+                        if duration <= 0 or duration > self.max_duration_seconds:
+                            return {"valid": False, "status": "MEDIA_DURATION_EXCEEDED", "duration_seconds": duration}
+                        metadata = {"duration_seconds": duration, "timescale": timescale}
+                        break
+                    child_offset += child_size
+        return {
+            "valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "MP4",
+            "boxes": boxes, "size_bytes": size, **metadata,
+        }
 
     def _validate_webm(self, path: Path, size: int) -> dict[str, Any]:
         with path.open("rb") as stream:
