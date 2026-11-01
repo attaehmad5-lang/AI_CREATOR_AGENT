@@ -71,6 +71,25 @@ class ProviderStreamSessionTests(unittest.TestCase):
         self.assertEqual(stream.append(sequence=0, chunk=object())["status"], "INVALID_CHUNK")
         self.assertEqual(stream.cancel(reason="")["status"], "INVALID_CANCEL_REASON")
 
+    def test_non_finite_timeout_clock_and_malformed_utf8_are_rejected(self):
+        for timeout in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(timeout=timeout):
+                with self.assertRaises(ValueError):
+                    ProviderStreamSession("request", timeout_seconds=timeout)
+        for clock_value in (float("nan"), float("inf"), True, "not-a-clock"):
+            with self.subTest(clock_value=clock_value):
+                with self.assertRaises(ValueError):
+                    ProviderStreamSession("request", clock=lambda value=clock_value: value)
+        stream = ProviderStreamSession("request-valid")
+        self.assertEqual(
+            stream.append(sequence=0, chunk="\\ud800")["status"],
+            "INVALID_CHUNK",
+        )
+        self.assertEqual(
+            ProviderStreamSession("bad\\nrequest").snapshot()["state"],
+            "OPEN",
+        )
+
     def test_concurrent_duplicate_chunk_delivery_is_thread_safe(self):
         stream = ProviderStreamSession("request-8")
         barrier = threading.Barrier(12)
