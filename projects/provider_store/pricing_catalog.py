@@ -22,6 +22,13 @@ _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _CURRENCY = re.compile(r"[A-Z]{3}\Z")
 _MODALITIES = {"image", "audio", "video", "text", "document"}
 _UNITS = {"request", "image", "second", "minute", "1k_tokens", "megapixel", "audio_minute", "video_second"}
+_MODALITY_UNITS = {
+    "image": {"request", "image", "megapixel"},
+    "audio": {"request", "second", "minute", "audio_minute"},
+    "video": {"request", "second", "minute", "video_second"},
+    "text": {"request", "1k_tokens"},
+    "document": {"request", "1k_tokens"},
+}
 _SECRET_MARKERS = ("api_key", "token", "password", "secret", "credential", "authorization", "bearer")
 
 
@@ -87,7 +94,9 @@ class PricingCatalog:
                 return False
         if (
             not isinstance(record["modality"], str) or record["modality"] not in _MODALITIES
-            or not isinstance(record["pricing_unit"], str) or record["pricing_unit"] not in _UNITS
+            or not isinstance(record["pricing_unit"], str)
+            or record["pricing_unit"] not in _UNITS
+            or record["pricing_unit"] not in _MODALITY_UNITS[record["modality"]]
         ):
             return False
         if finite_number(record["unit_price"], minimum=0) is None:
