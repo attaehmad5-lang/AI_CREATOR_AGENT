@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
@@ -463,6 +464,39 @@ class ProviderCostPolicyTests(unittest.TestCase):
             with self.subTest(budgets=budgets):
                 with self.assertRaises(ValueError):
                     ProviderCostPolicy(project_budgets=budgets)
+
+    def test_corrupt_ledger_rejects_request_present_as_reserved_and_finalized(self):
+        timestamp = datetime.now(timezone.utc).isoformat()
+        self.ledger.write_text(json.dumps({
+            "version": "1.0",
+            "projects": {
+                "documentary": {
+                    "actual_spend": 1.0,
+                    "requests": {
+                        "same-request": {
+                            "provider_id": "paid",
+                            "estimated_cost": 1.0,
+                            "actual_cost": 1.0,
+                            "recorded_at": timestamp,
+                            "charge_outcome": "incurred",
+                        }
+                    },
+                    "reservations": {
+                        "same-request": {
+                            "provider_id": "paid",
+                            "estimated_cost": 1.0,
+                            "reserved_at": timestamp,
+                        }
+                    },
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(
+            ValueError, "cannot be both reserved and finalized"
+        ):
+            ProviderCostPolicy(
+                self.ledger, project_budgets={"documentary": 5.0}
+            )
 
     def test_corrupt_usage_ledger_records_are_rejected(self):
         corrupt_ledgers = (
