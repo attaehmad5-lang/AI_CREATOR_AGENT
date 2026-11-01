@@ -495,7 +495,7 @@ Remaining work: OS-level interprocess lock behavior is used for shared JSON stat
 Feature 095: Crash Recovery
 Status: PARTIAL
 Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
-Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+Remaining work: Added atomic-replace crash injection for provider-job persistence: last committed state survives, uncommitted mutation is absent after reconstruction and temporary files are cleaned. Existing lease expiry/requeue/attempt-limit recovery is covered. CI #41319304356 passed full suite/build on Python 3.10/3.11/3.12. Cross-manager crash-at-every-write and CLI recovery remain.
 
 Feature 096: State Reconciliation
 Status: PARTIAL
@@ -579,7 +579,7 @@ Remaining work: Thread/process concurrency tests cover state updates, health his
 Feature 112: Failure Injection Testing
 Status: PARTIAL
 Implementation/evidence inspected: tests/test_provider_config_lifecycle.py; tests/test_catalog_interchange.py; .github/workflows/task-25-tests.yml
-Remaining work: Added injected pricing-catalog atomic-replace failure; original bytes remain unchanged and temporary files are removed. Existing config migration/catalog import rollback injection remains. CI #41315549531 passed on Python 3.10/3.11/3.12. Network/provider, crash-at-every-write and cross-manager failure matrices remain.
+Remaining work: Failure injection covers config migration, catalog import, pricing catalog and provider-job atomic replace rollback; CI #41319304356 passed on Python 3.10/3.11/3.12. Network/provider, crash-at-every-write and cross-manager failure matrices remain.
 
 Feature 113: Security Testing
 Status: PARTIAL
