@@ -1,10 +1,30 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from projects.provider_store.pricing_catalog import PricingCatalog
+
+
+
+
+def _upsert_price_in_process(args):
+    path, index = args
+    catalog = PricingCatalog(path)
+    record = {
+        "price_id": f"parallel-price-{index}",
+        "provider_id": "provider-a",
+        "model_id": f"image-model-{index}",
+        "modality": "image",
+        "pricing_unit": "image",
+        "unit_price": 0.01 + index / 1000,
+        "currency": "USD",
+        "source": "official-provider-pricing-page",
+        "verified_at": "2026-10-01T12:00:00+00:00",
+    }
+    return catalog.upsert_price(record)["status"]
 
 
 class PricingCatalogTests(unittest.TestCase):
@@ -214,6 +234,24 @@ class PricingCatalogTests(unittest.TestCase):
         result = PricingCatalog(link).upsert_price(dict(self.records[0], price_id="nope"))
         self.assertEqual(result["status"], "PRICING_CATALOG_SYMLINK_REJECTED")
         self.assertEqual(target.read_bytes(), self.path.read_bytes())
+
+    def test_concurrent_process_upserts_preserve_every_price_record(self):
+        path = self.root / "parallel-pricing.json"
+        PricingCatalog(path)
+        with ProcessPoolExecutor(max_workers=4) as pool:
+            statuses = list(pool.map(
+                _upsert_price_in_process,
+                [(str(path), index) for index in range(16)],
+            ))
+        self.assertEqual(statuses.count("PRICE_SAVED"), 16)
+        reloaded = PricingCatalog(path)
+        result = reloaded.list_prices(provider_id="provider-a")
+        self.assertEqual(result["status"], "PRICES_AVAILABLE")
+        self.assertEqual(result["count"], 16)
+        self.assertEqual(
+            {item["price_id"] for item in result["prices"]},
+            {f"parallel-price-{index}" for index in range(16)},
+        )
 
     def test_duplicate_json_keys_are_rejected(self):
         self.path.write_text(
