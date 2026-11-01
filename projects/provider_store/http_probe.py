@@ -5,11 +5,12 @@ an endpoint supports generation or that a provider has available credits.
 """
 from __future__ import annotations
 
+import http.client
+import ipaddress
 import os
 import re
 import socket
 import unicodedata
-import http.client
 from typing import Any
 from urllib.parse import urlsplit
 from urllib.error import HTTPError, URLError
@@ -52,7 +53,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         for record in records:
             address = str(record[4][0])
             try:
-                parsed = __import__("ipaddress").ip_address(address)
+                parsed = ipaddress.ip_address(address)
             except ValueError:
                 raise OSError("provider DNS returned an invalid address") from None
             if not parsed.is_global:
