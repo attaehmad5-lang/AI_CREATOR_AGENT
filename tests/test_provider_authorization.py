@@ -46,6 +46,33 @@ class ProviderAuthorizationManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProviderAuthorizationManager(self.path, clock=lambda: self.now)
 
+    def test_authorization_store_enforces_version_timestamp_and_principal_capacity(self):
+        limited = ProviderAuthorizationManager(
+            self.path, clock=lambda: self.now, max_principals=1
+        )
+        self.assertTrue(limited.assign_role("creator-1", "creator")["saved"])
+        full = limited.assign_role("viewer-1", "viewer")
+        self.assertEqual(full["status"], "PRINCIPAL_CAPACITY_REACHED")
+        self.assertTrue(limited.assign_role("creator-1", "operator")["saved"])
+
+        self.path.write_text(json.dumps({
+            "version": "2.0",
+            "principals": {},
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "authorization state schema"):
+            ProviderAuthorizationManager(self.path, clock=lambda: self.now)
+
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "principals": {
+                "creator-1": {
+                    "role": "creator", "enabled": True, "updated_at": "not-a-time"
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "authorization timestamp"):
+            ProviderAuthorizationManager(self.path, clock=lambda: self.now)
+
     def test_invalid_assignments_fail_closed(self):
         self.assertEqual(self.manager.assign_role("bad id", "admin")["status"], "INVALID_PRINCIPAL_ID")
         self.assertEqual(self.manager.assign_role("creator-1", "root")["status"], "INVALID_ROLE")
