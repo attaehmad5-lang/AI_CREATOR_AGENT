@@ -5,11 +5,9 @@ an endpoint supports generation or that a provider has available credits.
 """
 from __future__ import annotations
 
-import math
 import os
 import re
 import socket
-import ssl
 import unicodedata
 import http.client
 from typing import Any
