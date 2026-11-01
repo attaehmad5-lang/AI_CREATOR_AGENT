@@ -790,14 +790,26 @@ class ProviderRoutingManager:
                     release_cost = getattr(self.cost_policy, "release_reservation", None)
                     if callable(release_cost):
                         try:
-                            release_cost(
+                            released = release_cost(
                                 project_id=project_id,
                                 request_id=old_request_id,
                                 provider_id=failed_provider,
                                 charge_outcome="not_incurred",
                             )
+                            if (
+                                not isinstance(released, dict)
+                                or released.get("status") != "RESERVATION_RELEASED"
+                                or released.get("saved") is not True
+                            ):
+                                return {
+                                    "allowed": False,
+                                    "status": "COST_RESERVATION_RELEASE_FAILED",
+                                    "failed_provider": failed_provider,
+                                }
                         except Exception:
                             return {"allowed": False, "status": "COST_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
+                    else:
+                        return {"allowed": False, "status": "COST_RESERVATION_RELEASE_FAILED", "failed_provider": failed_provider}
         if self.credit_manager is not None and isinstance(old_request_id, str):
             raw_data = getattr(self.credit_manager, "data", {})
             reservations = raw_data.get("reservations", {}) if isinstance(raw_data, dict) else {}
@@ -821,7 +833,18 @@ class ProviderRoutingManager:
                 has_old_reservation = True
                 if release_reservations:
                     try:
-                        self.quota_manager.release(request_id=old_request_id, provider_id=failed_provider)
+                        released = self.quota_manager.release(
+                            request_id=old_request_id, provider_id=failed_provider
+                        )
+                        if (
+                            not isinstance(released, dict)
+                            or released.get("status") != "RELEASED"
+                        ):
+                            return {
+                                "allowed": False,
+                                "status": "QUOTA_RELEASE_FAILED",
+                                "failed_provider": failed_provider,
+                            }
                     except Exception:
                         return {"allowed": False, "status": "QUOTA_RELEASE_FAILED", "failed_provider": failed_provider}
         if has_old_reservation and not release_reservations and request_id == old_request_id:

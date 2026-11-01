@@ -842,6 +842,53 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
         self.assertEqual(quota.data["requests"]["job-1"]["provider_id"], "fallback")
 
+    def test_fallback_stops_when_cost_release_reports_failure(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 5.0})
+        router = ProviderRoutingManager(self.connections, cost_policy=policy)
+        router.route(
+            category="image", project_id="film", estimated_cost=1.0,
+            paid_approved_providers={"primary", "fallback"}, request_id="cost-release-job",
+        )
+        with patch.object(
+            policy, "release_reservation",
+            return_value={"status": "RESERVATION_RELEASE_FAILED", "saved": False},
+        ):
+            result = router.select_fallback(
+                failed_provider="primary", release_reservations=True,
+                category="image", project_id="film", estimated_cost=1.0,
+                paid_approved_providers={"primary", "fallback"},
+                request_id="cost-release-job",
+            )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "COST_RESERVATION_RELEASE_FAILED")
+        self.assertIn(
+            "cost-release-job",
+            policy.ledger["projects"]["film"]["reservations"],
+        )
+
+    def test_fallback_stops_when_quota_release_reports_failure(self):
+        quota = ProviderQuotaManager(
+            self.root / "quota-release-failure.json",
+            limits={"primary": {"hourly": 2}, "fallback": {"hourly": 2}},
+        )
+        router = ProviderRoutingManager(self.connections, quota_manager=quota)
+        router.route(
+            category="image", project_id="film", request_id="quota-release-job",
+        )
+        with patch.object(
+            quota, "release",
+            return_value={"status": "RELEASE_FAILED", "released": False},
+        ):
+            result = router.select_fallback(
+                failed_provider="primary", release_reservations=True,
+                category="image", project_id="film", request_id="quota-release-job",
+            )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "QUOTA_RELEASE_FAILED")
+        self.assertEqual(
+            quota.data["requests"]["quota-release-job"]["status"], "RESERVED"
+        )
+
     def test_fallback_preserves_possible_charges_and_requires_new_attempt_id(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
         quota = ProviderQuotaManager(
