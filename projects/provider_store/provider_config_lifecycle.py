@@ -210,7 +210,6 @@ class ProviderConfigLifecycleManager:
                             shutil.copyfileobj(source_stream, backup_stream)
                         backup_stream.flush()
                         os.fsync(backup_stream.fileno())
-                    shutil.copystat(config_path, backup_temp, follow_symlinks=False)
                     atomic_replace_with_retry(backup_temp, backup_path)
                     backup_temp = ""
                 finally:
