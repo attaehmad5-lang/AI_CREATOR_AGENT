@@ -219,12 +219,17 @@ class ProviderAdapterRegistry:
         max_chunks: int = 10_000,
         max_bytes: int = 64 * 1024 * 1024,
         timeout_seconds: float = 300.0,
+        chunk_validator: Callable[[str, int, bytes], bool] | None = None,
         **options: Any,
     ) -> dict[str, Any]:
-        """Dispatch an explicitly streaming adapter and safely assemble its chunks.
+        """Dispatch a streaming adapter with optional per-chunk validation.
 
-        The adapter must return an iterable of bytes or UTF-8 strings. Vendor
-        reconnect/resume semantics remain adapter-specific and are not inferred.
+        The adapter must return an iterable of bytes or UTF-8 strings. When
+        supplied, chunk_validator receives (modality, sequence, UTF-8 bytes)
+        before a chunk is committed to the session. A rejected/failed local
+        validator cancels buffered output; because the vendor request already
+        started, its billing outcome remains ambiguous. Vendor reconnect/resume
+        semantics remain adapter-specific and are not inferred.
         """
         if not isinstance(request_id, str) or not _IDENTIFIER.fullmatch(request_id):
             return {"status": "INVALID_REQUEST_ID", "executed": False}
@@ -277,6 +282,35 @@ class ProviderAdapterRegistry:
             iterator = iter(chunks)
             try:
                 for sequence, chunk in enumerate(iterator):
+                    if chunk_validator is not None:
+                        try:
+                            if isinstance(chunk, str):
+                                validation_payload = chunk.encode("utf-8", errors="strict")
+                            elif isinstance(chunk, bytes):
+                                validation_payload = chunk
+                            else:
+                                validation_payload = b""
+                            if not chunk_validator(modality, sequence, validation_payload):
+                                session.cancel(reason="STREAM_CHUNK_VALIDATION_FAILED")
+                                return {
+                                    "status": "STREAM_CHUNK_VALIDATION_FAILED",
+                                    "executed": False,
+                                    "started": True,
+                                    "outcome_known": False,
+                                    "reservations_retained": True,
+                                    "request_id": request_id,
+                                }
+                        except Exception as validation_error:
+                            session.cancel(reason="STREAM_CHUNK_VALIDATION_ERROR")
+                            return {
+                                "status": "STREAM_CHUNK_VALIDATION_ERROR",
+                                "executed": False,
+                                "started": True,
+                                "outcome_known": False,
+                                "reservations_retained": True,
+                                "request_id": request_id,
+                                "error_type": type(validation_error).__name__,
+                            }
                     accepted = session.append(sequence=sequence, chunk=chunk)
                     if accepted.get("accepted") is not True:
                         session.cancel(reason="STREAM_CHUNK_REJECTED")
