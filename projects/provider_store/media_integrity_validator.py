@@ -25,7 +25,7 @@ class MediaIntegrityValidator:
         if (
             not isinstance(path, (str, os.PathLike))
             or not str(path).strip()
-            or "\\x00" in str(path)
+            or chr(0) in str(path)
         ):
             return {"valid": False, "status": "INVALID_MEDIA_PATH"}
         try:
