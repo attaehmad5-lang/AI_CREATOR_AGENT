@@ -112,6 +112,49 @@ class ProviderQuotaManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.reserve(provider_id="unknown", request_id="job")["status"], "NO_QUOTA_POLICY")
         self.assertEqual(self.manager.reserve(provider_id="", request_id="job")["status"], "INVALID_REQUEST")
 
+    def test_released_attempt_history_is_bounded_without_dropping_audit_records(self):
+        self.manager.reserve(provider_id="image", request_id="reused-job")
+        self.manager.release(request_id="reused-job")
+        record = self.manager.data["requests"]["reused-job"]
+        entry = {
+            "provider_id": "image",
+            "status": "RELEASED",
+            "created_at": self.now[0].isoformat(),
+            "released_at": self.now[0].isoformat(),
+        }
+        record["attempt_history"] = [
+            dict(entry) for _ in range(self.manager.MAX_ATTEMPT_HISTORY)
+        ]
+        self.manager._save()
+
+        self.manager.limits["another-provider"] = {"hourly": 2}
+        result = self.manager.reserve(
+            provider_id="another-provider", request_id="reused-job"
+        )
+        self.assertEqual(result["status"], "REQUEST_ATTEMPT_HISTORY_FULL")
+        self.assertEqual(
+            len(self.manager.data["requests"]["reused-job"]["attempt_history"]),
+            self.manager.MAX_ATTEMPT_HISTORY,
+        )
+        self.assertEqual(
+            self.manager.data["requests"]["reused-job"]["provider_id"], "image"
+        )
+
+    def test_corrupt_released_attempt_history_is_rejected(self):
+        self.path.write_text(json.dumps({
+            "requests": {
+                "job": {
+                    "provider_id": "image",
+                    "status": "RELEASED",
+                    "created_at": self.now[0].isoformat(),
+                    "released_at": self.now[0].isoformat(),
+                    "attempt_history": "not-a-list",
+                }
+            }
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid quota attempt history"):
+            ProviderQuotaManager(self.path, limits=self.limits)
+
     def test_corrupt_state_is_rejected(self):
         self.path.write_text(json.dumps({"requests": {"job": {"provider_id": "image", "status": "BOGUS", "created_at": "bad"}}}), encoding="utf-8")
         with self.assertRaises(ValueError):

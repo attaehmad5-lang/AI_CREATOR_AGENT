@@ -15,6 +15,8 @@ from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 
 class ProviderQuotaManager:
+    MAX_ATTEMPT_HISTORY = 1000
+
     def __init__(
         self,
         state_path: str | os.PathLike[str],
@@ -69,6 +71,22 @@ class ProviderQuotaManager:
                 self._parse_timestamp(record.get("committed_at"))
             if record.get("status") == "RELEASED":
                 self._parse_timestamp(record.get("released_at"))
+            history = record.get("attempt_history", [])
+            if (
+                not isinstance(history, list)
+                or len(history) > self.MAX_ATTEMPT_HISTORY
+                or any(
+                    not isinstance(item, dict)
+                    or not isinstance(item.get("provider_id"), str)
+                    or not item.get("provider_id", "").strip()
+                    or item.get("status") != "RELEASED"
+                    for item in history
+                )
+            ):
+                raise ValueError("invalid quota attempt history")
+            for item in history:
+                self._parse_timestamp(item.get("created_at"))
+                self._parse_timestamp(item.get("released_at"))
         self.data = loaded
 
     @contextmanager
@@ -106,6 +124,10 @@ class ProviderQuotaManager:
                     # audit snapshot and permit a new provider attempt under the same
                     # logical request ID. Started/committed attempts cannot be reused.
                     history = existing.setdefault("attempt_history", [])
+                    if not isinstance(history, list):
+                        return {"status": "INVALID_ATTEMPT_HISTORY", "reserved": False}
+                    if len(history) >= self.MAX_ATTEMPT_HISTORY:
+                        return {"status": "REQUEST_ATTEMPT_HISTORY_FULL", "reserved": False}
                     history.append({
                         "provider_id": existing.get("provider_id"),
                         "status": "RELEASED",
