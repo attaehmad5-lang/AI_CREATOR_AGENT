@@ -185,7 +185,7 @@ class PricingCatalog:
                             {"version": "1.0", "prices": candidate},
                             stream, indent=2, ensure_ascii=False, allow_nan=False,
                         )
-                        stream.write("\\n")
+                        stream.write("\n")
                         stream.flush()
                         os.fsync(stream.fileno())
                     atomic_replace_with_retry(temp_name, self.path)
