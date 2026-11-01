@@ -50,7 +50,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
             raise OSError("provider hostname could not be resolved") from None
         addresses = []
         for record in records:
-            address = record[4][0]
+            address = str(record[4][0])
             try:
                 parsed = __import__("ipaddress").ip_address(address)
             except ValueError:
