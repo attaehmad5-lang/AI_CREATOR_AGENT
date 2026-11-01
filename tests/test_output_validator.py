@@ -1,5 +1,6 @@
 import json
 import stat
+import struct
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -25,6 +26,41 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertEqual(result["mime_type"], "image/png")
         self.assertEqual(len(result["sha256"]), 64)
+
+    def test_image_dimensions_are_reported_and_pixel_bombs_rejected(self):
+        path = self.root / "large.png"
+        path.write_bytes(
+            b"\\x89PNG\\r\\n\\x1a\\n"
+            + (13).to_bytes(4, "big") + b"IHDR"
+            + struct.pack(">II", 20, 20) + bytes((8, 2, 0, 0, 0))
+        )
+        limited = ProviderOutputValidator(max_size_bytes=64, max_image_pixels=100)
+        result = limited.validate_file(path, modality="image")
+        self.assertEqual(result["status"], "IMAGE_PIXEL_LIMIT_EXCEEDED")
+        self.assertEqual(result["width"], 20)
+        self.assertEqual(result["height"], 20)
+
+        normal = self.validator.validate_file(path, modality="image")
+        self.assertTrue(normal["valid"])
+        self.assertEqual(normal["pixel_count"], 400)
+
+    def test_image_with_missing_or_zero_dimensions_is_rejected(self):
+        path = self.root / "broken.png"
+        path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"short")
+        self.assertEqual(
+            self.validator.validate_file(path, modality="image")["status"],
+            "IMAGE_DIMENSIONS_INVALID",
+        )
+        zero = self.root / "zero.png"
+        zero.write_bytes(
+            b"\\x89PNG\\r\\n\\x1a\\n"
+            + (13).to_bytes(4, "big") + b"IHDR"
+            + struct.pack(">II", 0, 10) + bytes((8, 2, 0, 0, 0))
+        )
+        self.assertEqual(
+            self.validator.validate_file(zero, modality="image")["status"],
+            "IMAGE_DIMENSIONS_INVALID",
+        )
 
     def test_mismatched_signature_and_extension_are_rejected(self):
         wrong_signature = self.root / "cover.png"
