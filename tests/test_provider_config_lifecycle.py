@@ -60,6 +60,35 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.active_config, first)
         self.assertEqual(self.manager.generation, 3)
 
+    def test_file_migration_dry_run_previews_without_writing_or_backup(self):
+        path = self.root / "preview-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        original_bytes = json.dumps(original).encode("utf-8")
+        path.write_bytes(original_bytes)
+        result = self.manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2},
+            dry_run=True,
+        )
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_PREVIEW")
+        self.assertTrue(result["preview"])
+        self.assertFalse(result["migrated"])
+        self.assertEqual(result["config"]["schema_version"], "2")
+        self.assertEqual(path.read_bytes(), original_bytes)
+        self.assertFalse(Path(str(path) + ".bak").exists())
+
+    def test_file_migration_rejects_non_boolean_dry_run_flag(self):
+        path = self.root / "invalid-dry-run.json"
+        path.write_text(json.dumps({
+            "schema_version": "1", "providers": {},
+        }), encoding="utf-8")
+        result = self.manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2},
+            dry_run="yes",
+        )
+        self.assertEqual(result["status"], "INVALID_DRY_RUN_FLAG")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["schema_version"], "1")
+
     def test_file_migration_creates_backup_and_writes_atomically(self):
         path = self.root / "provider-config.json"
         original = {"schema_version": "1", "providers": {"image": {}}}
