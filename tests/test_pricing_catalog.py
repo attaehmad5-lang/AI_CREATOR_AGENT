@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from projects.provider_store.pricing_catalog import PricingCatalog
@@ -145,6 +146,40 @@ class PricingCatalogTests(unittest.TestCase):
             as_of="2026-06-01",
         )
         self.assertEqual(result["estimated_cost"], 0.1)
+
+    def test_concurrent_upserts_from_separate_instances_preserve_all_records(self):
+        first = PricingCatalog(self.path)
+        second = PricingCatalog(self.path)
+
+        def save(index):
+            catalog = first if index % 2 == 0 else second
+            record = dict(
+                self.records[0],
+                price_id=f"concurrent-price-{index:03d}",
+                model_id=f"image-model-{index:03d}",
+            )
+            return catalog.upsert_price(record)
+
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(save, range(40)))
+        self.assertTrue(all(result["status"] == "PRICE_SAVED" for result in results))
+        reloaded = PricingCatalog(self.path)
+        self.assertEqual(reloaded.list_prices()["count"], 42)
+        self.assertEqual(
+            len({item["price_id"] for item in reloaded.list_prices()["prices"]}),
+            42,
+        )
+
+    def test_upsert_does_not_overwrite_malformed_existing_catalog(self):
+        self.path.write_text(
+            '{"version":"1.0","prices":[{"price_id":"duplicate","price_id":"duplicate"}]}',
+            encoding="utf-8",
+        )
+        original = self.path.read_bytes()
+        result = PricingCatalog(self.path).upsert_price(self.records[0])
+        self.assertEqual(result["status"], "PRICING_CATALOG_INVALID")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.path.read_bytes(), original)
 
     def test_upsert_rejects_invalid_record_and_preserves_existing_catalog(self):
         original = self.path.read_bytes()
