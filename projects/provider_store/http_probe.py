@@ -66,7 +66,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
             raw = None
             try:
                 raw = socket.create_connection(
-                    (address, self.port), self.timeout, getattr(self, "source_address", None)
+                    (address, int(self.port)), self.timeout, getattr(self, "source_address", None)
                 )
                 self.sock = getattr(self, "_context").wrap_socket(
                     raw, server_hostname=str(self.host)
