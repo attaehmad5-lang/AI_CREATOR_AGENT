@@ -1,5 +1,6 @@
 """Audio/video container structure validation tests."""
 import tempfile
+from unittest.mock import patch
 import unittest
 import wave
 from pathlib import Path
@@ -54,6 +55,39 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         malformed = self.root / "bad.mp4"
         malformed.write_bytes((1000).to_bytes(4, "big") + b"ftyp" + b"tiny")
         self.assertEqual(self.validator.validate(malformed, modality="video")["status"], "MP4_BOX_SIZE_INVALID")
+
+    def test_mp4_validation_skips_media_payload_without_loading_whole_file(self):
+        path = self.root / "large.mp4"
+        boxes = (
+            (b"ftyp", b"isom0000"),
+            (b"moov", b"metadata"),
+            (b"mdat", b"x" * 1_000_000),
+        )
+        path.write_bytes(
+            b"".join(
+                (8 + len(body)).to_bytes(4, "big") + kind + body
+                for kind, body in boxes
+            )
+        )
+        validator = MediaIntegrityValidator(max_bytes=2_000_000)
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read")):
+            result = validator.validate(path, modality="video")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["container"], "MP4")
+
+    def test_ogg_pages_are_checked_incrementally(self):
+        path = self.root / "sample.ogg"
+        # One empty Ogg page: 27-byte fixed header, zero lacing entries and body.
+        page = bytearray(27)
+        page[:4] = b"OggS"
+        page[4] = 0
+        page[26] = 0
+        path.write_bytes(bytes(page))
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file read")):
+            result = self.validator.validate(path, modality="audio")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["container"], "OGG")
+        self.assertEqual(result["page_count"], 1)
 
     def test_webm_requires_ebml_header_and_segment(self):
         path = self.root / "sample.webm"
