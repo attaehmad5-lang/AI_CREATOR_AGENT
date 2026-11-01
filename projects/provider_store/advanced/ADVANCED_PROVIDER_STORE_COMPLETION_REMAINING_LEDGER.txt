@@ -754,7 +754,7 @@ Remaining work: Secret-free readiness diagnostics and normalized error taxonomy 
 Feature 149: Recovery Diagnostics
 Status: PARTIAL
 Implementation/evidence inspected: provider_store modules; test_provider_store_compat.py; regression tests
-Remaining work: Compatibility, deprecation, diagnostics and recovery primitives exist; full component-specific acceptance remains.
+Remaining work: Read-only cross-manager diagnostics now identify provider/project ownership mismatches and terminal jobs with active reservations for manual billing review; CI #41318473533 passed Python 3.10/3.11/3.12. Broader recovery diagnostics and cross-device correlation remain.
 
 Feature 150: Production Readiness Verification
 Status: NOT STARTED
