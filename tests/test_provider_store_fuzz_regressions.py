@@ -82,6 +82,22 @@ class ProviderStoreFuzzRegressionTests(unittest.TestCase):
                 )
                 self.assertFalse(result["valid"])
 
+    def test_endpoint_validator_fuzzes_unicode_and_allowlist_canonicalization(self):
+        rng = random.Random(76001)
+        alphabet = "例えテストbücherñáé中文العربية.-_0123456789"
+        for index in range(500):
+            label = "".join(
+                rng.choice(alphabet) for _ in range(rng.randrange(1, 24))
+            )
+            candidate = f"https://{label}.example/health"
+            result = ConnectionManager.validate_endpoint(
+                candidate, allowed_hosts={"xn--bcher-kva.example"}
+            )
+            self.assertIsInstance(result, dict, msg=f"case={index}")
+            self.assertIsInstance(result.get("valid"), bool, msg=f"case={index}")
+            if result["valid"]:
+                self.assertTrue(result["hostname"].isascii(), msg=f"case={index}")
+
     def test_traceparent_parser_handles_seeded_arbitrary_text_without_exceptions(self):
         rng = random.Random(250115)
         alphabet = string.ascii_letters + string.digits + "-_:. /\t\n"
