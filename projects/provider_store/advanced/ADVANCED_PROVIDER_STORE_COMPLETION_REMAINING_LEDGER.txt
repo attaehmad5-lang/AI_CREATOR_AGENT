@@ -554,7 +554,7 @@ Remaining work: HMAC-SHA256 signatures, timestamp windows, replay rejection, pay
 Feature 107: Integration Contract Testing
 Status: PARTIAL
 Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
-Remaining work: Unit/regression/security/concurrency tests exist; not all integration, failure-injection, fuzzing and performance dimensions are covered.
+Remaining work: Added integration contracts for verified user-controlled provider unlock state and pricing estimate -> project budget/paid approval; existing routing/provider-service integration coverage remains. CI #41315549531 passed on Python 3.10/3.11/3.12. Vendor-specific live adapters and all-modality end-to-end coverage remain.
 
 Feature 108: Unit Testing
 Status: COMPLETED
@@ -579,12 +579,12 @@ Remaining work: Thread/process concurrency tests cover state updates, health his
 Feature 112: Failure Injection Testing
 Status: PARTIAL
 Implementation/evidence inspected: tests/test_provider_config_lifecycle.py; tests/test_catalog_interchange.py; .github/workflows/task-25-tests.yml
-Remaining work: Injected atomic-replace failures verify config migration preserves original bytes and cleans temporary files; catalog import failure verifies rollback/no partial target. Network/provider, crash-at-every-write and cross-manager failure matrices remain.
+Remaining work: Added injected pricing-catalog atomic-replace failure; original bytes remain unchanged and temporary files are removed. Existing config migration/catalog import rollback injection remains. CI #41315549531 passed on Python 3.10/3.11/3.12. Network/provider, crash-at-every-write and cross-manager failure matrices remain.
 
 Feature 113: Security Testing
 Status: PARTIAL
 Implementation/evidence inspected: tests/; .github/workflows/task-25-tests.yml
-Remaining work: Unit/regression/security/concurrency tests exist; not all integration, failure-injection, fuzzing and performance dimensions are covered.
+Remaining work: Added security regressions for secret-bearing records, duplicate JSON keys, symlinked pricing files, malformed fuzz inputs, Unicode control credentials and raster pixel bombs. CI #41315549531 passed on Python 3.10/3.11/3.12. Full external security review and DNS/network adversarial testing remain.
 
 Feature 114: Fuzz Testing
 Status: PARTIAL
