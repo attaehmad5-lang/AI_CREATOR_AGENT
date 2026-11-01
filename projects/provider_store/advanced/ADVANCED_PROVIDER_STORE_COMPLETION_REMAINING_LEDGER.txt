@@ -260,7 +260,7 @@ Remaining work: Duplicate submissions are idempotent and conflicting reuse is re
 Feature 048: Idempotency Management
 Status: PARTIAL
 Implementation/evidence inspected: provider_job_manager.py; cost_policy.py; quota_manager.py; tests/
-Remaining work: Cross-process same-key races prove exactly one reservation is created; duplicates remain idempotent and provider-mismatched reuse fails with REQUEST_ID_CONFLICT. CI #41316076007 passed on Python 3.10/3.11/3.12. Multi-host distributed consensus remains out of scope.
+Remaining work: Queue submissions are serialized by interprocess transactions; a 48-way, six-process race accepts exactly 12 jobs at capacity 12 and returns QUEUE_FULL for the other 36. Cross-process quota idempotency separately enforces one provider-bound reservation per key. CI #41316471607 passed on Python 3.10/3.11/3.12. Distributed multi-host consensus and remote ledger guarantees remain out of scope.
 
 Feature 049: Async Job Management
 Status: COMPLETED
@@ -598,7 +598,7 @@ Remaining work: CI runs a bounded 25-iteration catalog-integrity benchmark with 
 Feature 116: Load Testing
 Status: PARTIAL
 Implementation/evidence inspected: advanced/performance_benchmark.py; tests/test_provider_store_performance_benchmark.py; .github/workflows/task-25-tests.yml
-Remaining work: CI exercises 25 concurrent offline catalog-integrity validations with four workers and a 15-second budget. Provider API throughput, queue saturation, streaming and live-generation load remain untested.
+Remaining work: Added a 48-way cross-process queue saturation test with six worker processes, exact capacity/backpressure assertions and persisted-state reload verification, complementing 120-thread queue stress and 25-way catalog validation. CI #41316471607 passed on Python 3.10/3.11/3.12. Provider API throughput, streaming and live generation load remain untested.
 
 Feature 117: Cross-Platform Testing
 Status: COMPLETED
