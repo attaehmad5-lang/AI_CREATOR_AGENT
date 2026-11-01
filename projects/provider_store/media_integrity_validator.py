@@ -116,7 +116,7 @@ class MediaIntegrityValidator:
     def _validate_webm(self, path: Path, size: int) -> dict[str, Any]:
         with path.open("rb") as stream:
             header = stream.read(min(size, 65536))
-        if len(header) < 12 or not header.startswith(b"\\x1a\\x45\\xdf\\xa3") or b"\\x18\\x53\\x80\\x67" not in header[4:]:
+        if len(header) < 12 or not header.startswith(b"\x1a\x45\xdf\xa3") or b"\x18\x53\x80\x67" not in header[4:]:
             return {"valid": False, "status": "WEBM_SEGMENT_MISSING", "size_bytes": size}
         return {"valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "WEBM", "size_bytes": size}
 
