@@ -1,0 +1,411 @@
+From 3a1640a147cda91b56cf8d7dfb55656e6271f26a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 1 Nov 2026 20:03:26 +0000
+Subject: [PATCH 2/3] Task 25: add modality binding tests and close
+ #81/#85/#130/#136 test gaps
+
+---
+ tests/test_connection_manager.py            |  98 ++++++++++++-
+ tests/test_generation_provider_interface.py |  80 ++++++++++
+ tests/test_provider_quality_policy.py       |  30 +++++
+ tests/test_provider_service.py              | 129 ++++++++++++++++++++
+ tests/test_routing_manager.py               |  15 +++
+ 5 files changed, 351 insertions(+), 1 deletion(-)
+
+diff --git a/tests/test_connection_manager.py b/tests/test_connection_manager.py
+index 4a6f305..ccef180 100644
+--- a/tests/test_connection_manager.py
++++ b/tests/test_connection_manager.py
+@@ -1,3 +1,5 @@
+ import json
++import shutil
+ import tempfile
++from types import SimpleNamespace
+ import threading
+@@ -7,3 +9,9 @@ from pathlib import Path
+ 
+-from projects.provider_store.connection_manager import ConnectionManager, simulate_provider_policy
++from projects.provider_store.connection_manager import (
++    MODALITY_CONTRACTS,
++    MODALITY_OUTPUT_KINDS,
++    ConnectionManager,
++    simulate_provider_policy,
++)
++from projects.provider_store.output_validator import ProviderOutputValidator
+ 
+@@ -1452,2 +1460,90 @@ class ProviderPolicySimulationTests(unittest.TestCase):
+ 
++class ModalityBindingTests(unittest.TestCase):
++    def setUp(self):
++        self.temp_dir = tempfile.TemporaryDirectory()
++        self.root = Path(self.temp_dir.name)
++        self.catalog_path = self.root / "provider_catalog.json"
++        self.state_path = self.root / "connection_state.json"
++        providers = [
++            {"id": "img", "auth_type": "NONE", "category": "image", "enabled": True},
++            {"id": "edit", "auth_type": "NONE", "category": "Image-Editing", "enabled": True},
++            {"id": "vid", "auth_type": "NONE", "category": "video", "enabled": True},
++            {"id": "mus", "auth_type": "NONE", "category": "music", "enabled": True},
++            {"id": "dub", "auth_type": "NONE", "category": "dubbing", "enabled": True},
++            {"id": "holo", "auth_type": "NONE", "category": "hologram", "enabled": True},
++        ]
++        self.catalog_path.write_text(json.dumps({"providers": providers}), encoding="utf-8")
++        self.state_path.write_text(
++            json.dumps({"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}),
++            encoding="utf-8",
++        )
++        self.manager = ConnectionManager(self.catalog_path, self.state_path)
++
++    def tearDown(self):
++        self.temp_dir.cleanup()
++
++    def test_binding_reports_contract_and_output_modalities(self):
++        expected = {
++            "img": (["image"], [["generate_image"]]),
++            "vid": (["video"], [["generate_video"]]),
++            "mus": (["audio"], [["generate_music"]]),
++            "dub": (["audio", "video"], [["dub"]]),
++        }
++        for provider_id, (kinds, methods) in expected.items():
++            with self.subTest(provider=provider_id):
++                binding = self.manager.get_modality_binding(provider_id)
++                self.assertEqual(binding["status"], "VALID")
++                self.assertTrue(binding["valid"])
++                self.assertEqual(binding["output_modalities"], kinds)
++                self.assertEqual(binding["contract_methods"], methods)
++                self.assertEqual(binding["runtime_contract"], "NOT_LOADED")
++
++    def test_binding_normalizes_category_spelling(self):
++        binding = self.manager.get_modality_binding("edit")
++        self.assertEqual(binding["category"], "image_editing")
++        self.assertEqual(binding["output_modalities"], ["image"])
++
++    def test_binding_rejects_unknown_provider_and_unsupported_category(self):
++        self.assertEqual(self.manager.get_modality_binding("missing")["status"], "NOT_FOUND")
++        unsupported = self.manager.get_modality_binding("holo")
++        self.assertEqual(unsupported["status"], "UNSUPPORTED_MODALITY")
++        self.assertFalse(unsupported["valid"])
++        self.assertNotIn("output_modalities", unsupported)
++
++    def test_loaded_instance_must_still_satisfy_its_contract(self):
++        instance = SimpleNamespace(generate_image=lambda *args, **kwargs: None)
++        self.assertEqual(self.manager.load_provider("img", lambda metadata: instance)["status"], "LOADED")
++        loaded = self.manager.get_modality_binding("img")
++        self.assertTrue(loaded["valid"])
++        self.assertEqual(loaded["runtime_contract"], "VALID")
++        instance.generate_image = None  # runtime regression after a successful load
++        broken = self.manager.get_modality_binding("img")
++        self.assertEqual(broken["status"], "CONTRACT_VIOLATION")
++        self.assertFalse(broken["valid"])
++        self.assertNotIn("output_modalities", broken)
++
++    def test_contract_and_output_tables_are_consistent(self):
++        self.assertEqual(set(MODALITY_CONTRACTS), set(MODALITY_OUTPUT_KINDS))
++        validator_modalities = set(ProviderOutputValidator.EXTENSIONS)
++        for category, kinds in MODALITY_OUTPUT_KINDS.items():
++            with self.subTest(category=category):
++                self.assertTrue(kinds)
++                self.assertLessEqual(kinds, validator_modalities)
++                self.assertTrue(MODALITY_CONTRACTS[category])
++                for alternatives in MODALITY_CONTRACTS[category]:
++                    self.assertTrue(alternatives)
++                    self.assertTrue(all(isinstance(name, str) and name for name in alternatives))
++
++    def test_every_category_in_the_shipped_catalog_has_a_binding(self):
++        shipped = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
++        copy = self.root / "shipped_catalog.json"
++        shutil.copyfile(shipped, copy)
++        manager = ConnectionManager(copy, self.state_path)
++        providers = manager.list_providers()
++        self.assertGreater(len(providers), 0)
++        for provider in providers:
++            with self.subTest(provider=provider.get("id")):
++                self.assertEqual(manager.get_modality_binding(provider["id"])["status"], "VALID")
++
++
+ if __name__ == "__main__":
+diff --git a/tests/test_generation_provider_interface.py b/tests/test_generation_provider_interface.py
+index b25f397..c50a6fa 100644
+--- a/tests/test_generation_provider_interface.py
++++ b/tests/test_generation_provider_interface.py
+@@ -3,2 +3,5 @@ from __future__ import annotations
+ 
++import ast
++import json
++from pathlib import Path
+ from types import SimpleNamespace
+@@ -81,2 +84,79 @@ class ProviderInterfaceVersionTests(unittest.TestCase):
+ 
++class RaisingVersionProvider:
++    @property
++    def PROVIDER_INTERFACE_VERSION(self):
++        raise RuntimeError("private provider details")
++
++    def generate_image(self, prompt, output_path):
++        return None
++
++
++class FloatVersionProvider:
++    PROVIDER_INTERFACE_VERSION = 1.0
++
++    def generate_image(self, prompt, output_path):
++        return None
++
++
++class MissingMethodProvider:
++    PROVIDER_INTERFACE_VERSION = "1.0"
++
++
++class ProviderInterfaceEdgeCaseTests(unittest.TestCase):
++    def test_unreadable_non_string_and_method_less_adapters_fail_closed(self):
++        for provider_class in (RaisingVersionProvider, FloatVersionProvider, MissingMethodProvider):
++            with self.subTest(provider_class=provider_class.__name__):
++                manager = ProviderManager()
++                with patch(
++                    "projects.generation.providers.provider_manager.importlib.import_module",
++                    return_value=SimpleNamespace(CandidateProvider=provider_class),
++                ):
++                    with self.assertRaises(ValueError) as caught:
++                        manager.register(
++                            "Candidate", "projects.generation.providers.candidate", "CandidateProvider"
++                        )
++                self.assertNotIn("private provider details", repr(caught.exception.__cause__))
++                self.assertEqual(manager.providers, {})
++
++
++class ShippedAdapterContractTests(unittest.TestCase):
++    """Dependency-free static contract check of the adapters actually shipped in the repo.
++
++    The real Hugging Face adapter needs the optional ``huggingface_hub`` package, which CI
++    does not install, so these adapters are inspected with ``ast`` instead of imported.
++    """
++
++    def test_every_shipped_image_adapter_meets_the_current_contract(self):
++        root = Path(__file__).resolve().parents[1]
++        registry = json.loads(
++            (root / "projects" / "generation" / "provider_registry.json").read_text(encoding="utf-8")
++        )
++        modules = registry["image"]["provider_modules"]
++        self.assertTrue(modules)
++        for name, module_path in modules.items():
++            with self.subTest(provider=name):
++                # The loader's own validation must accept the registry entry.
++                ProviderManager._module_from_path(module_path)
++                tree = ast.parse((root / module_path).read_text(encoding="utf-8"))
++                expected_class = name.replace(" ", "") + "Provider"
++                classes = [
++                    node for node in tree.body
++                    if isinstance(node, ast.ClassDef) and node.name == expected_class
++                ]
++                self.assertEqual(len(classes), 1)
++                methods = {
++                    node.name for node in classes[0].body
++                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
++                }
++                self.assertIn("generate_image", methods)
++                declared = [
++                    ast.literal_eval(node.value)
++                    for node in classes[0].body
++                    if isinstance(node, ast.Assign)
++                    and any(getattr(target, "id", None) == "PROVIDER_INTERFACE_VERSION" for target in node.targets)
++                ]
++                # Undeclared means legacy 1.0; a declared value must be the supported one.
++                self.assertTrue(all(version == "1.0" for version in declared))
++
++
+ if __name__ == "__main__":
+diff --git a/tests/test_provider_quality_policy.py b/tests/test_provider_quality_policy.py
+index 4b9dfac..740a30a 100644
+--- a/tests/test_provider_quality_policy.py
++++ b/tests/test_provider_quality_policy.py
+@@ -20,2 +20,32 @@ class ProviderOutputQualityPolicyTests(unittest.TestCase):
+ 
++    def test_threshold_precedence_is_modality_then_category_then_default(self):
++        policy = ProviderOutputQualityPolicy(
++            lambda path, **kwargs: {"score": 0.6},
++            thresholds={"documentary:text": 0.9, "documentary": 0.5},
++            default_threshold=0.7,
++        )
++        specific = policy.evaluate("asset:1", modality="text", category="documentary")
++        self.assertEqual(specific["threshold"], 0.9)
++        self.assertFalse(specific["allowed"])
++        category_level = policy.evaluate("asset:2", modality="audio", category="documentary")
++        self.assertEqual(category_level["threshold"], 0.5)
++        self.assertTrue(category_level["allowed"])
++        global_default = policy.evaluate("asset:3", modality="image", category="other")
++        self.assertEqual(global_default["threshold"], 0.7)
++        self.assertFalse(global_default["allowed"])
++
++    def test_score_equal_to_threshold_is_accepted_and_booleans_are_rejected(self):
++        exact = ProviderOutputQualityPolicy(
++            lambda path, **kwargs: 0.8, default_threshold=0.8
++        ).evaluate("asset:1", modality="image", category="image")
++        self.assertTrue(exact["allowed"])
++        self.assertEqual(exact["status"], "QUALITY_ACCEPTED")
++        for value in (True, False):
++            with self.subTest(value=value):
++                result = ProviderOutputQualityPolicy(
++                    lambda path, **kwargs: value, default_threshold=0.0
++                ).evaluate("asset:1", modality="image", category="image")
++                self.assertEqual(result["status"], "INVALID_QUALITY_SCORE")
++                self.assertFalse(result["allowed"])
++
+     def test_invalid_scores_and_scorer_errors_fail_closed(self):
+diff --git a/tests/test_provider_service.py b/tests/test_provider_service.py
+index 5d921d3..5193363 100644
+--- a/tests/test_provider_service.py
++++ b/tests/test_provider_service.py
+@@ -99,2 +99,131 @@ class ProviderServiceTests(unittest.TestCase):
+ 
++    def _modality_service(self, **kwargs):
++        class RoutingStub:
++            def route(self, **route_kwargs):
++                return {"allowed": True, "provider": "image", "billing_mode": "FREE"}
++
++        return ProviderService(self.connections, routing_manager=RoutingStub(), **kwargs)
++
++    def test_modality_binding_blocks_mismatched_output_before_adapter(self):
++        calls = []
++        service = self._modality_service()
++        result = service.execute_routed_request(
++            category="image", project_id="film", request_id="modality-mismatch",
++            estimated_cost=0.0, modality="video",
++            adapter=lambda **kwargs: calls.append(kwargs),
++            require_modality_binding=True,
++        )
++        self.assertEqual(result["status"], "MODALITY_MISMATCH")
++        self.assertFalse(result["executed"])
++        self.assertEqual(calls, [])
++        self.assertEqual(result["modality_binding"]["output_modalities"], ["image"])
++        self.assertEqual(result["modality_binding"]["requested_modality"], "video")
++
++    def test_modality_binding_allows_matching_output_and_normalizes_case(self):
++        calls = []
++        service = self._modality_service()
++        result = service.execute_routed_request(
++            category="image", project_id="film", request_id="modality-match",
++            estimated_cost=0.0, modality=" IMAGE ",
++            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
++            require_modality_binding=True,
++        )
++        self.assertEqual(len(calls), 1)
++        self.assertNotIn(result["status"], {"MODALITY_MISMATCH", "PROVIDER_MODALITY_REJECTED"})
++
++    def test_modality_binding_is_opt_in_and_preserves_legacy_behavior(self):
++        calls = []
++        service = self._modality_service()
++        result = service.execute_routed_request(
++            category="image", project_id="film", request_id="modality-legacy",
++            estimated_cost=0.0, modality="video",
++            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
++        )
++        self.assertEqual(len(calls), 1)
++        self.assertNotEqual(result["status"], "MODALITY_MISMATCH")
++
++    def test_modality_binding_fails_closed_for_bad_policy_and_bad_modality(self):
++        calls = []
++        service = self._modality_service()
++        for index, bad_policy in enumerate(("yes", 1, None)):
++            with self.subTest(policy=bad_policy):
++                result = service.execute_routed_request(
++                    category="image", project_id="film", request_id=f"modality-policy-{index}",
++                    estimated_cost=0.0, modality="image",
++                    adapter=lambda **kwargs: calls.append(kwargs),
++                    require_modality_binding=bad_policy,
++                )
++                self.assertEqual(result["status"], "INVALID_MODALITY_BINDING_POLICY")
++        for index, bad_modality in enumerate((None, 7, "", "hologram")):
++            with self.subTest(modality=bad_modality):
++                result = service.execute_routed_request(
++                    category="image", project_id="film", request_id=f"modality-bad-{index}",
++                    estimated_cost=0.0, modality=bad_modality,
++                    adapter=lambda **kwargs: calls.append(kwargs),
++                    require_modality_binding=True,
++                )
++                self.assertEqual(result["status"], "MODALITY_MISMATCH")
++        self.assertEqual(calls, [])
++
++    def test_modality_binding_fails_closed_when_connection_manager_cannot_report(self):
++        class RoutingStub:
++            def route(self, **kwargs):
++                return {"allowed": True, "provider": "image", "billing_mode": "FREE"}
++
++        class NoBindingConnections:
++            verify_connectivity = staticmethod(lambda *a, **k: {})
++
++        class RaisingConnections(NoBindingConnections):
++            @staticmethod
++            def get_modality_binding(provider_id):
++                raise RuntimeError("secret internal detail")
++
++        class MalformedConnections(NoBindingConnections):
++            @staticmethod
++            def get_modality_binding(provider_id):
++                return ["not", "a", "dict"]
++
++        expectations = (
++            (NoBindingConnections, "MODALITY_BINDING_UNAVAILABLE"),
++            (RaisingConnections, "MODALITY_BINDING_CHECK_FAILED"),
++            (MalformedConnections, "INVALID_MODALITY_BINDING_RESPONSE"),
++        )
++        for index, (connections_class, expected_status) in enumerate(expectations):
++            with self.subTest(connections=connections_class.__name__):
++                calls = []
++                service = ProviderService(connections_class(), routing_manager=RoutingStub())
++                service.release_unstarted_request = lambda **kwargs: {"released": True}
++                result = service.execute_routed_request(
++                    category="image", project_id="film", request_id=f"modality-cm-{index}",
++                    estimated_cost=0.0, modality="image",
++                    adapter=lambda **kwargs: calls.append(kwargs),
++                    require_modality_binding=True,
++                )
++                self.assertEqual(result["status"], "PROVIDER_MODALITY_REJECTED")
++                self.assertEqual(result["modality_binding"]["status"], expected_status)
++                self.assertNotIn("secret internal detail", repr(result))
++                self.assertEqual(calls, [])
++
++    def test_modality_binding_releases_reservations_on_rejection(self):
++        service = ProviderService(
++            self.connections, routing_manager=self._modality_service().routing_manager,
++            cost_policy=self.cost, quota_manager=self.quota,
++        )
++        released = []
++        original_release = service.release_unstarted_request
++
++        def tracking_release(**kwargs):
++            released.append(kwargs["request_id"])
++            return original_release(**kwargs)
++
++        service.release_unstarted_request = tracking_release
++        result = service.execute_routed_request(
++            category="image", project_id="film", request_id="modality-release",
++            estimated_cost=0.0, modality="audio",
++            adapter=lambda **kwargs: self.fail("adapter must not run"),
++            require_modality_binding=True,
++        )
++        self.assertEqual(result["status"], "MODALITY_MISMATCH")
++        self.assertEqual(released, ["modality-release"])
++
+     def test_routed_generation_health_gate_fails_closed_without_manager(self):
+diff --git a/tests/test_routing_manager.py b/tests/test_routing_manager.py
+index bd8c6c5..0bdd2c7 100644
+--- a/tests/test_routing_manager.py
++++ b/tests/test_routing_manager.py
+@@ -998,2 +998,17 @@ class ProviderRoutingManagerTests(unittest.TestCase):
+ 
++    def test_healthiest_first_ties_are_broken_by_configured_priority(self):
++        health = ProviderHealthManager(self.health_path)
++        for provider_id in ("primary", "fallback"):
++            self.assertEqual(
++                health.record_result(provider_id, success=True, latency_ms=40)["status"],
++                "HEALTHY",
++            )
++        router = ProviderRoutingManager(self.connections, health_manager=health)
++        results = [
++            router.route(category="image", project_id="film", strategy="HEALTHIEST_FIRST")
++            for _ in range(3)
++        ]
++        self.assertTrue(all(result["allowed"] for result in results))
++        self.assertEqual({result["provider"] for result in results}, {"primary"})
++
+     def test_malformed_latency_ranks_last_without_crashing(self):
