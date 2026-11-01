@@ -14,6 +14,13 @@ class ProviderStreamSessionTests(unittest.TestCase):
         self.assertEqual(result["content"], b"hello world")
         self.assertEqual(result["chunk_count"], 2)
         self.assertEqual(len(result["sha256"]), 64)
+        self.assertEqual(
+            result["chunk_sha256"],
+            [
+                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+                "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+            ],
+        )
         self.assertEqual(stream.snapshot()["state"], "COMPLETED")
 
     def test_duplicate_chunks_are_idempotent_but_conflicts_and_gaps_reject(self):
