@@ -2,9 +2,11 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from projects.provider_store.provider_config_lifecycle import ProviderConfigLifecycleManager
+import projects.provider_store.provider_config_lifecycle as lifecycle_module
 
 
 def valid_config(config):
@@ -97,6 +99,27 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "CONFIG_MIGRATION_APPLIED")
         self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["schema_version"], "2")
         self.assertEqual(json.loads(Path(str(path) + ".bak").read_text(encoding="utf-8"))["schema_version"], "1")
+
+    def test_file_migration_runs_inside_interprocess_lock(self):
+        path = self.root / "provider-config.json"
+        path.write_text(
+            json.dumps({"schema_version": "1", "providers": {"image": {}}}),
+            encoding="utf-8",
+        )
+        with patch.object(lifecycle_module, "interprocess_file_lock") as lock_factory:
+            lock_context = lock_factory.return_value
+            with patch.object(
+                self.manager,
+                "_migrate_file_locked",
+                return_value={"status": "LOCKED"},
+            ) as migrate_locked:
+                result = self.manager.migrate_file(
+                    path, target_version="2", migrations={"1": migrate_v1_to_v2}
+                )
+        self.assertEqual(result["status"], "LOCKED")
+        lock_factory.assert_called_once_with(path.with_name(path.name + ".lock"))
+        lock_context.__enter__.assert_called_once_with()
+        migrate_locked.assert_called_once()
 
     def test_invalid_config_file_is_not_overwritten(self):
         path = self.root / "bad.json"
