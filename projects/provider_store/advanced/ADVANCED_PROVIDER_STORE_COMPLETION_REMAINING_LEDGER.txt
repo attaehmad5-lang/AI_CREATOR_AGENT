@@ -80,7 +80,7 @@ Remaining work: Catalog/lifecycle foundations exist; individual acceptance cover
 Feature 012: Provider Adapter System
 Status: PARTIAL
 Implementation/evidence inspected: provider_adapter_registry.py; tests/test_provider_adapter_registry.py; provider_service.py; tests/test_provider_service.py; CI #40722792917
-Remaining work: Explicit streaming capability registration and verified resolve_streaming checks now supplement ordinary modality/model adapter routing; full CI #41317659544 passed on Python 3.10/3.11/3.12. Vendor-specific adapters and authorized live API checks remain.
+Remaining work: Explicit streaming_modalities registration, resolve_streaming gates and open_stream_session factory now create bounded local sessions only for enabled+verified adapters; full CI #41319304356 passed on Python 3.10/3.11/3.12. Actual vendor streaming dispatch and authorized live API checks remain.
 
 Feature 013: API Key Authentication
 Status: COMPLETED
