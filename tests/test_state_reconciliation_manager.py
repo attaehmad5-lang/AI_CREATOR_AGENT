@@ -60,6 +60,34 @@ class ProviderStoreReconciliationTests(unittest.TestCase):
         self.assertEqual(result["findings"][0]["code"], "REQUEST_PROVIDER_MISMATCH")
         self.assertEqual(result["findings"][0]["provider_ids"], ["image", "video"])
 
+    def test_project_mismatch_is_reported_across_request_ledgers(self):
+        self.jobs["job-1"]["project_id"] = "documentary"
+        self.quota["job-1"]["project_id"] = "documentary"
+        result = self.manager.inspect()
+        self.assertEqual(result["status"], "RECONCILIATION_REQUIRED")
+        finding = next(
+            item for item in result["findings"]
+            if item["code"] == "REQUEST_PROJECT_MISMATCH"
+        )
+        self.assertEqual(finding["project_ids"], ["documentary", "film"])
+        self.assertTrue(result["read_only"])
+
+    def test_constructor_rejects_missing_credit_usage_and_malformed_cost_projects(self):
+        with self.assertRaises(ValueError):
+            ProviderStoreReconciliationManager(
+                job_manager=self.job_manager,
+                quota_manager=self.quota_manager,
+                credit_manager=SimpleNamespace(data={"reservations": {}}),
+                cost_policy=self.cost_policy,
+            )
+        with self.assertRaises(ValueError):
+            ProviderStoreReconciliationManager(
+                job_manager=self.job_manager,
+                quota_manager=self.quota_manager,
+                credit_manager=self.credit_manager,
+                cost_policy=SimpleNamespace(ledger={"projects": {"film": []}}),
+            )
+
     def test_terminal_job_with_live_reservations_requires_manual_review(self):
         self.quota["job-1"]["status"] = "RESERVED"
         self.credit["reservations"]["job-1"] = {
