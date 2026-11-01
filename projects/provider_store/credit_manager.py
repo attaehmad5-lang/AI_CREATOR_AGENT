@@ -22,14 +22,18 @@ class ProviderCreditManager:
         *,
         max_age_seconds: float = 300.0,
         clock: Callable[[], datetime] | None = None,
+        max_records: int = 100_000,
     ) -> None:
         max_age = finite_number(max_age_seconds, minimum=0)
         if max_age is None or max_age <= 0:
             raise ValueError("max_age_seconds must be a finite positive number")
+        if isinstance(max_records, bool) or not isinstance(max_records, int) or not 1 <= max_records <= 1_000_000:
+            raise ValueError("max_records must be within 1..1000000")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.max_age_seconds = max_age
+        self.max_records = max_records
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}, "reservations": {}, "usage": {}}
@@ -53,6 +57,11 @@ class ProviderCreditManager:
             raise ValueError("invalid provider credit reservation/usage state")
         if set(loaded["reservations"]).intersection(loaded["usage"]):
             raise ValueError("credit request cannot be both reserved and committed")
+        if (
+            len(loaded["providers"]) > self.max_records
+            or len(loaded["reservations"]) + len(loaded["usage"]) > self.max_records
+        ):
+            raise ValueError("provider credit state exceeds configured record limit")
         for provider_id, record in loaded["providers"].items():
             if (
                 not isinstance(provider_id, str) or not provider_id.strip()
@@ -167,6 +176,12 @@ class ProviderCreditManager:
             "observed_at": observed.isoformat(),
         }
         with self._transaction():
+            if provider_id not in self.data["providers"] and len(self.data["providers"]) >= self.max_records:
+                return {
+                    "status": "CREDIT_PROVIDER_STATE_CAPACITY_REACHED",
+                    "provider": provider_id,
+                    "verified": False,
+                }
             if any(
                 item.get("provider_id") == provider_id
                 for item in self.data["reservations"].values()
@@ -303,6 +318,8 @@ class ProviderCreditManager:
                 ):
                     return {"status": "ALREADY_RESERVED", "reserved": False}
                 return {"status": "REQUEST_ID_CONFLICT", "reserved": False}
+            if len(self.data["reservations"]) + len(self.data["usage"]) >= self.max_records:
+                return {"status": "CREDIT_USAGE_STATE_CAPACITY_REACHED", "reserved": False}
             snapshot = self.data["providers"].get(provider_id)
             if not isinstance(snapshot, dict) or snapshot.get("verified") is not True:
                 return {"status": "CREDIT_BALANCE_UNKNOWN", "reserved": False}
