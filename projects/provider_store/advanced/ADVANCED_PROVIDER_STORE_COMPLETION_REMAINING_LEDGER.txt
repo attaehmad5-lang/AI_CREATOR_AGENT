@@ -588,8 +588,8 @@ Remaining work: Unit/regression/security/concurrency tests exist; not all integr
 
 Feature 114: Fuzz Testing
 Status: PARTIAL
-Implementation/evidence inspected: tests/test_provider_store_fuzz_regressions.py; connection_manager.py; provider_trace_manager.py; CI #40712713627
-Remaining work: Deterministic seeded fuzz-regression coverage for 500 JSON-like provider catalog candidates and 1,000 arbitrary traceparent strings passed on Ubuntu and Windows in CI #40712713627. Broader parser/property-based fuzzing and live/network failure fuzzing remain.
+Implementation/evidence inspected: tests/test_provider_store_fuzz_regressions.py; tests/test_pricing_catalog_fuzz.py; pricing_catalog.py; CI #41314520171
+Remaining work: Added 1,000 seeded malformed pricing-record cases and 1,000 randomized estimate-input combinations; malformed inputs must return structured failures without uncaught exceptions. CI #41314520171 passed on Python 3.10/3.11/3.12. Broader parser/property-based, network and crash-state fuzzing remain.
 Feature 115: Performance Testing
 Status: PARTIAL
 Implementation/evidence inspected: advanced/performance_benchmark.py; tests/test_provider_store_performance_benchmark.py; .github/workflows/task-25-tests.yml
