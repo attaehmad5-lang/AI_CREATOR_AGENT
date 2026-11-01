@@ -240,7 +240,7 @@ Remaining work: Round-robin distribution across eligible providers is tested alo
 Feature 044: Fair Scheduling
 Status: PARTIAL
 Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Remaining work: Added persistent round-robin project scheduling so each active project gets a dispatch turn before another project receives its next turn; priority/FIFO ordering is retained within a project. Tests cover fairness, persisted dispatch cursor and invalid config. Full cross-modality integration and production workload fairness tuning remain. CI #41312191652 passed full tests and reproducible wheel/clean install on Python 3.10/3.11/3.12.
 
 Feature 045: Concurrency Management
 Status: COMPLETED
