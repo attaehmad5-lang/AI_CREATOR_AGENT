@@ -105,7 +105,7 @@ class ProviderOutputValidator:
         stream.seek(0)
         if mime == "image/png":
             header = stream.read(24)
-            if len(header) < 24 or header[12:16] != b"IHDR":
+            if len(header) < 24 or header[8:12] != b"\\x00\\x00\\x00\\x0d" or header[12:16] != b"IHDR":
                 return None
             return struct.unpack(">II", header[16:24])
         if mime == "image/gif":
@@ -115,11 +115,23 @@ class ProviderOutputValidator:
             return struct.unpack("<HH", header[6:10])
         if mime == "image/webp":
             header = stream.read(30)
-            if len(header) < 30 or header[12:16] != b"VP8X":
+            if len(header) < 25 or header[8:12] != b"WEBP":
                 return None
-            width = 1 + int.from_bytes(header[24:27], "little")
-            height = 1 + int.from_bytes(header[27:30], "little")
-            return width, height
+            chunk = header[12:16]
+            if chunk == b"VP8X" and len(header) >= 30:
+                width = 1 + int.from_bytes(header[24:27], "little")
+                height = 1 + int.from_bytes(header[27:30], "little")
+                return width, height
+            if chunk == b"VP8 " and len(header) >= 30 and header[23:26] == b"\\x9d\\x01\\x2a":
+                width = int.from_bytes(header[26:28], "little") & 0x3FFF
+                height = int.from_bytes(header[28:30], "little") & 0x3FFF
+                return width, height
+            if chunk == b"VP8L" and header[20] == 0x2F:
+                bits = header[21:25]
+                width = 1 + bits[0] + ((bits[1] & 0x3F) << 8)
+                height = 1 + ((bits[1] >> 6) & 0x03) + (bits[2] << 2) + ((bits[3] & 0x0F) << 10)
+                return width, height
+            return None
         if mime == "image/jpeg":
             if stream.read(2) != b"\xff\xd8":
                 return None
@@ -146,6 +158,8 @@ class ProviderOutputValidator:
                     0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
                     0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
                 }:
+                    if segment_length < 7:
+                        return None
                     frame = stream.read(5)
                     if len(frame) != 5:
                         return None
