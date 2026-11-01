@@ -634,5 +634,38 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 connection.connect()
         connect.assert_not_called()
 
+
+    def test_default_opener_installs_pinned_https_handler(self):
+        from projects.provider_store.http_probe import _PinnedHTTPSHandler
+        probe = ProviderHTTPConnectivityProbe()
+        handlers = [handler for handler in probe.opener.handlers if isinstance(handler, _PinnedHTTPSHandler)]
+        self.assertEqual(len(handlers), 1)
+
+    def test_pinned_transport_rejects_empty_dns_answer(self):
+        connection = _PinnedHTTPSConnection("api.example.com", timeout=3)
+        with patch("projects.provider_store.http_probe.socket.getaddrinfo", return_value=[]), patch("projects.provider_store.http_probe.socket.create_connection") as connect:
+            with self.assertRaisesRegex(OSError, "no usable public address"):
+                connection.connect()
+        connect.assert_not_called()
+
+    def test_pinned_transport_does_not_connect_when_dns_resolution_fails(self):
+        connection = _PinnedHTTPSConnection("api.example.com", timeout=3)
+        with patch("projects.provider_store.http_probe.socket.getaddrinfo", side_effect=socket.gaierror("resolution failed")), patch("projects.provider_store.http_probe.socket.create_connection") as connect:
+            with self.assertRaisesRegex(OSError, "could not be resolved"):
+                connection.connect()
+        connect.assert_not_called()
+
+    def test_pinned_transport_supports_public_ipv6_answer(self):
+        connection = _PinnedHTTPSConnection("api.example.com", timeout=3)
+        raw_socket, tls_socket = object(), object()
+        context = Mock()
+        context.wrap_socket.return_value = tls_socket
+        connection._context = context
+        records = [(socket.AF_INET6, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("2606:4700:4700::1111", 443, 0, 0))]
+        with patch("projects.provider_store.http_probe.socket.getaddrinfo", return_value=records), patch("projects.provider_store.http_probe.socket.create_connection", return_value=raw_socket) as connect:
+            connection.connect()
+        connect.assert_called_once_with(("2606:4700:4700::1111", 443), 3, None)
+        context.wrap_socket.assert_called_once_with(raw_socket, server_hostname="api.example.com")
+
 if __name__ == "__main__":
     unittest.main()
