@@ -97,7 +97,7 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
             "test-image", modality="image", request_id="stream-before-verify"
         )
         self.assertFalse(denied["opened"])
-        self.assertEqual(denied["status"], "ADAPTER_NOT_REGISTERED")
+        self.assertEqual(denied["status"], "PROVIDER_NOT_VERIFIED")
 
         self.registry.register(
             "test-image", self.adapter, modalities=("image",),
