@@ -28,6 +28,7 @@ class ProviderJobManager:
         *,
         max_queue_size: int = 100,
         max_concurrent: int = 4,
+        max_job_records: int = 100_000,
         lease_seconds: int = 120,
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
@@ -35,6 +36,7 @@ class ProviderJobManager:
     ) -> None:
         for value, name, minimum, maximum in (
             (max_queue_size, "max_queue_size", 1, 100000),
+            (max_job_records, "max_job_records", 1, 1_000_000),
             (max_concurrent, "max_concurrent", 1, 10000),
             (lease_seconds, "lease_seconds", 1, 86400),
             (max_attempts, "max_attempts", 1, 20),
@@ -46,6 +48,7 @@ class ProviderJobManager:
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.max_queue_size = max_queue_size
+        self.max_job_records = max_job_records
         self.max_concurrent = max_concurrent
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
@@ -64,8 +67,13 @@ class ProviderJobManager:
                 loaded = json.load(stream)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValueError("invalid provider job state JSON") from exc
-        if not isinstance(loaded, dict) or not isinstance(loaded.get("jobs"), dict):
-            raise ValueError("invalid provider job state schema")
+        if (
+            not isinstance(loaded, dict)
+            or loaded.get("version") != "1.0"
+            or not isinstance(loaded.get("jobs"), dict)
+            or len(loaded["jobs"]) > self.max_job_records
+        ):
+            raise ValueError("invalid provider job state schema or capacity")
         for job_id, job in loaded["jobs"].items():
             if (
                 not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
@@ -140,6 +148,8 @@ class ProviderJobManager:
                     "accepted": same,
                     "job": dict(existing),
                 }
+            if len(self.data["jobs"]) >= self.max_job_records:
+                return {"status": "JOB_HISTORY_CAPACITY_REACHED", "accepted": False}
             queued = sum(
                 1 for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "QUEUED"
