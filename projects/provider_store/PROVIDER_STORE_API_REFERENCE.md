@@ -70,7 +70,7 @@ The route planner supports an explicit side-effect-free preview:
         dry_run=True,
     )
 
-A successful preview returns status ROUTE_SIMULATED, the selected provider, policy decisions, estimated cost/unit and a would_reserve list. It does not reserve paid budget, free credits or quota, and does not advance the round-robin cursor. A preview does not guarantee that quota or balances will still be available when a real request is submitted. Omit dry_run (or set it to False) only when the caller intends normal routing and reservation behavior.
+A successful preview returns status ROUTE_SIMULATED, the selected provider, policy decisions, estimated cost/unit, a would_reserve list, and a policy_matrix containing eligible provider IDs, rejected-provider decisions, the selected provider, fallback state and reservation plan. Project policies may constrain allowed/denied providers, models, capabilities, maximum estimated cost, health/verified-connection evidence, automatic fallback and required data-residency region. Region identifiers are validated and a provider without matching, declared region metadata is rejected. A preview does not reserve paid budget, free credits or quota, and does not advance the round-robin cursor. A preview does not guarantee that quota or balances will still be available when a real request is submitted. Omit dry_run (or set it to False) only when the caller intends normal routing and reservation behavior.
 
 ## Runtime and policy modules
 
