@@ -295,7 +295,7 @@ Remaining work: Billing, credit exhaustion, auth, permission, rate-limit and tra
 Feature 055: Output Quality Validation
 Status: PARTIAL
 Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Remaining work: Added bounded dimension inspection for PNG/JPEG/GIF/WebP, malformed/zero dimension rejection and configurable pixel-count ceilings; provider-service image integration fixtures now contain valid PNG metadata. CI #41313596884 passed on Python 3.10/3.11/3.12. Full visual-quality scoring, codec-level decoding and production provider evidence remain.
 
 Feature 056: Media Integrity Validation
 Status: COMPLETED
@@ -315,7 +315,7 @@ Remaining work: WAV duration/audio metadata extraction and truncated-audio rejec
 Feature 059: Video Metadata Validation
 Status: PARTIAL
 Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: Implementation/test foundations exist; full end-to-end behavior, all modalities, and production adapter evidence remain incomplete.
+Remaining work: MP4 box, WebM header and OGG page validators now stream/seek over metadata without loading full media payloads; WAV frames are read in bounded chunks. Regression tests cover large MP4 payloads and OGG streaming. CI #41313596884 passed on Python 3.10/3.11/3.12. Full codec decoding and extraction of duration, frame rate and dimensions across video codecs plus live provider integration remain.
 
 Feature 060: Artifact Checksum Verification
 Status: COMPLETED
