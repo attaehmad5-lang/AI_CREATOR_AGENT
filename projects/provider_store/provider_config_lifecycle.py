@@ -199,7 +199,28 @@ class ProviderConfigLifecycleManager:
                         "status": "CONFIG_CHANGED_DURING_MIGRATION",
                         "migrated": False,
                     }
-                shutil.copy2(config_path, backup_path)
+                backup_fd, backup_temp = tempfile.mkstemp(
+                    prefix=f".{backup_path.name}.", suffix=".tmp",
+                    dir=str(config_path.parent),
+                )
+                try:
+                    with os.fdopen(backup_fd, "wb") as backup_stream:
+                        backup_fd = -1
+                        with config_path.open("rb") as source_stream:
+                            shutil.copyfileobj(source_stream, backup_stream)
+                        backup_stream.flush()
+                        os.fsync(backup_stream.fileno())
+                    shutil.copystat(config_path, backup_temp, follow_symlinks=False)
+                    atomic_replace_with_retry(backup_temp, backup_path)
+                    backup_temp = ""
+                finally:
+                    if backup_fd >= 0:
+                        os.close(backup_fd)
+                    if backup_temp:
+                        try:
+                            os.unlink(backup_temp)
+                        except FileNotFoundError:
+                            pass
                 with os.fdopen(fd, "w", encoding="utf-8") as stream:
                     fd = -1
                     json.dump(result["config"], stream, indent=2, ensure_ascii=False, allow_nan=False)
