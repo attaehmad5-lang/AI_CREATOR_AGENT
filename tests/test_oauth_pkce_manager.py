@@ -109,6 +109,39 @@ class ProviderOAuthPKCEManagerTests(unittest.TestCase):
         self.assertNotIn("code_verifier", result)
         self.assertNotIn("access-secret-value", repr(result))
 
+    def test_http_error_cleanup_failure_preserves_safe_status(self):
+        class BrokenHTTPError(HTTPError):
+            def close(self):
+                raise RuntimeError("cleanup failure")
+
+        error = BrokenHTTPError(self.token_url, 401, "Unauthorized", {}, None)
+        manager = ProviderOAuthPKCEManager(
+            environ=self.environ, opener=_Opener(error=error), clock=lambda: self.now[0]
+        )
+        result = manager._post_form(
+            self.token_url, self.allowed_hosts, {"grant_type": "test"}, 10
+        )
+        self.assertEqual(result, {
+            "status": "OAUTH_TOKEN_HTTP_ERROR", "http_status": 401
+        })
+
+    def test_response_cleanup_failure_does_not_mask_token_response(self):
+        class BrokenCloseResponse(_Response):
+            @property
+            def close(self):
+                raise RuntimeError("cleanup failure")
+
+        manager = ProviderOAuthPKCEManager(
+            environ=self.environ,
+            opener=_Opener(BrokenCloseResponse({"access_token": "ignored"})),
+            clock=lambda: self.now[0],
+        )
+        result = manager._post_form(
+            self.token_url, self.allowed_hosts, {"grant_type": "test"}, 10
+        )
+        self.assertEqual(result["status"], "OK")
+        self.assertEqual(result["data"], {"access_token": "ignored"})
+
     def test_code_exchange_uses_verifier_and_keeps_tokens_out_of_status(self):
         begun = self.begin()
         result = self.manager.exchange_code("provider", state=begun["state"], code="one-time-code")
