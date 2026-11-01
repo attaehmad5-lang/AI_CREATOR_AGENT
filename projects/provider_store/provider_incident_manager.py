@@ -23,9 +23,15 @@ _STATES = {"OPEN", "ACKNOWLEDGED", "RESOLVED"}
 class ProviderIncidentManager:
     """Persist deduplicated incident metadata only; never store raw exception messages."""
 
-    def __init__(self, state_path: str | os.PathLike[str], *, clock: Any = None) -> None:
+    def __init__(
+        self, state_path: str | os.PathLike[str], *, clock: Any = None,
+        max_incidents: int = 10_000,
+    ) -> None:
+        if isinstance(max_incidents, bool) or not isinstance(max_incidents, int) or not 1 <= max_incidents <= 100_000:
+            raise ValueError("max_incidents must be within 1..100000")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
+        self.max_incidents = max_incidents
         self.state_path = Path(state_path)
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
@@ -42,8 +48,13 @@ class ProviderIncidentManager:
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValueError("invalid incident state JSON") from exc
         incidents = loaded.get("incidents") if isinstance(loaded, dict) else None
-        if not isinstance(incidents, dict):
-            raise ValueError("invalid incident state schema")
+        if (
+            not isinstance(loaded, dict)
+            or loaded.get("version") != "1.0"
+            or not isinstance(incidents, dict)
+            or len(incidents) > self.max_incidents
+        ):
+            raise ValueError("invalid incident state schema or capacity")
         for key, incident in incidents.items():
             if (
                 not isinstance(key, str) or not re.fullmatch(r"[0-9a-f]{64}", key)
@@ -52,7 +63,9 @@ class ProviderIncidentManager:
                 or incident.get("severity") not in _SEVERITIES
                 or not isinstance(incident.get("provider_id"), str)
                 or not isinstance(incident.get("code"), str)
+                or isinstance(incident.get("occurrences"), bool)
                 or not isinstance(incident.get("occurrences"), int)
+                or incident.get("occurrences") < 1
             ):
                 raise ValueError("invalid incident record")
         self.data = loaded
@@ -105,6 +118,8 @@ class ProviderIncidentManager:
                     incident["severity"] = severity
                 self._save()
                 return {"status": "INCIDENT_UPDATED", "saved": True, "incident": dict(incident)}
+            if key not in self.data["incidents"] and len(self.data["incidents"]) >= self.max_incidents:
+                return {"status": "INCIDENT_CAPACITY_REACHED", "saved": False}
             incident = {
                 "incident_id": key, "provider_id": provider_id, "category": category,
                 "severity": severity, "code": code, "state": "OPEN",

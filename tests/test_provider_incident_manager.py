@@ -1,4 +1,5 @@
 """Provider incident deduplication and lifecycle tests."""
+import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -56,6 +57,47 @@ class ProviderIncidentManagerTests(unittest.TestCase):
         self.assertEqual(reloaded.snapshot()["counts"]["OPEN"], 1)
         reloaded.acknowledge(incident["incident_id"])
         self.assertEqual(reloaded.snapshot()["counts"]["ACKNOWLEDGED"], 1)
+
+    def test_incident_capacity_rejects_new_keys_but_allows_deduplicated_updates(self):
+        limited = ProviderIncidentManager(
+            self.path, clock=lambda: self.now, max_incidents=1
+        )
+        first = limited.record(
+            provider_id="image", category="generation",
+            severity="warning", code="PROVIDER_TIMEOUT",
+        )
+        duplicate = limited.record(
+            provider_id="image", category="generation",
+            severity="critical", code="PROVIDER_TIMEOUT",
+        )
+        second = limited.record(
+            provider_id="video", category="generation",
+            severity="error", code="PROVIDER_TIMEOUT",
+        )
+        self.assertEqual(first["status"], "INCIDENT_OPENED")
+        self.assertEqual(duplicate["status"], "INCIDENT_UPDATED")
+        self.assertEqual(second["status"], "INCIDENT_CAPACITY_REACHED")
+        self.assertEqual(len(limited.data["incidents"]), 1)
+
+    def test_incident_state_rejects_unsupported_version_and_invalid_occurrence_count(self):
+        self.path.write_text(json.dumps({
+            "version": "2.0", "incidents": {}
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "incident state schema"):
+            ProviderIncidentManager(self.path, clock=lambda: self.now)
+
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "incidents": {
+                "a" * 64: {
+                    "state": "OPEN", "severity": "error",
+                    "provider_id": "image", "code": "TIMEOUT",
+                    "occurrences": True,
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "incident record"):
+            ProviderIncidentManager(self.path, clock=lambda: self.now)
 
     def test_invalid_incident_fields_fail_closed(self):
         self.assertEqual(self.manager.record(
