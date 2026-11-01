@@ -91,30 +91,58 @@ class ProviderJobManagerTests(unittest.TestCase):
         claimed = self.manager.claim_next(worker_id="worker-1")
         self.assertEqual(claimed["status"], "JOB_CLAIMED")
         done = self.manager.complete(
-            job_id="job-1", worker_id="worker-1", success=True,
+            job_id="job-1", worker_id="worker-1", lease_token=claimed["job"]["lease_token"], success=True,
             result_ref="asset:result-1",
         )
         self.assertEqual(done["job"]["status"], "SUCCEEDED")
         self.assertEqual(self.manager.poll(job_id="job-1")["job"]["result_ref"], "asset:result-1")
 
+    def test_stale_lease_token_cannot_complete_reclaimed_job_even_for_same_worker(self):
+        self.submit("job-1")
+        first = self.manager.claim_next(worker_id="worker-1")
+        old_token = first["job"]["lease_token"]
+        self.now[0] += timedelta(seconds=11)
+        second = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(second["status"], "JOB_CLAIMED")
+        self.assertNotEqual(second["job"]["lease_token"], old_token)
+
+        stale = self.manager.complete(
+            job_id="job-1", worker_id="worker-1",
+            lease_token=old_token, success=True,
+            result_ref="asset:stale-result",
+        )
+        self.assertEqual(stale["status"], "JOB_LEASE_NOT_OWNED")
+        self.assertEqual(
+            self.manager.poll(job_id="job-1")["job"]["status"], "RUNNING"
+        )
+        current = self.manager.complete(
+            job_id="job-1", worker_id="worker-1",
+            lease_token=second["job"]["lease_token"], success=True,
+            result_ref="asset:current-result",
+        )
+        self.assertEqual(current["status"], "JOB_COMPLETED")
+        self.assertEqual(
+            current["job"]["result_ref"], "asset:current-result"
+        )
+
     def test_wrong_worker_cannot_complete_job(self):
         self.submit("job-1")
-        self.manager.claim_next(worker_id="worker-1")
+        claimed = self.manager.claim_next(worker_id="worker-1")
         result = self.manager.complete(
-            job_id="job-1", worker_id="worker-2", success=True,
+            job_id="job-1", worker_id="worker-2", lease_token=claimed["job"]["lease_token"], success=True,
             result_ref="asset:result-1",
         )
-        self.assertEqual(result["status"], "JOB_NOT_OWNED_BY_WORKER")
+        self.assertEqual(result["status"], "JOB_LEASE_NOT_OWNED")
 
     def test_cancel_queued_and_running_jobs_safely(self):
         self.submit("queued")
         self.assertEqual(self.manager.cancel(job_id="queued")["status"], "JOB_CANCELLED")
         self.submit("running")
-        self.manager.claim_next(worker_id="worker-1")
+        claimed = self.manager.claim_next(worker_id="worker-1")
         requested = self.manager.cancel(job_id="running")
         self.assertEqual(requested["status"], "CANCEL_REQUESTED")
         finished = self.manager.complete(
-            job_id="running", worker_id="worker-1", success=True,
+            job_id="running", worker_id="worker-1", lease_token=claimed["job"]["lease_token"], success=True,
             result_ref="asset:unused",
         )
         self.assertEqual(finished["job"]["status"], "CANCELLED")

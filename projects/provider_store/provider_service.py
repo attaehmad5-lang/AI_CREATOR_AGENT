@@ -343,7 +343,7 @@ class ProviderService:
             return {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
 
-    def complete_job(self, *, job_id: str, worker_id: str, success: bool,
+    def complete_job(self, *, job_id: str, worker_id: str, lease_token: str, success: bool,
                      result_ref: str | None = None, error_code: str | None = None,
                      principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
@@ -353,7 +353,7 @@ class ProviderService:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
         try:
             result = self.job_manager.complete(
-                job_id=job_id, worker_id=worker_id, success=success,
+                job_id=job_id, worker_id=worker_id, lease_token=lease_token, success=success,
                 result_ref=result_ref, error_code=error_code,
             )
         except Exception as exc:
