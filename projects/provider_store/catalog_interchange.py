@@ -79,10 +79,30 @@ def _contains_credential_material(value: Any) -> bool:
 
 
 def _read_valid_catalog(path: Path) -> dict[str, Any]:
+    """Read bounded strict JSON and reject duplicate keys, constants and symlinks."""
+    if path.is_symlink():
+        raise ValueError("catalog file must not be a symlink")
     try:
+        if path.stat().st_size > 32_000_000:
+            raise ValueError("catalog file exceeds the size limit")
+
+        def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate catalog JSON key")
+                result[key] = value
+            return result
+
         with path.open("r", encoding="utf-8") as stream:
-            catalog = json.load(stream)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            catalog = json.load(
+                stream,
+                object_pairs_hook=reject_duplicate_keys,
+                parse_constant=lambda _value: (_ for _ in ()).throw(
+                    ValueError("non-standard JSON constant")
+                ),
+            )
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, RecursionError, ValueError) as exc:
         raise ValueError("catalog file is unreadable or invalid JSON") from exc
     result = ConnectionManager.validate_catalog_schema(catalog)
     if result.get("valid") is not True:
