@@ -207,6 +207,114 @@ class ProviderAdapterRegistry:
             "session": session,
         }
 
+
+    def execute_stream(
+        self,
+        provider_id: str,
+        /,
+        *,
+        modality: str,
+        request_id: str,
+        model_id: str | None = None,
+        max_chunks: int = 10_000,
+        max_bytes: int = 64 * 1024 * 1024,
+        timeout_seconds: float = 300.0,
+        **options: Any,
+    ) -> dict[str, Any]:
+        """Dispatch an explicitly streaming adapter and safely assemble its chunks.
+
+        The adapter must return an iterable of bytes or UTF-8 strings. Vendor
+        reconnect/resume semantics remain adapter-specific and are not inferred.
+        """
+        if not isinstance(request_id, str) or not _IDENTIFIER.fullmatch(request_id):
+            return {"status": "INVALID_REQUEST_ID", "executed": False}
+        if {"provider_id", "modality", "request_id", "model_id"}.intersection(options):
+            return {"status": "RESERVED_ADAPTER_OPTION", "executed": False}
+        opened = self.open_stream_session(
+            provider_id,
+            modality=modality,
+            request_id=request_id,
+            model_id=model_id,
+            max_chunks=max_chunks,
+            max_bytes=max_bytes,
+            timeout_seconds=timeout_seconds,
+        )
+        if opened.get("opened") is not True:
+            return {
+                "status": opened.get("status", "STREAMING_ADAPTER_UNAVAILABLE"),
+                "executed": False,
+                "started": False,
+            }
+        adapter = self.resolve_streaming(
+            provider_id, modality=modality, model_id=model_id
+        ).get("adapter")
+        session = opened["session"]
+        try:
+            chunks = adapter(
+                provider_id=provider_id,
+                modality=modality,
+                request_id=request_id,
+                model_id=model_id,
+                **options,
+            )
+            if isinstance(chunks, (str, bytes, bytearray, dict)) or not hasattr(chunks, "__iter__"):
+                session.cancel(reason="INVALID_ADAPTER_STREAM")
+                return {
+                    "status": "ADAPTER_STREAM_INVALID",
+                    "executed": False,
+                    "started": True,
+                    "outcome_known": False,
+                    "reservations_retained": True,
+                }
+            iterator = iter(chunks)
+            try:
+                for sequence, chunk in enumerate(iterator):
+                    accepted = session.append(sequence=sequence, chunk=chunk)
+                    if accepted.get("accepted") is not True:
+                        session.cancel(reason="STREAM_CHUNK_REJECTED")
+                        return {
+                            "status": accepted.get("status", "STREAM_CHUNK_REJECTED"),
+                            "executed": False,
+                            "started": True,
+                            "outcome_known": False,
+                            "reservations_retained": True,
+                            "request_id": request_id,
+                        }
+            finally:
+                close = getattr(iterator, "close", None)
+                if callable(close):
+                    close()
+            completed = session.finish()
+            if completed.get("finished") is not True:
+                return {
+                    "status": completed.get("status", "STREAM_FINISH_FAILED"),
+                    "executed": False,
+                    "started": True,
+                    "outcome_known": False,
+                    "reservations_retained": True,
+                    "request_id": request_id,
+                }
+            return {
+                "status": "STREAM_EXECUTED",
+                "executed": True,
+                "started": True,
+                "provider_id": provider_id,
+                "request_id": request_id,
+                "result": completed,
+            }
+        except Exception as exc:
+            session.cancel(reason="ADAPTER_STREAM_FAILED")
+            return {
+                "status": "ADAPTER_STREAM_OUTCOME_UNKNOWN",
+                "executed": False,
+                "started": True,
+                "outcome_known": False,
+                "reservations_retained": True,
+                "provider_id": provider_id,
+                "request_id": request_id,
+                "error_type": type(exc).__name__,
+            }
+
     def as_callable(
         self,
         provider_id: str,
