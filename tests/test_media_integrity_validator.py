@@ -44,7 +44,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         path = self.root / "sample.mp4"
         boxes = (
             (b"ftyp", b"isom0000"),
-            (b"moov", (16).to_bytes(4, "big") + b"free" + b"metadata"),
+            (b"moov", (28).to_bytes(4, "big") + b"mvhd" + b"\x00" * 4 + b"\x00" * 8 + (1000).to_bytes(4, "big") + (1000).to_bytes(4, "big")),
             (b"mdat", b"frame"),
         )
         data = b"".join((8 + len(body)).to_bytes(4, "big") + kind + body for kind, body in boxes)
@@ -93,6 +93,42 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         self.assertEqual(
             self.validator.validate(path, modality="video")["status"],
             "MP4_MOVIE_HEADER_INVALID",
+        )
+
+    def test_mp4_extracts_version_one_duration_and_rejects_duplicate_movie_headers(self):
+        path = self.root / "version-one.mp4"
+        payload = (
+            b"\x01\x00\x00\x00"
+            + (0).to_bytes(8, "big") * 2
+            + (1000).to_bytes(4, "big")
+            + (25000).to_bytes(8, "big")
+        )
+        mvhd = (8 + len(payload)).to_bytes(4, "big") + b"mvhd" + payload
+        moov = (8 + len(mvhd)).to_bytes(4, "big") + b"moov" + mvhd
+        ftyp = (16).to_bytes(4, "big") + b"ftyp" + b"isom0000"
+        mdat = (9).to_bytes(4, "big") + b"mdatx"
+        path.write_bytes(ftyp + moov + mdat)
+        result = self.validator.validate(path, modality="video")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["duration_seconds"], 25.0)
+
+        duplicate = (8 + len(mvhd) * 2).to_bytes(4, "big") + b"moov" + mvhd + mvhd
+        path.write_bytes(ftyp + duplicate + mdat)
+        self.assertEqual(
+            self.validator.validate(path, modality="video")["status"],
+            "MP4_DUPLICATE_MOVIE_HEADER",
+        )
+
+    def test_mp4_movie_box_without_movie_header_is_rejected(self):
+        path = self.root / "missing-mvhd.mp4"
+        free = (16).to_bytes(4, "big") + b"free" + b"metadata"
+        moov = (8 + len(free)).to_bytes(4, "big") + b"moov" + free
+        ftyp = (16).to_bytes(4, "big") + b"ftyp" + b"isom0000"
+        mdat = (9).to_bytes(4, "big") + b"mdatx"
+        path.write_bytes(ftyp + moov + mdat)
+        self.assertEqual(
+            self.validator.validate(path, modality="video")["status"],
+            "MP4_MOVIE_HEADER_MISSING",
         )
 
     def test_mp4_validation_skips_media_payload_without_loading_whole_file(self):
