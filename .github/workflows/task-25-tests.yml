@@ -95,6 +95,8 @@ jobs:
           projects/provider_store/cost_policy.py
           projects/provider_store/catalog_diff.py
           projects/provider_store/catalog_cli.py
+          projects/provider_store/provider_config_lifecycle.py
+          projects/provider_store/state_reconciliation_manager.py
           projects/provider_store/provider_outage_detector.py
           projects/provider_store/health_scheduler.py
           projects/provider_store/provider_structured_logger.py
