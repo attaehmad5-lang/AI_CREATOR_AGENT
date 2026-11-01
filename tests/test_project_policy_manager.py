@@ -16,6 +16,29 @@ class ProviderProjectPolicyManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def test_policy_store_rejects_duplicate_json_keys(self):
+        self.path.write_text(
+            '{"version":"1.0","version":"1.0","projects":{}}',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "unreadable"):
+            ProviderProjectPolicyManager(self.path)
+
+    def test_policy_store_rejects_symlinked_store(self):
+        target = self.path.parent / "real-policy-store.json"
+        target.write_text('{"version":"1.0","projects":{}}', encoding="utf-8")
+        linked = self.path.parent / "linked-policy-store.json"
+        try:
+            linked.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are unavailable")
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            ProviderProjectPolicyManager(linked)
+        self.assertEqual(
+            target.read_text(encoding="utf-8"),
+            '{"version":"1.0","projects":{}}',
+        )
+
     def test_policy_round_trips_and_survives_reinitialization(self):
         result = self.manager.set_policy("film-project", {
             "allowed_providers": ["huggingface", "replicate"],
