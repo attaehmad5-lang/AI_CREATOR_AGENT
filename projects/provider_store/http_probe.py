@@ -234,6 +234,12 @@ class ProviderHTTPConnectivityProbe:
                 result["authentication_verified"] = True
             return result
         finally:
-            close = getattr(response, "close", None)
-            if callable(close):
-                close()
+            # A custom response object may expose a failing close property or
+            # raise during cleanup. Cleanup must not mask the probe's actual
+            # HTTP/authentication result or exception.
+            try:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+            except Exception:
+                pass
