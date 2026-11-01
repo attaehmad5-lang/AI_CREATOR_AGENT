@@ -21,7 +21,10 @@ class ProviderOutputValidatorTests(unittest.TestCase):
 
     def test_valid_image_signature_returns_hash_and_metadata(self):
         path = self.root / "cover.png"
-        path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
+        path.write_bytes(
+            b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR"
+            + struct.pack(">II", 2, 3) + bytes((8, 2, 0, 0, 0))
+        )
         result = self.validator.validate_file(path, modality="image")
         self.assertTrue(result["valid"])
         self.assertEqual(result["mime_type"], "image/png")
@@ -30,7 +33,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
     def test_image_dimensions_are_reported_and_pixel_bombs_rejected(self):
         path = self.root / "large.png"
         path.write_bytes(
-            b"\\x89PNG\\r\\n\\x1a\\n"
+            b"\x89PNG\r\n\x1a\n"
             + (13).to_bytes(4, "big") + b"IHDR"
             + struct.pack(">II", 20, 20) + bytes((8, 2, 0, 0, 0))
         )
@@ -46,14 +49,14 @@ class ProviderOutputValidatorTests(unittest.TestCase):
 
     def test_image_with_missing_or_zero_dimensions_is_rejected(self):
         path = self.root / "broken.png"
-        path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"short")
+        path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"short")
         self.assertEqual(
             self.validator.validate_file(path, modality="image")["status"],
             "IMAGE_DIMENSIONS_INVALID",
         )
         zero = self.root / "zero.png"
         zero.write_bytes(
-            b"\\x89PNG\\r\\n\\x1a\\n"
+            b"\x89PNG\r\n\x1a\n"
             + (13).to_bytes(4, "big") + b"IHDR"
             + struct.pack(">II", 0, 10) + bytes((8, 2, 0, 0, 0))
         )
