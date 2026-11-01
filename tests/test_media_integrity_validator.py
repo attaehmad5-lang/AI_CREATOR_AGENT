@@ -144,7 +144,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
 
     def test_mp4_movie_box_without_movie_header_is_rejected(self):
         path = self.root / "missing-mvhd.mp4"
-        free = (28).to_bytes(4, "big") + b"free" + b"\\x00" * 20
+        free = (28).to_bytes(4, "big") + b"free" + b"0" * 20
         moov = (8 + len(free)).to_bytes(4, "big") + b"moov" + free
         ftyp = (16).to_bytes(4, "big") + b"ftyp" + b"isom0000"
         mdat = (9).to_bytes(4, "big") + b"mdatx"
