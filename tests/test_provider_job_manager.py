@@ -57,6 +57,47 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(same["status"], "ALREADY_SUBMITTED")
         self.assertEqual(conflict["status"], "REQUEST_ID_CONFLICT")
 
+    def test_fair_scheduling_round_robins_projects_and_preserves_priority_within_project(self):
+        fair = ProviderJobManager(
+            self.path, max_concurrent=10, fair_scheduling=True,
+            clock=lambda: self.now[0],
+        )
+        submissions = [
+            ("film-a-1", "film-a", 10),
+            ("film-a-2", "film-a", 99),
+            ("film-a-3", "film-a", 50),
+            ("film-b-1", "film-b", 20),
+            ("film-b-2", "film-b", 80),
+        ]
+        for job_id, project_id, priority in submissions:
+            result = fair.submit(
+                job_id=job_id, project_id=project_id, provider_id="image",
+                payload_ref=f"payload:{job_id}", priority=priority,
+            )
+            self.assertTrue(result["accepted"])
+
+        claimed = [
+            fair.claim_next(worker_id=f"worker-{index}")["job"]
+            for index in range(1, 6)
+        ]
+        self.assertEqual(
+            [job["project_id"] for job in claimed],
+            ["film-a", "film-b", "film-a", "film-b", "film-a"],
+        )
+        self.assertEqual(
+            [job["job_id"] for job in claimed],
+            ["film-a-2", "film-b-2", "film-a-3", "film-b-1", "film-a-1"],
+        )
+        reloaded = ProviderJobManager(
+            self.path, max_concurrent=10, fair_scheduling=True,
+            clock=lambda: self.now[0],
+        )
+        self.assertEqual(reloaded.data["last_scheduled_project"], "film-a")
+
+    def test_fair_scheduling_flag_must_be_boolean(self):
+        with self.assertRaisesRegex(ValueError, "fair_scheduling"):
+            ProviderJobManager(self.path, fair_scheduling="yes")
+
     def test_priority_order_and_concurrency_limit(self):
         self.submit("low", priority=10)
         self.submit("high", priority=90)
