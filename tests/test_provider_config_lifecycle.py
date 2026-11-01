@@ -120,6 +120,44 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertFalse(Path(str(path) + ".bak").exists())
         self.assertEqual(list(self.root.glob(".provider-config.json.*.tmp")), [])
 
+    def test_file_migration_keeps_reload_inside_interprocess_lock(self):
+        from contextlib import contextmanager
+        from unittest.mock import patch
+
+        path = self.root / "provider-config.json"
+        path.write_text(json.dumps({
+            "schema_version": "1", "providers": {"image": {}},
+        }), encoding="utf-8")
+        lock_state = {"held": False}
+        original_reload = self.manager.reload
+
+        @contextmanager
+        def tracked_lock(_lock_path):
+            self.assertFalse(lock_state["held"])
+            lock_state["held"] = True
+            try:
+                yield
+            finally:
+                lock_state["held"] = False
+
+        def assert_locked_reload(config):
+            self.assertTrue(lock_state["held"])
+            return original_reload(config)
+
+        with (
+            patch(
+                "projects.provider_store.provider_config_lifecycle.interprocess_file_lock",
+                side_effect=tracked_lock,
+            ),
+            patch.object(self.manager, "reload", side_effect=assert_locked_reload),
+        ):
+            result = self.manager.migrate_file(
+                path, target_version="2", migrations={"1": migrate_v1_to_v2}
+            )
+
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_APPLIED")
+        self.assertFalse(lock_state["held"])
+
     def test_file_migration_creates_backup_and_writes_atomically(self):
         path = self.root / "provider-config.json"
         original = {"schema_version": "1", "providers": {"image": {}}}
