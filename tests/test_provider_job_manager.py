@@ -98,7 +98,7 @@ class ProviderJobManagerTests(unittest.TestCase):
             job_id="job-1", worker_id="worker-2", lease_token=claimed["job"]["lease_token"], success=True,
             result_ref="asset:result-1",
         )
-        self.assertEqual(result["status"], "JOB_NOT_OWNED_BY_WORKER")
+        self.assertEqual(result["status"], "JOB_LEASE_NOT_OWNED")
 
     def test_cancel_queued_and_running_jobs_safely(self):
         self.submit("queued")
