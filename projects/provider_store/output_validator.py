@@ -105,7 +105,7 @@ class ProviderOutputValidator:
         stream.seek(0)
         if mime == "image/png":
             header = stream.read(24)
-            if len(header) < 24 or header[8:12] != b"\\x00\\x00\\x00\\x0d" or header[12:16] != b"IHDR":
+            if len(header) < 24 or header[8:12] != b"\x00\x00\x00\x0d" or header[12:16] != b"IHDR":
                 return None
             return struct.unpack(">II", header[16:24])
         if mime == "image/gif":
@@ -122,7 +122,7 @@ class ProviderOutputValidator:
                 width = 1 + int.from_bytes(header[24:27], "little")
                 height = 1 + int.from_bytes(header[27:30], "little")
                 return width, height
-            if chunk == b"VP8 " and len(header) >= 30 and header[23:26] == b"\\x9d\\x01\\x2a":
+            if chunk == b"VP8 " and len(header) >= 30 and header[23:26] == b"\x9d\x01\x2a":
                 width = int.from_bytes(header[26:28], "little") & 0x3FFF
                 height = int.from_bytes(header[28:30], "little") & 0x3FFF
                 return width, height
