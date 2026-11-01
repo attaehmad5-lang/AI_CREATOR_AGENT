@@ -155,6 +155,43 @@ class ProviderQuotaManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid quota attempt history"):
             ProviderQuotaManager(self.path, limits=self.limits)
 
+    def test_request_ledger_capacity_rejects_new_ids_without_evicting_idempotency_records(self):
+        manager = ProviderQuotaManager(
+            self.path,
+            limits=self.limits,
+            clock=lambda: self.now[0],
+            max_records=1,
+        )
+        first = manager.reserve(provider_id="image", request_id="job-1")
+        second = manager.reserve(provider_id="image", request_id="job-2")
+        duplicate = manager.reserve(provider_id="image", request_id="job-1")
+        self.assertEqual(first["status"], "RESERVED")
+        self.assertEqual(second["status"], "QUOTA_STATE_CAPACITY_REACHED")
+        self.assertEqual(duplicate["status"], "ALREADY_RESERVED")
+        self.assertEqual(list(manager.data["requests"]), ["job-1"])
+
+    def test_quota_state_above_configured_record_limit_fails_closed(self):
+        self.path.write_text(json.dumps({
+            "requests": {
+                "job-1": {
+                    "provider_id": "image",
+                    "status": "RESERVED",
+                    "created_at": self.now[0].isoformat(),
+                },
+                "job-2": {
+                    "provider_id": "image",
+                    "status": "RELEASED",
+                    "created_at": self.now[0].isoformat(),
+                    "released_at": self.now[0].isoformat(),
+                },
+            }
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "exceeds configured record limit"):
+            ProviderQuotaManager(
+                self.path, limits=self.limits, max_records=1,
+                clock=lambda: self.now[0],
+            )
+
     def test_corrupt_state_is_rejected(self):
         self.path.write_text(json.dumps({"requests": {"job": {"provider_id": "image", "status": "BOGUS", "created_at": "bad"}}}), encoding="utf-8")
         with self.assertRaises(ValueError):
