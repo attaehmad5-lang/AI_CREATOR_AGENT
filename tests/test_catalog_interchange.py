@@ -302,6 +302,15 @@ class CatalogInterchangeTests(unittest.TestCase):
             )
         )
 
+    def test_strict_reader_rejects_duplicate_json_keys(self):
+        target = self.root / "duplicate-keys.json"
+        target.write_text('{"version":"1.0","version":"1.0","providers":[]}', encoding="utf-8")
+        with self.assertRaises(ValueError):
+            export_catalog(target, self.root / "duplicate-export.json")
+        result = import_catalog(target, self.root / "duplicate-destination.json")
+        self.assertEqual(result["status"], "CATALOG_IMPORT_INVALID_SOURCE")
+        self.assertFalse(result["imported"])
+
     def test_export_refuses_malformed_json(self):
         invalid = self.root / "broken.json"
         invalid.write_text("{broken", encoding="utf-8")
