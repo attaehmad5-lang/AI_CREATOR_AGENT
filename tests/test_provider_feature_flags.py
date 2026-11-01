@@ -1,4 +1,5 @@
 """Provider feature flag rollout, scope, and persistence tests."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -47,6 +48,41 @@ class ProviderFeatureFlagManagerTests(unittest.TestCase):
         b = self.manager.evaluate("new_router", project_id="film", request_id="job-123")
         self.assertEqual(a, b)
         self.assertIn(a["status"], {"ROLLOUT_ENABLED", "OUTSIDE_ROLLOUT"})
+
+    def test_feature_flag_capacity_preserves_updates_and_limits_scope_size(self):
+        limited = ProviderFeatureFlagManager(
+            self.path, max_flags=1, max_projects_per_flag=1
+        )
+        first = limited.set_flag(
+            "job_queue", enabled=True, allow_projects=["film-a"]
+        )
+        too_many_scopes = limited.set_flag(
+            "job_queue", enabled=True, allow_projects=["film-a", "film-b"]
+        )
+        updated = limited.set_flag("job_queue", enabled=False)
+        second = limited.set_flag("webhooks", enabled=True)
+        self.assertEqual(first["status"], "FEATURE_FLAG_SAVED")
+        self.assertEqual(too_many_scopes["status"], "PROJECT_SCOPE_CAPACITY_REACHED")
+        self.assertEqual(updated["status"], "FEATURE_FLAG_SAVED")
+        self.assertEqual(second["status"], "FEATURE_FLAG_CAPACITY_REACHED")
+
+    def test_feature_flag_store_rejects_unsupported_version_and_duplicate_scopes(self):
+        self.path.write_text('{"version":"2.0","flags":{}}', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "feature flag state schema"):
+            ProviderFeatureFlagManager(self.path)
+
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "flags": {
+                "job_queue": {
+                    "enabled": True, "rollout_percent": 100,
+                    "allow_projects": ["film-a", "film-a"],
+                    "deny_projects": [],
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "feature flag record"):
+            ProviderFeatureFlagManager(self.path)
 
     def test_flags_persist_and_invalid_values_fail_closed(self):
         self.manager.set_flag("new_router", enabled=True, rollout_percent=100)
