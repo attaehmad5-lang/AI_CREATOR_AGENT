@@ -351,6 +351,27 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(invalid["status"], "CREDENTIAL_EXPIRY_INVALID")
 
+    def test_invalid_credential_expiry_environment_name_is_rejected(self):
+        self.manager.catalog["providers"][1]["token_expiry_env"] = ["NOT", "A", "NAME"]
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        result = self.manager.credential_status(
+            "token_image",
+            {"TEST_PROVIDER_TOKEN": "secret-value"},
+        )
+        self.assertEqual(result["status"], "INVALID_ENVIRONMENT")
+        self.assertTrue(result["credential_present"])
+        self.assertNotIn("secret-value", repr(result))
+
+    def test_malformed_credential_expiry_environment_name_is_rejected(self):
+        self.manager.catalog["providers"][1]["token_expiry_env"] = "TOKEN=PRIVATE"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        result = self.manager.credential_status(
+            "token_image",
+            {"TEST_PROVIDER_TOKEN": "secret-value"},
+        )
+        self.assertEqual(result["status"], "INVALID_ENVIRONMENT")
+        self.assertNotIn("secret-value", repr(result))
+
     def test_credential_expiring_soon_is_flagged(self):
         from datetime import datetime, timedelta, timezone
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"
