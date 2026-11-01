@@ -215,6 +215,61 @@ class ProviderCreditManagerTests(unittest.TestCase):
         self.assertEqual(unverified["status"], "UNVERIFIED_CREDIT_BALANCE")
         self.assertEqual(self.manager.usable_free_credits(), {})
 
+    def test_credit_usage_ledger_capacity_preserves_idempotency_records(self):
+        manager = ProviderCreditManager(
+            self.path, clock=lambda: self.now[0], max_records=1
+        )
+        manager.refresh(
+            "image-provider",
+            lambda _: {
+                "verified": True, "free_credits_remaining": 10.0,
+                "unit": "USD", "source": "official-account-api",
+            },
+        )
+        first = manager.reserve(
+            provider_id="image-provider", amount=2.0,
+            request_id="credit-job-1", unit="USD",
+        )
+        second = manager.reserve(
+            provider_id="image-provider", amount=2.0,
+            request_id="credit-job-2", unit="USD",
+        )
+        duplicate = manager.reserve(
+            provider_id="image-provider", amount=2.0,
+            request_id="credit-job-1", unit="USD",
+        )
+        self.assertEqual(first["status"], "RESERVED")
+        self.assertEqual(second["status"], "CREDIT_USAGE_STATE_CAPACITY_REACHED")
+        self.assertEqual(duplicate["status"], "ALREADY_RESERVED")
+        self.assertEqual(list(manager.data["reservations"]), ["credit-job-1"])
+
+    def test_credit_state_above_configured_capacity_fails_closed(self):
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "providers": {},
+            "reservations": {},
+            "usage": {
+                "credit-job-1": {
+                    "provider_id": "image-provider",
+                    "amount": 1.0,
+                    "unit": "USD",
+                    "committed_at": self.now[0].isoformat(),
+                    "snapshot_version": 1,
+                },
+                "credit-job-2": {
+                    "provider_id": "image-provider",
+                    "amount": 1.0,
+                    "unit": "USD",
+                    "committed_at": self.now[0].isoformat(),
+                    "snapshot_version": 1,
+                },
+            },
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "exceeds configured record limit"):
+            ProviderCreditManager(
+                self.path, clock=lambda: self.now[0], max_records=1
+            )
+
     def test_invalid_credit_amount_source_and_timestamp_are_rejected(self):
         cases = [
             {"verified": True, "free_credits_remaining": float("nan"), "source": "api"},
