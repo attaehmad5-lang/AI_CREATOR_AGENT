@@ -57,6 +57,8 @@ Use the canonical manager for provider registration, catalog validation, enable/
 
 Use the configuration lifecycle manager for version-validated candidate reload, explicitly registered schema migrations and rollback to a validated prior configuration. A failed migration write must preserve the original bytes and clean up its temporary file.
 
+Use migrate_file(..., dry_run=True) to preview the validated target configuration and migration step count without writing the source file, creating a backup or changing the active generation. The default remains mutating for backwards compatibility; pass dry_run=True explicitly for preview behavior.
+
 ## Routing simulation
 
 The route planner supports an explicit side-effect-free preview:
