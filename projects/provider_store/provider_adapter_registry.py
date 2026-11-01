@@ -249,6 +249,14 @@ class ProviderAdapterRegistry:
             provider_id, modality=modality, model_id=model_id
         ).get("adapter")
         session = opened["session"]
+        if not callable(adapter):
+            session.cancel(reason="STREAMING_ADAPTER_UNAVAILABLE")
+            return {
+                "status": "STREAMING_ADAPTER_UNAVAILABLE",
+                "executed": False,
+                "started": False,
+                "reservations_retained": True,
+            }
         try:
             chunks = adapter(
                 provider_id=provider_id,
