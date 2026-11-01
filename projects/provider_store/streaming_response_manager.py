@@ -91,7 +91,8 @@ class ProviderStreamSession:
             return {"status": "INVALID_CHUNK", "accepted": False}
         digest = hashlib.sha256(payload).hexdigest()
         with self._lock:
-            if self._expire_if_needed(self._read_clock()):
+            now = self._read_clock()
+            if self._expire_if_needed(now):
                 return {"status": "STREAM_TIMED_OUT", "accepted": False}
             if self._state != "OPEN":
                 return {"status": "STREAM_NOT_OPEN", "accepted": False, "state": self._state}
@@ -110,7 +111,7 @@ class ProviderStreamSession:
             self._chunks.append(payload)
             self._digests.append(digest)
             self._total_bytes += len(payload)
-            self._last_activity = self._read_clock()
+            self._last_activity = now
             return {
                 "status": "CHUNK_ACCEPTED", "accepted": True,
                 "sequence": sequence, "chunk_bytes": len(payload),
@@ -119,11 +120,12 @@ class ProviderStreamSession:
 
     def heartbeat(self) -> dict[str, Any]:
         with self._lock:
-            if self._expire_if_needed(self._read_clock()):
+            now = self._read_clock()
+            if self._expire_if_needed(now):
                 return {"status": "STREAM_TIMED_OUT", "state": self._state}
             if self._state != "OPEN":
                 return {"status": "STREAM_NOT_OPEN", "state": self._state}
-            self._last_activity = self._read_clock()
+            self._last_activity = now
             return {"status": "HEARTBEAT_ACCEPTED", "state": self._state}
 
     def finish(self) -> dict[str, Any]:
@@ -155,9 +157,10 @@ class ProviderStreamSession:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            self._expire_if_needed(self._read_clock())
+            now = self._read_clock()
+            self._expire_if_needed(now)
             return {
                 "request_id": self.request_id, "state": self._state,
                 "chunk_count": len(self._chunks), "total_bytes": self._total_bytes,
-                "age_seconds": max(0.0, self._read_clock() - self._created_at),
+                "age_seconds": max(0.0, now - self._created_at),
             }
