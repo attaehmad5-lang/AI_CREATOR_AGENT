@@ -130,9 +130,11 @@ Sequences must be contiguous from zero. Identical repeated chunks are idempotent
 | oauth_pkce_manager.py | OAuth authorization-code PKCE, expiring state and in-memory token handling |
 | routing_manager.py | Policy-aware provider/model selection, fallback and reservation checks |
 | cost_policy.py | Paid approval, budget reservations, pricing-estimate integration and idempotent usage reconciliation |
-| pricing_catalog.py | Atomic source-attributed provider/model pricing updates and date-aware unit cost estimates |\n| credit_manager.py | Verified credit snapshots and local reserve/commit/release |
+| pricing_catalog.py | Atomic source-attributed provider/model pricing updates and date-aware unit cost estimates |
+| credit_manager.py | Verified credit snapshots and local reserve/commit/release |
 | quota_manager.py | UTC quota windows and request reservation lifecycle |
 | provider_job_manager.py | Bounded asynchronous job queue, ownership, polling, cancellation and recovery |
+| streaming_response_manager.py | Bounded, ordered, cancellable in-memory provider stream sessions |
 | health_manager.py | Health history, active probes, eligibility and recovery |
 | health_scheduler.py | Poll-driven bounded health scheduling; the application owns the polling loop |
 | provider_outage_detector.py | Deduplicated outage incidents and recovery resolution |
@@ -142,6 +144,10 @@ Sequences must be contiguous from zero. Identical repeated chunks are idempotent
 | media_integrity_validator.py | Modality-specific structural integrity checks |
 | provider_error_policy.py | Normalized safe provider error outcomes |
 | provider_webhook_verifier.py | Bounded HMAC signature, timestamp and replay verification |
+
+## Performance benchmark scope
+
+`run_benchmark` measures offline catalog-integrity validation. `run_stream_benchmark` measures bounded in-memory stream assembly, including chunk validation and final digest generation. Both are reproducible local benchmarks with explicit iteration, worker, payload and time limits. Neither represents provider network throughput, codec performance, end-to-end generation latency or production capacity.
 
 ## Safety and compatibility notes
 
