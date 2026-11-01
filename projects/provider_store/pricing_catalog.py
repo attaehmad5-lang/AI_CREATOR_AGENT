@@ -14,8 +14,8 @@ from typing import Any
 from .safe_numbers import finite_number
 
 
-_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\\Z")
-_CURRENCY = re.compile(r"[A-Z]{3}\\Z")
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_CURRENCY = re.compile(r"[A-Z]{3}\Z")
 _MODALITIES = {"image", "audio", "video", "text", "document"}
 _UNITS = {"request", "image", "second", "minute", "1k_tokens", "megapixel", "audio_minute", "video_second"}
 _SECRET_MARKERS = ("api_key", "token", "password", "secret", "credential", "authorization", "bearer")
@@ -80,7 +80,10 @@ class PricingCatalog:
         for key in ("price_id", "provider_id", "model_id"):
             if not isinstance(record.get(key), str) or not _ID.fullmatch(record[key]):
                 return False
-        if record["modality"] not in _MODALITIES or record["pricing_unit"] not in _UNITS:
+        if (
+            not isinstance(record["modality"], str) or record["modality"] not in _MODALITIES
+            or not isinstance(record["pricing_unit"], str) or record["pricing_unit"] not in _UNITS
+        ):
             return False
         if finite_number(record["unit_price"], minimum=0) is None:
             return False
@@ -108,10 +111,26 @@ class PricingCatalog:
         if not self.path.exists():
             self._prices = []
             return {"status": "PRICING_CATALOG_EMPTY", "count": 0}
+        if self.path.is_symlink():
+            self._prices = []
+            return {"status": "PRICING_CATALOG_INVALID", "count": 0}
         try:
+            if self.path.stat().st_size > 16_000_000:
+                self._prices = []
+                return {"status": "PRICING_CATALOG_INVALID", "count": 0}
+            def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                result: dict[str, Any] = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("duplicate pricing catalog key")
+                    result[key] = value
+                return result
             with self.path.open("r", encoding="utf-8") as stream:
-                data = json.load(stream)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+                data = json.load(
+                    stream, object_pairs_hook=reject_duplicate_keys,
+                    parse_constant=lambda _value: (_ for _ in ()).throw(ValueError("invalid constant")),
+                )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
             self._prices = []
             return {"status": "PRICING_CATALOG_INVALID", "count": 0}
         if not isinstance(data, dict) or data.get("version") != "1.0" or not isinstance(data.get("prices"), list):
@@ -135,7 +154,7 @@ class PricingCatalog:
         for value in (provider_id, model_id):
             if value is not None and (not isinstance(value, str) or not _ID.fullmatch(value)):
                 return {"status": "INVALID_FILTER", "prices": [], "count": 0}
-        if modality is not None and modality not in _MODALITIES:
+        if modality is not None and (not isinstance(modality, str) or modality not in _MODALITIES):
             return {"status": "INVALID_FILTER", "prices": [], "count": 0}
         items = [
             dict(item) for item in self._prices
@@ -153,7 +172,7 @@ class PricingCatalog:
         if (
             not isinstance(provider_id, str) or not _ID.fullmatch(provider_id)
             or not isinstance(model_id, str) or not _ID.fullmatch(model_id)
-            or modality not in _MODALITIES
+            or not isinstance(modality, str) or modality not in _MODALITIES
             or not isinstance(currency, str) or not _CURRENCY.fullmatch(currency)
             or finite_number(units, minimum=0) is None or units <= 0
         ):
