@@ -351,6 +351,14 @@ class ConnectionManagerTests(unittest.TestCase):
         )
         self.assertEqual(invalid["status"], "CREDENTIAL_EXPIRY_INVALID")
 
+    def test_invalid_credential_expiry_environment_name_is_rejected(self):
+        for invalid_name in (["NOT", "A", "NAME"], "TOKEN=PRIVATE"):
+            catalog = json.loads(json.dumps(self.manager.catalog))
+            catalog["providers"][1]["token_expiry_env"] = invalid_name
+            result = self.manager.validate_catalog_schema(catalog)
+            self.assertFalse(result["valid"])
+            self.assertTrue(any("token_expiry_env" in error for error in result["errors"]))
+
     def test_credential_expiring_soon_is_flagged(self):
         from datetime import datetime, timedelta, timezone
         self.manager.catalog["providers"][1]["token_expiry_env"] = "TEST_PROVIDER_TOKEN_EXPIRES"

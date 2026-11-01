@@ -1706,6 +1706,16 @@ class ConnectionManager:
                 "credential_name": token_env,
             }
         expiry_env = provider.get("token_expiry_env")
+        if expiry_env is not None and (
+            not isinstance(expiry_env, str)
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", expiry_env)
+        ):
+            return {
+                "provider": provider_id,
+                "status": "INVALID_ENVIRONMENT",
+                "credential_present": True,
+                "credential_name": token_env,
+            }
         if expiry_env:
             expiry_value = env.get(expiry_env)
             raw_expiry = expiry_value.strip() if isinstance(expiry_value, str) else ""
