@@ -38,6 +38,35 @@ class _Opener:
 
 
 class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
+    def test_response_cleanup_failure_does_not_mask_successful_probe(self):
+        class Response:
+            status = 204
+
+            def read(self, limit):
+                return b""
+
+            @property
+            def close(self):
+                raise RuntimeError("cleanup failure")
+
+        class Opener:
+            def open(self, request, timeout):
+                return Response()
+
+        probe = ProviderHTTPConnectivityProbe(
+            environ={},
+            opener=Opener(),
+        )
+        result = probe(
+            {
+                "id": "public_image",
+                "auth_type": "NONE",
+                "allowed_hosts": ["provider.example"],
+                "configuration": {"endpoint": "https://provider.example/health"},
+            }
+        )
+        self.assertEqual(result, {"ok": True, "http_status": 204})
+
     def test_public_https_probe_uses_timeout_and_bounds_response_read(self):
         opener = _Opener(_Response(body=b"x" * 5000))
         probe = ProviderHTTPConnectivityProbe(opener=opener, max_response_bytes=16)
