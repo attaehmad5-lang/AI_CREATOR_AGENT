@@ -31,9 +31,15 @@ _PRINCIPAL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}")
 class ProviderAuthorizationManager:
     """Persist explicit role assignments and deny unknown identities/operations."""
 
-    def __init__(self, state_path: str | os.PathLike[str], *, clock: Any = None) -> None:
+    def __init__(
+        self, state_path: str | os.PathLike[str], *, clock: Any = None,
+        max_principals: int = 10_000,
+    ) -> None:
+        if isinstance(max_principals, bool) or not isinstance(max_principals, int) or not 1 <= max_principals <= 100_000:
+            raise ValueError("max_principals must be within 1..100000")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
+        self.max_principals = max_principals
         self.state_path = Path(state_path)
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
@@ -54,8 +60,13 @@ class ProviderAuthorizationManager:
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValueError("invalid authorization state JSON") from exc
         principals = loaded.get("principals") if isinstance(loaded, dict) else None
-        if not isinstance(principals, dict):
-            raise ValueError("invalid authorization state schema")
+        if (
+            not isinstance(loaded, dict)
+            or loaded.get("version") != "1.0"
+            or not isinstance(principals, dict)
+            or len(principals) > self.max_principals
+        ):
+            raise ValueError("invalid authorization state schema or principal capacity")
         for principal_id, record in principals.items():
             if (
                 not self._valid_principal(principal_id)
@@ -65,6 +76,10 @@ class ProviderAuthorizationManager:
                 or not isinstance(record.get("updated_at"), str)
             ):
                 raise ValueError("invalid principal authorization record")
+            try:
+                datetime.fromisoformat(record["updated_at"])
+            except ValueError as exc:
+                raise ValueError("invalid principal authorization timestamp") from exc
         self.data = loaded
 
     @contextmanager
@@ -103,6 +118,8 @@ class ProviderAuthorizationManager:
         if not isinstance(enabled, bool):
             return {"status": "INVALID_ENABLED_FLAG", "saved": False}
         with self._transaction():
+            if principal_id not in self.data["principals"] and len(self.data["principals"]) >= self.max_principals:
+                return {"status": "PRINCIPAL_CAPACITY_REACHED", "saved": False}
             self.data["principals"][principal_id] = {
                 "role": role,
                 "enabled": enabled,
