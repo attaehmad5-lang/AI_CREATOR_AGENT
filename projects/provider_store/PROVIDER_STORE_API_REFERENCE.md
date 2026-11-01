@@ -105,6 +105,12 @@ Use catalog.upsert_price(record) to add or replace one fully validated price rec
 
 A returned estimate is not an invoice, live quote, account balance or guarantee of provider billing. evaluate_priced_request passes the estimate into the existing project-budget and explicit paid-approval gate. Do not populate the catalog with guessed prices; use provider-published sources and record when they were verified.
 
+## Cross-manager state reconciliation
+
+`ProviderStoreReconciliationManager` compares in-memory validated snapshots from the job, quota, credit and cost managers. It reports request-provider/project mismatches and terminal jobs that still have active quota, credit or cost reservations. Cost and credit reservation states are inferred from their ledger location because those records do not duplicate a status field.
+
+The inspection is strictly read-only: it never releases or commits reservations. A terminal-job reservation finding is routed to manual billing/usage review because an upstream provider may have charged even when local execution failed. Refresh each manager from its persisted store before inspection; the comparison is not a distributed transaction or an atomic snapshot across files/devices.
+
 ## Bounded streaming response sessions
 
 Use `ProviderStreamSession` to validate and assemble chunks from an upstream streaming adapter. This class is an in-process stream-lifecycle primitive; it does not open network connections or imply that a provider/model supports streaming.
@@ -136,7 +142,7 @@ Register stream support explicitly with `ProviderAdapterRegistry.register(..., s
 | credit_manager.py | Verified credit snapshots and local reserve/commit/release |
 | quota_manager.py | UTC quota windows and request reservation lifecycle |
 | provider_job_manager.py | Bounded asynchronous job queue, ownership, polling, cancellation and recovery |
-| streaming_response_manager.py | Bounded, ordered, cancellable in-memory provider stream sessions |
+| streaming_response_manager.py | Bounded, ordered, cancellable in-memory provider stream sessions |\n| state_reconciliation_manager.py | Read-only job/quota/credit/cost ledger consistency diagnostics |
 | health_manager.py | Health history, active probes, eligibility and recovery |
 | health_scheduler.py | Poll-driven bounded health scheduling; the application owns the polling loop |
 | provider_outage_detector.py | Deduplicated outage incidents and recovery resolution |
