@@ -258,6 +258,61 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         self.assertNotIn("partial-private-payload", json.dumps(result))
         self.assertNotIn("vendor connection dropped", json.dumps(result))
 
+    def test_execute_stream_runs_incremental_chunk_validator_before_commit(self):
+        seen = []
+        self.registry.register(
+            "test-image", lambda **kwargs: iter((b"safe-prefix", b"unsafe-tail")),
+            modalities=("image",), streaming_modalities=("image",),
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+
+        def validate(modality, sequence, payload):
+            seen.append((modality, sequence, payload))
+            return sequence == 0
+
+        result = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-chunk-validation",
+            chunk_validator=validate,
+        )
+        self.assertEqual(result["status"], "STREAM_CHUNK_VALIDATION_FAILED")
+        self.assertTrue(result["started"])
+        self.assertFalse(result["outcome_known"])
+        self.assertTrue(result["reservations_retained"])
+        self.assertEqual(seen, [
+            ("image", 0, b"safe-prefix"),
+            ("image", 1, b"unsafe-tail"),
+        ])
+
+    def test_execute_stream_sanitizes_chunk_validator_exceptions_and_rejects_invalid_validator(self):
+        self.registry.register(
+            "test-image", lambda **kwargs: iter((b"payload",)),
+            modalities=("image",), streaming_modalities=("image",),
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        invalid = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-invalid-validator",
+            chunk_validator="not-callable",
+        )
+        self.assertEqual(invalid["status"], "INVALID_CHUNK_VALIDATOR")
+        self.assertFalse(invalid["started"])
+
+        def broken_validator(modality, sequence, payload):
+            raise RuntimeError("private validator detail")
+
+        failed = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-validator-error",
+            chunk_validator=broken_validator,
+        )
+        self.assertEqual(failed["status"], "STREAM_CHUNK_VALIDATION_ERROR")
+        self.assertTrue(failed["started"])
+        self.assertTrue(failed["reservations_retained"])
+        self.assertEqual(failed["error_type"], "RuntimeError")
+        self.assertNotIn("private validator detail", json.dumps(failed))
+
     def test_execute_stream_enforces_session_limits_and_invalid_adapter_shape(self):
         self.registry.register(
             "test-image", lambda **kwargs: iter((b"123", b"456")),
