@@ -1423,6 +1423,66 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["output"]["valid"])
         self.assertNotEqual(result["status"], "EXECUTION_SUCCEEDED")
 
+    def test_quality_scorer_exception_fails_closed_after_valid_output(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        quality = ProviderOutputQualityPolicy(
+            lambda path, **kwargs: (_ for _ in ()).throw(RuntimeError("private scorer detail"))
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota, quality_policy=quality,
+        )
+        output_path = self.root / "scorer-error.png"
+        output_path.write_bytes(valid_test_png())
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="quality-scorer-error",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 5.0,
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "OUTPUT_QUALITY_FAILED")
+        self.assertEqual(result["quality"]["status"], "QUALITY_SCORING_FAILED")
+        self.assertNotIn("private scorer detail", repr(result))
+        self.assertTrue(result["output"]["valid"])
+
+    def test_malformed_quality_policy_response_fails_closed(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+
+        class MalformedQualityPolicy:
+            def evaluate(self, *args, **kwargs):
+                return {"allowed": "true", "status": "pretend accepted"}
+
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota,
+            quality_policy=MalformedQualityPolicy(),
+        )
+        output_path = self.root / "malformed-quality.png"
+        output_path.write_bytes(valid_test_png())
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="malformed-quality-result",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 5.0,
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "OUTPUT_QUALITY_FAILED")
+        self.assertEqual(result["quality"]["status"], "pretend accepted")
+        self.assertNotEqual(result["status"], "EXECUTION_SUCCEEDED")
+
     def test_execution_records_provider_model_benchmark_sample(self):
         outer = self
 
