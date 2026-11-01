@@ -117,6 +117,7 @@ class MediaIntegrityValidator:
             metadata: dict[str, Any] = {}
             if moov is not None:
                 child_offset, child_bytes, _ = moov
+                found_movie_header = False
                 child_end = child_offset + child_bytes
                 children = 0
                 while child_offset < child_end:
@@ -141,6 +142,9 @@ class MediaIntegrityValidator:
                     if child_size < child_header_size or child_size > child_end - child_offset:
                         return {"valid": False, "status": "MP4_MOVIE_BOX_SIZE_INVALID", "size_bytes": size}
                     if child_type == b"mvhd":
+                        if found_movie_header:
+                            return {"valid": False, "status": "MP4_DUPLICATE_MOVIE_HEADER", "size_bytes": size}
+                        found_movie_header = True
                         payload_size = child_size - child_header_size
                         if payload_size < 20:
                             return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
@@ -172,6 +176,8 @@ class MediaIntegrityValidator:
                         metadata = {"duration_seconds": duration, "timescale": timescale}
                         break
                     child_offset += child_size
+                if not found_movie_header:
+                    return {"valid": False, "status": "MP4_MOVIE_HEADER_MISSING", "size_bytes": size}
         return {
             "valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "MP4",
             "boxes": boxes, "size_bytes": size, **metadata,
