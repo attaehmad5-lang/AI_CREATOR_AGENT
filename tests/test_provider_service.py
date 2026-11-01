@@ -31,6 +31,17 @@ from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryBudget, RetryPolicy
 
 
+
+
+def valid_test_png():
+    return (
+        b"\\x89PNG\\r\\n\\x1a\\n"
+        + (13).to_bytes(4, "big") + b"IHDR"
+        + (2).to_bytes(4, "big") + (3).to_bytes(4, "big")
+        + bytes((8, 2, 0, 0, 0))
+    )
+
+
 class ProviderServiceTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
