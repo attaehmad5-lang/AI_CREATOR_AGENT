@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import unicodedata
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -114,7 +115,8 @@ class ProviderJSONBalanceProbe:
             return {"status": "INVALID_PROVIDER", "verified": False}
         token = self.environ.get(self.token_env)
         if not isinstance(token, str) or not token.strip() or len(token) > 16384 or any(
-            ord(char) < 32 or ord(char) == 127 for char in token
+            unicodedata.category(char) == "Cc" or char in "\\u2028\\u2029"
+            for char in token
         ):
             return {"status": "CREDENTIAL_MISSING_OR_INVALID", "provider": provider_id, "verified": False}
         headers = {"Accept": "application/json", "User-Agent": "AI_CREATOR_AGENT-BalanceProbe/1.0"}
@@ -165,8 +167,23 @@ class ProviderJSONBalanceProbe:
                 return {"status": "BALANCE_RESPONSE_READ_FAILED", "provider": provider_id, "verified": False, "error_type": type(exc).__name__}
             if not isinstance(body, bytes) or len(body) > self.max_response_bytes:
                 return {"status": "BALANCE_RESPONSE_TOO_LARGE", "provider": provider_id, "verified": False}
+            def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                result: dict[str, Any] = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("duplicate JSON key")
+                    result[key] = value
+                return result
+
+            def reject_nonstandard_constant(token_value: str) -> None:
+                raise ValueError("non-standard JSON constant")
+
             try:
-                data = json.loads(body.decode("utf-8"))
+                data = json.loads(
+                    body.decode("utf-8"),
+                    object_pairs_hook=reject_duplicate_keys,
+                    parse_constant=reject_nonstandard_constant,
+                )
             except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
                 return {"status": "BALANCE_RESPONSE_INVALID", "provider": provider_id, "verified": False}
             if not isinstance(data, dict) or self.balance_field not in data:
