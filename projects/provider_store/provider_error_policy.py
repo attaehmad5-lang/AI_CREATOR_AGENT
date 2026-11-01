@@ -43,7 +43,10 @@ def _normalize_code(value: Any) -> str | None:
 def _retry_after(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    seconds = float(value)
+    try:
+        seconds = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
     if not math.isfinite(seconds) or seconds < 0:
         return None
     return min(seconds, 300.0)
