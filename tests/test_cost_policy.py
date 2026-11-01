@@ -465,6 +465,55 @@ class ProviderCostPolicyTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     ProviderCostPolicy(project_budgets=budgets)
 
+    def test_usage_ledger_capacity_preserves_reservation_idempotency(self):
+        policy = ProviderCostPolicy(project_budgets={"film": 10.0}, max_records=1)
+        first = policy.reserve_usage(
+            project_id="film", provider_id="primary",
+            estimated_cost=1.0, request_id="job-1",
+        )
+        full = policy.reserve_usage(
+            project_id="film", provider_id="primary",
+            estimated_cost=1.0, request_id="job-2",
+        )
+        duplicate = policy.reserve_usage(
+            project_id="film", provider_id="primary",
+            estimated_cost=1.0, request_id="job-1",
+        )
+        self.assertEqual(first["status"], "RESERVED")
+        self.assertEqual(full["status"], "USAGE_LEDGER_CAPACITY_REACHED")
+        self.assertEqual(duplicate["status"], "ALREADY_RESERVED")
+        self.assertEqual(
+            list(policy.ledger["projects"]["film"]["reservations"]), ["job-1"]
+        )
+
+    def test_usage_ledger_existing_records_above_configured_limit_fail_closed(self):
+        timestamp = datetime.now(timezone.utc).isoformat()
+        self.ledger.write_text(json.dumps({
+            "version": "1.0",
+            "projects": {
+                "film": {
+                    "actual_spend": 0.0,
+                    "requests": {},
+                    "reservations": {
+                        "job-1": {
+                            "provider_id": "primary",
+                            "estimated_cost": 1.0,
+                            "reserved_at": timestamp,
+                        },
+                        "job-2": {
+                            "provider_id": "primary",
+                            "estimated_cost": 1.0,
+                            "reserved_at": timestamp,
+                        },
+                    },
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "exceeds configured record limit"):
+            ProviderCostPolicy(
+                self.ledger, project_budgets={"film": 10.0}, max_records=1
+            )
+
     def test_corrupt_ledger_rejects_request_present_as_reserved_and_finalized(self):
         timestamp = datetime.now(timezone.utc).isoformat()
         self.ledger.write_text(json.dumps({
