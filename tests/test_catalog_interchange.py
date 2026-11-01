@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ProcessPoolExecutor
 import os
 import tempfile
 import unittest
@@ -19,6 +20,11 @@ from projects.provider_store.catalog_interchange import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CATALOG = REPO_ROOT / "projects" / "provider_store" / "provider_catalog.json"
+
+
+def _create_catalog_snapshot_in_process(args):
+    source, history = args
+    return create_catalog_snapshot(source, history)["snapshot"]
 
 
 class CatalogInterchangeTests(unittest.TestCase):
@@ -209,6 +215,23 @@ class CatalogInterchangeTests(unittest.TestCase):
             json.loads(self.source.read_text(encoding="utf-8")),
         )
         self.assertTrue(Path(str(target) + ".bak").is_file())
+
+    def test_concurrent_process_snapshot_creation_allocates_unique_valid_files(self):
+        history = self.root / "concurrent-history"
+        with ProcessPoolExecutor(max_workers=6) as pool:
+            names = list(pool.map(
+                _create_catalog_snapshot_in_process,
+                [(str(self.source), str(history)) for _ in range(24)],
+            ))
+        self.assertEqual(len(names), 24)
+        self.assertEqual(len(set(names)), 24)
+        listed = list_catalog_snapshots(history)
+        self.assertEqual(listed["status"], "CATALOG_SNAPSHOTS_AVAILABLE")
+        self.assertEqual(len(listed["snapshots"]), 24)
+        self.assertTrue(all(
+            (history / name).is_file() and not (history / name).is_symlink()
+            for name in names
+        ))
 
     def test_snapshot_listing_ignores_invalid_files_and_empty_history_is_safe(self):
         history = self.root / "history"
