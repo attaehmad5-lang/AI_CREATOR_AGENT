@@ -84,6 +84,19 @@ class ProviderFeatureFlagManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "feature flag record"):
             ProviderFeatureFlagManager(self.path)
 
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "flags": {
+                "job_queue": {
+                    "enabled": True, "rollout_percent": 100,
+                    "allow_projects": [{"nested": "unhashable"}],
+                    "deny_projects": [],
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "feature flag record"):
+            ProviderFeatureFlagManager(self.path)
+
     def test_flags_persist_and_invalid_values_fail_closed(self):
         self.manager.set_flag("new_router", enabled=True, rollout_percent=100)
         reloaded = ProviderFeatureFlagManager(self.path)
