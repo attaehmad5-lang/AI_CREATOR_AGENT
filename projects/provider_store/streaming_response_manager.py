@@ -66,6 +66,10 @@ class ProviderStreamSession:
             raise ValueError("stream clock must return a finite number") from None
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(numeric):
             raise ValueError("stream clock must return a finite number")
+        previous = getattr(self, "_last_clock_read", None)
+        if previous is not None and numeric < previous:
+            raise ValueError("stream clock must be monotonic")
+        self._last_clock_read = numeric
         return numeric
 
     def _expire_if_needed(self, now: float) -> bool:
