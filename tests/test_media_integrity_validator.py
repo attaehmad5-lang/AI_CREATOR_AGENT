@@ -58,7 +58,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
 
     def test_mp4_extracts_movie_duration_from_version_zero_mvhd(self):
         path = self.root / "duration.mp4"
-        mvhd_payload = b"\\x00\\x00\\x00\\x00" + (0).to_bytes(4, "big") * 2 + (1000).to_bytes(4, "big") + (12500).to_bytes(4, "big")
+        mvhd_payload = b"\x00\x00\x00\x00" + (0).to_bytes(4, "big") * 2 + (1000).to_bytes(4, "big") + (12500).to_bytes(4, "big")
         mvhd = (8 + len(mvhd_payload)).to_bytes(4, "big") + b"mvhd" + mvhd_payload
         moov = (8 + len(mvhd)).to_bytes(4, "big") + b"moov" + mvhd
         ftyp_body = b"isom0000"
@@ -75,7 +75,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
 
     def test_mp4_duration_limit_and_invalid_movie_header_fail_closed(self):
         path = self.root / "too-long.mp4"
-        mvhd_payload = b"\\x00\\x00\\x00\\x00" + (0).to_bytes(4, "big") * 2 + (1).to_bytes(4, "big") + (31).to_bytes(4, "big")
+        mvhd_payload = b"\x00\x00\x00\x00" + (0).to_bytes(4, "big") * 2 + (1).to_bytes(4, "big") + (31).to_bytes(4, "big")
         mvhd = (8 + len(mvhd_payload)).to_bytes(4, "big") + b"mvhd" + mvhd_payload
         moov = (8 + len(mvhd)).to_bytes(4, "big") + b"moov" + mvhd
         ftyp_body = b"isom0000"
@@ -99,7 +99,7 @@ class MediaIntegrityValidatorTests(unittest.TestCase):
         path = self.root / "large.mp4"
         boxes = (
             (b"ftyp", b"isom0000"),
-            (b"moov", b"metadata"),
+            (b"moov", (16).to_bytes(4, "big") + b"free" + b"metadata"),
             (b"mdat", b"x" * 1_000_000),
         )
         path.write_bytes(
