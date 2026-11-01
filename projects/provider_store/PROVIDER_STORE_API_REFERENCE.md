@@ -59,6 +59,12 @@ Use the configuration lifecycle manager for version-validated candidate reload, 
 
 Use migrate_file(..., dry_run=True) to preview the validated target configuration and migration step count without writing the source file, creating a backup or changing the active generation. The default remains mutating for backwards compatibility; pass dry_run=True explicitly for preview behavior.
 
+## Verified streaming adapter sessions
+
+`ProviderAdapterRegistry.open_stream_session(provider_id, modality=..., request_id=...)` creates a bounded `ProviderStreamSession` only after the provider is enabled, its connection is verified, and the registered adapter explicitly advertises streaming for the requested modality. The method validates request/session limits and returns a structured rejection without creating a session when the adapter gate fails.
+
+Opening a session is local state initialization only: it does not dispatch a vendor request, establish a network stream, or prove that a provider emitted data. Callers append ordered chunks, then finish or cancel the session; the accumulator enforces byte/chunk bounds, timeout, sequence integrity and output digest.
+
 ## Project routing policy store
 
 `ProviderProjectPolicyManager` persists validated per-project provider, model, capability, cost, health, fallback and data-residency constraints. Its JSON store rejects duplicate keys, non-standard JSON constants, oversized files and symlinked store paths before accepting policy data. Invalid or unreadable policy state is a hard error; routing revalidates policy objects at the decision boundary and fails closed.
