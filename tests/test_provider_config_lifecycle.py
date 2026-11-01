@@ -282,7 +282,7 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
 
         def fail_restore(source, destination):
             replacements["count"] += 1
-            if replacements["count"] == 1:
+            if replacements["count"] <= 2:
                 os.replace(source, destination)
                 return
             raise OSError("simulated rollback replacement failure")
