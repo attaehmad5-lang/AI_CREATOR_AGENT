@@ -1,0 +1,151 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from projects.provider_store.pricing_catalog import PricingCatalog
+
+
+class PricingCatalogTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp_dir.name) / "pricing.json"
+        self.records = [
+            {
+                "price_id": "image-standard-2026",
+                "provider_id": "provider-a",
+                "model_id": "image-v2",
+                "modality": "image",
+                "pricing_unit": "image",
+                "unit_price": 0.04,
+                "currency": "USD",
+                "effective_from": "2026-01-01",
+                "effective_to": "2026-12-31",
+                "source": "official-provider-pricing-page",
+                "verified_at": "2026-10-01T12:00:00+00:00",
+            },
+            {
+                "price_id": "text-token-2026",
+                "provider_id": "provider-a",
+                "model_id": "text-v3",
+                "modality": "text",
+                "pricing_unit": "1k_tokens",
+                "unit_price": 0.002,
+                "currency": "USD",
+                "effective_from": "2026-01-01",
+                "source": "official-provider-pricing-page",
+                "verified_at": "2026-10-01T12:00:00+00:00",
+            },
+        ]
+        self.write_catalog(self.records)
+        self.catalog = PricingCatalog(self.path)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def write_catalog(self, records):
+        self.path.write_text(
+            json.dumps({"version": "1.0", "prices": records}),
+            encoding="utf-8",
+        )
+
+    def test_exact_image_cost_estimate_is_source_attributed(self):
+        result = self.catalog.estimate(
+            provider_id="provider-a", model_id="image-v2",
+            modality="image", units=10, currency="USD",
+            as_of="2026-06-01",
+        )
+        self.assertEqual(result["status"], "COST_ESTIMATED")
+        self.assertEqual(result["estimated_cost"], 0.4)
+        self.assertEqual(result["source"], "official-provider-pricing-page")
+        self.assertFalse(result["billing_authoritative"])
+
+    def test_per_thousand_token_pricing_uses_correct_unit_scale(self):
+        result = self.catalog.estimate(
+            provider_id="provider-a", model_id="text-v3",
+            modality="text", units=1500, currency="USD",
+            as_of="2026-06-01",
+        )
+        self.assertEqual(result["estimated_cost"], 0.003)
+        self.assertEqual(result["pricing_unit"], "1k_tokens")
+
+    def test_effective_dates_and_currency_are_enforced(self):
+        expired = self.catalog.estimate(
+            provider_id="provider-a", model_id="image-v2",
+            modality="image", units=1, currency="USD",
+            as_of="2027-01-01",
+        )
+        wrong_currency = self.catalog.estimate(
+            provider_id="provider-a", model_id="image-v2",
+            modality="image", units=1, currency="EUR",
+            as_of="2026-06-01",
+        )
+        self.assertEqual(expired["status"], "PRICING_NOT_FOUND")
+        self.assertEqual(wrong_currency["status"], "PRICING_NOT_FOUND")
+
+    def test_overlapping_prices_are_reported_as_ambiguous(self):
+        duplicate = dict(self.records[0], price_id="image-standard-duplicate")
+        self.write_catalog(self.records + [duplicate])
+        catalog = PricingCatalog(self.path)
+        result = catalog.estimate(
+            provider_id="provider-a", model_id="image-v2",
+            modality="image", units=1, currency="USD",
+            as_of="2026-06-01",
+        )
+        self.assertEqual(result["status"], "PRICING_AMBIGUOUS")
+
+    def test_invalid_inputs_and_missing_prices_fail_closed(self):
+        self.assertEqual(self.catalog.estimate(
+            provider_id="provider-a", model_id="image-v2",
+            modality=[], units=1, currency="USD",
+        )["status"], "INVALID_ESTIMATE_INPUT")
+        self.assertEqual(self.catalog.estimate(
+            provider_id="provider-a", model_id="image-v2",
+            modality="image", units=0, currency="USD",
+        )["status"], "INVALID_ESTIMATE_INPUT")
+        self.assertEqual(self.catalog.estimate(
+            provider_id="provider-a", model_id="missing",
+            modality="image", units=1, currency="USD",
+        )["status"], "PRICING_NOT_FOUND")
+        self.assertEqual(self.catalog.estimate(
+            provider_id="provider-a", model_id="image-v2",
+            modality="image", units=1, currency="USD",
+            as_of="not-a-date",
+        )["status"], "INVALID_ESTIMATE_DATE")
+
+    def test_invalid_catalog_record_shapes_do_not_raise(self):
+        for patch in (
+            {"modality": []},
+            {"pricing_unit": {}},
+            {"currency": []},
+            {"unit_price": True},
+            {"provider_id": "../bad"},
+            {"api_key": "must-not-be-stored"},
+        ):
+            with self.subTest(patch=patch):
+                self.write_catalog([dict(self.records[0], **patch)])
+                result = PricingCatalog(self.path).list_prices()
+                self.assertEqual(result["status"], "PRICING_NOT_FOUND")
+
+    def test_duplicate_json_keys_are_rejected(self):
+        self.path.write_text(
+            '{"version":"1.0","version":"1.0","prices":[]}',
+            encoding="utf-8",
+        )
+        result = PricingCatalog(self.path).list_prices()
+        self.assertEqual(result["status"], "PRICING_NOT_FOUND")
+
+    def test_catalog_symlinks_are_rejected(self):
+        target = Path(self.temp_dir.name) / "target.json"
+        target.write_text('{"version":"1.0","prices":[]}', encoding="utf-8")
+        link = Path(self.temp_dir.name) / "link.json"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are unavailable")
+        result = PricingCatalog(link).list_prices()
+        self.assertEqual(result["status"], "PRICING_NOT_FOUND")
+
+
+if __name__ == "__main__":
+    unittest.main()
