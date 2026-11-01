@@ -144,13 +144,15 @@ class ProviderAdapterRegistry:
         self, provider_id: str, *, modality: str, model_id: str | None = None
     ) -> dict[str, Any]:
         """Resolve only adapters that explicitly advertise streaming for this modality."""
+        with self._lock:
+            entry = self._adapters.get(provider_id)
+        if entry is None:
+            return {"status": "ADAPTER_NOT_REGISTERED", "resolved": False}
+        if modality not in entry["streaming_modalities"]:
+            return {"status": "STREAMING_UNSUPPORTED", "resolved": False}
         resolved = self.resolve(provider_id, modality=modality, model_id=model_id)
         if resolved.get("resolved") is not True:
             return resolved
-        with self._lock:
-            entry = self._adapters.get(provider_id)
-        if entry is None or modality not in entry["streaming_modalities"]:
-            return {"status": "STREAMING_UNSUPPORTED", "resolved": False}
         return {
             "status": "STREAMING_ADAPTER_RESOLVED",
             "resolved": True,
