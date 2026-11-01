@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - task-25-provider-connection-manager
+      - advanced-provider-store-hardening-20261027
   pull_request:
     branches:
       - main
