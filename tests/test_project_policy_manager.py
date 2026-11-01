@@ -51,6 +51,7 @@ class ProviderProjectPolicyManagerTests(unittest.TestCase):
             "require_verified_connection": True,
         })
         self.assertTrue(result["saved"])
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["version"], "1.0")
         loaded = ProviderProjectPolicyManager(self.path).get_policy("film-project")
         self.assertEqual(loaded["status"], "PROJECT_POLICY_FOUND")
         self.assertEqual(loaded["policy"]["max_estimated_cost"], 2.5)
