@@ -27,6 +27,40 @@ class ProviderJobManagerTests(unittest.TestCase):
             payload_ref=f"payload:{job_id}", priority=priority,
         )
 
+    def test_job_history_capacity_preserves_terminal_idempotency_records(self):
+        limited = ProviderJobManager(
+            self.path, max_queue_size=2, max_concurrent=1,
+            max_job_records=1, clock=lambda: self.now[0],
+        )
+        first = limited.submit(
+            job_id="job-1", project_id="film", provider_id="image",
+            payload_ref="payload:job-1",
+        )
+        claimed = limited.claim_next(worker_id="worker-1")
+        completed = limited.complete(
+            job_id="job-1", worker_id="worker-1", success=True,
+            result_ref="asset:job-1",
+        )
+        second = limited.submit(
+            job_id="job-2", project_id="film", provider_id="image",
+            payload_ref="payload:job-2",
+        )
+        duplicate = limited.submit(
+            job_id="job-1", project_id="film", provider_id="image",
+            payload_ref="payload:job-1",
+        )
+        self.assertEqual(first["status"], "JOB_QUEUED")
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.assertEqual(completed["status"], "JOB_COMPLETED")
+        self.assertEqual(second["status"], "JOB_HISTORY_CAPACITY_REACHED")
+        self.assertEqual(duplicate["status"], "ALREADY_SUBMITTED")
+        self.assertEqual(len(limited.data["jobs"]), 1)
+
+    def test_job_store_rejects_unsupported_version(self):
+        self.path.write_text('{"version":"2.0","jobs":{}}', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "job state schema"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
     def test_queue_capacity_applies_backpressure_and_returns_retry_hint(self):
         self.assertTrue(self.submit("job-1")["accepted"])
         self.assertTrue(self.submit("job-2")["accepted"])
