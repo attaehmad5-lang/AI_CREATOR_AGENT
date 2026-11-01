@@ -80,7 +80,7 @@ Remaining work: Catalog/lifecycle foundations exist; individual acceptance cover
 Feature 012: Provider Adapter System
 Status: PARTIAL
 Implementation/evidence inspected: provider_adapter_registry.py; tests/test_provider_adapter_registry.py; provider_service.py; tests/test_provider_service.py; CI #40722792917
-Remaining work: Runtime adapter registration, modality/model allowlists, enabled+verified dispatch gates, routed-model propagation and safe ambiguous-outcome handling are covered by deterministic tests. Ubuntu/Windows CI #40722792917 passed 549 tests plus focused lint/type/coverage and release packaging gates. Vendor-specific generation adapters and authorized live API validation remain.
+Remaining work: Explicit streaming capability registration and verified resolve_streaming checks now supplement ordinary modality/model adapter routing; full CI #41317659544 passed on Python 3.10/3.11/3.12. Vendor-specific adapters and authorized live API checks remain.
 
 Feature 013: API Key Authentication
 Status: COMPLETED
@@ -280,7 +280,7 @@ Remaining work: Expired worker leases are requeued and jobs fail safely at the c
 Feature 052: Streaming Response Management
 Status: PARTIAL
 Implementation/evidence inspected: retry_policy.py; routing_manager.py; provider_job_manager.py; output_validator.py; media_integrity_validator.py; related tests
-Remaining work: A bounded, thread-safe stream session primitive now enforces chunk order, idempotency, backpressure limits, timeout, cancellation and final digest; nine focused tests including malformed Unicode and runtime clock edge cases and full Python 3.10/3.11/3.12 CI passed (#41317229283). Provider adapter/network integration, reconnect/resume and all-modality streaming remain.
+Remaining work: A bounded, thread-safe stream session primitive now enforces chunk order, idempotency, backpressure limits, timeout, cancellation and final digest; nine focused tests including malformed Unicode and runtime clock edge cases and full Python 3.10/3.11/3.12 CI passed (#41317229283). Provider registry now blocks streaming dispatch unless the adapter explicitly advertises that modality and the provider is enabled+verified. Vendor stream transport, reconnect/resume, incremental modality decoding and real-provider end-to-end tests remain.
 
 Feature 053: Request/Response Validation
 Status: COMPLETED
