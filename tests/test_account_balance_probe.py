@@ -162,6 +162,33 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
         self.assertNotIn("retry_after", result)
         self.assertNotIn("secret", repr(result))
 
+    def test_http_error_cleanup_failure_preserves_classified_balance_error(self):
+        class BrokenHTTPError(HTTPError):
+            def close(self):
+                raise RuntimeError("cleanup failure")
+
+        error = BrokenHTTPError(
+            "https://api.example.com/account/balance", 401,
+            "Unauthorized", {}, None,
+        )
+        result = self.make_probe(_Opener(error=error))("provider")
+        self.assertEqual(result["status"], "BALANCE_AUTH_FAILED")
+        self.assertEqual(result["http_status"], 401)
+        self.assertFalse(result["verified"])
+        self.assertNotIn("cleanup failure", repr(result))
+
+    def test_response_cleanup_failure_does_not_mask_verified_balance(self):
+        class BrokenCloseResponse(_Response):
+            @property
+            def close(self):
+                raise RuntimeError("cleanup failure")
+
+        response = BrokenCloseResponse({"totalBalance": 4.25})
+        result = self.make_probe(_Opener(response))("provider")
+        self.assertEqual(result["status"], "BALANCE_VERIFIED")
+        self.assertEqual(result["free_credits_remaining"], 4.25)
+        self.assertTrue(result["verified"])
+
     def test_redirects_and_invalid_provider_ids_are_not_followed(self):
         opener = _Opener(error=HTTPError(
             "https://api.example.com/account/balance", 302, "redirect", {}, None

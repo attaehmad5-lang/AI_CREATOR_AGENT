@@ -135,7 +135,10 @@ class ProviderJSONBalanceProbe:
                     retry_after = raw_retry_after
             except Exception:
                 retry_after = None
-            exc.close()
+            try:
+                exc.close()
+            except Exception:
+                pass
             result = {
                 "status": "BALANCE_AUTH_FAILED" if status in {401, 403} else "BALANCE_HTTP_ERROR",
                 "http_status": status if isinstance(status, int) and 100 <= status <= 599 else None,
@@ -189,6 +192,11 @@ class ProviderJSONBalanceProbe:
                 "source": self.source,
             }
         finally:
-            close = getattr(response, "close", None)
-            if callable(close):
-                close()
+            # Response cleanup is best-effort and must not mask a verified
+            # balance or a deliberately classified failure result.
+            try:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+            except Exception:
+                pass
