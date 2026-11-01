@@ -84,6 +84,12 @@ class ProviderJobManager:
                 or not isinstance(job.get("project_id"), str)
                 or not isinstance(job.get("provider_id"), str)
                 or not isinstance(job.get("payload_ref"), str)
+                or not isinstance(job.get("worker_id"), (str, type(None)))
+                or not isinstance(job.get("lease_token"), (str, type(None)))
+                or (
+                    job.get("lease_token") is not None
+                    and not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", job["lease_token"])
+                )
                 or isinstance(job.get("attempts"), bool)
                 or not isinstance(job.get("attempts"), int) or job["attempts"] < 0
                 or isinstance(job.get("priority"), bool)

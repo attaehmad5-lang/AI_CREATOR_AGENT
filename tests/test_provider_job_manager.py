@@ -27,6 +27,21 @@ class ProviderJobManagerTests(unittest.TestCase):
             payload_ref=f"payload:{job_id}", priority=priority,
         )
 
+    def test_persisted_running_job_requires_well_formed_lease_token(self):
+        self.submit("job-1")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["jobs"]["job-1"]["lease_token"] = "bad-token"
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "provider job record"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
+    def test_persisted_queued_job_accepts_null_lease_token(self):
+        self.submit("job-1")
+        reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertIsNone(reloaded.data["jobs"]["job-1"].get("lease_token"))
+
     def test_job_history_capacity_preserves_terminal_idempotency_records(self):
         limited = ProviderJobManager(
             self.path, max_queue_size=2, max_concurrent=1,
