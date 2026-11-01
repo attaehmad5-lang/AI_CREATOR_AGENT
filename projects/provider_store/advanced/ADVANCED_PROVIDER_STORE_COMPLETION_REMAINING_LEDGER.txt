@@ -260,7 +260,7 @@ Remaining work: Duplicate submissions are idempotent and conflicting reuse is re
 Feature 048: Idempotency Management
 Status: PARTIAL
 Implementation/evidence inspected: provider_job_manager.py; cost_policy.py; quota_manager.py; tests/
-Remaining work: Idempotency and duplicate/conflict protections exist in local ledgers; distributed cross-device guarantees are not provided.
+Remaining work: Cross-process same-key races prove exactly one reservation is created; duplicates remain idempotent and provider-mismatched reuse fails with REQUEST_ID_CONFLICT. CI #41316076007 passed on Python 3.10/3.11/3.12. Multi-host distributed consensus remains out of scope.
 
 Feature 049: Async Job Management
 Status: COMPLETED
@@ -360,7 +360,7 @@ Remaining work: Reservation/provider/estimate mismatch is rejected and actual-co
 Feature 068: Pricing Catalog
 Status: PARTIAL
 Implementation/evidence inspected: pricing_catalog.py; pricing_catalog.json; tests/test_pricing_catalog.py; tests/test_pricing_catalog_fuzz.py; cost_policy.py:evaluate_priced_request; CI #41315421000
-Remaining work: Catalog supports strict records and atomic cross-process upsert with source attribution, verification timestamps, currency/effective dates, exact model matching, unit-aware estimates and fail-closed ambiguity. Estimates integrate with project budget and paid-approval gates. CI #41315421000 passed on Python 3.10/3.11/3.12. The checked-in catalog remains empty until official current vendor prices are verified; no values are fabricated.
+Remaining work: Catalog supports strict records and atomic cross-process upsert with source attribution, verification timestamps, currency/effective dates, exact model matching, unit-aware estimates and fail-closed ambiguity. Estimates integrate with project budget and paid-approval gates. CI #41316076007 passed on Python 3.10/3.11/3.12; a 16-process concurrent upsert regression proves no lost pricing records. The checked-in catalog remains empty until official current vendor prices are verified; no values are fabricated.
 
 Feature 069: Budget Alerts
 Status: COMPLETED
