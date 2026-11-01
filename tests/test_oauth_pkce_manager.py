@@ -316,6 +316,14 @@ class ProviderOAuthPKCEManagerTests(unittest.TestCase):
             self.assertEqual(result["status"], expected)
             self.assertTrue(response.closed)
 
+    def test_clear_rejects_invalid_provider_ids_without_mutating_state(self):
+        for provider_id in (None, [], {}, "", "bad/provider"):
+            result = self.manager.clear(provider_id)
+            self.assertEqual(result["status"], "INVALID_PROVIDER")
+        self.assertEqual(self.manager._pending, {})
+        self.assertEqual(self.manager._tokens, {})
+        self.assertEqual(self.manager._generation, {})
+
     def test_clear_removes_in_memory_credentials(self):
         begun = self.begin()
         self.manager.exchange_code("provider", state=begun["state"], code="code")

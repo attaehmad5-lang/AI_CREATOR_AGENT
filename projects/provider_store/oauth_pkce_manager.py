@@ -470,6 +470,8 @@ class ProviderOAuthPKCEManager:
             }
 
     def clear(self, provider_id: str) -> dict[str, Any]:
+        if not self._safe_provider_id(provider_id):
+            return {"status": "INVALID_PROVIDER", "provider": None}
         with self._lock:
             if provider_id in self._refreshing or provider_id in self._exchanging:
                 return {"status": "CONNECTION_OPERATION_IN_PROGRESS", "provider": provider_id}
