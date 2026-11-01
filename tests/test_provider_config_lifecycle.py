@@ -89,6 +89,36 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertFalse(result["migrated"])
         self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["schema_version"], "1")
 
+    def test_file_migration_detects_concurrent_change_after_lock_acquisition(self):
+        from contextlib import contextmanager
+        from unittest.mock import patch
+
+        path = self.root / "provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        path.write_text(json.dumps(original), encoding="utf-8")
+
+        @contextmanager
+        def concurrent_writer(_lock_path):
+            changed = {"schema_version": "1", "providers": {"video": {}}}
+            path.write_text(json.dumps(changed), encoding="utf-8")
+            yield
+
+        with patch(
+            "projects.provider_store.provider_config_lifecycle.interprocess_file_lock",
+            side_effect=concurrent_writer,
+        ):
+            result = self.manager.migrate_file(
+                path, target_version="2", migrations={"1": migrate_v1_to_v2}
+            )
+
+        self.assertEqual(result["status"], "CONFIG_CHANGED_DURING_MIGRATION")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(
+            json.loads(path.read_text(encoding="utf-8"))["providers"],
+            {"video": {}},
+        )
+        self.assertFalse(Path(str(path) + ".bak").exists())
+
     def test_file_migration_creates_backup_and_writes_atomically(self):
         path = self.root / "provider-config.json"
         original = {"schema_version": "1", "providers": {"image": {}}}
