@@ -62,9 +62,9 @@ class ProviderFeatureFlagManager:
                 or not isinstance(flag.get("deny_projects"), list)
                 or len(flag["allow_projects"]) > self.max_projects_per_flag
                 or len(flag["deny_projects"]) > self.max_projects_per_flag
+                or any(not isinstance(p, str) or not _PROJECT_RE.fullmatch(p) for p in flag["allow_projects"] + flag["deny_projects"])
                 or len(set(flag["allow_projects"])) != len(flag["allow_projects"])
                 or len(set(flag["deny_projects"])) != len(flag["deny_projects"])
-                or any(not isinstance(p, str) or not _PROJECT_RE.fullmatch(p) for p in flag["allow_projects"] + flag["deny_projects"])
             ):
                 raise ValueError("invalid feature flag record")
         self.data = loaded
