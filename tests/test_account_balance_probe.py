@@ -94,7 +94,7 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
             ({}, "BALANCE_FIELD_MISSING"),
             ({"totalBalance": True}, "BALANCE_AMOUNT_INVALID"),
             ({"totalBalance": -1}, "BALANCE_AMOUNT_INVALID"),
-            ({"totalBalance": float("nan")}, "BALANCE_AMOUNT_INVALID"),
+            ({"totalBalance": float("nan")}, "BALANCE_RESPONSE_INVALID"),
             ({"totalBalance": "5.0"}, "BALANCE_AMOUNT_INVALID"),
             ({"totalBalance": 10**1000}, "BALANCE_AMOUNT_INVALID"),
         ]
@@ -103,6 +103,25 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
                 result = self.make_probe(_Opener(_Response(payload)))("provider")
                 self.assertEqual(result["status"], expected)
                 self.assertFalse(result["verified"])
+
+    def test_duplicate_json_keys_and_nonstandard_constants_are_rejected(self):
+        for body in (
+            b'{"totalBalance": 2, "totalBalance": 9}',
+            b'{"totalBalance": NaN}',
+            b'{"totalBalance": Infinity}',
+        ):
+            with self.subTest(body=body):
+                result = self.make_probe(_Opener(_Response(body)))("provider")
+                self.assertEqual(result["status"], "BALANCE_RESPONSE_INVALID")
+                self.assertFalse(result["verified"])
+
+    def test_unicode_control_and_line_separator_credentials_fail_before_network(self):
+        for secret in ("token\\u0085injected", "token\\u2028injected", "token\\u2029injected"):
+            with self.subTest(secret=repr(secret)):
+                opener = _Opener()
+                result = self.make_probe(opener, environ={"PROVIDER_TOKEN": secret})("provider")
+                self.assertEqual(result["status"], "CREDENTIAL_MISSING_OR_INVALID")
+                self.assertEqual(opener.calls, [])
 
     def test_untrusted_endpoint_and_ambiguous_balance_semantics_are_rejected(self):
         with self.assertRaises(ValueError):
