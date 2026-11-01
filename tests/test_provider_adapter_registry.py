@@ -71,6 +71,40 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         self.assertEqual(self.calls[0]["model_id"], "image-v1")
         self.assertEqual(self.calls[0]["prompt"], "test")
 
+    def test_streaming_requires_explicit_registered_capability_and_verified_provider(self):
+        registered = self.registry.register(
+            "test-image", self.adapter, modalities=("image",),
+            model_ids=("image-v1",), streaming_modalities=("image",),
+        )
+        self.assertTrue(registered["registered"])
+        self.assertEqual(
+            self.registry.resolve_streaming(
+                "test-image", modality="image", model_id="image-v1"
+            )["status"],
+            "PROVIDER_NOT_VERIFIED",
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        resolved = self.registry.resolve_streaming(
+            "test-image", modality="image", model_id="image-v1"
+        )
+        self.assertEqual(resolved["status"], "STREAMING_ADAPTER_RESOLVED")
+        self.assertIs(resolved["adapter"], self.adapter)
+
+    def test_streaming_capability_must_be_subset_of_registered_modalities(self):
+        result = self.registry.register(
+            "test-image", self.adapter, modalities=("image",),
+            streaming_modalities=("video",),
+        )
+        self.assertEqual(result["status"], "STREAMING_MODALITY_NOT_REGISTERED")
+        self.assertFalse(result["registered"])
+        invalid = self.registry.register(
+            "test-image", self.adapter, modalities=("image",),
+            streaming_modalities="image",
+        )
+        self.assertEqual(invalid["status"], "INVALID_STREAMING_MODALITIES")
+
     def test_disabled_provider_cannot_dispatch_even_if_adapter_is_registered(self):
         result = self.registry.register("disabled-image", self.adapter, modalities=("image",))
         self.assertTrue(result["registered"])
