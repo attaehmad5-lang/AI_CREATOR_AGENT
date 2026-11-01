@@ -2,7 +2,7 @@ import json
 import socket
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -571,7 +571,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         connection = _PinnedHTTPSConnection('api.example.com', timeout=3)
         raw_socket = object()
         tls_socket = object()
-        context = unittest.mock.Mock()
+        context = Mock()
         context.wrap_socket.return_value = tls_socket
         connection._context = context
         records = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('1.1.1.1', 443))]
