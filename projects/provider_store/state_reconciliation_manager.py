@@ -32,6 +32,14 @@ class ProviderStoreReconciliationManager:
             for manager, attribute, key in requirements
         ):
             raise ValueError("all managers must expose validated state mappings")
+        if not isinstance(credit_manager.data.get("usage"), dict):
+            raise ValueError("credit manager must expose validated usage mappings")
+        for project in cost_policy.ledger["projects"].values():
+            if not isinstance(project, dict) or any(
+                not isinstance(project.get(key, {}), dict)
+                for key in ("reservations", "requests")
+            ):
+                raise ValueError("cost policy must expose validated project ledgers")
         self.job_manager = job_manager
         self.quota_manager = quota_manager
         self.credit_manager = credit_manager
@@ -54,7 +62,7 @@ class ProviderStoreReconciliationManager:
             "status": record.get("status") or (
                 "RESERVED" if source in {"credit_reservation", "cost_reservation"} else None
             ),
-            "project_id": project_id,
+            "project_id": project_id if project_id is not None else record.get("project_id"),
         })
 
     def inspect(self) -> dict[str, Any]:
@@ -67,13 +75,13 @@ class ProviderStoreReconciliationManager:
         projects = self.cost_policy.ledger["projects"]
 
         for request_id, record in jobs.items():
-            self._add(index, request_id, "job", record)
+            self._add(index, request_id, "job", record, project_id=record.get("project_id") if isinstance(record, dict) else None)
         for request_id, record in quota.items():
-            self._add(index, request_id, "quota", record)
+            self._add(index, request_id, "quota", record, project_id=record.get("project_id") if isinstance(record, dict) else None)
         for request_id, record in credit.items():
-            self._add(index, request_id, "credit_reservation", record)
+            self._add(index, request_id, "credit_reservation", record, project_id=record.get("project_id") if isinstance(record, dict) else None)
         for request_id, record in credit_usage.items():
-            self._add(index, request_id, "credit_usage", record)
+            self._add(index, request_id, "credit_usage", record, project_id=record.get("project_id") if isinstance(record, dict) else None)
         for project_id, project in projects.items():
             if not isinstance(project_id, str) or not isinstance(project, dict):
                 continue
@@ -106,6 +114,17 @@ class ProviderStoreReconciliationManager:
                     "provider_ids": provider_ids,
                     "sources": [item["source"] for item in records],
                 })
+            project_ids = sorted({
+                item["project_id"] for item in records
+                if isinstance(item.get("project_id"), str) and item["project_id"]
+            })
+            if len(project_ids) > 1:
+                findings.append({
+                    "code": "REQUEST_PROJECT_MISMATCH",
+                    "request_id": request_id,
+                    "project_ids": project_ids,
+                    "sources": [item["source"] for item in records],
+                })
             if job and job.get("status") in terminal_job_states:
                 active = [
                     item for item in records
@@ -124,6 +143,7 @@ class ProviderStoreReconciliationManager:
                 "request_id": request_id,
                 "sources": [item["source"] for item in records],
                 "provider_ids": provider_ids,
+                "project_ids": project_ids,
                 "job_status": job.get("status") if job else None,
             })
 
