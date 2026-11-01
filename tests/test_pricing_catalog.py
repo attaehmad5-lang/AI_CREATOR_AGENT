@@ -127,6 +127,59 @@ class PricingCatalogTests(unittest.TestCase):
                 result = PricingCatalog(self.path).list_prices()
                 self.assertEqual(result["status"], "PRICING_NOT_FOUND")
 
+    def test_upsert_atomically_adds_and_replaces_valid_price_records(self):
+        record = dict(self.records[0], price_id="managed-price")
+        saved = self.catalog.upsert_price(record)
+        self.assertEqual(saved["status"], "PRICE_SAVED")
+        self.assertTrue(saved["saved"])
+        self.assertEqual(saved["count"], 3)
+
+        replacement = dict(record, unit_price=0.05)
+        updated = self.catalog.upsert_price(replacement)
+        self.assertEqual(updated["status"], "PRICE_SAVED")
+        self.assertEqual(updated["count"], 3)
+        reloaded = PricingCatalog(self.path)
+        result = reloaded.estimate(
+            provider_id="provider-a", model_id="image-v2",
+            modality="image", units=2, currency="USD",
+            as_of="2026-06-01",
+        )
+        self.assertEqual(result["estimated_cost"], 0.1)
+
+    def test_upsert_rejects_invalid_record_and_preserves_existing_catalog(self):
+        original = self.path.read_bytes()
+        result = self.catalog.upsert_price(dict(self.records[0], unit_price=float("nan")))
+        self.assertEqual(result["status"], "INVALID_PRICE_RECORD")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.path.read_bytes(), original)
+
+    def test_upsert_atomic_write_failure_preserves_original_and_cleans_temp(self):
+        from unittest.mock import patch
+        original = self.path.read_bytes()
+        with patch(
+            "projects.provider_store.pricing_catalog.atomic_replace_with_retry",
+            side_effect=OSError("simulated replace failure"),
+        ):
+            result = self.catalog.upsert_price(
+                dict(self.records[0], price_id="write-failure-price")
+            )
+        self.assertEqual(result["status"], "PRICING_CATALOG_WRITE_FAILED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(list(self.root.glob(".pricing.json.*.tmp")), [])
+
+    def test_upsert_rejects_catalog_symlink_without_touching_target(self):
+        target = self.root / "protected-pricing.json"
+        target.write_bytes(self.path.read_bytes())
+        link = self.root / "linked-pricing.json"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are unavailable")
+        result = PricingCatalog(link).upsert_price(dict(self.records[0], price_id="nope"))
+        self.assertEqual(result["status"], "PRICING_CATALOG_SYMLINK_REJECTED")
+        self.assertEqual(target.read_bytes(), self.path.read_bytes())
+
     def test_duplicate_json_keys_are_rejected(self):
         self.path.write_text(
             '{"version":"1.0","version":"1.0","prices":[]}',
