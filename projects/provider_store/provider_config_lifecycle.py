@@ -11,7 +11,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Callable
 
-from .interprocess_lock import atomic_replace_with_retry
+from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 
 class ProviderConfigLifecycleManager:
@@ -181,7 +181,19 @@ class ProviderConfigLifecycleManager:
             dir=str(config_path.parent), text=True,
         )
         try:
-            shutil.copy2(config_path, backup_path)
+            with interprocess_file_lock(
+                config_path.with_name(config_path.name + ".migration.lock")
+            ):
+                # Re-read after acquiring the process lock so another cooperating
+                # migrator cannot silently overwrite a newer schema generation.
+                with config_path.open("r", encoding="utf-8") as stream:
+                    latest = json.load(stream)
+                if latest != original:
+                    return {
+                        "status": "CONFIG_CHANGED_DURING_MIGRATION",
+                        "migrated": False,
+                    }
+                shutil.copy2(config_path, backup_path)
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 fd = -1
                 json.dump(result["config"], stream, indent=2, ensure_ascii=False, allow_nan=False)
