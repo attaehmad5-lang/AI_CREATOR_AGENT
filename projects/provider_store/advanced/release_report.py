@@ -309,7 +309,7 @@ def write_release_artifacts(output_dir: Path, *, repo_root: Path | None = None) 
                 archived_data = zf.read(entry["path"])
                 if _sha256(archived_data) != entry["sha256"]:
                     raise ValueError(f"ZIP checksum mismatch for {entry['path']}")
-        with open(archive_temporary, "rb") as completed_archive:
+        with open(archive_temporary, "r+b") as completed_archive:
             os.fsync(completed_archive.fileno())
         if archive.is_symlink():
             raise ValueError("release archive destination must not be a symlink")
