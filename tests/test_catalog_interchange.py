@@ -226,7 +226,7 @@ class CatalogInterchangeTests(unittest.TestCase):
         self.assertEqual(len(names), 24)
         self.assertEqual(len(set(names)), 24)
         listed = list_catalog_snapshots(history)
-        self.assertEqual(listed["status"], "CATALOG_SNAPSHOTS_AVAILABLE")
+        self.assertEqual(listed["status"], "CATALOG_HISTORY_LISTED")
         self.assertEqual(len(listed["snapshots"]), 24)
         self.assertTrue(all(
             (history / name).is_file() and not (history / name).is_symlink()
