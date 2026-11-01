@@ -430,6 +430,8 @@ class ProviderCostPolicy:
                     return {"status": "CHARGE_OUTCOME_UNKNOWN", "saved": False, "request_id": request_id}
                 if charge_outcome == "incurred":
                     return {"status": "RECONCILIATION_REQUIRED", "saved": False, "request_id": request_id}
+                if existing_reservation is None and self._record_count() >= self.max_records:
+                    return {"status": "USAGE_LEDGER_CAPACITY_REACHED", "saved": False}
                 project = self.ledger["projects"].setdefault(
                     project_id, {"actual_spend": 0.0, "requests": {}, "reservations": {}}
                 )
