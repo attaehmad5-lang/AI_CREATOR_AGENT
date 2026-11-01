@@ -363,6 +363,40 @@ class ProviderAdapterRegistryTests(unittest.TestCase):
         self.assertEqual(result["status"], "STREAM_CHUNK_VALIDATION_FAILED")
         self.assertEqual(closed, [True])
 
+    def test_execute_stream_reports_iterator_close_failure_as_ambiguous(self):
+        class CloseFailureIterator:
+            def __init__(self):
+                self._done = False
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self._done:
+                    raise StopIteration
+                self._done = True
+                return b"complete-looking-payload"
+
+            def close(self):
+                raise RuntimeError("private close detail")
+
+        self.registry.register(
+            "test-image", lambda **kwargs: CloseFailureIterator(),
+            modalities=("image",), streaming_modalities=("image",),
+        )
+        self.manager.verify_connectivity(
+            "test-image", lambda provider, **kwargs: {"ok": True}
+        )
+        result = self.registry.execute_stream(
+            "test-image", modality="image", request_id="stream-close-failure",
+        )
+        self.assertEqual(result["status"], "ADAPTER_STREAM_OUTCOME_UNKNOWN")
+        self.assertTrue(result["started"])
+        self.assertFalse(result["outcome_known"])
+        self.assertTrue(result["reservations_retained"])
+        self.assertEqual(result["error_type"], "RuntimeError")
+        self.assertNotIn("private close detail", json.dumps(result))
+
     def test_execute_stream_enforces_session_limits_and_invalid_adapter_shape(self):
         self.registry.register(
             "test-image", lambda **kwargs: iter((b"123", b"456")),
