@@ -324,8 +324,8 @@ Remaining work: SHA-256 output hashes are produced and file growth/same-size mut
 
 Feature 061: Cost Estimation
 Status: PARTIAL
-Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
-Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+Implementation/evidence inspected: pricing_catalog.py; cost_policy.py; account_balance_probe.py; focused pricing, cost-policy and balance-probe tests; CI #41314260671
+Remaining work: Source-attributed price catalog estimates now pass through project budget and paid-approval gates; account-balance response parsing rejects duplicate keys, non-standard constants and Unicode control credentials. CI #41314260671 passed on Python 3.10/3.11/3.12. Provider-specific verified price data and live billing reconciliation remain.
 
 Feature 062: Usage Tracking
 Status: COMPLETED
@@ -359,8 +359,8 @@ Remaining work: Reservation/provider/estimate mismatch is rejected and actual-co
 
 Feature 068: Pricing Catalog
 Status: PARTIAL
-Implementation/evidence inspected: cost_policy.py; credit_manager.py; quota_manager.py; account_balance_probe.py
-Remaining work: Budget/credit/quota controls exist; real billing reconciliation and provider-specific live-balance evidence are not established.
+Implementation/evidence inspected: pricing_catalog.py; tests/test_pricing_catalog.py; cost_policy.py:evaluate_priced_request; CI #41314260671
+Remaining work: Read-only catalog supports strict records, official source attribution, verification timestamps, currencies, effective dates, exact provider/model matching and unit-aware estimates; ambiguity and missing prices fail closed. Estimates integrate with budget and explicit paid-approval gates. CI #41314260671 passed on Python 3.10/3.11/3.12. Official current vendor pricing records still need verification and population; none are invented.
 
 Feature 069: Budget Alerts
 Status: COMPLETED
