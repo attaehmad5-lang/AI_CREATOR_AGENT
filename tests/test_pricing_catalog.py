@@ -166,12 +166,12 @@ class PricingCatalogTests(unittest.TestCase):
         self.assertEqual(result["status"], "PRICING_CATALOG_WRITE_FAILED")
         self.assertFalse(result["saved"])
         self.assertEqual(self.path.read_bytes(), original)
-        self.assertEqual(list(self.root.glob(".pricing.json.*.tmp")), [])
+        self.assertEqual(list(self.path.parent.glob(".pricing.json.*.tmp")), [])
 
     def test_upsert_rejects_catalog_symlink_without_touching_target(self):
-        target = self.root / "protected-pricing.json"
+        target = self.path.parent / "protected-pricing.json"
         target.write_bytes(self.path.read_bytes())
-        link = self.root / "linked-pricing.json"
+        link = self.path.parent / "linked-pricing.json"
         try:
             link.symlink_to(target)
         except (OSError, NotImplementedError):
