@@ -118,6 +118,7 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
             {"video": {}},
         )
         self.assertFalse(Path(str(path) + ".bak").exists())
+        self.assertEqual(list(self.root.glob(".provider-config.json.*.tmp")), [])
 
     def test_file_migration_creates_backup_and_writes_atomically(self):
         path = self.root / "provider-config.json"
