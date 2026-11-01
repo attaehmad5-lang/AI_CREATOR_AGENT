@@ -343,6 +343,23 @@ class ProviderService:
             return {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
 
+    def renew_job_lease(
+        self, *, job_id: str, worker_id: str, lease_token: str,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "renewed": False}
+        authorization = self._authorize_operation(principal_id, "provider.generate")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "renewed": False, "authorization": authorization}
+        try:
+            result = self.job_manager.renew_lease(
+                job_id=job_id, worker_id=worker_id, lease_token=lease_token
+            )
+        except Exception as exc:
+            return {"status": "JOB_LEASE_RENEWAL_FAILED", "renewed": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "renewed": False}
+
     def complete_job(self, *, job_id: str, worker_id: str, lease_token: str, success: bool,
                      result_ref: str | None = None, error_code: str | None = None,
                      principal_id: str | None = None) -> dict[str, Any]:
