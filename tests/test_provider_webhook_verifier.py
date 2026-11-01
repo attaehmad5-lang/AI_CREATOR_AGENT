@@ -2,11 +2,26 @@
 import hashlib
 import hmac
 import tempfile
+from concurrent.futures import ProcessPoolExecutor
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
 from projects.provider_store.provider_webhook_verifier import ProviderWebhookVerifier
+
+
+def _verify_same_webhook_in_process(args):
+    path, timestamp, secret, payload, signature, event_id = args
+    now = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    verifier = ProviderWebhookVerifier(path, clock=lambda: now)
+    return verifier.verify(
+        provider_id="video",
+        payload=payload,
+        signature=signature,
+        timestamp=timestamp,
+        event_id=event_id,
+        secret=secret,
+    )["status"]
 
 
 class ProviderWebhookVerifierTests(unittest.TestCase):
@@ -70,6 +85,27 @@ class ProviderWebhookVerifierTests(unittest.TestCase):
             event_id="event-stale", secret=self.secret,
         )
         self.assertEqual(stale["status"], "WEBHOOK_TIMESTAMP_OUT_OF_RANGE")
+
+    def test_same_signed_event_is_accepted_once_across_processes(self):
+        payload = b'{"event":"generation.completed","job_id":"shared-job"}'
+        secret = "shared-process-webhook-secret"
+        timestamp = self.timestamp
+        signed = str(timestamp).encode("ascii") + b"." + payload
+        signature = "sha256=" + hmac.new(
+            secret.encode("utf-8"), signed, hashlib.sha256
+        ).hexdigest()
+        with ProcessPoolExecutor(max_workers=6) as pool:
+            statuses = list(pool.map(
+                _verify_same_webhook_in_process,
+                [
+                    (str(self.path), timestamp, secret, payload, signature, "one-event")
+                    for _ in range(18)
+                ],
+            ))
+        self.assertEqual(statuses.count("WEBHOOK_VERIFIED"), 1)
+        self.assertEqual(statuses.count("WEBHOOK_REPLAY_REJECTED"), 17)
+        reloaded = ProviderWebhookVerifier(self.path, clock=lambda: self.now)
+        self.assertEqual(len(reloaded.data["events"]), 1)
 
     def test_replay_state_rejects_duplicate_keys_and_symlinks(self):
         self.path.write_text(
