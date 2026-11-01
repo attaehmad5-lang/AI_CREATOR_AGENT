@@ -200,61 +200,63 @@ class ProviderConfigLifecycleManager:
                 with os.fdopen(fd, "w", encoding="utf-8") as stream:
                     fd = -1
                     json.dump(result["config"], stream, indent=2, ensure_ascii=False, allow_nan=False)
-                    stream.write("\n")
+                    stream.write("\\n")
                     stream.flush()
                     os.fsync(stream.fileno())
                 atomic_replace_with_retry(temp_name, config_path)
-                if fd >= 0:
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
-                try:
-                    os.unlink(temp_name)
-                except FileNotFoundError:
-                    pass
-                return {"status": "CONFIG_MIGRATION_WRITE_FAILED", "migrated": False, "error_type": type(exc).__name__}
-            reloaded = self.reload(result["config"])
-            if reloaded.get("reloaded") is not True:
-                restore_name = None
-                fd_restore = -1
-                try:
-                    fd_restore, restore_name = tempfile.mkstemp(
-                        prefix=f".{config_path.name}.restore.",
-                        suffix=".tmp",
-                        dir=str(config_path.parent),
-                    )
-                    with os.fdopen(fd_restore, "wb") as restore_stream:
-                        fd_restore = -1
-                        with backup_path.open("rb") as backup_stream:
-                            shutil.copyfileobj(backup_stream, restore_stream)
-                        restore_stream.flush()
-                        os.fsync(restore_stream.fileno())
-                    atomic_replace_with_retry(restore_name, config_path)
+                # Keep reload and any compensating rollback inside the same
+                # process lock so a second migrator cannot interleave writes.
+                reloaded = self.reload(result["config"])
+                if reloaded.get("reloaded") is not True:
                     restore_name = None
-                except Exception:
+                    fd_restore = -1
+                    try:
+                        fd_restore, restore_name = tempfile.mkstemp(
+                            prefix=f".{config_path.name}.restore.",
+                            suffix=".tmp",
+                            dir=str(config_path.parent),
+                        )
+                        with os.fdopen(fd_restore, "wb") as restore_stream:
+                            fd_restore = -1
+                            with backup_path.open("rb") as backup_stream:
+                                shutil.copyfileobj(backup_stream, restore_stream)
+                            restore_stream.flush()
+                            os.fsync(restore_stream.fileno())
+                        atomic_replace_with_retry(restore_name, config_path)
+                        restore_name = None
+                    except Exception:
+                        return {
+                            "status": "CONFIG_MIGRATION_ROLLBACK_FAILED",
+                            "migrated": False,
+                            "backup_path": str(backup_path),
+                        }
+                    finally:
+                        if fd_restore >= 0:
+                            try:
+                                os.close(fd_restore)
+                            except OSError:
+                                pass
+                        if restore_name is not None:
+                            try:
+                                os.unlink(restore_name)
+                            except FileNotFoundError:
+                                pass
                     return {
-                        "status": "CONFIG_MIGRATION_ROLLBACK_FAILED",
+                        "status": "CONFIG_MIGRATION_ROLLED_BACK",
                         "migrated": False,
                         "backup_path": str(backup_path),
                     }
-                finally:
-                    if fd_restore >= 0:
-                        try:
-                            os.close(fd_restore)
-                        except OSError:
-                            pass
-                    if restore_name is not None:
-                        try:
-                            os.unlink(restore_name)
-                        except FileNotFoundError:
-                            pass
-                return {
-                    "status": "CONFIG_MIGRATION_ROLLED_BACK",
-                    "migrated": False,
-                    "backup_path": str(backup_path),
-                }
-
+        except Exception as exc:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            try:
+                os.unlink(temp_name)
+            except FileNotFoundError:
+                pass
+            return {"status": "CONFIG_MIGRATION_WRITE_FAILED", "migrated": False, "error_type": type(exc).__name__}
         return {
             "status": "CONFIG_MIGRATION_APPLIED",
             "migrated": True,
