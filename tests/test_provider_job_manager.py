@@ -194,9 +194,9 @@ class ProviderJobManagerTests(unittest.TestCase):
             manager._save()
 
             reclaimed = manager.claim_next(worker_id="worker-2")
-            self.assertEqual(re claimed["status"], "JOB_CLAIMED")
-            self.assertEqual(re claimed["job"]["worker_id"], "worker-2")
-            self.assertEqual(re claimed["job"]["attempts"], 2)
+            self.assertEqual(reclaimed["status"], "JOB_CLAIMED")
+            self.assertEqual(reclaimed["job"]["worker_id"], "worker-2")
+            self.assertEqual(reclaimed["job"]["attempts"], 2)
 
     def test_expired_worker_lease_requeues_then_fails_at_attempt_limit(self):
         self.submit("job-1")
