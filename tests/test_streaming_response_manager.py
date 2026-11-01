@@ -23,6 +23,18 @@ class ProviderStreamSessionTests(unittest.TestCase):
         )
         self.assertEqual(stream.snapshot()["state"], "COMPLETED")
 
+    def test_finish_reports_exact_aggregate_digest_and_rejects_second_finish(self):
+        stream = ProviderStreamSession("request-exact-digest")
+        stream.append(sequence=0, chunk=b"alpha")
+        stream.append(sequence=1, chunk=b"-beta")
+        result = stream.finish()
+        self.assertEqual(
+            result["sha256"],
+            "a8b405ab6f00d98196baf634c9d1cb02b03a801770775effca822c7abe8cf432",
+        )
+        self.assertEqual(result["content"], b"alpha-beta")
+        self.assertFalse(stream.finish()["finished"])
+
     def test_duplicate_chunks_are_idempotent_but_conflicts_and_gaps_reject(self):
         stream = ProviderStreamSession("request-2")
         stream.append(sequence=0, chunk=b"first")
