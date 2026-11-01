@@ -90,10 +90,14 @@ class ConnectionManager:
         """Restore only a missing/invalid catalog from a separately validated master copy."""
         target = Path(catalog_path) if catalog_path is not None else DEFAULT_CATALOG
         master = Path(master_path) if master_path is not None else MASTER_CATALOG
+        if target.is_symlink() or master.is_symlink():
+            return {"status": "RECOVERY_SYMLINK_REJECTED", "restored": False}
         if target.resolve() == master.resolve():
             return {"status": "RECOVERY_TARGET_EQUALS_MASTER", "restored": False}
         lock_path = target.with_name(target.name + ".lock")
         with interprocess_file_lock(lock_path):
+            if target.is_symlink() or master.is_symlink():
+                return {"status": "RECOVERY_SYMLINK_REJECTED", "restored": False}
             if target.exists():
                 try:
                     current = cls._load_json(target)
