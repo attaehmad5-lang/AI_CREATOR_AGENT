@@ -441,6 +441,39 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(result["restored"])
         self.assertEqual(target_data.read_text(encoding="utf-8"), "{corrupt")
 
+    def test_provider_json_loader_rejects_duplicate_keys_and_nonstandard_constants(self):
+        duplicate = self.root / "duplicate-state.json"
+        duplicate.write_text(
+            '{"version":"1.0","providers":{},"providers":{"injected":{}}}',
+            encoding="utf-8",
+        )
+        with self.assertRaises(ValueError):
+            ConnectionManager._load_json(duplicate)
+
+        nonstandard = self.root / "nonstandard-state.json"
+        nonstandard.write_text(
+            '{"version":"1.0","providers":{},"quota":NaN}',
+            encoding="utf-8",
+        )
+        with self.assertRaises(ValueError):
+            ConnectionManager._load_json(nonstandard)
+
+    def test_provider_json_loader_rejects_oversized_and_symlinked_files(self):
+        oversized = self.root / "oversized-state.json"
+        oversized.write_text(" " * (16_000_001), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ConnectionManager._load_json(oversized)
+
+        target = self.root / "real-state.json"
+        target.write_text('{"version":"1.0","providers":{}}', encoding="utf-8")
+        link = self.root / "linked-state.json"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are unavailable")
+        with self.assertRaises(ValueError):
+            ConnectionManager._load_json(link)
+
     def test_catalog_recovery_fails_closed_when_master_is_invalid(self):
         master_path = self.root / "invalid_master.json"
         master_path.write_text("{invalid", encoding="utf-8")
