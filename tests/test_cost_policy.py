@@ -5,6 +5,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 from projects.provider_store.cost_policy import ProviderCostPolicy
+from projects.provider_store.pricing_catalog import PricingCatalog
 
 
 def _reserve_cost_in_process(args):
@@ -493,6 +494,55 @@ class ProviderCostPolicyTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     ProviderCostPolicy(path)
 
+
+    def test_pricing_catalog_estimate_flows_through_paid_budget_gate(self):
+        catalog_path = Path(self.temp_dir.name) / "pricing.json"
+        catalog_path.write_text(json.dumps({
+            "version": "1.0",
+            "prices": [{
+                "price_id": "img-price",
+                "provider_id": "paid",
+                "model_id": "image-v2",
+                "modality": "image",
+                "pricing_unit": "image",
+                "unit_price": 0.04,
+                "currency": "USD",
+                "source": "official-provider-pricing-page",
+                "verified_at": "2026-10-01T12:00:00+00:00",
+            }],
+        }), encoding="utf-8")
+        catalog = PricingCatalog(catalog_path)
+        provider = {
+            "id": "paid", "enabled": True,
+            "subscription_required": False, "zero_cost_allowed": False,
+        }
+        blocked = self.policy.evaluate_priced_request(
+            provider, pricing_catalog=catalog, model_id="image-v2",
+            modality="image", units=10, currency="USD",
+            project_id="documentary", paid_usage_approved=False,
+        )
+        self.assertFalse(blocked["allowed"])
+        self.assertEqual(blocked["status"], "PAID_APPROVAL_REQUIRED")
+        self.assertEqual(blocked["cost_estimate"]["estimated_cost"], 0.4)
+
+        approved = self.policy.evaluate_priced_request(
+            provider, pricing_catalog=catalog, model_id="image-v2",
+            modality="image", units=10, currency="USD",
+            project_id="documentary", paid_usage_approved=True,
+        )
+        self.assertTrue(approved["allowed"])
+        self.assertEqual(approved["status"], "ALLOWED_PAID")
+
+    def test_pricing_lookup_failure_never_falls_back_to_zero_cost(self):
+        catalog = PricingCatalog(Path(self.temp_dir.name) / "missing-pricing.json")
+        result = self.policy.evaluate_priced_request(
+            {"id": "paid", "enabled": True},
+            pricing_catalog=catalog, model_id="missing-model",
+            modality="image", units=1, currency="USD",
+            project_id="documentary", paid_usage_approved=True,
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "COST_ESTIMATE_UNAVAILABLE")
 
 if __name__ == "__main__":
     unittest.main()
