@@ -76,7 +76,7 @@ A successful preview returns status ROUTE_SIMULATED, the selected provider, poli
 
 ## Pricing catalog and estimates
 
-The pricing catalog is a read-only, source-attributed metadata store. Each price record identifies an exact provider, model, modality, unit, currency, effective date range, source and verification timestamp. Estimates fail closed when no unique applicable price exists.
+The pricing catalog is a source-attributed metadata store with atomic, validated price-record updates. Each price record identifies an exact provider, model, modality, unit, currency, effective date range, source and verification timestamp. Estimates fail closed when no unique applicable price exists.
 
     catalog = PricingCatalog("projects/provider_store/pricing_catalog.json")
     estimate = catalog.estimate(
@@ -97,6 +97,8 @@ The pricing catalog is a read-only, source-attributed metadata store. Each price
         paid_usage_approved=False,
     )
 
+Use catalog.upsert_price(record) to add or replace one fully validated price record. The update is serialized across processes and written through an atomic replacement; malformed records, symlinked catalogs and failed writes are rejected without claiming success. The checked-in pricing_catalog.json is intentionally empty until official vendor prices have been verified.
+
 A returned estimate is not an invoice, live quote, account balance or guarantee of provider billing. evaluate_priced_request passes the estimate into the existing project-budget and explicit paid-approval gate. Do not populate the catalog with guessed prices; use provider-published sources and record when they were verified.
 
 ## Runtime and policy modules
@@ -108,7 +110,7 @@ A returned estimate is not an invoice, live quote, account balance or guarantee 
 | oauth_pkce_manager.py | OAuth authorization-code PKCE, expiring state and in-memory token handling |
 | routing_manager.py | Policy-aware provider/model selection, fallback and reservation checks |
 | cost_policy.py | Paid approval, budget reservations, pricing-estimate integration and idempotent usage reconciliation |
-| pricing_catalog.py | Source-attributed provider/model pricing metadata and date-aware unit cost estimates |\n| credit_manager.py | Verified credit snapshots and local reserve/commit/release |
+| pricing_catalog.py | Atomic source-attributed provider/model pricing updates and date-aware unit cost estimates |\n| credit_manager.py | Verified credit snapshots and local reserve/commit/release |
 | quota_manager.py | UTC quota windows and request reservation lifecycle |
 | provider_job_manager.py | Bounded asynchronous job queue, ownership, polling, cancellation and recovery |
 | health_manager.py | Health history, active probes, eligibility and recovery |
