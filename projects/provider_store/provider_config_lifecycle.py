@@ -147,7 +147,10 @@ class ProviderConfigLifecycleManager:
         *,
         target_version: str,
         migrations: dict[str, Callable[[dict[str, Any]], dict[str, Any]]],
+        dry_run: bool = False,
     ) -> dict[str, Any]:
+        if not isinstance(dry_run, bool):
+            return {"status": "INVALID_DRY_RUN_FLAG", "migrated": False}
         config_path = Path(path)
         if config_path.is_symlink():
             return {"status": "CONFIG_FILE_SYMLINK_REJECTED", "migrated": False}
@@ -161,6 +164,15 @@ class ProviderConfigLifecycleManager:
         result = self.migrate(original, target_version=target_version, migrations=migrations)
         if result.get("migrated") is not True:
             return result
+        if dry_run:
+            return {
+                "status": "CONFIG_MIGRATION_PREVIEW",
+                "migrated": False,
+                "preview": True,
+                "steps": result["steps"],
+                "config": copy.deepcopy(result["config"]),
+                "backup_created": False,
+            }
         backup_path = config_path.with_name(config_path.name + ".bak")
         if backup_path.is_symlink():
             return {"status": "CONFIG_BACKUP_SYMLINK_REJECTED", "migrated": False}
