@@ -861,7 +861,7 @@ class ProviderRoutingManagerTests(unittest.TestCase):
             )
         self.assertFalse(result["allowed"])
         self.assertEqual(result["status"], "COST_RESERVATION_RELEASE_FAILED")
-        self.assertNotIn(
+        self.assertIn(
             "cost-release-job",
             policy.ledger["projects"]["film"]["reservations"],
         )
