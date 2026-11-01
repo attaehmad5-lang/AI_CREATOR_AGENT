@@ -1010,8 +1010,29 @@ class ConnectionManager:
         allow_loopback_http: bool = False,
     ) -> dict[str, Any]:
         """Validate provider endpoint transport and host policy before any network request."""
+        import re
         from ipaddress import ip_address
         from urllib.parse import urlsplit
+
+        def canonical_host(value: str) -> tuple[str | None, Any]:
+            candidate = value.casefold().rstrip(".")
+            if not candidate or "%" in candidate:
+                return None, None
+            try:
+                address = ip_address(candidate)
+                return address.compressed, address
+            except ValueError:
+                pass
+            try:
+                ascii_host = candidate.encode("idna").decode("ascii")
+            except UnicodeError:
+                return None, None
+            if len(ascii_host) > 253 or any(
+                not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                for label in ascii_host.split(".")
+            ):
+                return None, None
+            return ascii_host, None
 
         if not isinstance(allow_loopback_http, bool):
             return {"valid": False, "status": "INVALID_LOOPBACK_HTTP_POLICY"}
@@ -1040,18 +1061,20 @@ class ConnectionManager:
             return {"valid": False, "status": "QUERY_PARAMETERS_REJECTED"}
         if parsed.fragment:
             return {"valid": False, "status": "FRAGMENT_REJECTED"}
-        normalized_host = hostname.casefold().rstrip(".")
-        normalized_allowed = (
-            {str(host).casefold().rstrip(".") for host in allowed_hosts}
-            if allowed_hosts is not None else None
+        normalized_host, address = canonical_host(hostname)
+        if normalized_host is None:
+            return {"valid": False, "status": "INVALID_HOSTNAME"}
+        normalized_allowed = None
+        if allowed_hosts is not None:
+            normalized_allowed = set()
+            for host in allowed_hosts:
+                normalized, _ = canonical_host(host)
+                if normalized is None:
+                    return {"valid": False, "status": "INVALID_HOST_ALLOWLIST"}
+                normalized_allowed.add(normalized)
+        is_loopback = normalized_host == "localhost" or (
+            address is not None and address.is_loopback
         )
-        is_loopback = normalized_host == "localhost"
-        address = None
-        try:
-            address = ip_address(normalized_host)
-            is_loopback = is_loopback or address.is_loopback
-        except ValueError:
-            pass
         if parsed.scheme == "http" and not (allow_loopback_http and is_loopback):
             return {"valid": False, "status": "HTTPS_REQUIRED"}
         # Private, link-local, and reserved literal IPs are unsafe defaults for
