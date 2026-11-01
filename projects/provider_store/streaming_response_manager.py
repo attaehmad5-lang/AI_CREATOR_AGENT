@@ -34,17 +34,21 @@ class ProviderStreamSession:
             raise ValueError("max_chunks must be a positive bounded integer")
         if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 1 <= max_bytes <= 2**31:
             raise ValueError("max_bytes must be a positive bounded integer")
+        try:
+            timeout_value = float(timeout_seconds)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("timeout_seconds must be finite and positive") from None
         if (
             isinstance(timeout_seconds, bool)
             or not isinstance(timeout_seconds, (int, float))
-            or not math.isfinite(timeout_seconds)
-            or timeout_seconds <= 0
+            or not math.isfinite(timeout_value)
+            or timeout_value <= 0
         ):
             raise ValueError("timeout_seconds must be finite and positive")
         self.request_id = request_id
         self.max_chunks = max_chunks
         self.max_bytes = max_bytes
-        self.timeout_seconds = float(timeout_seconds)
+        self.timeout_seconds = timeout_value
         self._clock = clock or time.monotonic
         self._created_at = self._read_clock()
         self._last_activity = self._created_at
@@ -56,9 +60,13 @@ class ProviderStreamSession:
 
     def _read_clock(self) -> float:
         value = self._clock()
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("stream clock must return a finite number") from None
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(numeric):
             raise ValueError("stream clock must return a finite number")
-        return float(value)
+        return numeric
 
     def _expire_if_needed(self, now: float) -> bool:
         if self._state == "OPEN" and now - self._last_activity > self.timeout_seconds:
