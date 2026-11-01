@@ -1483,6 +1483,36 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["quality"]["status"], "pretend accepted")
         self.assertNotEqual(result["status"], "EXECUTION_SUCCEEDED")
 
+    def test_quality_scorer_is_not_called_when_structural_validation_fails(self):
+        calls = []
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        quality = ProviderOutputQualityPolicy(
+            lambda path, **kwargs: calls.append(path) or 1.0
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota, quality_policy=quality,
+        )
+        output_path = self.root / "invalid-output.png"
+        output_path.write_bytes(b"not-a-real-png")
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="invalid-output-before-quality",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path),
+                "latency_ms": 5.0,
+            },
+            modality="image",
+        )
+        self.assertEqual(result["status"], "OUTPUT_VALIDATION_FAILED")
+        self.assertFalse(result["output"]["valid"])
+        self.assertEqual(calls, [])
+        self.assertIsNone(result.get("quality"))
+
     def test_execution_records_provider_model_benchmark_sample(self):
         outer = self
 
