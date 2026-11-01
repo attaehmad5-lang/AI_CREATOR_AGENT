@@ -51,6 +51,8 @@ class ProviderCreditManager:
         loaded.setdefault("usage", {})
         if not isinstance(loaded["reservations"], dict) or not isinstance(loaded["usage"], dict):
             raise ValueError("invalid provider credit reservation/usage state")
+        if set(loaded["reservations"]).intersection(loaded["usage"]):
+            raise ValueError("credit request cannot be both reserved and committed")
         for provider_id, record in loaded["providers"].items():
             if (
                 not isinstance(provider_id, str) or not provider_id.strip()
