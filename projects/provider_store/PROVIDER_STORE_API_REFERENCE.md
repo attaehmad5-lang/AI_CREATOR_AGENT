@@ -78,6 +78,19 @@ The route planner supports an explicit side-effect-free preview:
 
 A successful preview returns status ROUTE_SIMULATED, the selected provider, policy decisions, estimated cost/unit, a would_reserve list, and a policy_matrix containing eligible provider IDs, rejected-provider decisions, the selected provider, fallback state and reservation plan. Project policies may constrain allowed/denied providers, models, capabilities, maximum estimated cost, health/verified-connection evidence, automatic fallback and required data-residency region. Region identifiers are validated and a provider without matching, declared region metadata is rejected. A preview does not reserve paid budget, free credits or quota, and does not advance the round-robin cursor. A preview does not guarantee that quota or balances will still be available when a real request is submitted. Omit dry_run (or set it to False) only when the caller intends normal routing and reservation behavior.
 
+## Cross-manager request reconciliation
+
+Use ProviderStoreReconciliationManager to inspect local job, quota, credit and project-cost ledgers without changing them:
+
+    report = ProviderStoreReconciliationManager(
+        job_manager=jobs,
+        quota_manager=quota,
+        credit_manager=credits,
+        cost_policy=cost_policy,
+    ).inspect()
+
+The report is diagnostic only. It identifies provider/project ownership mismatches and terminal jobs that still have active reservations, recommending manual billing/usage review. It never releases reservations automatically. This is a local-ledger consistency check, not distributed consensus or proof of provider-side billing state. CI #41318473533 covers validated manager shapes, consistent/orphan requests, mismatch cases and no-mutation behavior.
+
 ## Pricing catalog and estimates
 
 The pricing catalog is a source-attributed metadata store with atomic, validated price-record updates. Each price record identifies an exact provider, model, modality, unit, currency, effective date range, source and verification timestamp. Estimates fail closed when no unique applicable price exists.
