@@ -882,6 +882,21 @@ class ConnectionManager:
             for key, item in value.items():
                 normalized = str(key).casefold().replace("-", "_")
                 if normalized in safe_reference_keys:
+                    # Only canonical, validated references are safe to expose. State
+                    # files can be edited or corrupted independently of catalog validation;
+                    # aliases or malformed values must not become a secret-disclosure path.
+                    if key != normalized or not isinstance(item, str):
+                        continue
+                    if normalized in {"token_env", "token_expiry_env", "api_key_env", "credential_env"}:
+                        if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", item):
+                            continue
+                    elif (
+                        not item.strip()
+                        or len(item) > 256
+                        or any(ord(char) < 32 for char in item)
+                        or any(marker in item.casefold() for marker in ("token=", "api_key=", "password=", "secret=", "bearer "))
+                    ):
+                        continue
                     safe[key] = item
                 elif normalized == "token" or any(part in normalized for part in secret_fragments):
                     continue

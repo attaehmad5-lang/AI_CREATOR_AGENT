@@ -53,6 +53,49 @@ class ConnectionManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_state_sanitizer_rejects_reference_aliases_and_malformed_values(self):
+        self.state_path.write_text(
+            json.dumps({
+                "version": "1.0",
+                "policy": "USER_CONTROLLED",
+                "providers": {
+                    "public_image": {
+                        "status": "READY",
+                        "verified": False,
+                        "Token-Env": "TOKEN=PRIVATE_VALUE",
+                        "token_env": "TOKEN=PRIVATE_VALUE",
+                        "token_expiry_env": ["PRIVATE_VALUE"],
+                        "secret_ref": "bearer PRIVATE_VALUE",
+                        "nested": {"Api-Key-Env": "PRIVATE_VALUE"},
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+
+        result = self.manager.get_state("public_image")
+
+        self.assertEqual(result["status"], "READY")
+        self.assertNotIn("Token-Env", result)
+        self.assertNotIn("token_env", result)
+        self.assertNotIn("token_expiry_env", result)
+        self.assertNotIn("secret_ref", result)
+        self.assertNotIn("Api-Key-Env", result["nested"])
+
+    def test_state_sanitizer_preserves_canonical_environment_references(self):
+        sanitized = ConnectionManager._sanitize_public_data({
+            "token_env": "VALID_TOKEN_2",
+            "token_expiry_env": "VALID_TOKEN_EXPIRY",
+            "api_key_env": "API_KEY",
+            "secret_ref": "vault/provider/token",
+        })
+        self.assertEqual(sanitized, {
+            "token_env": "VALID_TOKEN_2",
+            "token_expiry_env": "VALID_TOKEN_EXPIRY",
+            "api_key_env": "API_KEY",
+            "secret_ref": "vault/provider/token",
+        })
+
     def test_concurrent_connection_state_updates_across_processes_preserve_records(self):
         catalog_path = self.root / "process_state_catalog.json"
         state_path = self.root / "process_state.json"
