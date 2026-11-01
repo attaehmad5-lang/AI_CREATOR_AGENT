@@ -38,7 +38,8 @@ class ProviderJobManagerTests(unittest.TestCase):
         )
         claimed = limited.claim_next(worker_id="worker-1")
         completed = limited.complete(
-            job_id="job-1", worker_id="worker-1", success=True,
+            job_id="job-1", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"], success=True,
             result_ref="asset:job-1",
         )
         second = limited.submit(
