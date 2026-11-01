@@ -137,10 +137,27 @@ class ConnectionManager:
             if default is not None:
                 return json.loads(json.dumps(default))
             raise FileNotFoundError(f"Required provider catalog not found: {path}")
+        if path.is_symlink():
+            raise ValueError(f"Symlinked JSON files are not trusted: {path.name}")
         try:
+            if path.stat().st_size > 16_000_000:
+                raise ValueError(f"JSON file exceeds size limit: {path.name}")
+            def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                result: dict[str, Any] = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError(f"Duplicate JSON key in {path.name}")
+                    result[key] = value
+                return result
             with path.open("r", encoding="utf-8") as stream:
-                data = json.load(stream)
-        except json.JSONDecodeError as exc:
+                data = json.load(
+                    stream,
+                    object_pairs_hook=reject_duplicate_keys,
+                    parse_constant=lambda _value: (_ for _ in ()).throw(
+                        ValueError(f"Invalid JSON constant in {path.name}")
+                    ),
+                )
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValueError(f"Invalid JSON in {path.name}") from exc
         if not isinstance(data, dict):
             raise ValueError(f"Expected a JSON object in {path.name}")
