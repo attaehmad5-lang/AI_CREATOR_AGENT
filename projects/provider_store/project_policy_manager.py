@@ -45,12 +45,31 @@ class ProviderProjectPolicyManager:
         target = path
         if target is None:
             raise ValueError("path is required")
+        if target.is_symlink():
+            raise ValueError("project policy store must not be a symlink")
         try:
+            if target.stat().st_size > 4_000_000:
+                raise ValueError("project policy store exceeds the size limit")
+
+            def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                result: dict[str, Any] = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("duplicate project policy JSON key")
+                    result[key] = value
+                return result
+
             with target.open("r", encoding="utf-8") as stream:
-                data = json.load(stream)
+                data = json.load(
+                    stream,
+                    object_pairs_hook=reject_duplicate_keys,
+                    parse_constant=lambda _value: (_ for _ in ()).throw(
+                        ValueError("non-standard JSON constant")
+                    ),
+                )
         except FileNotFoundError:
             return {"version": "1.0", "projects": {}}
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, RecursionError, ValueError) as exc:
             raise ValueError("project policy store is unreadable") from exc
         if not isinstance(data, dict):
             raise ValueError("project policy store must be an object")
