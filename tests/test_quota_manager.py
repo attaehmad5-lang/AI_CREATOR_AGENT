@@ -127,6 +127,7 @@ class ProviderQuotaManagerTests(unittest.TestCase):
         ]
         self.manager._save()
 
+        self.manager.limits["another-provider"] = {"hourly": 2}
         result = self.manager.reserve(
             provider_id="another-provider", request_id="reused-job"
         )
