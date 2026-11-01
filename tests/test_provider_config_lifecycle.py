@@ -176,9 +176,18 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         path.write_bytes(original_bytes)
 
         from unittest.mock import patch
+        replacements = {"count": 0}
+
+        def fail_config_replace(source, destination):
+            replacements["count"] += 1
+            if replacements["count"] == 1:
+                os.replace(source, destination)
+                return
+            raise OSError("simulated config replace failure")
+
         with patch(
             "projects.provider_store.provider_config_lifecycle.atomic_replace_with_retry",
-            side_effect=OSError("simulated replace failure"),
+            side_effect=fail_config_replace,
         ):
             result = self.manager.migrate_file(
                 path, target_version="2", migrations={"1": migrate_v1_to_v2}
@@ -187,8 +196,9 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "CONFIG_MIGRATION_WRITE_FAILED")
         self.assertFalse(result["migrated"])
         self.assertEqual(path.read_bytes(), original_bytes)
-        self.assertTrue(Path(str(path) + ".bak").is_file())
+        self.assertEqual(Path(str(path) + ".bak").read_bytes(), original_bytes)
         self.assertEqual(list(self.root.glob(".provider-config.json.*.tmp")), [])
+        self.assertEqual(list(self.root.glob(".provider-config.json.bak.*.tmp")), [])
 
     def test_rollback_does_not_discard_previous_config_when_validation_fails(self):
         first = {"schema_version": "1", "providers": {"image": {}}}
