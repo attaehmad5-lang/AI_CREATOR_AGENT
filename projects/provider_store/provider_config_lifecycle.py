@@ -62,6 +62,8 @@ class ProviderConfigLifecycleManager:
         steps = 0
         while candidate.get("schema_version") != target_version:
             source_version = candidate.get("schema_version")
+            if not isinstance(source_version, str):
+                return {"status": "INVALID_SOURCE_CONFIG", "migrated": False}
             if source_version in visited or steps >= 20:
                 return {"status": "MIGRATION_CYCLE_OR_LIMIT", "migrated": False}
             visited.add(source_version)
