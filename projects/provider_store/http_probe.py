@@ -8,10 +8,14 @@ from __future__ import annotations
 import math
 import os
 import re
+import socket
+import ssl
 import unicodedata
+import http.client
 from typing import Any
+from urllib.parse import urlsplit
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .connection_manager import ConnectionManager, ProviderAuthenticationVerificationRequired
 from .safe_numbers import finite_number
@@ -32,6 +36,54 @@ class ProviderHTTPStatusError(ConnectionError):
         self.status_code = status_code
         self.retry_after = retry_after
         super().__init__(f"provider returned HTTP {status_code}")
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Connect to a validated public DNS address while retaining hostname TLS verification."""
+
+    def connect(self) -> None:
+        if self._tunnel_host:
+            raise OSError("HTTPS proxies are not supported by the pinned provider transport")
+        try:
+            records = socket.getaddrinfo(
+                self.host, self.port, type=socket.SOCK_STREAM
+            )
+        except OSError:
+            raise OSError("provider hostname could not be resolved") from None
+        addresses = []
+        for record in records:
+            address = record[4][0]
+            try:
+                parsed = __import__("ipaddress").ip_address(address)
+            except ValueError:
+                raise OSError("provider DNS returned an invalid address") from None
+            if not parsed.is_global:
+                raise OSError("provider DNS resolved to a non-public address")
+            if address not in addresses:
+                addresses.append(address)
+        if not addresses:
+            raise OSError("provider hostname has no usable public address")
+        last_error = None
+        for address in addresses:
+            raw = None
+            try:
+                raw = socket.create_connection(
+                    (address, self.port), self.timeout, self.source_address
+                )
+                self.sock = self._context.wrap_socket(
+                    raw, server_hostname=self.host
+                )
+                return
+            except OSError as exc:
+                last_error = exc
+                if raw is not None:
+                    raw.close()
+        raise OSError("provider connection failed") from last_error
+
+
+class _PinnedHTTPSHandler(HTTPSHandler):
+    def https_open(self, req: Any) -> Any:
+        return self.do_open(_PinnedHTTPSConnection, req)
 
 
 class _RejectRedirects(HTTPRedirectHandler):
@@ -115,7 +167,7 @@ class ProviderHTTPConnectivityProbe:
         if opener is not None and not callable(getattr(opener, "open", None)):
             raise ValueError("opener must provide an open method")
         self.environ = os.environ if environ is None else environ
-        self.opener = opener or build_opener(_RejectRedirects())
+        self.opener = opener or build_opener(_RejectRedirects(), _PinnedHTTPSHandler())
         self.max_response_bytes = max_response_bytes
 
     def __call__(self, provider: dict[str, Any], *, timeout_seconds: float = 5.0) -> dict[str, Any]:
@@ -199,6 +251,9 @@ class ProviderHTTPConnectivityProbe:
                 raise ValueError("provider auth scheme is not permitted")
             headers[header_name] = f"{auth_scheme} {token}" if auth_scheme else token
 
+        parsed_endpoint = urlsplit(endpoint.strip())
+        if parsed_endpoint.scheme.casefold() != "https" or not parsed_endpoint.hostname:
+            raise ValueError("HTTPS_ENDPOINT_REQUIRED")
         request = Request(endpoint.strip(), headers=headers, method="GET")
         try:
             response = self.opener.open(request, timeout=timeout_value)
