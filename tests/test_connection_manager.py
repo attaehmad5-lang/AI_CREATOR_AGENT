@@ -391,6 +391,56 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertFalse(no_op["restored"])
         self.assertEqual(json.loads(self.catalog_path.read_text(encoding="utf-8")), valid_target)
 
+    def test_catalog_recovery_rejects_symlinked_master_and_preserves_target(self):
+        real_master = self.root / "real-master.json"
+        real_master.write_text(json.dumps({
+            "version": "3.0", "providers": [{
+                "id": "safe_api", "name": "Safe API", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "subscription_required": False, "allowed_hosts": ["api.example.com"],
+                "official_api_url": "https://api.example.com/docs",
+                "capabilities": ["image_generation"],
+            }],
+        }), encoding="utf-8")
+        master_link = self.root / "master-link.json"
+        try:
+            master_link.symlink_to(real_master)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are unavailable")
+        self.catalog_path.write_text("{corrupt", encoding="utf-8")
+        before = self.catalog_path.read_bytes()
+        result = ConnectionManager.restore_catalog_from_master(
+            self.catalog_path, master_link
+        )
+        self.assertEqual(result["status"], "RECOVERY_SYMLINK_REJECTED")
+        self.assertFalse(result["restored"])
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
+    def test_catalog_recovery_rejects_symlinked_target_without_touching_target_file(self):
+        master_path = self.root / "safe-master.json"
+        target_data = self.root / "target-data.json"
+        target_data.write_text("{corrupt", encoding="utf-8")
+        master_path.write_text(json.dumps({
+            "version": "3.0", "providers": [{
+                "id": "safe_api", "name": "Safe API", "category": "image",
+                "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                "subscription_required": False, "allowed_hosts": ["api.example.com"],
+                "official_api_url": "https://api.example.com/docs",
+                "capabilities": ["image_generation"],
+            }],
+        }), encoding="utf-8")
+        target_link = self.root / "target-link.json"
+        try:
+            target_link.symlink_to(target_data)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are unavailable")
+        result = ConnectionManager.restore_catalog_from_master(
+            target_link, master_path
+        )
+        self.assertEqual(result["status"], "RECOVERY_SYMLINK_REJECTED")
+        self.assertFalse(result["restored"])
+        self.assertEqual(target_data.read_text(encoding="utf-8"), "{corrupt")
+
     def test_catalog_recovery_fails_closed_when_master_is_invalid(self):
         master_path = self.root / "invalid_master.json"
         master_path.write_text("{invalid", encoding="utf-8")
