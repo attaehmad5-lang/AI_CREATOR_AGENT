@@ -50,7 +50,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
     def test_jpeg_gif_and_extended_webp_dimensions_are_supported(self):
         jpeg = self.root / "sample.jpg"
         jpeg.write_bytes(
-            b"\\xff\\xd8\\xff\\xc0" + (8).to_bytes(2, "big")
+            b"\xff\xd8\xff\xc0" + (8).to_bytes(2, "big")
             + bytes((8, 0, 3, 0, 4, 1))
         )
         jpeg_result = self.validator.validate_file(jpeg, modality="image")
@@ -58,7 +58,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         self.assertEqual((jpeg_result["width"], jpeg_result["height"]), (4, 3))
 
         gif = self.root / "sample.gif"
-        gif.write_bytes(b"GIF89a" + struct.pack("<HH", 5, 6) + b"\\x00" * 20)
+        gif.write_bytes(b"GIF89a" + struct.pack("<HH", 5, 6) + b"\x00" * 20)
         gif_result = self.validator.validate_file(gif, modality="image")
         self.assertTrue(gif_result["valid"], gif_result)
         self.assertEqual((gif_result["width"], gif_result["height"]), (5, 6))
@@ -66,7 +66,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
         webp = self.root / "sample.webp"
         webp.write_bytes(
             b"RIFF" + (22).to_bytes(4, "little") + b"WEBPVP8X"
-            + (10).to_bytes(4, "little") + b"\\x00\\x00\\x00\\x00"
+            + (10).to_bytes(4, "little") + b"\x00\x00\x00\x00"
             + (3).to_bytes(3, "little") + (2).to_bytes(3, "little")
         )
         webp_result = self.validator.validate_file(webp, modality="image")
