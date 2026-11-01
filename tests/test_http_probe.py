@@ -1,11 +1,13 @@
 import json
+import socket
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from urllib.error import HTTPError
 
 from projects.provider_store.connection_manager import ConnectionManager
-from projects.provider_store.http_probe import ProviderHTTPConnectivityProbe
+from projects.provider_store.http_probe import ProviderHTTPConnectivityProbe, _PinnedHTTPSConnection
 
 
 class _Response:
@@ -565,6 +567,35 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             })
         self.assertEqual(opener.calls, [])
 
+    def test_pinned_transport_connects_to_resolved_ip_and_keeps_tls_hostname(self):
+        connection = _PinnedHTTPSConnection('api.example.com', timeout=3)
+        raw_socket = object()
+        tls_socket = object()
+        context = unittest.mock.Mock()
+        context.wrap_socket.return_value = tls_socket
+        connection._context = context
+        records = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('1.1.1.1', 443))]
+        with patch('projects.provider_store.http_probe.socket.getaddrinfo', return_value=records), patch('projects.provider_store.http_probe.socket.create_connection', return_value=raw_socket) as connect:
+            connection.connect()
+        connect.assert_called_once_with(('1.1.1.1', 443), 3, None)
+        context.wrap_socket.assert_called_once_with(raw_socket, server_hostname='api.example.com')
+        self.assertIs(connection.sock, tls_socket)
+
+    def test_pinned_transport_rejects_private_dns_answer_before_connect(self):
+        connection = _PinnedHTTPSConnection('api.example.com', timeout=3)
+        records = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('10.0.0.8', 443))]
+        with patch('projects.provider_store.http_probe.socket.getaddrinfo', return_value=records), patch('projects.provider_store.http_probe.socket.create_connection') as connect:
+            with self.assertRaisesRegex(OSError, 'non-public'):
+                connection.connect()
+        connect.assert_not_called()
+
+    def test_pinned_transport_rejects_mixed_public_and_private_dns_answers(self):
+        connection = _PinnedHTTPSConnection('api.example.com', timeout=3)
+        records = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('1.1.1.1', 443)), (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('127.0.0.1', 443))]
+        with patch('projects.provider_store.http_probe.socket.getaddrinfo', return_value=records), patch('projects.provider_store.http_probe.socket.create_connection') as connect:
+            with self.assertRaisesRegex(OSError, 'non-public'):
+                connection.connect()
+        connect.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()
