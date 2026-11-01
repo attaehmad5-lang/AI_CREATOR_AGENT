@@ -500,7 +500,7 @@ Remaining work: Configuration/storage/recovery primitives exist; migration, cras
 Feature 096: State Reconciliation
 Status: PARTIAL
 Implementation/evidence inspected: connection_manager.py; interprocess_lock.py; catalog JSON files; routing_manager.py; provider_job_manager.py
-Remaining work: Configuration/storage/recovery primitives exist; migration, crash-injection, state-reconciliation and CLI acceptance evidence remain.
+Remaining work: Added a read-only inventory over job, quota, credit and cost ledgers; it flags provider/project mismatches and terminal jobs with live reservations for manual billing review, without releasing anything. Manager state shapes are validated. CI #41318473533 passed on Python 3.10/3.11/3.12. CLI integration, crash-injection and distributed cross-device reconciliation remain.
 
 Feature 097: Stale Job Detection
 Status: COMPLETED
