@@ -61,7 +61,7 @@ class ProviderQuotaManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.usage(provider_id="image")["hourly"], 1)
 
     def test_same_idempotency_key_is_single_provider_bound_across_processes(self):
-        path = self.root / "same-key-process-state.json"
+        path = self.path.parent / "same-key-process-state.json"
         path.write_text(
             json.dumps({"version": "1.0", "requests": {}}),
             encoding="utf-8",
