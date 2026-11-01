@@ -54,6 +54,15 @@ class ProviderStreamSessionTests(unittest.TestCase):
         self.assertEqual(stream.append(sequence=0, chunk=b"late")["status"], "STREAM_TIMED_OUT")
         self.assertEqual(stream.snapshot()["state"], "TIMED_OUT")
 
+    def test_non_finite_runtime_clock_is_rejected_on_all_lifecycle_reads(self):
+        now = [1.0]
+        stream = ProviderStreamSession("request-clock", clock=lambda: now[0])
+        now[0] = float("nan")
+        for operation in (stream.heartbeat, stream.finish, stream.snapshot):
+            with self.subTest(operation=operation.__name__):
+                with self.assertRaises(ValueError):
+                    operation()
+
     def test_cancel_discards_buffer_and_terminal_states_reject_writes(self):
         stream = ProviderStreamSession("request-6")
         stream.append(sequence=0, chunk=b"secret output")
