@@ -249,6 +249,36 @@ class ProviderCreditManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.refresh("", lambda _: {})["status"], "INVALID_PROVIDER")
         self.assertEqual(self.manager.refresh("provider", None)["status"], "INVALID_PROBE")
 
+    def test_corrupt_state_rejects_request_present_in_reservations_and_usage(self):
+        timestamp = self.now[0].isoformat()
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "providers": {},
+            "reservations": {
+                "same-request": {
+                    "provider_id": "provider",
+                    "amount": 1.0,
+                    "unit": "credits",
+                    "created_at": timestamp,
+                }
+            },
+            "usage": {
+                "same-request": {
+                    "provider_id": "provider",
+                    "amount": 1.0,
+                    "unit": "credits",
+                    "committed_at": timestamp,
+                    "snapshot_version": 1,
+                }
+            },
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(
+            ValueError, "cannot be both reserved and committed"
+        ):
+            ProviderCreditManager(
+                self.path, clock=lambda: self.now[0]
+            )
+
     def test_invalid_configuration_and_corrupt_state_are_rejected(self):
         with self.assertRaises(ValueError):
             ProviderCreditManager(self.path, max_age_seconds=float("inf"))
