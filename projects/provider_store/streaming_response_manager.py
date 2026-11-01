@@ -107,16 +107,16 @@ class ProviderStreamSession:
 
     def heartbeat(self) -> dict[str, Any]:
         with self._lock:
-            if self._expire_if_needed(self._clock()):
+            if self._expire_if_needed(self._read_clock()):
                 return {"status": "STREAM_TIMED_OUT", "state": self._state}
             if self._state != "OPEN":
                 return {"status": "STREAM_NOT_OPEN", "state": self._state}
-            self._last_activity = self._clock()
+            self._last_activity = self._read_clock()
             return {"status": "HEARTBEAT_ACCEPTED", "state": self._state}
 
     def finish(self) -> dict[str, Any]:
         with self._lock:
-            if self._expire_if_needed(self._clock()):
+            if self._expire_if_needed(self._read_clock()):
                 return {"status": "STREAM_TIMED_OUT", "finished": False}
             if self._state != "OPEN":
                 return {"status": "STREAM_NOT_OPEN", "finished": False, "state": self._state}
@@ -143,7 +143,7 @@ class ProviderStreamSession:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            self._expire_if_needed(self._clock())
+            self._expire_if_needed(self._read_clock())
             return {
                 "request_id": self.request_id, "state": self._state,
                 "chunk_count": len(self._chunks), "total_bytes": self._total_bytes,
