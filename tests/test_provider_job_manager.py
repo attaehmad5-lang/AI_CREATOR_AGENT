@@ -393,6 +393,28 @@ class ProviderJobManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid provider job state schema"):
             ProviderJobManager(self.path, clock=lambda: self.now[0])
 
+    def test_atomic_state_replace_failure_preserves_last_committed_queue_state(self):
+        import unittest.mock
+        self.manager.submit(
+            job_id="committed-job", project_id="project-a",
+            provider_id="provider-a", payload_ref="payload:committed",
+        )
+        original = self.path.read_bytes()
+        with unittest.mock.patch(
+            "projects.provider_store.provider_job_manager.atomic_replace_with_retry",
+            side_effect=OSError("simulated crash before atomic replace"),
+        ):
+            with self.assertRaisesRegex(OSError, "simulated crash"):
+                self.manager.submit(
+                    job_id="uncommitted-job", project_id="project-a",
+                    provider_id="provider-a", payload_ref="payload:uncommitted",
+                )
+        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(list(self.path.parent.glob(f".{self.path.name}.*.tmp")), [])
+        recovered = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertIn("committed-job", recovered.data["jobs"])
+        self.assertNotIn("uncommitted-job", recovered.data["jobs"])
+
     def test_state_file_symlink_is_rejected_without_reading_target(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
