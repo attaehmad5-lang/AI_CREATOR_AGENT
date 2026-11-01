@@ -5,6 +5,7 @@ from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.routing_manager import ProviderRoutingManager
+from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
 
 
 class RoutingSimulationTests(unittest.TestCase):
@@ -166,6 +167,39 @@ class RoutingSimulationTests(unittest.TestCase):
         self.assertEqual(result["would_reserve"], ["credits", "quota"])
         self.assertEqual(credits.reservations, [])
         self.assertEqual(self.quota.calls, [])
+
+    def test_dry_run_exposes_policy_matrix_without_mutating_quota(self):
+        policies = ProviderProjectPolicyManager(self.root / "simulation-policy.json")
+        self.assertTrue(policies.set_policy(
+            "demo", {"allowed_providers": ["fallback"]}
+        )["saved"])
+        router = ProviderRoutingManager(
+            self.connections,
+            quota_manager=self.quota,
+            project_policy_manager=policies,
+        )
+
+        result = router.route(
+            category="image",
+            project_id="demo",
+            request_id="matrix-preview",
+            dry_run=True,
+        )
+
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        self.assertEqual(
+            result["policy_matrix"]["eligible_provider_ids"], ["fallback"]
+        )
+        self.assertEqual(
+            result["policy_matrix"]["rejected_providers"],
+            [{"provider": "primary", "status": "PROJECT_PROVIDER_NOT_ALLOWED"}],
+        )
+        self.assertEqual(result["policy_matrix"]["selected_provider"], "fallback")
+        self.assertTrue(result["policy_matrix"]["fallback_enabled"])
+        self.assertEqual(result["policy_matrix"]["reservation_plan"], ["quota"])
+        self.assertEqual(self.quota.calls, [])
+        self.assertEqual(router._round_robin_counters, {})
 
     def test_invalid_dry_run_flag_fails_closed(self):
         result = self.router.route(category="image", project_id="demo", dry_run="yes")
