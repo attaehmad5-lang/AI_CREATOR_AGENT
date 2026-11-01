@@ -63,8 +63,16 @@ class MediaIntegrityValidator:
             if duration > self.max_duration_seconds:
                 return {"valid": False, "status": "MEDIA_DURATION_EXCEEDED", "duration_seconds": duration}
             expected_bytes = frames * channels * sample_width
-            data = audio.readframes(frames)
-            if len(data) != expected_bytes:
+            remaining_frames = frames
+            bytes_read = 0
+            while remaining_frames:
+                chunk_frames = min(remaining_frames, 32768)
+                chunk = audio.readframes(chunk_frames)
+                if not chunk:
+                    break
+                bytes_read += len(chunk)
+                remaining_frames -= chunk_frames
+            if bytes_read != expected_bytes or remaining_frames:
                 return {"valid": False, "status": "WAV_DATA_TRUNCATED", "size_bytes": size}
         return {
             "valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "WAV",
@@ -73,59 +81,68 @@ class MediaIntegrityValidator:
         }
 
     def _validate_mp4(self, path: Path, size: int) -> dict[str, Any]:
-        data = path.read_bytes()
-        offset = 0
         boxes: list[str] = []
-        while offset < len(data):
-            if len(boxes) >= 10000 or len(data) - offset < 8:
-                return {"valid": False, "status": "MP4_BOX_STRUCTURE_INVALID", "size_bytes": size}
-            box_size = struct.unpack(">I", data[offset:offset + 4])[0]
-            box_type_bytes = data[offset + 4:offset + 8]
-            try:
-                box_type = box_type_bytes.decode("ascii")
-            except UnicodeDecodeError:
-                return {"valid": False, "status": "MP4_BOX_TYPE_INVALID", "size_bytes": size}
-            header_size = 8
-            if box_size == 1:
-                if len(data) - offset < 16:
-                    return {"valid": False, "status": "MP4_EXTENDED_BOX_HEADER_TRUNCATED", "size_bytes": size}
-                box_size = struct.unpack(">Q", data[offset + 8:offset + 16])[0]
-                header_size = 16
-            elif box_size == 0:
-                box_size = len(data) - offset
-            if box_size < header_size or box_size > len(data) - offset:
-                return {"valid": False, "status": "MP4_BOX_SIZE_INVALID", "size_bytes": size}
-            boxes.append(box_type)
-            offset += box_size
+        offset = 0
+        with path.open("rb") as stream:
+            while offset < size:
+                if len(boxes) >= 10000 or size - offset < 8:
+                    return {"valid": False, "status": "MP4_BOX_STRUCTURE_INVALID", "size_bytes": size}
+                stream.seek(offset)
+                header = stream.read(8)
+                if len(header) != 8:
+                    return {"valid": False, "status": "MP4_BOX_STRUCTURE_INVALID", "size_bytes": size}
+                box_size = struct.unpack(">I", header[:4])[0]
+                try:
+                    box_type = header[4:8].decode("ascii")
+                except UnicodeDecodeError:
+                    return {"valid": False, "status": "MP4_BOX_TYPE_INVALID", "size_bytes": size}
+                header_size = 8
+                if box_size == 1:
+                    extended = stream.read(8)
+                    if len(extended) != 8:
+                        return {"valid": False, "status": "MP4_EXTENDED_BOX_HEADER_TRUNCATED", "size_bytes": size}
+                    box_size = struct.unpack(">Q", extended)[0]
+                    header_size = 16
+                elif box_size == 0:
+                    box_size = size - offset
+                if box_size < header_size or box_size > size - offset:
+                    return {"valid": False, "status": "MP4_BOX_SIZE_INVALID", "size_bytes": size}
+                boxes.append(box_type)
+                offset += box_size
         if "ftyp" not in boxes or "mdat" not in boxes or not ({"moov", "moof"} & set(boxes)):
             return {"valid": False, "status": "MP4_REQUIRED_BOX_MISSING", "boxes": boxes, "size_bytes": size}
         return {"valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "MP4", "boxes": boxes, "size_bytes": size}
 
     def _validate_webm(self, path: Path, size: int) -> dict[str, Any]:
-        data = path.read_bytes()
-        if len(data) < 12 or b"\x18\x53\x80\x67" not in data[4:]:
+        with path.open("rb") as stream:
+            header = stream.read(min(size, 65536))
+        if len(header) < 12 or not header.startswith(b"\\x1a\\x45\\xdf\\xa3") or b"\\x18\\x53\\x80\\x67" not in header[4:]:
             return {"valid": False, "status": "WEBM_SEGMENT_MISSING", "size_bytes": size}
         return {"valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "WEBM", "size_bytes": size}
 
     def _validate_ogg(self, path: Path, size: int) -> dict[str, Any]:
-        data = path.read_bytes()
         offset = 0
         pages = 0
-        while offset < len(data):
-            if pages >= 10000 or len(data) - offset < 27 or data[offset:offset + 4] != b"OggS":
-                return {"valid": False, "status": "OGG_PAGE_STRUCTURE_INVALID", "size_bytes": size}
-            if data[offset + 4] != 0:
-                return {"valid": False, "status": "OGG_VERSION_UNSUPPORTED", "size_bytes": size}
-            segment_count = data[offset + 26]
-            header_end = offset + 27 + segment_count
-            if header_end > len(data):
-                return {"valid": False, "status": "OGG_SEGMENT_TABLE_TRUNCATED", "size_bytes": size}
-            body_size = sum(data[offset + 27:header_end])
-            page_end = header_end + body_size
-            if page_end > len(data):
-                return {"valid": False, "status": "OGG_PAGE_TRUNCATED", "size_bytes": size}
-            offset = page_end
-            pages += 1
+        with path.open("rb") as stream:
+            while offset < size:
+                if pages >= 10000 or size - offset < 27:
+                    return {"valid": False, "status": "OGG_PAGE_STRUCTURE_INVALID", "size_bytes": size}
+                stream.seek(offset)
+                header = stream.read(27)
+                if len(header) != 27 or header[:4] != b"OggS":
+                    return {"valid": False, "status": "OGG_PAGE_STRUCTURE_INVALID", "size_bytes": size}
+                if header[4] != 0:
+                    return {"valid": False, "status": "OGG_VERSION_UNSUPPORTED", "size_bytes": size}
+                segment_count = header[26]
+                lacing = stream.read(segment_count)
+                if len(lacing) != segment_count:
+                    return {"valid": False, "status": "OGG_SEGMENT_TABLE_TRUNCATED", "size_bytes": size}
+                body_size = sum(lacing)
+                page_end = offset + 27 + segment_count + body_size
+                if page_end > size:
+                    return {"valid": False, "status": "OGG_PAGE_TRUNCATED", "size_bytes": size}
+                offset = page_end
+                pages += 1
         if pages == 0:
             return {"valid": False, "status": "OGG_NO_PAGES", "size_bytes": size}
         return {"valid": True, "status": "MEDIA_CONTAINER_VALID", "container": "OGG", "page_count": pages, "size_bytes": size}
