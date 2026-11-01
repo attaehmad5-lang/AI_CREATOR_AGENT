@@ -159,6 +159,54 @@ class ProviderAdapterRegistry:
             "modality": modality,
         }
 
+    def open_stream_session(
+        self,
+        provider_id: str,
+        *,
+        modality: str,
+        request_id: str,
+        model_id: str | None = None,
+        max_chunks: int = 10_000,
+        max_bytes: int = 64 * 1024 * 1024,
+        timeout_seconds: float = 300.0,
+    ) -> dict[str, Any]:
+        """Create a bounded stream accumulator only for a verified streaming adapter.
+
+        This creates local lifecycle state; it does not start a vendor network
+        request or imply that the adapter has begun producing chunks.
+        """
+        resolved = self.resolve_streaming(
+            provider_id, modality=modality, model_id=model_id
+        )
+        if resolved.get("resolved") is not True:
+            return {
+                "status": resolved.get("status", "STREAMING_ADAPTER_UNAVAILABLE"),
+                "opened": False,
+            }
+        from .streaming_response_manager import ProviderStreamSession
+
+        try:
+            session = ProviderStreamSession(
+                request_id,
+                max_chunks=max_chunks,
+                max_bytes=max_bytes,
+                timeout_seconds=timeout_seconds,
+            )
+        except (TypeError, ValueError) as exc:
+            return {
+                "status": "INVALID_STREAM_SESSION_OPTIONS",
+                "opened": False,
+                "error_type": type(exc).__name__,
+            }
+        return {
+            "status": "STREAM_SESSION_OPENED",
+            "opened": True,
+            "provider_id": provider_id,
+            "modality": modality,
+            "request_id": request_id,
+            "session": session,
+        }
+
     def as_callable(
         self,
         provider_id: str,
