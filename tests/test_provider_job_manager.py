@@ -198,6 +198,22 @@ class ProviderJobManagerTests(unittest.TestCase):
             self.assertEqual(reclaimed["job"]["worker_id"], "worker-2")
             self.assertEqual(reclaimed["job"]["attempts"], 2)
 
+    def test_completion_persists_other_expired_jobs_even_when_target_is_missing(self):
+        self.submit("job-1")
+        self.assertEqual(
+            self.manager.claim_next(worker_id="worker-1")["status"],
+            "JOB_CLAIMED",
+        )
+        self.now[0] += timedelta(seconds=11)
+        missing = self.manager.complete(
+            job_id="missing-job", worker_id="worker-1",
+            lease_token="A" * 43, success=False,
+        )
+        self.assertEqual(missing["status"], "JOB_NOT_FOUND")
+        persisted = self.manager.poll(job_id="job-1")
+        self.assertEqual(persisted["job"]["status"], "QUEUED")
+        self.assertEqual(persisted["job"]["last_error_code"], "WORKER_LEASE_EXPIRED")
+
     def test_expired_worker_lease_requeues_then_fails_at_attempt_limit(self):
         self.submit("job-1")
         self.manager.claim_next(worker_id="worker-1")
