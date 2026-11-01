@@ -234,7 +234,11 @@ class ProviderAdapterRegistry:
         if not isinstance(request_id, str) or not _IDENTIFIER.fullmatch(request_id):
             return {"status": "INVALID_REQUEST_ID", "executed": False}
         if chunk_validator is not None and not callable(chunk_validator):
-            return {"status": "INVALID_CHUNK_VALIDATOR", "executed": False}
+            return {
+                "status": "INVALID_CHUNK_VALIDATOR",
+                "executed": False,
+                "started": False,
+            }
         if {"provider_id", "modality", "request_id", "model_id"}.intersection(options):
             return {"status": "RESERVED_ADAPTER_OPTION", "executed": False}
         opened = self.open_stream_session(
