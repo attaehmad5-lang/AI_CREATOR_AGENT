@@ -161,8 +161,8 @@ class MediaIntegrityValidator:
                         elif version == 1:
                             if payload_size < 32:
                                 return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
-                            values = stream.read(24)
-                            if len(values) != 24:
+                            values = stream.read(28)
+                            if len(values) != 28:
                                 return {"valid": False, "status": "MP4_MOVIE_HEADER_INVALID", "size_bytes": size}
                             timescale = struct.unpack(">I", values[16:20])[0]
                             duration_units = struct.unpack(">Q", values[20:28])[0]
