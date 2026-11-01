@@ -91,7 +91,7 @@ class ProviderStreamSessionTests(unittest.TestCase):
                     ProviderStreamSession("request", clock=lambda value=clock_value: value)
         stream = ProviderStreamSession("request-valid")
         self.assertEqual(
-            stream.append(sequence=0, chunk="\\ud800")["status"],
+            stream.append(sequence=0, chunk="\ud800")["status"],
             "INVALID_CHUNK",
         )
         self.assertEqual(
