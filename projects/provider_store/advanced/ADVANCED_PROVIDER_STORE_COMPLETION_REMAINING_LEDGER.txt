@@ -543,8 +543,8 @@ Remaining work: Task-specific score thresholds, invalid scorer results/errors an
 
 Feature 105: Provider Unlock Management
 Status: PARTIAL
-Implementation/evidence inspected: provider_benchmark_manager.py; provider_output_quality_policy.py; provider_unlock_manager.py; related tests
-Remaining work: Foundational modules exist; controlled benchmark data and full acceptance matrices remain.
+Implementation/evidence inspected: provider_unlock_manager.py; unlock_flow_manager.py; tests/test_provider_unlock_flow.py; CI #41314709867
+Remaining work: Verified catalog/runtime state separation, user-controlled unlock steps, disabled/unknown provider blocking and no-purchase/no-bypass/no-key-logging behavior. CI #41314709867 passed on Python 3.10/3.11/3.12. User-provided account/subscription setup and real provider credentials remain external.
 
 Feature 106: Webhook Verification
 Status: COMPLETED
