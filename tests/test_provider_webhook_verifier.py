@@ -71,6 +71,43 @@ class ProviderWebhookVerifierTests(unittest.TestCase):
         )
         self.assertEqual(stale["status"], "WEBHOOK_TIMESTAMP_OUT_OF_RANGE")
 
+    def test_replay_state_rejects_duplicate_keys_and_symlinks(self):
+        self.path.write_text(
+            '{"version":"1.0","events":{},"events":{"injected":{}}}',
+            encoding="utf-8",
+        )
+        with self.assertRaises(ValueError):
+            ProviderWebhookVerifier(self.path)
+        target = self.path.parent / "real-webhook-state.json"
+        target.write_text('{"version":"1.0","events":{}}', encoding="utf-8")
+        link = self.path.parent / "linked-webhook-state.json"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are unavailable")
+        with self.assertRaises(ValueError):
+            ProviderWebhookVerifier(link)
+
+    def test_webhook_clock_and_unicode_secret_controls_fail_closed(self):
+        invalid_clock = ProviderWebhookVerifier(
+            self.path, clock=lambda: datetime(2026, 10, 16, 12)
+        )
+        result = invalid_clock.verify(
+            provider_id="video", payload=self.payload,
+            signature=self.signature(), timestamp=self.timestamp,
+            event_id="event-clock", secret=self.secret,
+        )
+        self.assertEqual(result["status"], "WEBHOOK_CLOCK_INVALID")
+        for control in ("\\u0085", "\\u2028", "\\u2029"):
+            with self.subTest(control=control):
+                result = self.verifier.verify(
+                    provider_id="video", payload=self.payload,
+                    signature=self.signature(), timestamp=self.timestamp,
+                    event_id="event-secret-" + str(ord(control)),
+                    secret=self.secret + control,
+                )
+                self.assertEqual(result["status"], "WEBHOOK_SECRET_INVALID")
+
     def test_oversized_payload_and_malformed_fields_fail_closed(self):
         oversized = self.verifier.verify(
             provider_id="video", payload=b"x" * 129,
