@@ -174,7 +174,6 @@ class MediaIntegrityValidator:
                         if duration <= 0 or duration > self.max_duration_seconds:
                             return {"valid": False, "status": "MEDIA_DURATION_EXCEEDED", "duration_seconds": duration}
                         metadata = {"duration_seconds": duration, "timescale": timescale}
-                        break
                     child_offset += child_size
                 if not found_movie_header:
                     return {"valid": False, "status": "MP4_MOVIE_HEADER_MISSING", "size_bytes": size}
