@@ -49,6 +49,42 @@ class ProviderStructuredLoggerTests(unittest.TestCase):
         self.assertNotIn("token=", encoded)
         self.assertNotIn("token=top-secret", encoded)
 
+    def test_credential_shaped_identifiers_are_never_written_to_logs(self):
+        secret_values = (
+            "ghp_abcdefghijklmnopqrstuvwxyz123456",
+            "sk-proj-abcdefghijklmnopqrstuvwxyz123456",
+            "AKIA1234567890ABCDEF",
+            "xoxb-12345678901234567890",
+            "Bearer top-secret-token",
+            "api_key=top-secret-token",
+        )
+        for secret in secret_values:
+            with self.subTest(secret=secret):
+                self.stream.seek(0)
+                self.stream.truncate(0)
+                result = self.events.emit(
+                    "provider.call",
+                    provider_id=secret,
+                    status="OK",
+                    outcome="OK",
+                    request_id=secret,
+                    error_code=secret,
+                )
+                self.assertTrue(result["logged"])
+                encoded = self.stream.getvalue()
+                self.assertNotIn(secret, encoded)
+                record = json.loads(encoded)
+                self.assertNotIn("provider_id", record)
+                self.assertNotIn("request_id", record)
+                self.assertNotIn("error_code", record)
+
+    def test_credential_shaped_status_fails_closed(self):
+        result = self.events.emit(
+            "provider.call", status="api_key=top-secret", outcome="ERROR"
+        )
+        self.assertEqual(result["status"], "INVALID_LOG_STATUS")
+        self.assertEqual(self.stream.getvalue(), "")
+
     def test_invalid_event_status_duration_and_clock_fail_closed(self):
         self.assertEqual(self.events.emit("../secret", status="OK", outcome="OK")["status"], "INVALID_LOG_EVENT")
         self.assertEqual(self.events.emit("provider.call", status="bad status", outcome="OK")["status"], "INVALID_LOG_STATUS")
