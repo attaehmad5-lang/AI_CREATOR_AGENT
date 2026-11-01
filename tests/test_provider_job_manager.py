@@ -40,7 +40,7 @@ class ProviderJobManagerTests(unittest.TestCase):
     def test_persisted_queued_job_accepts_null_lease_token(self):
         self.submit("job-1")
         reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
-        self.assertEqual(reloaded.poll(job_id="job-1")["job"]["lease_token"], None)
+        self.assertIsNone(reloaded.data["jobs"]["job-1"].get("lease_token"))
 
     def test_job_history_capacity_preserves_terminal_idempotency_records(self):
         limited = ProviderJobManager(
