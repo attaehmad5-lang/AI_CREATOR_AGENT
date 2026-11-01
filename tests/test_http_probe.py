@@ -317,7 +317,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             environ={},
             opener=Opener(),
         )
-        with self.assertRaises(ProviderHTTPAuthError) as caught:
+        with self.assertRaises(PermissionError) as caught:
             probe(
                 {
                     "id": "public_image",
