@@ -121,6 +121,8 @@ Use `ProviderStreamSession` to validate and assemble chunks from an upstream str
 
 Sequences must be contiguous from zero. Identical repeated chunks are idempotently rejected; conflicting duplicates and gaps fail. Chunk count, total bytes and inactivity are bounded. Cancellation clears buffered output. Terminal sessions reject further writes. Integrate this primitive only behind a provider adapter that explicitly advertises streaming and applies modality-specific output validation.
 
+Register stream support explicitly with `ProviderAdapterRegistry.register(..., streaming_modalities=(...))`. The list must be a subset of the adapter's registered modalities. `resolve_streaming(provider_id, modality=..., model_id=...)` additionally requires an enabled provider, verified connection, registered adapter and matching streaming capability; ordinary generation registration does not imply streaming support.
+
 ## Runtime and policy modules
 
 | Module | Responsibility |
