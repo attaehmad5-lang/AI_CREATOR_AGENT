@@ -8,6 +8,19 @@ from pathlib import Path
 from projects.provider_store.provider_job_manager import ProviderJobManager
 
 
+def _submit_provider_job_in_process(args):
+    path, index, capacity = args
+    manager = ProviderJobManager(path, max_queue_size=capacity, max_concurrent=3)
+    result = manager.submit(
+        job_id=f"process-job-{index:03d}",
+        project_id=f"project-{index % 4}",
+        provider_id="provider-a",
+        payload_ref=f"payload:{index}",
+        priority=index % 101,
+    )
+    return result["status"]
+
+
 class ProviderJobManagerTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -98,6 +111,25 @@ class ProviderJobManagerTests(unittest.TestCase):
     def test_fair_scheduling_flag_must_be_boolean(self):
         with self.assertRaisesRegex(ValueError, "fair_scheduling"):
             ProviderJobManager(self.path, fair_scheduling="yes")
+
+    def test_cross_process_queue_capacity_is_atomic_under_submission_race(self):
+        from concurrent.futures import ProcessPoolExecutor
+        capacity = 12
+        with ProcessPoolExecutor(max_workers=6) as pool:
+            statuses = list(pool.map(
+                _submit_provider_job_in_process,
+                [(str(self.path), index, capacity) for index in range(48)],
+            ))
+        self.assertEqual(statuses.count("JOB_QUEUED"), capacity)
+        self.assertEqual(statuses.count("QUEUE_FULL"), 48 - capacity)
+        reloaded = ProviderJobManager(
+            self.path, max_queue_size=capacity, max_concurrent=3,
+            clock=lambda: self.now[0],
+        )
+        self.assertEqual(
+            sum(job["status"] == "QUEUED" for job in reloaded.data["jobs"].values()),
+            capacity,
+        )
 
     def test_concurrent_load_respects_queue_capacity_and_worker_limit(self):
         manager = ProviderJobManager(
