@@ -487,6 +487,11 @@ class ProviderService:
             return {"status": "AUTHORIZATION_DENIED", "rotated": False}
         if self.secret_manager is None:
             return {"status": "SECRET_MANAGER_UNAVAILABLE", "rotated": False}
+        if self.tenant_isolation_manager is not None and (
+            getattr(self.secret_manager, "tenant_isolation_manager", None)
+            is not self.tenant_isolation_manager
+        ):
+            return {"status": "TENANT_CREDENTIAL_AUTHORIZATION_NOT_CONFIGURED", "rotated": False}
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_PROVIDER_ID", "rotated": False}
         try:
@@ -518,10 +523,11 @@ class ProviderService:
             or result.get("rotated") is not True
             or result.get("status") != "SECRET_ROTATED"
         ):
+            candidate_status = result.get("status") if isinstance(result, dict) else None
             safe_status = (
-                result.get("status")
-                if isinstance(result, dict)
-                and isinstance(result.get("status"), str)
+                candidate_status
+                if isinstance(candidate_status, str)
+                and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", candidate_status)
                 else "INVALID_ROTATION_RESPONSE"
             )
             return {"status": safe_status, "rotated": False}
@@ -1220,6 +1226,20 @@ class ProviderService:
                 )
                 return {
                     "status": "ADAPTER_MANAGED_CREDENTIAL_CONTRACT_UNSUPPORTED",
+                    "executed": False,
+                    "provider": provider_id,
+                    "release": released,
+                }
+            if self.tenant_isolation_manager is not None and (
+                getattr(self.secret_manager, "tenant_isolation_manager", None)
+                is not self.tenant_isolation_manager
+            ):
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "TENANT_CREDENTIAL_AUTHORIZATION_NOT_CONFIGURED",
                     "executed": False,
                     "provider": provider_id,
                     "release": released,
