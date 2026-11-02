@@ -6,7 +6,7 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/38434905299): **328 tests passed on Ubuntu and 328 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. The suite covers bounded Retry-After metadata, overflow-safe retry backoff, fail-closed OAuth lookup, deprecation validation including malformed dates/control characters, and runtime enablement rejecting invalid catalogs.
+GitHub Actions run [#41379929002](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41379929002), PR #151 code commit `f5c65d63779d059bad55dfce5d282d82007a691e`: **506 tests passed on Ubuntu and 506 on Windows, 0 failures**. Compilation and provider JSON catalog validation passed on both platforms. Added provider-category modality binding, an opt-in fail-closed routed modality gate, interprocess-locked health-state initialization, and regression coverage for modality contracts, quality-threshold precedence, routing tie-breaks, and health-state loading. The integration is still in PR #151 and is not merged into `main`.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -47,7 +47,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 21 | 🔴 | Music Generation Providers | OPEN | No verified music generation adapter and output validation test. |
 | 22 | 🔴 | Image Editing/Upscaling/Restoration | OPEN | No verified end-to-end editing/upscaling/restoration adapters. |
 | 23 | 🔴 | Transcription, Translation and Dubbing | OPEN | No verified end-to-end transcription/translation/dubbing adapters. |
-| 24 | 🔴 | Future Modality Support and Contract Tests | PARTIAL | Capability identifiers and callable modality contracts are tested; working adapters for future modalities remain open. |
+| 24 | 🔴 | Future Modality Support and Contract Tests | PARTIAL | Shared `MODALITY_CONTRACTS`/`MODALITY_OUTPUT_KINDS` and `ConnectionManager.get_modality_binding()` now feed the opt-in `ProviderService.execute_routed_request(require_modality_binding=True)` gate; mismatch, unsupported categories and broken loaded instances fail closed before adapter invocation. Tests: `tests/test_connection_manager.py::ModalityBindingTests` and `tests/test_provider_service.py::test_modality_binding_*`. This is contract-level integration only; working adapters for future modalities remain open. |
 
 ## D — Routing and Selection
 
@@ -144,7 +144,7 @@ GitHub Actions run [#38434905299](https://github.com/attaehmad5-lang/AI_CREATOR_
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 81 | 🔴 | Latency-Aware Routing | PARTIAL | Health latency data exists; verified latency-aware routing policy coverage is incomplete. |
+| 81 | 🔴 | Latency-Aware Routing | PARTIAL | Health latency data and `HEALTHIEST_FIRST` routing are present; added regression coverage that equal-latency providers are ordered by configured priority (`tests/test_routing_manager.py::test_healthiest_first_ties_are_broken_by_configured_priority`). The full latency-aware routing requirement remains only partially verified. |
 | 82 | 🔴 | Provider Success/Error-Rate Metrics | PARTIAL | `provider_metrics_manager.py` records success/failure/timeout counters and success rate from provider executions; metrics history is bounded and does not store payloads. Export to production telemetry remains open. |
 | 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | PARTIAL | `ProviderMetricsManager` aggregates bounded latency percentiles, queue-wait averages, timeout counts, and sample throughput; `ProviderService` records execution latency and queue wait. External telemetry export and load-tested throughput metrics remain open. |
 | 84 | 🔴 | Output Quality Validation/Score Integration | PARTIAL | `provider_quality_policy.py` adds an injected output scorer and `ProviderService` applies its result after file validation; below-threshold or invalid scores prevent an output from being reported successful. A production semantic scorer and modality-specific QA remain open. |
