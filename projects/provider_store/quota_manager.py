@@ -167,6 +167,8 @@ class ProviderQuotaManager:
             return {"status": "INVALID_REQUEST", "reserved": False}
         if tenant_id is not None and not self._valid_tenant_id(tenant_id):
             return {"status": "INVALID_TENANT_ID", "reserved": False}
+        if self.tenant_limits and tenant_id is None:
+            return {"status": "TENANT_CONTEXT_REQUIRED", "reserved": False}
         if provider_id not in self.limits:
             return {"status": "NO_QUOTA_POLICY", "provider": provider_id, "reserved": False}
         with self._transaction():
