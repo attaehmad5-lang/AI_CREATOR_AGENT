@@ -114,6 +114,24 @@ class ProviderHealthProbeFacadeTests(unittest.TestCase):
                 self.assertEqual(result["status"], "INVALID_TIMEOUT")
         self.assertEqual(health.calls, [])
 
+    def test_malformed_probe_status_and_inconsistent_health_flags_fail_closed(self):
+        malformed_results = (
+            {"status": [], "verified": False},
+            {"status": {}, "verified": False},
+            {"status": "HEALTHY", "verified": "yes"},
+            {"status": "TIMEOUT", "verified": True},
+        )
+        for malformed in malformed_results:
+            with self.subTest(result=malformed):
+                health = HealthStub(malformed)
+                service = ProviderService(ConnectionStub(), health_manager=health)
+                result = service.active_probe_provider(
+                    "image", lambda **kwargs: True,
+                )
+                self.assertEqual(result["status"], "INVALID_ACTIVE_PROBE_RESPONSE")
+                self.assertFalse(result["verified"])
+                self.assertFalse(result["saved"])
+
     def test_missing_health_manager_and_probe_exception_fail_closed(self):
         service = ProviderService(ConnectionStub())
         self.assertEqual(
