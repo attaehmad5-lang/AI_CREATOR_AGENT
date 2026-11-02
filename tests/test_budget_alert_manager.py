@@ -67,6 +67,25 @@ class BudgetAlertManagerTests(unittest.TestCase):
         )
         self.assertEqual(len(self.manager.data["events"]), 4)
 
+
+    def test_alert_store_limit_rejects_new_period_atomically(self):
+        manager = BudgetAlertManager(
+            self.path, thresholds=(0.5, 0.8), clock=lambda: self.now[0],
+            max_events=2,
+        )
+        first = manager.record(
+            project_id="film", spend=9.0, budget=10.0, request_id="period-1",
+            budget_period_id="2026-10",
+        )
+        self.assertEqual(len(first["alerts"]), 2)
+        blocked = manager.record(
+            project_id="film", spend=9.0, budget=10.0, request_id="period-2",
+            budget_period_id="2026-11",
+        )
+        self.assertEqual(blocked["status"], "ALERT_STORE_LIMIT_REACHED")
+        self.assertEqual(blocked["alerts"], [])
+        self.assertEqual(len(manager.data["events"]), 2)
+
     def test_legacy_period_omission_preserves_existing_idempotency(self):
         first = self.manager.record(
             project_id="film", spend=8.0, budget=10.0, request_id="job-1"
@@ -286,6 +305,8 @@ class BudgetAlertManagerTests(unittest.TestCase):
         for kwargs in (
             {"max_delivery_attempts": 0},
             {"max_delivery_attempts": True},
+            {"max_events": 0},
+            {"max_events": True},
             {"retry_base_seconds": 0},
             {"retry_base_seconds": 60, "retry_max_seconds": 30},
             {"dispatch_lease_seconds": 4},
