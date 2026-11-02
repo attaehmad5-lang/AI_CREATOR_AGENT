@@ -112,7 +112,7 @@ class ProviderOutputValidator:
                 if prefix != b"\xff":
                     return None
                 marker_byte = stream.read(1)
-                while marker_byte == b"\\xff":
+                while marker_byte == b"\xff":
                     marker_byte = stream.read(1)
                 if len(marker_byte) != 1:
                     return None
