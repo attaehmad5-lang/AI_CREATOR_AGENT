@@ -69,8 +69,11 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
 
     def test_denied_malformed_and_underfunded_approvals_fail_closed(self):
         denied = ProviderABExperimentManager(approval_verifier=lambda **_: {"allowed": False})
-        underfunded = ProviderABExperimentManager(approval_verifier=lambda **_: {
-            "allowed": True, "approved_max_cost_per_request": 0.01,
+        underfunded = ProviderABExperimentManager(approval_verifier=lambda **claim: {
+            "allowed": True,
+            "approved_max_cost_per_request": (
+                0.0 if claim["usage_mode"] == "FREE_VERIFIED" else 0.01
+            ),
         })
         malformed = ProviderABExperimentManager(approval_verifier=lambda **_: {
             "allowed": True, "approved_max_cost_per_request": float("nan"),
@@ -154,7 +157,8 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first["status"], "VARIANT_ASSIGNED")
         assignment = first["assignment"]
-        self.assertTrue(assignment["provider_call_permitted"])
+        self.assertFalse(assignment["provider_call_permitted"])
+        self.assertTrue(assignment["eligible_after_downstream_gates"])
         self.assertTrue(assignment["downstream_cost_gate_required"])
         self.assertFalse(assignment["execution_performed"])
         self.assertIn(assignment["usage_mode"], {"FREE_VERIFIED", "PAID_APPROVED"})
