@@ -790,6 +790,14 @@ class ProviderService:
                 degraded_state_result.get("state")
                 if isinstance(degraded_state_result, dict) else None
             )
+            if not isinstance(degraded_mode_state, dict):
+                return {
+                    "status": "PROVIDER_CATEGORY_HEALTH_UNKNOWN",
+                    "executed": False,
+                    "degraded_mode": degraded_state_result if isinstance(degraded_state_result, dict) else {
+                        "status": "INVALID_DEGRADED_MODE_STATE_RESPONSE"
+                    },
+                }
             if isinstance(degraded_mode_state, dict):
                 current_mode = degraded_mode_state.get("mode")
                 if current_mode == "OUTAGE":
