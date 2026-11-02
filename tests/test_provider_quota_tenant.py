@@ -82,11 +82,14 @@ class ProviderQuotaTenantTests(unittest.TestCase):
 
     def test_reservation_idempotency_cannot_cross_tenant_boundaries(self):
         self.manager.reserve(provider_id="image", request_id="shared", tenant_id="tenant-a")
-        for tenant_id in (None, "tenant-b"):
+        for tenant_id, expected in (
+            (None, "TENANT_CONTEXT_REQUIRED"),
+            ("tenant-b", "TENANT_ISOLATION_DENIED"),
+        ):
             result = self.manager.reserve(
                 provider_id="image", request_id="shared", tenant_id=tenant_id,
             )
-            self.assertEqual(result["status"], "TENANT_ISOLATION_DENIED")
+            self.assertEqual(result["status"], expected)
             self.assertFalse(result["reserved"])
 
     def test_released_tenant_reservation_keeps_its_tenant_binding_on_retry(self):
@@ -101,7 +104,7 @@ class ProviderQuotaTenantTests(unittest.TestCase):
             self.manager.reserve(
                 provider_id="image", request_id="retry", tenant_id="tenant-a",
             )["status"],
-            "ALREADY_RESERVED",
+            "ALREADY_RELEASED",
         )
         self.assertEqual(
             self.manager.reserve(
