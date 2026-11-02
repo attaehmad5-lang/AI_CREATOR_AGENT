@@ -11,6 +11,7 @@ from projects.provider_store.provider_benchmark_manager import ProviderBenchmark
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
+from projects.provider_store.provider_slo_manager import ProviderSLOManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
@@ -1219,12 +1220,19 @@ class ProviderServiceTests(unittest.TestCase):
                 return {"allowed": True, "provider": "image", "billing_mode": "PAID_APPROVED"}
 
         metrics = ProviderMetricsManager()
+        slo = ProviderSLOManager(self.root / "execution-slos.json")
+        slo.configure(
+            "image-slo", provider_id="image", category="image",
+            availability_target=0.5, max_p95_latency_ms=100,
+            window_seconds=3600, minimum_samples=1,
+        )
         service = ProviderService(
             self.connections,
             routing_manager=RoutingStub(),
             cost_policy=self.cost,
             quota_manager=self.quota,
             metrics_manager=metrics,
+            slo_manager=slo,
         )
         result = service.execute_routed_request(
             category="image", project_id="film", request_id="metrics-job",
@@ -1236,10 +1244,57 @@ class ProviderServiceTests(unittest.TestCase):
             },
         )
         self.assertEqual(result["metrics"]["status"], "METRIC_RECORDED")
+        self.assertEqual(result["slo_observation"]["status"], "SLO_OBSERVATION_RECORDED")
+        self.assertEqual(slo.evaluate("image-slo")["status"], "SLO_BREACHED")
         snapshot = metrics.snapshot(provider_id="image")["metrics"]
         self.assertEqual(snapshot["failure_count"], 1)
         self.assertEqual(snapshot["avg_latency_ms"], 25.0)
         self.assertEqual(snapshot["avg_queue_wait_ms"], 12.0)
+
+    def test_service_configures_slos_for_admin_and_limits_read_to_authorized_principals(self):
+        auth = ProviderAuthorizationManager(self.root / "slo-auth.json")
+        auth.assign_role("slo-admin", "admin")
+        auth.assign_role("slo-operator", "operator")
+        auth.assign_role("slo-viewer", "viewer")
+        slo = ProviderSLOManager(self.root / "slo-state.json")
+        service = ProviderService(
+            self.connections, authorization_manager=auth, slo_manager=slo,
+        )
+        configured = service.configure_service_level_objective(
+            "image-slo", provider_id="image", category="image",
+            availability_target=0.99, max_p95_latency_ms=500,
+            window_seconds=3600, minimum_samples=2,
+            principal_id="slo-admin",
+        )
+        self.assertEqual(configured["status"], "SLO_CONFIGURED")
+        denied_config = service.configure_service_level_objective(
+            "operator-slo", provider_id="image", category="image",
+            availability_target=0.99, max_p95_latency_ms=500,
+            principal_id="slo-operator",
+        )
+        self.assertEqual(denied_config["status"], "AUTHORIZATION_DENIED")
+        denied_read = service.evaluate_service_level_objective(
+            "image-slo", principal_id="unknown",
+        )
+        self.assertEqual(denied_read["status"], "AUTHORIZATION_DENIED")
+        allowed_read = service.evaluate_service_level_objective(
+            "image-slo", principal_id="slo-viewer",
+        )
+        self.assertEqual(allowed_read["status"], "INSUFFICIENT_DATA")
+        self.assertEqual(allowed_read["evaluation"]["sample_count"], 0)
+
+    def test_service_slo_configuration_and_evaluation_fail_closed_without_authorization(self):
+        service = ProviderService(
+            self.connections,
+            slo_manager=ProviderSLOManager(self.root / "slo-no-auth.json"),
+        )
+        configured = service.configure_service_level_objective(
+            "image-slo", provider_id="image", category="image",
+            availability_target=0.99, max_p95_latency_ms=500,
+        )
+        self.assertEqual(configured["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        evaluated = service.evaluate_service_level_objective("image-slo")
+        self.assertEqual(evaluated["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
 
     def test_low_output_quality_score_prevents_success_status(self):
         router = ProviderRoutingManager(
