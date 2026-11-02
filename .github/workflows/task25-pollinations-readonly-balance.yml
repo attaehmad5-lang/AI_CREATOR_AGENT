@@ -1,0 +1,74 @@
+name: Task 25 Pollinations Read-only Account Usage Verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pollinations-account-usage-readonly
+  cancel-in-progress: false
+
+jobs:
+  verify-account-usage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify read-only account usage permission
+        env:
+          POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from urllib.error import HTTPError, URLError
+          from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+          class RejectRedirects(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          token = os.environ.get("POLLINATIONS_API_KEY", "")
+          if not token or len(token) > 16384 or any(ord(c) < 32 or ord(c) == 127 for c in token):
+              print("status: CREDENTIAL_MISSING_OR_INVALID")
+              raise SystemExit(1)
+
+          request = Request(
+              "https://gen.pollinations.ai/account/balance",
+              headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+              method="GET",
+          )
+          opener = build_opener(RejectRedirects())
+          try:
+              with opener.open(request, timeout=8) as response:
+                  if response.geturl() != "https://gen.pollinations.ai/account/balance":
+                      print("status: UNEXPECTED_ENDPOINT")
+                      raise SystemExit(1)
+                  raw = response.read(65537)
+                  if len(raw) > 65536:
+                      print("status: RESPONSE_TOO_LARGE")
+                      raise SystemExit(1)
+                  payload = json.loads(raw.decode("utf-8"))
+          except HTTPError as exc:
+              print("status: HTTP_" + str(exc.code))
+              print("account_usage_verified: false")
+              raise SystemExit(1)
+          except (URLError, TimeoutError, OSError, ValueError, UnicodeError):
+              print("status: REQUEST_OR_RESPONSE_INVALID")
+              print("account_usage_verified: false")
+              raise SystemExit(1)
+
+          account = payload.get("accountBalance") if isinstance(payload, dict) else None
+          total = account.get("total") if isinstance(account, dict) else None
+          verified = (
+              isinstance(total, (int, float))
+              and not isinstance(total, bool)
+              and total >= 0
+          )
+          print("status: " + ("VERIFIED" if verified else "ACCOUNT_USAGE_SCOPE_REQUIRED_OR_BALANCE_INVALID"))
+          print("account_usage_verified: " + str(verified).lower())
+          print("required_scope: account:usage")
+          # Never print the credential, response body, or balance amount.
+          raise SystemExit(0 if verified else 1)
+          PY
