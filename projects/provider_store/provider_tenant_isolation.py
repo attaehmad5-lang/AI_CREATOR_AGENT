@@ -120,12 +120,12 @@ class ProviderTenantIsolationManager:
             credentials = record["credential_refs"]
             if (
                 len(principals) > self.max_principals_per_tenant
-                or len(set(principals)) != len(principals)
                 or any(not self._valid_id(value) for value in principals)
-                or len(set(projects)) != len(projects)
+                or len(set(principals)) != len(principals)
                 or any(not self._valid_id(value) for value in projects)
-                or len(set(credentials)) != len(credentials)
+                or len(set(projects)) != len(projects)
                 or any(not self._valid_ref(value) for value in credentials)
+                or len(set(credentials)) != len(credentials)
             ):
                 raise ValueError("invalid tenant isolation membership list")
             for project_id in projects:
