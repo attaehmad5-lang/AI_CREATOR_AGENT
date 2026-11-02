@@ -21,7 +21,7 @@ ROLE_PERMISSIONS = {
     "admin": frozenset({
         "provider.read", "provider.verify", "provider.generate",
         "provider.configure", "provider.enable", "provider.disable",
-        "provider.credentials.rotate", "billing.approve",
+        "provider.credentials.rotate", "provider.policy.simulate", "billing.approve",
     }),
 }
 KNOWN_OPERATIONS = frozenset().union(*ROLE_PERMISSIONS.values())
