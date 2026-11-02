@@ -70,7 +70,12 @@ class PollinationsProvider:
         if not isinstance(payload, dict):
             return None
         error = payload.get("error")
-        candidate = error.get("code") if isinstance(error, dict) else payload.get("code")
+        if isinstance(error, dict):
+            candidate = error.get("code")
+        elif isinstance(error, str):
+            candidate = error
+        else:
+            candidate = payload.get("code")
         if not isinstance(candidate, str) or len(candidate) > 80:
             return None
         normalized = candidate.strip().casefold().replace("-", "_").replace(" ", "_")
