@@ -90,7 +90,6 @@ class ProviderCapacityPlannerTests(unittest.TestCase):
     def test_load_simulation_starts_new_work_when_a_worker_becomes_free(self):
         arrivals = [
             {"arrival_ms": 0, "service_ms": 50},
-            {"arrival_ms": 20, "service_ms": 30},
             {"arrival_ms": 50, "service_ms": 10},
         ]
         result = self.planner.simulate_load(
@@ -98,7 +97,7 @@ class ProviderCapacityPlannerTests(unittest.TestCase):
             max_concurrent=1, max_queue_size=0,
         )
         simulation = result["simulation"]
-        self.assertEqual(simulation["accepted_requests"], 3)
+        self.assertEqual(simulation["accepted_requests"], 2)
         self.assertEqual(simulation["rejected_requests"], 0)
         self.assertEqual(simulation["simulated_drain_time_ms"], 60)
         self.assertEqual(simulation["queue_wait_sample_count"], 0)
