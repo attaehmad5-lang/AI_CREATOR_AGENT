@@ -219,7 +219,7 @@ These changes advance only their documented item scopes. The canonical 138-item 
 | 124 | 🔴 | Disaster Recovery and Restore Procedures | PARTIAL | Catalog restore and atomic persistence exist; full disaster recovery/restore drills are not verified. |
 | 125 | 🔴 | Degraded Mode During Partial Service Outages | OPEN | Explicit degraded-mode orchestration is not implemented. |
 | 126 | 🔴 | Capacity Planning and Load Testing | OPEN | Capacity planning and sustained load tests are not complete. |
-| 127 | 🔴 | Service-Level Objectives (SLOs) | OPEN | SLO definitions and tracking are not implemented. |
+| 127 | 🔴 | Service-Level Objectives (SLOs) | PARTIAL | `ProviderSLOManager` persists SLO definitions and bounded operational samples, evaluates rolling-window availability and p95 latency, reports insufficient-data separately, and calculates remaining error budget. `ProviderService` records outcomes from executed routed requests and exposes admin-only SLO configuration plus authorized read/evaluation. Alert delivery, dashboards, multi-region/project objectives and production retention/scale validation remain open. |
 | 128 | 🔴 | Operational Runbooks and Incident Recovery | PARTIAL | A provider guide exists; full operational runbooks and incident drills are incomplete. |
 
 ## P — Future-Ready Extensibility
