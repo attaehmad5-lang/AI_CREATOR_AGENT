@@ -59,15 +59,24 @@ class ProviderErrorPolicyTests(unittest.TestCase):
                 self.assertEqual(result["status"], "INVALID_PROVIDER_ERROR_INPUT")
                 self.assertFalse(result["retryable"])
 
-    def test_pollinations_documented_balance_codes_are_provider_specific(self):
-        for code in ("INSUFFICIENT_BALANCE", "KEY_BUDGET_EXHAUSTED"):
-            with self.subTest(code=code):
-                result = classify_provider_error(
-                    402, provider_id="pollinations", provider_code=code
-                )
-                self.assertEqual(result["status"], "CREDITS_EXHAUSTED")
-                self.assertEqual(result["category"], "credits_exhausted")
-                self.assertFalse(result["retryable"])
+    def test_pollinations_insufficient_balance_is_provider_specific(self):
+        result = classify_provider_error(
+            402, provider_id="pollinations", provider_code="INSUFFICIENT_BALANCE"
+        )
+        self.assertEqual(result["status"], "CREDITS_EXHAUSTED")
+        self.assertEqual(result["category"], "credits_exhausted")
+        self.assertFalse(result["retryable"])
+
+    def test_pollinations_key_budget_exhaustion_is_not_misreported_as_wallet_empty(self):
+        result = classify_provider_error(
+            402, provider_id="pollinations", provider_code="KEY_BUDGET_EXHAUSTED"
+        )
+        self.assertEqual(result["status"], "PROVIDER_KEY_BUDGET_EXHAUSTED")
+        self.assertEqual(result["category"], "billing")
+        self.assertEqual(
+            result["action"], "stop_attempt_and_review_provider_api_key_budget"
+        )
+        self.assertFalse(result["retryable"])
 
     def test_pollinations_paid_only_model_requires_paid_balance(self):
         result = classify_provider_error(
