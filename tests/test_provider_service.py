@@ -26,6 +26,7 @@ from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
+from projects.generation.providers.pollinations_provider import PollinationsProviderError
 
 
 class ProviderServiceTests(unittest.TestCase):
@@ -927,6 +928,69 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(retry_spy.calls, 0)
         self.assertNotIn("provider_code", result["provider_error"])
         self.assertTrue(self.cost.ledger["projects"]["film"]["reservations"]["credits-exhausted-job"])
+
+    def test_pollinations_billing_exception_is_classified_and_reservations_are_retained(self):
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "provider": "pollinations",
+                    "billing_mode": "PAID_APPROVED",
+                }
+
+        class BillingFailureAdapter:
+            def __call__(self, **kwargs):
+                raise PollinationsProviderError(
+                    "safe message",
+                    status_code=402,
+                    retryable=False,
+                    provider_error_code="insufficient_balance",
+                )
+
+        self.cost.reserve_usage(
+            project_id="film", provider_id="pollinations", estimated_cost=2.0,
+            request_id="pollinations-billing-exception",
+        )
+        pollinations_quota = ProviderQuotaManager(
+            self.root / "pollinations-quota.json",
+            limits={"pollinations": {"daily": 10}},
+        )
+        pollinations_quota.reserve(
+            provider_id="pollinations", request_id="pollinations-billing-exception"
+        )
+        incidents = ProviderIncidentManager(self.root / "pollinations-incidents.json")
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            retry_policy=self.retry,
+            cost_policy=self.cost,
+            quota_manager=pollinations_quota,
+            incident_manager=incidents,
+        )
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="pollinations-billing-exception",
+            estimated_cost=2.0,
+            adapter=BillingFailureAdapter(),
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_OUTCOME_UNKNOWN")
+        self.assertEqual(result["provider_error"]["status"], "CREDITS_EXHAUSTED")
+        self.assertFalse(result["provider_error"]["retryable"])
+        self.assertFalse(result["retry_decision"]["retry"])
+        self.assertTrue(result["reservations_retained"])
+        self.assertIn(
+            "pollinations-billing-exception",
+            self.cost.ledger["projects"]["film"]["reservations"],
+        )
+        self.assertEqual(
+            pollinations_quota.data["requests"]["pollinations-billing-exception"]["status"],
+            "RESERVED",
+        )
+        self.assertEqual(result["incident"]["status"], "INCIDENT_OPENED")
+        self.assertEqual(result["incident"]["incident"]["severity"], "critical")
+        self.assertNotIn("safe message", repr(result))
 
     def test_execution_queues_budget_alert_after_spend_crosses_threshold(self):
         self.cost.reserve_usage(

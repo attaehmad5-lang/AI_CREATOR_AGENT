@@ -200,3 +200,185 @@ class ProviderJSONBalanceProbe:
                     close()
             except Exception:
                 pass
+
+
+class PollinationsAccountBalanceProbe:
+    """Read-only Pollinations wallet balance probe requiring the account:usage scope.
+
+    It intentionally accepts only accountBalance.total. The top-level "balance"
+    field may represent an API-key spending budget, so it is never treated as
+    the account wallet balance by this probe.
+    """
+
+    endpoint = "https://gen.pollinations.ai/account/balance"
+    allowed_hosts = ("gen.pollinations.ai",)
+    max_response_bytes = 64 * 1024
+
+    def __init__(
+        self,
+        *,
+        environ: dict[str, str] | None = None,
+        opener: Any = None,
+        timeout_seconds: float = 5.0,
+    ) -> None:
+        if environ is not None and not isinstance(environ, dict):
+            raise ValueError("INVALID_ENVIRONMENT")
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+        ):
+            raise ValueError("INVALID_TIMEOUT")
+        try:
+            timeout = float(timeout_seconds)
+        except (OverflowError, TypeError, ValueError):
+            raise ValueError("INVALID_TIMEOUT") from None
+        if not math.isfinite(timeout) or not 0.1 <= timeout <= 30.0:
+            raise ValueError("INVALID_TIMEOUT")
+        if opener is not None and not callable(getattr(opener, "open", None)):
+            raise ValueError("INVALID_OPENER")
+        self.environ = os.environ if environ is None else environ
+        self.opener = opener or build_opener(_RejectRedirects())
+        self.timeout_seconds = timeout
+
+    def __call__(self, provider_id: str = "pollinations") -> dict[str, Any]:
+        if provider_id != "pollinations":
+            return {"status": "INVALID_PROVIDER", "provider": provider_id, "verified": False}
+        token = self.environ.get("POLLINATIONS_API_KEY")
+        if (
+            not isinstance(token, str) or not token.strip() or len(token) > 16384
+            or any(ord(char) < 32 or ord(char) == 127 for char in token)
+        ):
+            return {
+                "status": "CREDENTIAL_MISSING_OR_INVALID",
+                "provider": "pollinations",
+                "verified": False,
+            }
+        request = Request(
+            self.endpoint,
+            headers={
+                "Authorization": "Bearer " + token,
+                "Accept": "application/json",
+                "User-Agent": "AI_CREATOR_AGENT-BalanceProbe/1.0",
+            },
+            method="GET",
+        )
+        try:
+            response = self.opener.open(request, timeout=self.timeout_seconds)
+        except HTTPError as exc:
+            status = exc.code if isinstance(exc.code, int) else None
+            try:
+                exc.close()
+            except Exception:
+                pass
+            if status == 401:
+                code = "BALANCE_AUTH_FAILED"
+            elif status == 403:
+                code = "ACCOUNT_USAGE_SCOPE_REQUIRED"
+            elif status == 429:
+                code = "BALANCE_RATE_LIMITED"
+            else:
+                code = "BALANCE_HTTP_ERROR"
+            return {
+                "status": code,
+                "provider": "pollinations",
+                "http_status": status,
+                "verified": False,
+                "required_scope": "account:usage",
+            }
+        except URLError as exc:
+            reason = getattr(exc, "reason", None)
+            status = (
+                "BALANCE_TIMEOUT"
+                if isinstance(reason, TimeoutError)
+                or "timeout" in type(reason).__name__.casefold()
+                else "BALANCE_NETWORK_ERROR"
+            )
+            return {"status": status, "provider": "pollinations", "verified": False}
+        except TimeoutError:
+            return {"status": "BALANCE_TIMEOUT", "provider": "pollinations", "verified": False}
+        except Exception as exc:
+            return {
+                "status": "BALANCE_REQUEST_FAILED",
+                "provider": "pollinations",
+                "verified": False,
+                "error_type": type(exc).__name__,
+            }
+
+        try:
+            try:
+                status = (
+                    response.getcode()
+                    if callable(getattr(response, "getcode", None))
+                    else getattr(response, "status", None)
+                )
+                if not isinstance(status, int) or not 200 <= status < 300:
+                    return {
+                        "status": "BALANCE_HTTP_ERROR",
+                        "provider": "pollinations",
+                        "verified": False,
+                    }
+                body = response.read(self.max_response_bytes + 1)
+            except TimeoutError:
+                return {"status": "BALANCE_TIMEOUT", "provider": "pollinations", "verified": False}
+            except Exception as exc:
+                return {
+                    "status": "BALANCE_RESPONSE_READ_FAILED",
+                    "provider": "pollinations",
+                    "verified": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(body, bytes) or len(body) > self.max_response_bytes:
+                return {"status": "BALANCE_RESPONSE_TOO_LARGE", "provider": "pollinations", "verified": False}
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
+                return {"status": "BALANCE_RESPONSE_INVALID", "provider": "pollinations", "verified": False}
+            if not isinstance(payload, dict):
+                return {"status": "BALANCE_RESPONSE_INVALID", "provider": "pollinations", "verified": False}
+            account_balance = payload.get("accountBalance")
+            if not isinstance(account_balance, dict):
+                return {
+                    "status": "ACCOUNT_USAGE_SCOPE_REQUIRED",
+                    "provider": "pollinations",
+                    "verified": False,
+                    "required_scope": "account:usage",
+                }
+            total = account_balance.get("total")
+            if isinstance(total, bool) or not isinstance(total, (int, float)):
+                return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
+            try:
+                total_value = float(total)
+            except (OverflowError, TypeError, ValueError):
+                return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
+            if not math.isfinite(total_value) or total_value < 0:
+                return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
+            result = {
+                "status": "POLLINATIONS_ACCOUNT_BALANCE_VERIFIED",
+                "provider": "pollinations",
+                "verified": True,
+                "account_balance_total": total_value,
+                "unit": "POLLEN",
+                "source": "pollinations-account-balance-accountBalance.total",
+                "required_scope": "account:usage",
+            }
+            for field in ("tier", "paid"):
+                value = account_balance.get(field)
+                if value is None:
+                    continue
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
+                try:
+                    numeric_value = float(value)
+                except (OverflowError, TypeError, ValueError):
+                    return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
+                if not math.isfinite(numeric_value) or numeric_value < 0:
+                    return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
+                result["tier" if field == "tier" else "paid"] = numeric_value
+            return result
+        finally:
+            try:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+            except Exception:
+                pass

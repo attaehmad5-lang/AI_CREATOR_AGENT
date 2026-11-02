@@ -6,7 +6,9 @@ This file preserves the user's original A–P headings, feature numbers, feature
 
 ## Latest code verification
 
-GitHub Actions run [#41400187124](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41400187124), PR #173 head commit `a082da20ec8d359f4c06e6861abb5d3a767bcac3`: **665 unit/regression tests passed on Ubuntu and 665 on Windows, zero failures**. Provider module/test compilation, provider JSON catalog validation, and all 3 secret/generated-asset exclusion checks also passed on both platforms. PR #173 was squash-merged into `main` as `d259b76ae6120f432e0ed915cd7af34853122c8e`.
+GitHub Actions run [#41400187124](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41400187124), PR #173 head commit `a082da20ec8d359f4c06e6861abb5d3a767bcac3`: **665 unit/regression tests passed on Ubuntu and 665 on Windows, zero failures**. Provider module/test compilation, provider JSON catalog validation, and all 3 secret/generated-asset exclusion checks also passed on both platforms.
+
+Feature #62 additionally passed PR #177 CI run [#41466199291](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41466199291): **685 tests passed on Ubuntu and 685 on Windows**, with module/test compilation, provider catalog validation, and secret/generated-asset exclusion checks passing on both. The authorized read-only Pollinations account usage check passed in [run #41486930153](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41486930153): `status: VERIFIED`, `account_usage_verified: true`, `required_scope: account:usage`; logs did not expose the credential, response body, or balance amount. PR #173 was squash-merged into `main` as `d259b76ae6120f432e0ed915cd7af34853122c8e`.
 
 Recent merged Task 25 work includes:
 - PR #148: bounded and validated persisted provider feature-flag state.
@@ -17,7 +19,7 @@ Recent merged Task 25 work includes:
 - PR #157 and #159: authorized active health-probe facade and malformed-response fail-closed regressions.
 - PR #158 and #160: bounded image-dimension parsing and Git-index secret/generated-asset exclusion audit.
 
-These changes advance only their documented item scopes. The canonical 138-item ledger remains IN PROGRESS; no full Task #25 PASS is claimed. Current audit remains **24 VERIFIED, 106 PARTIAL, 8 OPEN**; no item was promoted solely because a broad regression suite passed.
+These changes advance only their documented item scopes. The canonical 138-item ledger remains IN PROGRESS; no full Task #25 PASS is claimed. Current audit remains **25 VERIFIED, 105 PARTIAL, 8 OPEN**; no item was promoted solely because a broad regression suite passed.
 
 **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
 
@@ -121,7 +123,7 @@ These changes advance only their documented item scopes. The canonical 138-item 
 | 59 | 🔴 | Explicit Approval Before Paid Usage | PARTIAL | Paid-usage approval guard and tests exist; approval workflow integration is not complete. |
 | 60 | 🔴 | Per-Request/Project Budgets | PARTIAL | Project budget and quota managers are tested; end-to-end tenant/user budgeting is incomplete. |
 | 61 | 🔴 | Estimated vs Actual Usage Reconciliation | PARTIAL | Cost reservation/reconciliation is implemented and tested; provider-specific actual usage adapters are missing. |
-| 62 | 🔴 | Credit Exhaustion and Billing Error Handling | PARTIAL | `provider_error_policy.py` normalizes explicit billing/credit/auth/permission/rate-limit/transient signals; `ProviderService.execute_routed_request` blocks retry for non-retryable billing/credit outcomes, including HTTP 429 with `insufficient_quota`; focused unit and service regression tests added. Provider-specific documented error-code mappings and authorized live account tests remain open. |
+| 62 | 🔴 | Credit Exhaustion and Billing Error Handling | VERIFIED | Allowlisted Pollinations codes cover insufficient balance, key-budget exhaustion, paid-only models, and billable output-limit failures. Uncertain billing outcomes retain cost/quota reservations, stop retries and fallback, and open critical incidents; raw errors are redacted. Regression tests cover mappings, reservations, retry/fallback, and redaction. Read-only live `account:usage` verification passed 2026-11-02 in [run #41486930153](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41486930153): `status: VERIFIED`, `account_usage_verified: true`; no key, response body, or balance amount logged. No paid failure was induced; documented failure codes are tested deterministically to avoid charges. CI [#41466199291](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41466199291) passed 685 tests on each platform. |
 | 63 | 🔴 | Cost-Aware Provider/Model Selection | PARTIAL | Cost/credit-aware routing foundations exist; reliable live prices and model-level cost comparisons remain open. |
 | 64 | 🔴 | Budget Alerts and Hard-Stop Policy | PARTIAL | `BudgetAlertManager` persists idempotent 50/80/100% threshold events, keeps failed deliveries pending with bounded attempt metadata, and supports injected notification dispatch with retry-safe outcomes. External channel setup, scheduling, and end-to-end delivery monitoring remain open. |
 

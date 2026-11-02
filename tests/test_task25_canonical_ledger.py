@@ -58,7 +58,14 @@ class Task25CanonicalLedgerTests(unittest.TestCase):
                 if current_section is not None:
                     section_counts[current_section] += 1
 
-        self.assertEqual(len(items), 138)
+        numbered_rows = [line for line in content.splitlines() if re.match(r"^\|\s*\d+\s*\|", line)]
+        unparsed_rows = [line for line in numbered_rows if not row.match(line)]
+        self.assertEqual(
+            len(items),
+            138,
+            f"Expected 138 parsed feature rows; parsed {len(items)} of {len(numbered_rows)}. "
+            f"Unparsed numbered rows: {unparsed_rows!r}",
+        )
         self.assertEqual(sorted(number for number, _ in items), list(range(1, 139)))
         self.assertEqual(len({number for number, _ in items}), 138)
         self.assertEqual(

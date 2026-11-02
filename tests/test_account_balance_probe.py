@@ -4,7 +4,10 @@ import unittest
 from pathlib import Path
 from urllib.error import HTTPError
 
-from projects.provider_store.account_balance_probe import ProviderJSONBalanceProbe
+from projects.provider_store.account_balance_probe import (
+    ProviderJSONBalanceProbe,
+    PollinationsAccountBalanceProbe,
+)
 from projects.provider_store.credit_manager import ProviderCreditManager
 
 
@@ -197,6 +200,83 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertEqual(len(opener.calls), 1)
         self.assertEqual(self.make_probe()("../bad")["status"], "INVALID_PROVIDER")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+
+class PollinationsAccountBalanceProbeTests(unittest.TestCase):
+    def make_probe(self, opener=None, **overrides):
+        options = {
+            "environ": {"POLLINATIONS_API_KEY": "secret-key"},
+            "opener": opener or _Opener(_Response({
+                "accountBalance": {"total": 4.5, "tier": 1.0, "paid": 3.5},
+                "balance": 99.0,
+            })),
+        }
+        options.update(overrides)
+        return PollinationsAccountBalanceProbe(**options)
+
+    def test_reads_account_total_and_paid_tier_without_exposing_key(self):
+        opener = _Opener(_Response({
+            "accountBalance": {"total": 4.5, "tier": 1.0, "paid": 3.5},
+            "balance": 99.0,
+        }))
+        probe = self.make_probe(opener)
+        result = probe()
+        self.assertEqual(result["status"], "POLLINATIONS_ACCOUNT_BALANCE_VERIFIED")
+        self.assertEqual(result["account_balance_total"], 4.5)
+        self.assertEqual(result["tier"], 1.0)
+        self.assertEqual(result["paid"], 3.5)
+        self.assertEqual(result["unit"], "POLLEN")
+        self.assertEqual(result["required_scope"], "account:usage")
+        request = opener.calls[0][0]
+        self.assertEqual(request.full_url, "https://gen.pollinations.ai/account/balance")
+        self.assertEqual(request.get_header("Authorization"), "Bearer secret-key")
+        self.assertTrue(opener.response.closed)
+        self.assertNotIn("secret-key", repr(result))
+
+    def test_never_treats_api_key_budget_as_account_wallet_balance(self):
+        opener = _Opener(_Response({"balance": 99.0}))
+        result = self.make_probe(opener)()
+        self.assertEqual(result["status"], "ACCOUNT_USAGE_SCOPE_REQUIRED")
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["required_scope"], "account:usage")
+        self.assertNotIn("account_balance_total", result)
+        self.assertTrue(opener.response.closed)
+
+    def test_missing_key_fails_before_network_call(self):
+        opener = _Opener()
+        result = self.make_probe(opener, environ={})()
+        self.assertEqual(result["status"], "CREDENTIAL_MISSING_OR_INVALID")
+        self.assertEqual(opener.calls, [])
+
+    def test_forbidden_scope_is_reported_without_provider_body(self):
+        opener = _Opener(error=HTTPError(
+            "https://gen.pollinations.ai/account/balance", 403,
+            "Forbidden private body", {}, None,
+        ))
+        result = self.make_probe(opener)()
+        self.assertEqual(result["status"], "ACCOUNT_USAGE_SCOPE_REQUIRED")
+        self.assertEqual(result["http_status"], 403)
+        self.assertNotIn("private body", repr(result))
+        self.assertNotIn("secret-key", repr(result))
+
+    def test_invalid_nested_balance_fails_closed(self):
+        for value in (True, -1, "4.5", float("inf"), 10**1000):
+            with self.subTest(value=repr(value)):
+                result = self.make_probe(_Opener(_Response({
+                    "accountBalance": {"total": value}
+                })))()
+                self.assertEqual(result["status"], "BALANCE_AMOUNT_INVALID")
+                self.assertFalse(result["verified"])
+
+    def test_invalid_provider_is_rejected(self):
+        result = self.make_probe()("huggingface")
+        self.assertEqual(result["status"], "INVALID_PROVIDER")
+        self.assertFalse(result["verified"])
 
 
 if __name__ == "__main__":

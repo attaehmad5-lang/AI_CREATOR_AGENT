@@ -1125,6 +1125,50 @@ class ProviderService:
         except Exception as exc:
             # The adapter may have transmitted the request before failing. Do not
             # release cost, quota, or credit reservations on this ambiguous outcome.
+            # Extract only structured, explicitly exposed attributes; never return
+            # exception text or provider response bodies.
+            status_code = getattr(exc, "status_code", None)
+            provider_code = getattr(exc, "provider_error_code", None)
+            retry_after_seconds = getattr(exc, "retry_after_seconds", None)
+            provider_error = None
+            if status_code is not None:
+                provider_error = classify_provider_error(
+                    status_code,
+                    provider_id=provider_id,
+                    provider_code=provider_code,
+                    retry_after_seconds=retry_after_seconds,
+                )
+            reason = (
+                provider_error.get("status")
+                if isinstance(provider_error, dict)
+                else "EXECUTION_OUTCOME_UNKNOWN"
+            )
+            incident_result = None
+            if (
+                self.incident_manager is not None
+                and isinstance(provider_error, dict)
+            ):
+                incident_category = provider_error.get("category")
+                severity = (
+                    "critical"
+                    if incident_category in {"billing", "credits_exhausted"}
+                    else "warning"
+                    if incident_category == "transient"
+                    else "error"
+                )
+                try:
+                    incident_result = self.incident_manager.record(
+                        provider_id=provider_id,
+                        category=category,
+                        severity=severity,
+                        code=reason,
+                    )
+                except Exception as incident_exc:
+                    incident_result = {
+                        "status": "INCIDENT_RECORD_FAILED",
+                        "saved": False,
+                        "error_type": type(incident_exc).__name__,
+                    }
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
@@ -1132,6 +1176,9 @@ class ProviderService:
                 "request_id": request_id,
                 "reservations_retained": True,
                 "error_type": type(exc).__name__,
+                "provider_error": provider_error,
+                "incident": incident_result,
+                "retry_decision": {"retry": False, "reason": reason},
             }
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
             return {
@@ -1370,6 +1417,7 @@ class ProviderService:
         if not final_success and status_code is not None:
             provider_error = classify_provider_error(
                 status_code,
+                provider_id=provider_id,
                 provider_code=provider_code,
                 retry_after_seconds=adapter_result.get("retry_after_seconds"),
             )
