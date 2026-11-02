@@ -152,7 +152,7 @@ class ProviderSecretsManager:
     def parse_reference(reference: Any) -> tuple[str, str] | None:
         if (
             not isinstance(reference, str)
-            or not 1 <= len(reference) <= 512
+            or not 1 <= len(reference) <= 256
             or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in reference)
             or "?" in reference
             or "#" in reference
