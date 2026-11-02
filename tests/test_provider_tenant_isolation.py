@@ -14,6 +14,11 @@ class FakeConnectionManager:
         return {"connected": False}
 
 
+class FakeAuthorizationManager:
+    def authorize(self, principal_id, operation):
+        return {"allowed": True, "principal_id": principal_id, "operation": operation}
+
+
 class StopAfterTenantGateRoutingManager:
     def __init__(self):
         self.calls = 0
@@ -193,6 +198,7 @@ class ProviderServiceTenantGateTests(unittest.TestCase):
         self.service = ProviderService(
             FakeConnectionManager(),
             routing_manager=self.routing,
+            authorization_manager=FakeAuthorizationManager(),
             tenant_isolation_manager=self.manager,
         )
         self.adapter_calls = []
@@ -233,7 +239,11 @@ class ProviderServiceTenantGateTests(unittest.TestCase):
 
     def test_tenant_manager_contract_is_required_when_configured(self):
         with self.assertRaises(ValueError):
-            ProviderService(FakeConnectionManager(), tenant_isolation_manager=object())
+            ProviderService(
+                FakeConnectionManager(),
+                authorization_manager=FakeAuthorizationManager(),
+                tenant_isolation_manager=object(),
+            )
 
 
 if __name__ == "__main__":
