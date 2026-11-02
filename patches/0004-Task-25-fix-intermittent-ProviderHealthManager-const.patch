@@ -1,0 +1,96 @@
+From 0b25a162a4e6bc41a569be1bb9dcdc1a430e9a81 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 2 Nov 2026 02:24:14 +0000
+Subject: [PATCH 4/4] Task 25: fix intermittent ProviderHealthManager
+ constructor race (load existing state under interprocess lock)
+
+---
+ .../TASK25_CANONICAL_138_ITEM_LEDGER.md       |  2 +-
+ projects/provider_store/health_manager.py     | 18 +++++++++
+ tests/test_health_manager.py                  | 37 +++++++++++++++++++
+ 3 files changed, 56 insertions(+), 1 deletion(-)
+
+diff --git a/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md b/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md
+index e2f21c5..b74f73b 100644
+--- a/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md
++++ b/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md
+@@ -16,3 +16,3 @@ GitHub Actions run [#40442372725](https://github.com/attaehmad5-lang/AI_CREATOR_
+ 
+-**Local verification 2026-11-01 (not CI; Python 3.12.3, run via `python -m projects.provider_store.task25_test_report`):** 650 tests, `OK (skipped=1)` (the skip is the opt-in real-Ollama test), plus `compileall` and provider JSON catalog validation. GitHub Actions has not yet run on this change; run [#40525243664](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40525243664) (633 tests) remains the latest CI evidence. No status was changed by this revision.
++**Local verification 2026-11-01 (not CI; Python 3.12.3, run via `python -m projects.provider_store.task25_test_report`):** 653 tests, `OK (skipped=1)` (the skip is the opt-in real-Ollama test), plus `compileall` and provider JSON catalog validation. During this check `test_health_manager.ProviderHealthManagerTests.test_concurrent_health_updates_across_processes_preserve_history` failed intermittently on the unmodified PR #79 head (1 of 25 full runs); the cause was `ProviderHealthManager.__init__` reading existing state without the interprocess lock, and it is fixed by loading under that lock (a stress script saw 5 spurious `ValueError`s in 1200 constructions before the fix and 0 in 2400 after). `credit_manager.py` and `quota_manager.py` use the same unlocked constructor read; no failure was observed there and they were not changed. GitHub Actions has not yet run on this change; run [#40525243664](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40525243664) (633 tests) remains the latest CI evidence. No status was changed by this revision.
+ 
+diff --git a/projects/provider_store/health_manager.py b/projects/provider_store/health_manager.py
+index e8fa6c1..f4077c5 100644
+--- a/projects/provider_store/health_manager.py
++++ b/projects/provider_store/health_manager.py
+@@ -44,2 +44,20 @@ class ProviderHealthManager:
+         self.data: dict[str, Any] = {"version": "1.0", "providers": {}}
++        self._load_initial_state()
++
++    def _load_initial_state(self) -> None:
++        """Load existing state under the interprocess lock like every other reader.
++
++        Without the lock, another process atomically replacing the file between the two
++        ``fstat`` calls in ``_reload_state`` makes its consistency check raise spuriously.
++        If the lock file cannot be created (for example a read-only directory) the
++        previous plain read is used.
++        """
++        if not self.state_path.exists():
++            self._reload_state()
++            return
++        try:
++            with self._transaction():
++                return
++        except OSError:
++            pass
+         self._reload_state()
+diff --git a/tests/test_health_manager.py b/tests/test_health_manager.py
+index f918ee5..a1f8148 100644
+--- a/tests/test_health_manager.py
++++ b/tests/test_health_manager.py
+@@ -4,5 +4,8 @@ import unittest
+ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
++from contextlib import contextmanager
+ from datetime import datetime, timedelta, timezone
+ from pathlib import Path
++from unittest.mock import patch
+ 
++from projects.provider_store import health_manager as health_manager_module
+ from projects.provider_store.health_manager import ProviderHealthManager
+@@ -70,2 +73,36 @@ class ProviderHealthManagerTests(unittest.TestCase):
+ 
++    def test_constructor_loads_existing_state_under_the_interprocess_lock(self):
++        self.manager.record_result("image", success=True, latency_ms=5)
++        events = []
++        real_lock = health_manager_module.interprocess_file_lock
++
++        @contextmanager
++        def tracking_lock(lock_path):
++            events.append(Path(lock_path).name)
++            with real_lock(lock_path):
++                yield
++
++        with patch.object(health_manager_module, "interprocess_file_lock", tracking_lock):
++            loaded = ProviderHealthManager(
++                self.path, history_limit=3, failure_threshold=2, clock=lambda: self.now[0]
++            )
++        self.assertEqual(events, ["health.json.lock"])
++        self.assertIn("image", loaded.data["providers"])
++
++    def test_constructor_without_existing_state_does_not_create_a_lock_file(self):
++        fresh = Path(self.temp_dir.name) / "fresh" / "health.json"
++        ProviderHealthManager(fresh, history_limit=3, failure_threshold=2)
++        self.assertFalse(fresh.parent.exists())
++
++    def test_constructor_falls_back_to_plain_read_when_lock_file_cannot_be_created(self):
++        self.manager.record_result("image", success=True, latency_ms=5)
++        with patch.object(
++            health_manager_module, "interprocess_file_lock",
++            side_effect=PermissionError("read-only directory"),
++        ):
++            loaded = ProviderHealthManager(
++                self.path, history_limit=3, failure_threshold=2, clock=lambda: self.now[0]
++            )
++        self.assertIn("image", loaded.data["providers"])
++
+     def test_request_id_makes_health_recording_idempotent_and_conflict_safe(self):
