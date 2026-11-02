@@ -293,8 +293,8 @@ class ProviderProjectPolicyManager:
             proposed_decision = self._evaluate_policy_scenario(candidate, scenario)
             changed = (
                 current_decision["allowed"] != proposed_decision["allowed"]
-                or current_decision["automatic_fallback_allowed"]
-                != proposed_decision["automatic_fallback_allowed"]
+                or current_decision["fallback_would_be_blocked"]
+                != proposed_decision["fallback_would_be_blocked"]
             )
             changed_decisions += int(changed)
             results.append({
