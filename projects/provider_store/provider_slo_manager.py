@@ -95,11 +95,11 @@ class ProviderSLOManager:
             or not _ID_RE.fullmatch(objective["category"])
             or isinstance(objective.get("availability_target"), bool)
             or not isinstance(objective.get("availability_target"), (int, float))
-            or not math.isfinite(objective["availability_target"])
+            or finite_number(objective["availability_target"], minimum=0) is None
             or not 0 < objective["availability_target"] <= 1
             or isinstance(objective.get("max_p95_latency_ms"), bool)
             or not isinstance(objective.get("max_p95_latency_ms"), (int, float))
-            or not math.isfinite(objective["max_p95_latency_ms"])
+            or finite_number(objective["max_p95_latency_ms"], minimum=0) is None
             or objective["max_p95_latency_ms"] <= 0
             or isinstance(objective.get("window_seconds"), bool)
             or not isinstance(objective.get("window_seconds"), int)
@@ -122,8 +122,7 @@ class ProviderSLOManager:
             and isinstance(sample.get("success"), bool)
             and isinstance(sample.get("latency_ms"), (int, float))
             and not isinstance(sample.get("latency_ms"), bool)
-            and math.isfinite(sample["latency_ms"])
-            and sample["latency_ms"] >= 0
+            and finite_number(sample["latency_ms"], minimum=0) is not None
             and ProviderSLOManager._parse_timestamp(sample.get("recorded_at")) is not None
         )
 
@@ -229,7 +228,10 @@ class ProviderSLOManager:
         if latency is None:
             return {"status": "INVALID_LATENCY", "saved": False}
         try:
-            recorded_at = self.clock().astimezone(timezone.utc).isoformat()
+            clock_value = self.clock()
+            if not isinstance(clock_value, datetime) or clock_value.tzinfo is None:
+                raise ValueError("timezone-aware datetime required")
+            recorded_at = clock_value.astimezone(timezone.utc).isoformat()
         except (AttributeError, TypeError, ValueError, OverflowError):
             return {"status": "INVALID_CLOCK", "saved": False}
         sample = {
@@ -308,7 +310,10 @@ class ProviderSLOManager:
         if not isinstance(slo_id, str) or not _ID_RE.fullmatch(slo_id):
             return {"status": "INVALID_SLO_ID", "evaluation": None}
         try:
-            now = self.clock().astimezone(timezone.utc)
+            clock_value = self.clock()
+            if not isinstance(clock_value, datetime) or clock_value.tzinfo is None:
+                raise ValueError("timezone-aware datetime required")
+            now = clock_value.astimezone(timezone.utc)
         except (AttributeError, TypeError, ValueError, OverflowError):
             return {"status": "INVALID_CLOCK", "evaluation": None}
         with self._transaction():
@@ -320,7 +325,10 @@ class ProviderSLOManager:
 
     def evaluate_all(self) -> dict[str, Any]:
         try:
-            now = self.clock().astimezone(timezone.utc)
+            clock_value = self.clock()
+            if not isinstance(clock_value, datetime) or clock_value.tzinfo is None:
+                raise ValueError("timezone-aware datetime required")
+            now = clock_value.astimezone(timezone.utc)
         except (AttributeError, TypeError, ValueError, OverflowError):
             return {"status": "INVALID_CLOCK", "evaluations": []}
         with self._transaction():
