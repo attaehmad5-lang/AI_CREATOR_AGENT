@@ -121,7 +121,7 @@ class ProviderJobManager:
                 )
                 or (
                     job.get("status") != "RUNNING"
-                    and (job.get("worker_id") is not None or job.get("lease_token") is not None)
+                    and job.get("lease_token") is not None
                 )
                 or (
                     job.get("tenant_id") is not None
@@ -411,6 +411,7 @@ class ProviderJobManager:
             job["updated_at"] = now
             job["lease_until"] = None
             job["lease_token"] = None
+            job["worker_id"] = None
             self._save()
             return {"status": "JOB_COMPLETED", "saved": True, "job": dict(job)}
 
