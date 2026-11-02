@@ -88,7 +88,14 @@ class ConnectionManager:
         self,
         catalog_path: str | os.PathLike[str] | None = None,
         state_path: str | os.PathLike[str] | None = None,
+        secret_manager: Any | None = None,
     ) -> None:
+        if secret_manager is not None and (
+            not callable(getattr(secret_manager, "inspect_reference", None))
+            or not callable(getattr(secret_manager, "resolve_secret", None))
+        ):
+            raise ValueError("secret_manager must support reference inspection and secret resolution")
+        self.secret_manager = secret_manager
         self.catalog_path = Path(catalog_path) if catalog_path else self._default_catalog()
         self.state_path = Path(state_path) if state_path else DEFAULT_STATE
         # Constructor reads must use the same interprocess locks as writers. On
@@ -1477,6 +1484,7 @@ class ConnectionManager:
         blocked_credential_states = {
             "CREDENTIALS_MISSING", "CREDENTIALS_EXPIRED", "CREDENTIAL_EXPIRY_INVALID",
             "CREDENTIAL_EXPIRY_UNKNOWN", "INVALID_ENVIRONMENT", "MANUAL_CONNECTION_REQUIRED",
+            "SECRET_MANAGER_REQUIRED", "SECRET_BACKEND_UNAVAILABLE", "SECRET_REFERENCE_INVALID",
         }
         if credentials["status"] in blocked_credential_states:
             if not save_state("ERROR"):
@@ -1721,6 +1729,32 @@ class ConnectionManager:
                 "status": "MANUAL_CONNECTION_REQUIRED",
                 "credential_present": False,
             }
+        secret_ref = provider.get("secret_ref")
+        if secret_ref is not None:
+            if self.secret_manager is None:
+                return {
+                    "provider": provider_id, "status": "SECRET_MANAGER_REQUIRED",
+                    "credential_present": False,
+                }
+            try:
+                inspection = self.secret_manager.inspect_reference(
+                    secret_ref, provider_id=provider_id
+                )
+            except Exception:
+                inspection = {"valid": False, "status": "SECRET_REFERENCE_INVALID"}
+            if not isinstance(inspection, dict) or inspection.get("valid") is not True:
+                status = inspection.get("status") if isinstance(inspection, dict) else None
+                if status not in {"SECRET_BACKEND_UNAVAILABLE", "INVALID_SECRET_REFERENCE"}:
+                    status = "SECRET_REFERENCE_INVALID"
+                return {
+                    "provider": provider_id, "status": status,
+                    "credential_present": False,
+                }
+            return {
+                "provider": provider_id, "status": "CREDENTIALS_PRESENT",
+                "credential_present": True, "credential_source": inspection.get("scheme"),
+            }
+
         token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env")
         if not token_env:
             token_env = {
