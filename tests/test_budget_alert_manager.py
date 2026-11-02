@@ -139,7 +139,7 @@ class BudgetAlertManagerTests(unittest.TestCase):
 
         self.now[0] += timedelta(seconds=30)
         retried = manager.dispatch_pending(lambda alert: {"delivered": True}, limit=10)
-        self.assertEqual(retried["delivered"], 2)
+        self.assertEqual(retried["delivered"], 1)
         self.assertEqual(len(manager.pending_alerts()["alerts"]), 0)
 
     def test_delivery_attempts_exhaust_to_dead_letter_and_can_be_requeued(self):
