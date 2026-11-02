@@ -457,31 +457,105 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
-    def test_modality_binding_opt_in_rejects_mismatch_before_adapter(self):
-        router = ProviderRoutingManager(self.connections, cost_policy=self.cost, quota_manager=self.quota)
-        service = ProviderService(self.connections, routing_manager=router, health_manager=self.health,
-            retry_policy=self.retry, output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota)
+    def _modality_service(self, **kwargs):
+        class RoutingStub:
+            def route(self, **route_kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "FREE"}
+        return ProviderService(self.connections, routing_manager=RoutingStub(), **kwargs)
+
+    def test_modality_binding_blocks_mismatched_output_before_adapter(self):
         calls = []
+        service = self._modality_service()
         result = service.execute_routed_request(category="image", project_id="film", request_id="modality-mismatch",
-            estimated_cost=0.0, adapter=lambda **kwargs: calls.append(kwargs) or {"started": True},
-            modality="video", require_modality_binding=True)
+            estimated_cost=0.0, modality="video", adapter=lambda **kwargs: calls.append(kwargs), require_modality_binding=True)
         self.assertEqual(result["status"], "MODALITY_MISMATCH")
         self.assertFalse(result["executed"])
         self.assertEqual(calls, [])
+        self.assertEqual(result["modality_binding"]["output_modalities"], ["image"])
+        self.assertEqual(result["modality_binding"]["requested_modality"], "video")
 
-    def test_modality_binding_opt_in_allows_matching_modality(self):
-        router = ProviderRoutingManager(self.connections, cost_policy=self.cost, quota_manager=self.quota)
-        service = ProviderService(self.connections, routing_manager=router, health_manager=self.health,
-            retry_policy=self.retry, output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota)
-        output_path = self.root / "modality-valid.png"
-        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
-        result = service.execute_routed_request(category="image", project_id="film", request_id="modality-valid",
-            estimated_cost=0.0, output_path=str(output_path),
-            adapter=lambda **kwargs: {"started": True, "success": True, "actual_cost": 0.0,
-                "charge_outcome": "not_incurred", "output_path": str(output_path), "latency_ms": 5.0},
-            modality="image", require_modality_binding=True)
-        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
-        self.assertTrue(result["output"]["valid"])
+    def test_modality_binding_allows_matching_output_and_normalizes_case(self):
+        calls = []
+        service = self._modality_service()
+        result = service.execute_routed_request(category="image", project_id="film", request_id="modality-match",
+            estimated_cost=0.0, modality=" IMAGE ", adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
+            require_modality_binding=True)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn(result["status"], {"MODALITY_MISMATCH", "PROVIDER_MODALITY_REJECTED"})
+
+    def test_modality_binding_is_opt_in_and_preserves_legacy_behavior(self):
+        calls = []
+        service = self._modality_service()
+        result = service.execute_routed_request(category="image", project_id="film", request_id="modality-legacy",
+            estimated_cost=0.0, modality="video", adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False})
+        self.assertEqual(len(calls), 1)
+        self.assertNotEqual(result["status"], "MODALITY_MISMATCH")
+
+    def test_modality_binding_fails_closed_for_bad_policy_and_bad_modality(self):
+        calls = []
+        service = self._modality_service()
+        for index, bad_policy in enumerate(("yes", 1, None)):
+            with self.subTest(policy=bad_policy):
+                result = service.execute_routed_request(category="image", project_id="film", request_id=f"modality-policy-{index}",
+                    estimated_cost=0.0, modality="image", adapter=lambda **kwargs: calls.append(kwargs), require_modality_binding=bad_policy)
+                self.assertEqual(result["status"], "INVALID_MODALITY_BINDING_POLICY")
+        for index, bad_modality in enumerate((None, 7, "", "hologram")):
+            with self.subTest(modality=bad_modality):
+                result = service.execute_routed_request(category="image", project_id="film", request_id=f"modality-bad-{index}",
+                    estimated_cost=0.0, modality=bad_modality, adapter=lambda **kwargs: calls.append(kwargs), require_modality_binding=True)
+                self.assertEqual(result["status"], "MODALITY_MISMATCH")
+        self.assertEqual(calls, [])
+
+    def test_modality_binding_fails_closed_when_connection_manager_cannot_report(self):
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "FREE"}
+        class NoBindingConnections:
+            verify_connectivity = staticmethod(lambda *a, **k: {})
+        class RaisingConnections(NoBindingConnections):
+            @staticmethod
+            def get_modality_binding(provider_id):
+                raise RuntimeError("secret internal detail")
+        class MalformedConnections(NoBindingConnections):
+            @staticmethod
+            def get_modality_binding(provider_id):
+                return ["not", "a", "dict"]
+        expectations = ((NoBindingConnections, "MODALITY_BINDING_UNAVAILABLE"),
+            (RaisingConnections, "MODALITY_BINDING_CHECK_FAILED"), (MalformedConnections, "INVALID_MODALITY_BINDING_RESPONSE"))
+        for index, (connections_class, expected_status) in enumerate(expectations):
+            with self.subTest(connections=connections_class.__name__):
+                calls = []
+                service = ProviderService(connections_class(), routing_manager=RoutingStub())
+                service.release_unstarted_request = lambda **kwargs: {"released": True}
+                result = service.execute_routed_request(category="image", project_id="film", request_id=f"modality-cm-{index}",
+                    estimated_cost=0.0, modality="image", adapter=lambda **kwargs: calls.append(kwargs), require_modality_binding=True)
+                self.assertEqual(result["status"], "PROVIDER_MODALITY_REJECTED")
+                self.assertEqual(result["modality_binding"]["status"], expected_status)
+                self.assertNotIn("secret internal detail", repr(result))
+                self.assertEqual(calls, [])
+
+    def test_modality_binding_releases_reservations_on_rejection(self):
+        service = ProviderService(self.connections, routing_manager=self._modality_service().routing_manager,
+            cost_policy=self.cost, quota_manager=self.quota)
+        released = []
+        original_release = service.release_unstarted_request
+        def tracking_release(**kwargs):
+            released.append(kwargs["request_id"])
+            return original_release(**kwargs)
+        service.release_unstarted_request = tracking_release
+        result = service.execute_routed_request(category="image", project_id="film", request_id="modality-release",
+            estimated_cost=0.0, modality="audio", adapter=lambda **kwargs: self.fail("adapter must not run"), require_modality_binding=True)
+        self.assertEqual(result["status"], "MODALITY_MISMATCH")
+        self.assertEqual(released, ["modality-release"])
+
+    def test_routed_generation_health_gate_fails_closed_without_manager(self):
+        service = self._modality_service()
+        calls = []
+        result = service.execute_routed_request(category="image", project_id="film", request_id="health-gate-no-manager",
+            estimated_cost=0.0, modality="image", adapter=lambda **kwargs: calls.append(kwargs), require_fresh_health_check=True)
+        self.assertEqual(result["status"], "PROVIDER_HEALTH_REJECTED")
+        self.assertEqual(result["health"]["status"], "HEALTH_CHECK_UNAVAILABLE")
+        self.assertEqual(calls, [])
 
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
