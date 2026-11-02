@@ -108,6 +108,12 @@ class BudgetAlertManager:
         event.pop("delivery_lease_owner", None)
         event.pop("delivery_lease_until", None)
 
+    @staticmethod
+    def _public_event(event: dict[str, Any]) -> dict[str, Any]:
+        public = dict(event)
+        BudgetAlertManager._remove_lease(public)
+        return public
+
     def _reload(self) -> None:
         if not self.state_path.exists():
             self.data = {"version": "1.0", "events": {}}
@@ -283,7 +289,7 @@ class BudgetAlertManager:
                     event["spend"] = max(float(event.get("spend", 0.0)), spend_value)
                     event["ratio"] = max(float(event.get("ratio", 0.0)), ratio)
                     event["request_id"] = request_id
-                alerts.append(dict(event))
+                alerts.append(self._public_event(event))
             if alerts:
                 self._save()
         return {
@@ -300,7 +306,7 @@ class BudgetAlertManager:
             return {"status": "INVALID_LIMIT", "alerts": []}
         with self._transaction():
             events = [
-                dict(event) for event in self.data["events"].values()
+                self._public_event(event) for event in self.data["events"].values()
                 if isinstance(event, dict) and event.get("status") == "PENDING"
             ]
             events.sort(key=lambda item: (float(item.get("threshold", 0)), item.get("created_at", "")))
@@ -311,7 +317,7 @@ class BudgetAlertManager:
             return {"status": "INVALID_LIMIT", "alerts": []}
         with self._transaction():
             events = [
-                dict(event) for event in self.data["events"].values()
+                self._public_event(event) for event in self.data["events"].values()
                 if isinstance(event, dict) and event.get("status") == "FAILED_PERMANENT"
             ]
             events.sort(key=lambda item: (item.get("failed_at", ""), item.get("event_id", "")))
