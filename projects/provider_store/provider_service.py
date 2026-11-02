@@ -653,6 +653,10 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.read")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
+        if self.tenant_isolation_manager is not None and (
+            not isinstance(tenant_id, str) or not tenant_id.strip()
+        ):
+            return {"status": "TENANT_CONTEXT_REQUIRED", "job": None}
         try:
             result = (
                 self.job_manager.poll(job_id=job_id, tenant_id=tenant_id)
@@ -729,6 +733,10 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        if self.tenant_isolation_manager is not None and (
+            not isinstance(tenant_id, str) or not tenant_id.strip()
+        ):
+            return {"status": "TENANT_CONTEXT_REQUIRED", "saved": False}
         try:
             if self.tenant_isolation_manager is not None:
                 existing = self.job_manager.poll(job_id=job_id, tenant_id=tenant_id)
