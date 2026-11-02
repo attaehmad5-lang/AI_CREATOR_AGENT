@@ -1587,6 +1587,9 @@ class ProviderServiceTests(unittest.TestCase):
         for label, state, response_status in invalid_cases:
             with self.subTest(case=label):
                 class InjectedDegradedMode:
+                    def evaluate(self, category, provider_statuses):
+                        return {"status": "UNUSED", "evaluated": False}
+
                     def get_state(self, category):
                         return {"status": response_status, "state": state}
 
