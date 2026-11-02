@@ -964,6 +964,8 @@ class ProviderService:
                     },
                 }
 
+        if self.tenant_isolation_manager is not None:
+            route_options["tenant_id"] = tenant_id
         route = self.route_request(
             category=category,
             project_id=project_id,
@@ -981,7 +983,8 @@ class ProviderService:
             eligible_ids = degraded_mode_state.get("healthy_provider_ids")
             if not isinstance(eligible_ids, list) or provider_id not in eligible_ids:
                 release = self.release_unstarted_request(
-                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                    project_id=project_id, provider_id=provider_id, request_id=request_id,
+                    tenant_id=tenant_id,
                 )
                 return {
                     "status": "PROVIDER_NOT_ELIGIBLE_DURING_DEGRADED_MODE",
@@ -1009,7 +1012,7 @@ class ProviderService:
             allowed_modalities = binding.get("output_modalities") if isinstance(binding, dict) else None
             binding_valid = isinstance(binding, dict) and binding.get("valid") is True and isinstance(allowed_modalities, list)
             if not binding_valid or requested_modality not in allowed_modalities:
-                release = self.release_unstarted_request(project_id=project_id, provider_id=provider_id, request_id=request_id)
+                release = self.release_unstarted_request(project_id=project_id, provider_id=provider_id, request_id=request_id, tenant_id=tenant_id)
                 safe_binding = {
                     "valid": False,
                     "status": binding.get("status") if isinstance(binding, dict) and isinstance(binding.get("status"), str) else "INVALID_MODALITY_BINDING_RESPONSE",
@@ -1442,6 +1445,7 @@ class ProviderService:
         billing_mode: str | None = None,
         credit_outcome: str = "used",
         actual_credit_amount: float | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         """Account for a started request without assuming ambiguous failures were free.
 
@@ -1608,7 +1612,11 @@ class ProviderService:
             duplicate_finalization = True
         if self.quota_manager is not None:
             try:
-                quota_result = self.quota_manager.commit(request_id=request_id)
+                quota_result = (
+                    self.quota_manager.commit(request_id=request_id, tenant_id=tenant_id)
+                    if tenant_id is not None
+                    else self.quota_manager.commit(request_id=request_id)
+                )
                 if (
                     isinstance(quota_result, dict)
                     and quota_result.get("status") == "ALREADY_COMMITTED"
@@ -1649,7 +1657,8 @@ class ProviderService:
         }
 
     def release_unstarted_request(
-        self, *, project_id: str, provider_id: str, request_id: str
+        self, *, project_id: str, provider_id: str, request_id: str,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         """Release reservations only when the caller knows no provider request started."""
         if not all(isinstance(value, str) and value.strip() for value in (project_id, provider_id, request_id)):
@@ -1673,7 +1682,11 @@ class ProviderService:
             release = getattr(self.quota_manager, "release", None)
             if callable(release):
                 try:
-                    results["quota"] = release(request_id=request_id, provider_id=provider_id)
+                    results["quota"] = (
+                        release(request_id=request_id, provider_id=provider_id, tenant_id=tenant_id)
+                        if tenant_id is not None
+                        else release(request_id=request_id, provider_id=provider_id)
+                    )
                 except Exception as exc:
                     results["quota"] = {"status": "QUOTA_RELEASE_FAILED", "error_type": type(exc).__name__}
         if self.credit_manager is not None:
