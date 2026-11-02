@@ -1609,6 +1609,9 @@ class ProviderServiceTests(unittest.TestCase):
 
     def test_unknown_degraded_mode_value_fails_closed_before_adapter(self):
         class CorruptDegradedMode:
+            def evaluate(self, category, provider_statuses):
+                return {"status": "UNKNOWN", "evaluated": False}
+
             def get_state(self, category):
                 return {"status": "UNKNOWN", "state": {
                     "category": category, "mode": ["CORRUPT"],
