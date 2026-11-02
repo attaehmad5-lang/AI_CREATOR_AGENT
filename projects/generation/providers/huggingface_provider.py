@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from huggingface_hub import InferenceClient
 from .base_provider import BaseProvider
+from .atomic_output import atomic_save_image
 
 class HuggingFaceProvider(BaseProvider):
     name = "Hugging Face"
@@ -21,12 +22,11 @@ class HuggingFaceProvider(BaseProvider):
             model="stabilityai/stable-diffusion-xl-base-1.0"
         )
 
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        image.save(output_path)
+        destination = atomic_save_image(image, output_path)
 
         return {
             "status": "COMPLETED",
             "provider": self.name,
             "model": "stabilityai/stable-diffusion-xl-base-1.0",
-            "output": output_path
+            "output": str(destination)
         }
