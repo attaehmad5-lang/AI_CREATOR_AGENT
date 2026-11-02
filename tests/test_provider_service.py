@@ -1611,7 +1611,7 @@ class ProviderServiceTests(unittest.TestCase):
         class CorruptDegradedMode:
             def get_state(self, category):
                 return {"status": "UNKNOWN", "state": {
-                    "category": category, "mode": "CORRUPT",
+                    "category": category, "mode": ["CORRUPT"],
                     "healthy_provider_ids": ["image"],
                 }}
 
