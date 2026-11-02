@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+import inspect
 import re
 import time
 
@@ -1203,6 +1204,26 @@ class ProviderService:
         options["request_id"] = request_id
         secret_lease = None
         if use_managed_credential:
+            try:
+                adapter_parameters = inspect.signature(adapter).parameters.values()
+                supports_managed_lease = any(
+                    parameter.name == "provider_credential_lease"
+                    or parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in adapter_parameters
+                )
+            except (TypeError, ValueError):
+                supports_managed_lease = False
+            if not supports_managed_lease:
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "ADAPTER_MANAGED_CREDENTIAL_CONTRACT_UNSUPPORTED",
+                    "executed": False,
+                    "provider": provider_id,
+                    "release": released,
+                }
             if self.secret_manager is None:
                 released = self.release_unstarted_request(
                     project_id=project_id, provider_id=provider_id,
