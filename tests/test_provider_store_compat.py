@@ -107,6 +107,56 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
             self.assertFalse(after["route_selected"])
             self.assertEqual(after["available"][0]["id"], "image")
 
+
+    def test_unified_registry_views_report_invalid_catalog_truthfully(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = root / "catalog.json"
+            state = root / "state.json"
+            catalog.write_text(json.dumps({
+                "store": "AI_CREATOR_AGENT_PROVIDER_STORE",
+                "version": "3.0",
+                "status": "READY",
+                "subscription_policy": "USER_CONTROLLED",
+                "providers": [{
+                    "id": "story", "name": "Story", "category": "script_story",
+                    "auth_type": "NONE", "connection_type": "API",
+                    "enabled": True, "subscription_required": False,
+                }],
+            }), encoding="utf-8")
+            state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            manager = ConnectionManager(catalog, state)
+            registry = UnifiedProviderRegistry(connection_manager=manager)
+            with patch.object(
+                manager, "validate_catalog_schema",
+                return_value={"valid": False, "errors": ["simulated invalid catalog"]},
+            ):
+                self.assertEqual(registry.advanced["status"], "ERROR")
+                self.assertFalse(registry.advanced["ready"])
+                self.assertEqual(registry.core["status"], "ERROR")
+                self.assertEqual(registry.status()["status"], "ERROR")
+                self.assertFalse(registry.status()["catalog_valid"])
+
+    def test_unified_registry_by_category_rejects_invalid_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = root / "catalog.json"
+            state = root / "state.json"
+            catalog.write_text(json.dumps({
+                "providers": [{
+                    "id": "story", "name": "Story", "category": "script_story",
+                    "auth_type": "NONE", "connection_type": "API", "enabled": True,
+                }],
+            }), encoding="utf-8")
+            state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            registry = UnifiedProviderRegistry(
+                catalog_path=str(catalog), state_path=str(state)
+            )
+            for category in (None, 7, [], {}):
+                with self.subTest(category=category):
+                    self.assertEqual(registry.by_category(category), [])
+
     def test_production_registry_contains_all_advanced_provider_entries(self):
         project_root = Path(__file__).resolve().parents[1]
         main_catalog = project_root / "projects" / "provider_store" / "provider_catalog.json"
