@@ -19,7 +19,7 @@ from typing import Any, Iterator
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .safe_numbers import finite_number
 
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\\Z")
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
 _STATES = {"SLO_MET", "SLO_BREACHED", "INSUFFICIENT_DATA"}
 
 
@@ -147,7 +147,7 @@ class ProviderSLOManager:
                     self.data, stream, ensure_ascii=False, indent=2,
                     sort_keys=True, allow_nan=False,
                 )
-                stream.write("\\n")
+                stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             atomic_replace_with_retry(temp_name, self.state_path)
