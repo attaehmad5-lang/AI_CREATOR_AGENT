@@ -7,6 +7,7 @@ import time
 
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
+from .secrets_manager import SecretManagerError
 
 
 class ProviderService:
