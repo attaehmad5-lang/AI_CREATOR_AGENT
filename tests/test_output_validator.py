@@ -175,8 +175,8 @@ class ProviderOutputValidatorTests(unittest.TestCase):
             + bytes((8, 2, 0, 0, 0))
         )
         return (
-            b"\\x89PNG\\r\\n\\x1a\\n" + (13).to_bytes(4, "big")
-            + b"IHDR" + ihdr + b"\\x00\\x00\\x00\\x00"
+            b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big")
+            + b"IHDR" + ihdr + b"\x00\x00\x00\x00"
         )
 
     def test_png_dimensions_are_reported_and_limits_are_enforced(self):
@@ -212,16 +212,16 @@ class ProviderOutputValidatorTests(unittest.TestCase):
     def test_jpeg_gif_and_webp_headers_report_dimensions(self):
         jpeg = self.root / "dimensions.jpg"
         jpeg.write_bytes(
-            b"\\xff\\xd8\\xff\\xc0" + (17).to_bytes(2, "big")
-            + b"\\x08" + (100).to_bytes(2, "big") + (200).to_bytes(2, "big")
-            + b"\\x03\\x01\\x11\\x00\\x02\\x11\\x00\\x03\\x11\\x00"
-            + b"\\xff\\xd9"
+            b"\xff\xd8\xff\xc0" + (17).to_bytes(2, "big")
+            + b"\x08" + (100).to_bytes(2, "big") + (200).to_bytes(2, "big")
+            + b"\x03\x01\x11\x00\x02\x11\x00\x03\x11\x00"
+            + b"\xff\xd9"
         )
         gif = self.root / "dimensions.gif"
         gif.write_bytes(b"GIF89a" + (320).to_bytes(2, "little") + (200).to_bytes(2, "little"))
         webp = self.root / "dimensions.webp"
         vp8x = (
-            b"\\x00\\x00\\x00\\x00" + (319).to_bytes(3, "little")
+            b"\x00\x00\x00\x00" + (319).to_bytes(3, "little")
             + (239).to_bytes(3, "little")
         )
         webp.write_bytes(
@@ -239,7 +239,7 @@ class ProviderOutputValidatorTests(unittest.TestCase):
 
     def test_legacy_signature_only_images_report_dimensions_unavailable(self):
         path = self.root / "legacy.png"
-        path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"test")
+        path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
         result = ProviderOutputValidator(max_size_bytes=64).validate_file(path, modality="image")
         self.assertTrue(result["valid"])
         self.assertFalse(result["image_dimensions_validated"])
