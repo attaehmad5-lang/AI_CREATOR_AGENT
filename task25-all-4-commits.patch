@@ -1,0 +1,888 @@
+From 7b42c81a94a786aba41c075b87a3f1ac491d8242 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 1 Nov 2026 20:03:26 +0000
+Subject: [PATCH 1/4] Task 25: add opt-in modality binding gate
+ (ConnectionManager.get_modality_binding, execute_routed_request)
+
+---
+ projects/provider_store/connection_manager.py | 116 ++++++++++++++----
+ projects/provider_store/provider_service.py   |  62 ++++++++++
+ 2 files changed, 156 insertions(+), 22 deletions(-)
+
+diff --git a/projects/provider_store/connection_manager.py b/projects/provider_store/connection_manager.py
+index 9dd43c1..a65e80d 100644
+--- a/projects/provider_store/connection_manager.py
++++ b/projects/provider_store/connection_manager.py
+@@ -33,6 +33,60 @@ class ProviderAuthenticationVerificationRequired(PermissionError):
+ 
+ 
+ 
++# Single source of truth for the callable surface each declared category must expose.
++# Each inner tuple lists alternatives; at least one alternative must be callable.
++MODALITY_CONTRACTS: dict[str, tuple[tuple[str, ...], ...]] = {
++    "image": (("generate_image",),),
++    "video": (("generate_video",),),
++    "voice": (("generate_speech", "generate_audio"),),
++    "audio": (("generate_audio", "generate_speech"),),
++    "music": (("generate_music",),),
++    "text": (("generate_text",),),
++    "language_model": (("generate_text",),),
++    "transcription": (("transcribe",),),
++    "translation": (("translate",),),
++    "dubbing": (("dub",),),
++    "image_editing": (("edit_image",),),
++    "advanced_image_editing": (("edit_image",),),
++    "upscaling": (("upscale_image",),),
++    "advanced_upscaling": (("upscale_image", "upscale_video"),),
++    "lipsync": (("generate_lipsync",),),
++    "script_story": (("generate_text",),),
++    "advanced_transcription": (("transcribe",),),
++    "advanced_audio": (("generate_audio", "generate_speech", "generate_music"),),
++    "video_editing": (("edit_video",),),
++    "advanced_video_editing": (("edit_video",),),
++}
++
++# Output modalities (as understood by ProviderOutputValidator) a provider of each
++# category may legitimately produce. Derived from the callable contract above
++# (for example generate_music -> audio, upscale_video -> video); categories whose
++# contract names both image and video operations allow both. A category missing
++# here has no declared output binding and is rejected rather than guessed.
++MODALITY_OUTPUT_KINDS: dict[str, frozenset[str]] = {
++    "image": frozenset({"image"}),
++    "video": frozenset({"video"}),
++    "voice": frozenset({"audio"}),
++    "audio": frozenset({"audio"}),
++    "music": frozenset({"audio"}),
++    "text": frozenset({"text"}),
++    "language_model": frozenset({"text"}),
++    "script_story": frozenset({"text"}),
++    "transcription": frozenset({"text"}),
++    "advanced_transcription": frozenset({"text"}),
++    "translation": frozenset({"text"}),
++    "dubbing": frozenset({"audio", "video"}),
++    "image_editing": frozenset({"image"}),
++    "advanced_image_editing": frozenset({"image"}),
++    "upscaling": frozenset({"image"}),
++    "advanced_upscaling": frozenset({"image", "video"}),
++    "lipsync": frozenset({"video"}),
++    "advanced_audio": frozenset({"audio"}),
++    "video_editing": frozenset({"video"}),
++    "advanced_video_editing": frozenset({"video"}),
++}
++
++
+ class ConnectionManager:
+     VALID_STATES = {
+         "LOCKED",
+@@ -729,28 +783,7 @@ class ConnectionManager:
+         if provider is None:
+             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
+-        contracts: dict[str, tuple[tuple[str, ...], ...]] = {
+-            "image": (("generate_image",),),
+-            "video": (("generate_video",),),
+-            "voice": (("generate_speech", "generate_audio"),),
+-            "audio": (("generate_audio", "generate_speech"),),
+-            "music": (("generate_music",),),
+-            "text": (("generate_text",),),
+-            "language_model": (("generate_text",),),
+-            "transcription": (("transcribe",),),
+-            "translation": (("translate",),),
+-            "dubbing": (("dub",),),
+-            "image_editing": (("edit_image",),),
+-            "advanced_image_editing": (("edit_image",),),
+-            "upscaling": (("upscale_image",),),
+-            "advanced_upscaling": (("upscale_image", "upscale_video"),),
+-            "lipsync": (("generate_lipsync",),),
+-            "script_story": (("generate_text",),),
+-            "advanced_transcription": (("transcribe",),),
+-            "advanced_audio": (("generate_audio", "generate_speech", "generate_music"),),
+-            "video_editing": (("edit_video",),),
+-            "advanced_video_editing": (("edit_video",),),
+-        }
++        contracts = MODALITY_CONTRACTS
+         requirements = contracts.get(category)
+         if requirements is None:
+             return {
+@@ -778,6 +811,45 @@ class ConnectionManager:
+             "contract_version": "1.0",
+         }
+ 
++    def get_modality_binding(self, provider_id: str) -> dict[str, Any]:
++        """Report which output modalities a provider may produce, side-effect free.
++
++        The binding comes from the provider's declared catalog category and the shared
++        ``MODALITY_CONTRACTS``/``MODALITY_OUTPUT_KINDS`` tables. If a runtime instance is
++        currently loaded it must still satisfy its callable contract; otherwise the
++        binding is invalid. No provider is contacted and nothing is persisted.
++        """
++        provider = self.get_provider(provider_id)
++        if provider is None:
++            return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
++        category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
++        requirements = MODALITY_CONTRACTS.get(category)
++        output_kinds = MODALITY_OUTPUT_KINDS.get(category)
++        if requirements is None or output_kinds is None:
++            return {
++                "status": "UNSUPPORTED_MODALITY", "provider": provider_id, "valid": False,
++                "category": category, "contract_version": "1.0",
++            }
++        runtime_contract = "NOT_LOADED"
++        instance = self.get_loaded_provider(provider_id)
++        if instance is not None:
++            checked = self.validate_provider_contract(provider_id, instance)
++            runtime_contract = checked.get("status", "CONTRACT_VIOLATION")
++            if checked.get("valid") is not True:
++                return {
++                    "status": "CONTRACT_VIOLATION", "provider": provider_id, "valid": False,
++                    "category": category, "runtime_contract": runtime_contract,
++                    "contract_version": "1.0",
++                }
++        return {
++            "status": "VALID", "provider": provider_id, "valid": True,
++            "category": category,
++            "contract_methods": [list(alternatives) for alternatives in requirements],
++            "output_modalities": sorted(output_kinds),
++            "runtime_contract": runtime_contract,
++            "contract_version": "1.0",
++        }
++
+     def load_provider(self, provider_id: str, factory: Any) -> dict[str, Any]:
+         """Load one validated runtime instance while holding the lifecycle lock."""
+         with self._lock:
+diff --git a/projects/provider_store/provider_service.py b/projects/provider_store/provider_service.py
+index 6d0d4f9..09bd5e1 100644
+--- a/projects/provider_store/provider_service.py
++++ b/projects/provider_store/provider_service.py
+@@ -830,6 +830,7 @@ class ProviderService:
+         estimated_cost_unit: str = "USD",
+         adapter_options: dict[str, Any] | None = None,
+         require_fresh_health_check: bool = False,
++        require_modality_binding: bool = False,
+         paid_usage_approved: bool = False,
+         health_stale_after_seconds: float = 300.0,
+         health_max_latency_ms: float | None = None,
+@@ -959,6 +960,67 @@ class ProviderService:
+         if not isinstance(provider_id, str) or not provider_id.strip():
+             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+ 
++        if not isinstance(require_modality_binding, bool):
++            release = self.release_unstarted_request(
++                project_id=project_id, provider_id=provider_id, request_id=request_id
++            )
++            return {
++                "status": "INVALID_MODALITY_BINDING_POLICY", "executed": False,
++                "release": release,
++            }
++        if require_modality_binding:
++            # Opt-in: the routed provider must declare a modality contract, any loaded
++            # runtime instance must still satisfy it, and the requested output modality
++            # must be one that provider's category can produce. Runs before the adapter
++            # is invoked, so a mismatch can never start (or bill) a request.
++            binding_fn = getattr(self.connection_manager, "get_modality_binding", None)
++            if not callable(binding_fn):
++                binding = {"valid": False, "status": "MODALITY_BINDING_UNAVAILABLE"}
++            else:
++                try:
++                    binding = binding_fn(provider_id)
++                except Exception as exc:
++                    binding = {
++                        "valid": False, "status": "MODALITY_BINDING_CHECK_FAILED",
++                        "error_type": type(exc).__name__,
++                    }
++            requested_modality = (
++                modality.strip().casefold() if isinstance(modality, str) else None
++            )
++            allowed_modalities = (
++                binding.get("output_modalities") if isinstance(binding, dict) else None
++            )
++            binding_valid = (
++                isinstance(binding, dict)
++                and binding.get("valid") is True
++                and isinstance(allowed_modalities, list)
++            )
++            if not binding_valid or requested_modality not in allowed_modalities:
++                release = self.release_unstarted_request(
++                    project_id=project_id, provider_id=provider_id, request_id=request_id
++                )
++                safe_binding = {
++                    "valid": False,
++                    "status": (
++                        binding.get("status") if isinstance(binding, dict)
++                        and isinstance(binding.get("status"), str)
++                        else "INVALID_MODALITY_BINDING_RESPONSE"
++                    ),
++                }
++                if binding_valid:
++                    safe_binding["category"] = binding.get("category")
++                    safe_binding["output_modalities"] = list(allowed_modalities)
++                    safe_binding["requested_modality"] = (
++                        requested_modality[:64] if requested_modality is not None else None
++                    )
++                return {
++                    "status": "MODALITY_MISMATCH" if binding_valid else "PROVIDER_MODALITY_REJECTED",
++                    "executed": False,
++                    "provider": provider_id,
++                    "modality_binding": safe_binding,
++                    "release": release,
++                }
++
+         if not isinstance(require_fresh_health_check, bool):
+             release = self.release_unstarted_request(
+                 project_id=project_id, provider_id=provider_id, request_id=request_id
+-- 
+2.43.0
+
+
+From 3a1640a147cda91b56cf8d7dfb55656e6271f26a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 1 Nov 2026 20:03:26 +0000
+Subject: [PATCH 2/4] Task 25: add modality binding tests and close
+ #81/#85/#130/#136 test gaps
+
+---
+ tests/test_connection_manager.py            |  98 ++++++++++++++-
+ tests/test_generation_provider_interface.py |  80 ++++++++++++
+ tests/test_provider_quality_policy.py       |  30 +++++
+ tests/test_provider_service.py              | 129 ++++++++++++++++++++
+ tests/test_routing_manager.py               |  15 +++
+ 5 files changed, 351 insertions(+), 1 deletion(-)
+
+diff --git a/tests/test_connection_manager.py b/tests/test_connection_manager.py
+index 4a6f305..ccef180 100644
+--- a/tests/test_connection_manager.py
++++ b/tests/test_connection_manager.py
+@@ -1,11 +1,19 @@
+ import json
++import shutil
+ import tempfile
++from types import SimpleNamespace
+ import threading
+ import unittest
+ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+ from pathlib import Path
+ 
+-from projects.provider_store.connection_manager import ConnectionManager, simulate_provider_policy
++from projects.provider_store.connection_manager import (
++    MODALITY_CONTRACTS,
++    MODALITY_OUTPUT_KINDS,
++    ConnectionManager,
++    simulate_provider_policy,
++)
++from projects.provider_store.output_validator import ProviderOutputValidator
+ 
+ 
+ def _set_provider_state_in_process(args):
+@@ -1450,5 +1458,93 @@ class ProviderPolicySimulationTests(unittest.TestCase):
+         self.assertTrue(manager.is_provider_enabled("paid_image"))
+ 
+ 
++class ModalityBindingTests(unittest.TestCase):
++    def setUp(self):
++        self.temp_dir = tempfile.TemporaryDirectory()
++        self.root = Path(self.temp_dir.name)
++        self.catalog_path = self.root / "provider_catalog.json"
++        self.state_path = self.root / "connection_state.json"
++        providers = [
++            {"id": "img", "auth_type": "NONE", "category": "image", "enabled": True},
++            {"id": "edit", "auth_type": "NONE", "category": "Image-Editing", "enabled": True},
++            {"id": "vid", "auth_type": "NONE", "category": "video", "enabled": True},
++            {"id": "mus", "auth_type": "NONE", "category": "music", "enabled": True},
++            {"id": "dub", "auth_type": "NONE", "category": "dubbing", "enabled": True},
++            {"id": "holo", "auth_type": "NONE", "category": "hologram", "enabled": True},
++        ]
++        self.catalog_path.write_text(json.dumps({"providers": providers}), encoding="utf-8")
++        self.state_path.write_text(
++            json.dumps({"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}),
++            encoding="utf-8",
++        )
++        self.manager = ConnectionManager(self.catalog_path, self.state_path)
++
++    def tearDown(self):
++        self.temp_dir.cleanup()
++
++    def test_binding_reports_contract_and_output_modalities(self):
++        expected = {
++            "img": (["image"], [["generate_image"]]),
++            "vid": (["video"], [["generate_video"]]),
++            "mus": (["audio"], [["generate_music"]]),
++            "dub": (["audio", "video"], [["dub"]]),
++        }
++        for provider_id, (kinds, methods) in expected.items():
++            with self.subTest(provider=provider_id):
++                binding = self.manager.get_modality_binding(provider_id)
++                self.assertEqual(binding["status"], "VALID")
++                self.assertTrue(binding["valid"])
++                self.assertEqual(binding["output_modalities"], kinds)
++                self.assertEqual(binding["contract_methods"], methods)
++                self.assertEqual(binding["runtime_contract"], "NOT_LOADED")
++
++    def test_binding_normalizes_category_spelling(self):
++        binding = self.manager.get_modality_binding("edit")
++        self.assertEqual(binding["category"], "image_editing")
++        self.assertEqual(binding["output_modalities"], ["image"])
++
++    def test_binding_rejects_unknown_provider_and_unsupported_category(self):
++        self.assertEqual(self.manager.get_modality_binding("missing")["status"], "NOT_FOUND")
++        unsupported = self.manager.get_modality_binding("holo")
++        self.assertEqual(unsupported["status"], "UNSUPPORTED_MODALITY")
++        self.assertFalse(unsupported["valid"])
++        self.assertNotIn("output_modalities", unsupported)
++
++    def test_loaded_instance_must_still_satisfy_its_contract(self):
++        instance = SimpleNamespace(generate_image=lambda *args, **kwargs: None)
++        self.assertEqual(self.manager.load_provider("img", lambda metadata: instance)["status"], "LOADED")
++        loaded = self.manager.get_modality_binding("img")
++        self.assertTrue(loaded["valid"])
++        self.assertEqual(loaded["runtime_contract"], "VALID")
++        instance.generate_image = None  # runtime regression after a successful load
++        broken = self.manager.get_modality_binding("img")
++        self.assertEqual(broken["status"], "CONTRACT_VIOLATION")
++        self.assertFalse(broken["valid"])
++        self.assertNotIn("output_modalities", broken)
++
++    def test_contract_and_output_tables_are_consistent(self):
++        self.assertEqual(set(MODALITY_CONTRACTS), set(MODALITY_OUTPUT_KINDS))
++        validator_modalities = set(ProviderOutputValidator.EXTENSIONS)
++        for category, kinds in MODALITY_OUTPUT_KINDS.items():
++            with self.subTest(category=category):
++                self.assertTrue(kinds)
++                self.assertLessEqual(kinds, validator_modalities)
++                self.assertTrue(MODALITY_CONTRACTS[category])
++                for alternatives in MODALITY_CONTRACTS[category]:
++                    self.assertTrue(alternatives)
++                    self.assertTrue(all(isinstance(name, str) and name for name in alternatives))
++
++    def test_every_category_in_the_shipped_catalog_has_a_binding(self):
++        shipped = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
++        copy = self.root / "shipped_catalog.json"
++        shutil.copyfile(shipped, copy)
++        manager = ConnectionManager(copy, self.state_path)
++        providers = manager.list_providers()
++        self.assertGreater(len(providers), 0)
++        for provider in providers:
++            with self.subTest(provider=provider.get("id")):
++                self.assertEqual(manager.get_modality_binding(provider["id"])["status"], "VALID")
++
++
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_generation_provider_interface.py b/tests/test_generation_provider_interface.py
+index b25f397..c50a6fa 100644
+--- a/tests/test_generation_provider_interface.py
++++ b/tests/test_generation_provider_interface.py
+@@ -1,6 +1,9 @@
+ """Version negotiation and atomic activation tests for generation provider adapters."""
+ from __future__ import annotations
+ 
++import ast
++import json
++from pathlib import Path
+ from types import SimpleNamespace
+ import unittest
+ from unittest.mock import patch
+@@ -79,5 +82,82 @@ class ProviderInterfaceVersionTests(unittest.TestCase):
+         self.assertEqual(manager.providers, {"Existing": existing})
+ 
+ 
++class RaisingVersionProvider:
++    @property
++    def PROVIDER_INTERFACE_VERSION(self):
++        raise RuntimeError("private provider details")
++
++    def generate_image(self, prompt, output_path):
++        return None
++
++
++class FloatVersionProvider:
++    PROVIDER_INTERFACE_VERSION = 1.0
++
++    def generate_image(self, prompt, output_path):
++        return None
++
++
++class MissingMethodProvider:
++    PROVIDER_INTERFACE_VERSION = "1.0"
++
++
++class ProviderInterfaceEdgeCaseTests(unittest.TestCase):
++    def test_unreadable_non_string_and_method_less_adapters_fail_closed(self):
++        for provider_class in (RaisingVersionProvider, FloatVersionProvider, MissingMethodProvider):
++            with self.subTest(provider_class=provider_class.__name__):
++                manager = ProviderManager()
++                with patch(
++                    "projects.generation.providers.provider_manager.importlib.import_module",
++                    return_value=SimpleNamespace(CandidateProvider=provider_class),
++                ):
++                    with self.assertRaises(ValueError) as caught:
++                        manager.register(
++                            "Candidate", "projects.generation.providers.candidate", "CandidateProvider"
++                        )
++                self.assertNotIn("private provider details", repr(caught.exception.__cause__))
++                self.assertEqual(manager.providers, {})
++
++
++class ShippedAdapterContractTests(unittest.TestCase):
++    """Dependency-free static contract check of the adapters actually shipped in the repo.
++
++    The real Hugging Face adapter needs the optional ``huggingface_hub`` package, which CI
++    does not install, so these adapters are inspected with ``ast`` instead of imported.
++    """
++
++    def test_every_shipped_image_adapter_meets_the_current_contract(self):
++        root = Path(__file__).resolve().parents[1]
++        registry = json.loads(
++            (root / "projects" / "generation" / "provider_registry.json").read_text(encoding="utf-8")
++        )
++        modules = registry["image"]["provider_modules"]
++        self.assertTrue(modules)
++        for name, module_path in modules.items():
++            with self.subTest(provider=name):
++                # The loader's own validation must accept the registry entry.
++                ProviderManager._module_from_path(module_path)
++                tree = ast.parse((root / module_path).read_text(encoding="utf-8"))
++                expected_class = name.replace(" ", "") + "Provider"
++                classes = [
++                    node for node in tree.body
++                    if isinstance(node, ast.ClassDef) and node.name == expected_class
++                ]
++                self.assertEqual(len(classes), 1)
++                methods = {
++                    node.name for node in classes[0].body
++                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
++                }
++                self.assertIn("generate_image", methods)
++                declared = [
++                    ast.literal_eval(node.value)
++                    for node in classes[0].body
++                    if isinstance(node, ast.Assign)
++                    and any(getattr(target, "id", None) == "PROVIDER_INTERFACE_VERSION" for target in node.targets)
++                ]
++                # Undeclared means legacy 1.0; a declared value must be the supported one.
++                self.assertTrue(all(version == "1.0" for version in declared))
++
++
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_provider_quality_policy.py b/tests/test_provider_quality_policy.py
+index 4b9dfac..740a30a 100644
+--- a/tests/test_provider_quality_policy.py
++++ b/tests/test_provider_quality_policy.py
+@@ -18,6 +18,36 @@ class ProviderOutputQualityPolicyTests(unittest.TestCase):
+         accepted = policy.evaluate("asset:image", modality="image", category="image")
+         self.assertTrue(accepted["allowed"])
+ 
++    def test_threshold_precedence_is_modality_then_category_then_default(self):
++        policy = ProviderOutputQualityPolicy(
++            lambda path, **kwargs: {"score": 0.6},
++            thresholds={"documentary:text": 0.9, "documentary": 0.5},
++            default_threshold=0.7,
++        )
++        specific = policy.evaluate("asset:1", modality="text", category="documentary")
++        self.assertEqual(specific["threshold"], 0.9)
++        self.assertFalse(specific["allowed"])
++        category_level = policy.evaluate("asset:2", modality="audio", category="documentary")
++        self.assertEqual(category_level["threshold"], 0.5)
++        self.assertTrue(category_level["allowed"])
++        global_default = policy.evaluate("asset:3", modality="image", category="other")
++        self.assertEqual(global_default["threshold"], 0.7)
++        self.assertFalse(global_default["allowed"])
++
++    def test_score_equal_to_threshold_is_accepted_and_booleans_are_rejected(self):
++        exact = ProviderOutputQualityPolicy(
++            lambda path, **kwargs: 0.8, default_threshold=0.8
++        ).evaluate("asset:1", modality="image", category="image")
++        self.assertTrue(exact["allowed"])
++        self.assertEqual(exact["status"], "QUALITY_ACCEPTED")
++        for value in (True, False):
++            with self.subTest(value=value):
++                result = ProviderOutputQualityPolicy(
++                    lambda path, **kwargs: value, default_threshold=0.0
++                ).evaluate("asset:1", modality="image", category="image")
++                self.assertEqual(result["status"], "INVALID_QUALITY_SCORE")
++                self.assertFalse(result["allowed"])
++
+     def test_invalid_scores_and_scorer_errors_fail_closed(self):
+         for value in (float("nan"), float("inf"), -0.1, 1.1, "high"):
+             with self.subTest(value=value):
+diff --git a/tests/test_provider_service.py b/tests/test_provider_service.py
+index 5d921d3..5193363 100644
+--- a/tests/test_provider_service.py
++++ b/tests/test_provider_service.py
+@@ -97,6 +97,135 @@ class ProviderServiceTests(unittest.TestCase):
+         self.assertEqual(len(calls), 1)
+         self.assertNotEqual(allowed["status"], "PROVIDER_HEALTH_REJECTED")
+ 
++    def _modality_service(self, **kwargs):
++        class RoutingStub:
++            def route(self, **route_kwargs):
++                return {"allowed": True, "provider": "image", "billing_mode": "FREE"}
++
++        return ProviderService(self.connections, routing_manager=RoutingStub(), **kwargs)
++
++    def test_modality_binding_blocks_mismatched_output_before_adapter(self):
++        calls = []
++        service = self._modality_service()
++        result = service.execute_routed_request(
++            category="image", project_id="film", request_id="modality-mismatch",
++            estimated_cost=0.0, modality="video",
++            adapter=lambda **kwargs: calls.append(kwargs),
++            require_modality_binding=True,
++        )
++        self.assertEqual(result["status"], "MODALITY_MISMATCH")
++        self.assertFalse(result["executed"])
++        self.assertEqual(calls, [])
++        self.assertEqual(result["modality_binding"]["output_modalities"], ["image"])
++        self.assertEqual(result["modality_binding"]["requested_modality"], "video")
++
++    def test_modality_binding_allows_matching_output_and_normalizes_case(self):
++        calls = []
++        service = self._modality_service()
++        result = service.execute_routed_request(
++            category="image", project_id="film", request_id="modality-match",
++            estimated_cost=0.0, modality=" IMAGE ",
++            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
++            require_modality_binding=True,
++        )
++        self.assertEqual(len(calls), 1)
++        self.assertNotIn(result["status"], {"MODALITY_MISMATCH", "PROVIDER_MODALITY_REJECTED"})
++
++    def test_modality_binding_is_opt_in_and_preserves_legacy_behavior(self):
++        calls = []
++        service = self._modality_service()
++        result = service.execute_routed_request(
++            category="image", project_id="film", request_id="modality-legacy",
++            estimated_cost=0.0, modality="video",
++            adapter=lambda **kwargs: calls.append(kwargs) or {"started": False, "success": False},
++        )
++        self.assertEqual(len(calls), 1)
++        self.assertNotEqual(result["status"], "MODALITY_MISMATCH")
++
++    def test_modality_binding_fails_closed_for_bad_policy_and_bad_modality(self):
++        calls = []
++        service = self._modality_service()
++        for index, bad_policy in enumerate(("yes", 1, None)):
++            with self.subTest(policy=bad_policy):
++                result = service.execute_routed_request(
++                    category="image", project_id="film", request_id=f"modality-policy-{index}",
++                    estimated_cost=0.0, modality="image",
++                    adapter=lambda **kwargs: calls.append(kwargs),
++                    require_modality_binding=bad_policy,
++                )
++                self.assertEqual(result["status"], "INVALID_MODALITY_BINDING_POLICY")
++        for index, bad_modality in enumerate((None, 7, "", "hologram")):
++            with self.subTest(modality=bad_modality):
++                result = service.execute_routed_request(
++                    category="image", project_id="film", request_id=f"modality-bad-{index}",
++                    estimated_cost=0.0, modality=bad_modality,
++                    adapter=lambda **kwargs: calls.append(kwargs),
++                    require_modality_binding=True,
++                )
++                self.assertEqual(result["status"], "MODALITY_MISMATCH")
++        self.assertEqual(calls, [])
++
++    def test_modality_binding_fails_closed_when_connection_manager_cannot_report(self):
++        class RoutingStub:
++            def route(self, **kwargs):
++                return {"allowed": True, "provider": "image", "billing_mode": "FREE"}
++
++        class NoBindingConnections:
++            verify_connectivity = staticmethod(lambda *a, **k: {})
++
++        class RaisingConnections(NoBindingConnections):
++            @staticmethod
++            def get_modality_binding(provider_id):
++                raise RuntimeError("secret internal detail")
++
++        class MalformedConnections(NoBindingConnections):
++            @staticmethod
++            def get_modality_binding(provider_id):
++                return ["not", "a", "dict"]
++
++        expectations = (
++            (NoBindingConnections, "MODALITY_BINDING_UNAVAILABLE"),
++            (RaisingConnections, "MODALITY_BINDING_CHECK_FAILED"),
++            (MalformedConnections, "INVALID_MODALITY_BINDING_RESPONSE"),
++        )
++        for index, (connections_class, expected_status) in enumerate(expectations):
++            with self.subTest(connections=connections_class.__name__):
++                calls = []
++                service = ProviderService(connections_class(), routing_manager=RoutingStub())
++                service.release_unstarted_request = lambda **kwargs: {"released": True}
++                result = service.execute_routed_request(
++                    category="image", project_id="film", request_id=f"modality-cm-{index}",
++                    estimated_cost=0.0, modality="image",
++                    adapter=lambda **kwargs: calls.append(kwargs),
++                    require_modality_binding=True,
++                )
++                self.assertEqual(result["status"], "PROVIDER_MODALITY_REJECTED")
++                self.assertEqual(result["modality_binding"]["status"], expected_status)
++                self.assertNotIn("secret internal detail", repr(result))
++                self.assertEqual(calls, [])
++
++    def test_modality_binding_releases_reservations_on_rejection(self):
++        service = ProviderService(
++            self.connections, routing_manager=self._modality_service().routing_manager,
++            cost_policy=self.cost, quota_manager=self.quota,
++        )
++        released = []
++        original_release = service.release_unstarted_request
++
++        def tracking_release(**kwargs):
++            released.append(kwargs["request_id"])
++            return original_release(**kwargs)
++
++        service.release_unstarted_request = tracking_release
++        result = service.execute_routed_request(
++            category="image", project_id="film", request_id="modality-release",
++            estimated_cost=0.0, modality="audio",
++            adapter=lambda **kwargs: self.fail("adapter must not run"),
++            require_modality_binding=True,
++        )
++        self.assertEqual(result["status"], "MODALITY_MISMATCH")
++        self.assertEqual(released, ["modality-release"])
++
+     def test_routed_generation_health_gate_fails_closed_without_manager(self):
+         class RoutingStub:
+             def route(self, **kwargs):
+diff --git a/tests/test_routing_manager.py b/tests/test_routing_manager.py
+index bd8c6c5..0bdd2c7 100644
+--- a/tests/test_routing_manager.py
++++ b/tests/test_routing_manager.py
+@@ -996,6 +996,21 @@ class ProviderRoutingManagerTests(unittest.TestCase):
+         self.assertEqual(result["provider"], "fallback")
+         self.assertEqual(result["strategy"], "HEALTHIEST_FIRST")
+ 
++    def test_healthiest_first_ties_are_broken_by_configured_priority(self):
++        health = ProviderHealthManager(self.health_path)
++        for provider_id in ("primary", "fallback"):
++            self.assertEqual(
++                health.record_result(provider_id, success=True, latency_ms=40)["status"],
++                "HEALTHY",
++            )
++        router = ProviderRoutingManager(self.connections, health_manager=health)
++        results = [
++            router.route(category="image", project_id="film", strategy="HEALTHIEST_FIRST")
++            for _ in range(3)
++        ]
++        self.assertTrue(all(result["allowed"] for result in results))
++        self.assertEqual({result["provider"] for result in results}, {"primary"})
++
+     def test_malformed_latency_ranks_last_without_crashing(self):
+         class HealthStub:
+             data = {
+-- 
+2.43.0
+
+
+From 66bc1b63bcc3fd69f2e7717e21996b63b55ad63f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 1 Nov 2026 20:03:26 +0000
+Subject: [PATCH 3/4] Task 25: ledger provenance/evidence notes and
+ superseded-snapshot banners (no status changes)
+
+---
+ projects/provider_store/TASK25_AUDIT.md          |  2 ++
+ .../TASK25_CANONICAL_138_ITEM_LEDGER.md          | 16 +++++++++++-----
+ projects/provider_store/TASK_25_AUDIT_MATRIX.md  |  2 ++
+ 3 files changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/projects/provider_store/TASK25_AUDIT.md b/projects/provider_store/TASK25_AUDIT.md
+index 8b24768..a23fc13 100644
+--- a/projects/provider_store/TASK25_AUDIT.md
++++ b/projects/provider_store/TASK25_AUDIT.md
+@@ -1,5 +1,7 @@
+ # Task #25 — Provider Connection Manager Verification Audit
+ 
++> **Superseded snapshot.** The test counts, PR references (#1/#7) and dispositions below are historical. The current, canonical status is [TASK25_CANONICAL_138_ITEM_LEDGER.md](TASK25_CANONICAL_138_ITEM_LEDGER.md); do not quote figures from this file.
++
+ **Follow-up branch:** `task-25-followup-audit`  
+ **Pull request:** #1 (merged; follow-up work requires a new branch/PR)  
+ **Audit status:** In progress — do not mark Task #25 complete yet.
+diff --git a/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md b/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md
+index 1e0ec2d..e2f21c5 100644
+--- a/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md
++++ b/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md
+@@ -10,6 +10,12 @@ GitHub Actions run [#40525243664](https://github.com/attaehmad5-lang/AI_CREATOR_
+ 
+ GitHub Actions run [#40442372725](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40442372725): **601 tests passed on Ubuntu and 601 on Windows, 0 failures**. Added regression coverage for explicit provider rate-limit codes (`rate_limit_exceeded`, `rate_limited`, `too_many_requests`), ensuring retryable rate-limit classification without echoing provider codes and ensuring exhausted-credit classification takes precedence. Added RIFF subtype-spoofing regression tests (WebP/WAV/AVI) and MP4 ISO-BMFF signature-offset coverage in `tests/test_output_validator.py`; compilation, JSON catalog validation, tests, and report-artifact uploads passed on both platforms. Each OS successfully uploaded a machine-readable JSON test report artifact retained for 14 days; reports include test IDs, outcomes, durations and aggregate counts without serializing failure messages. Hardened request IDs before routing/reservation (1–128 safe ASCII characters; rejects whitespace, control characters, empty and oversized IDs); retry-after parsing now fails closed on huge integers that overflow float conversion; malformed connectivity-manager responses in standard/manual verification return `INVALID_CONNECTION_RESPONSE`; positive regression coverage confirms `HEALTHIEST_FIRST` selects the provider with lower recorded latency. Compilation, JSON catalog validation, tests, and artifact upload passed on both platforms. Coverage also includes fail-closed provider health gates, side-effect-free policy simulation before activation, separate `billing.approve` authorization for paid usage, secret-free hash-chained activation-decision audit records, audit-write failure blocking, tamper detection, role-based provider admin controls, independent user/project/tenant quota limits, tenant-scoped job submit/claim/complete/poll/cancel controls, cross-tenant metadata non-disclosure on job-ID conflicts, safe coexistence with legacy unscoped jobs, priority aging to prevent starvation, per-tenant queue/concurrency limits, concurrent queue-load completion, persisted project region constraints, tenant/project policy intersection, stricter tenant cost ceilings, tenant-membership checks before job operations and routed adapter invocation, persisted SLO thresholds evaluated against runtime metrics, side-effect-free A/B benchmark planning with budget enforcement and authenticated `billing.approve` checks, fail-closed assessment of NORMAL/DEGRADED/OUTAGE provider availability, a release-readiness gate that blocks PASS until all feature and production evidence requirements are met, and a loopback-only Ollama-compatible local text adapter with strict response validation and authorization/privacy gates. Retry decision normalization also rejects malformed third-party policy results, truthy string booleans, exceptions raised by decision properties, and non-finite/negative/excessive delays rather than coercing them into retries. HTTP 429 responses use an explicit rate-limit backoff reason even when Retry-After is absent or invalid; boolean/unsupported Retry-After values are rejected. Regression tests cover these fail-closed cases. Metrics collection now rejects clock exceptions, non-timezone-aware timestamps, unsupported clock return types, and durations above seven days so invalid data cannot poison aggregates; regression tests confirm rejected metrics are not stored. `ProviderHealthManager.record_result()` now likewise rejects clock exceptions, naive/unsupported timestamps, and invalid time conversions without recording a health event. Paid routed execution also blocks caller-forged approval sets and requires the explicit approval flag plus authenticated `billing.approve` authorization. Local text generation now supports an opt-in fail-closed fresh-health eligibility gate: unavailable/stale health blocks adapter invocation, invalid thresholds are rejected, and generation proceeds only when the health manager explicitly returns eligible. Feature #43 remains PARTIAL because fresh health checks are not yet enforced across every generation path. The 597-test run verifies UTF-8 byte-size enforcement for custom local text adapter output, rejection of invalid Unicode surrogates, the hardened generation provider loader, and portable default registry resolution: trusted-package-only imports, traversal/unsafe-name/duplicate-module rejection, atomic registry replacement, and preservation of the active registry on failed reload. Coverage also includes explicit provider identity and safe request/project IDs, strict integer retention/category inputs, fail-closed data-handling and fresh-health policy enforcement, authorization-detail redaction, denial/exception handling, malformed health evidence, provider-identity spoofing resistance, and direct local-adapter execution metadata validation. Compilation, JSON catalog validation, tests, and report-artifact uploads passed on both platforms. The same 597-test run also verifies that generation providers must expose a callable `generate_image` method before activation, and that the generation service rejects malformed registry roots/image sections while resolving the default registry independently of the current working directory. Compilation, JSON catalog validation, tests, and report-artifact uploads passed on both platforms. A real local Ollama server/model and live third-party provider credentials are not claimed as verified.
+ 
++## Ledger provenance and local verification
++
++**Counts at this revision: 29 VERIFIED / 103 PARTIAL / 6 OPEN = 138**, recomputed from the table rows on 2026-11-01 (the five most recent VERIFIED promotions are #135, #81, #85, #130 and #136). The separate 150-point Advanced Provider Store acceptance ledger lives only on the PR #84 branch; that branch's copy of *this* 138-item ledger is an older snapshot (24 VERIFIED / 95 PARTIAL / 19 OPEN) and differs from this file in 17 rows.
++
++**Local verification 2026-11-01 (not CI; Python 3.12.3, run via `python -m projects.provider_store.task25_test_report`):** 650 tests, `OK (skipped=1)` (the skip is the opt-in real-Ollama test), plus `compileall` and provider JSON catalog validation. GitHub Actions has not yet run on this change; run [#40525243664](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40525243664) (633 tests) remains the latest CI evidence. No status was changed by this revision.
++
+ **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
+ 
+ ## A — Basic Provider Management
+@@ -49,7 +55,7 @@ GitHub Actions run [#40442372725](https://github.com/attaehmad5-lang/AI_CREATOR_
+ | 21 | 🔴 | Music Generation Providers | OPEN | No verified music generation adapter and output validation test. |
+ | 22 | 🔴 | Image Editing/Upscaling/Restoration | OPEN | No verified end-to-end editing/upscaling/restoration adapters. |
+ | 23 | 🔴 | Transcription, Translation and Dubbing | OPEN | No verified end-to-end transcription/translation/dubbing adapters. |
+-| 24 | 🔴 | Future Modality Support and Contract Tests | PARTIAL | Capability identifiers and callable modality contracts are tested; working adapters for future modalities remain open. |
++| 24 | 🔴 | Future Modality Support and Contract Tests | PARTIAL | Capability identifiers and callable modality contracts are tested; working adapters for future modalities remain open. Added `ConnectionManager.get_modality_binding` (shared `MODALITY_CONTRACTS`/`MODALITY_OUTPUT_KINDS`) and the opt-in `ProviderService.execute_routed_request(require_modality_binding=True)`, which blocks a modality/provider-category mismatch, or a loaded instance that no longer meets its contract, before adapter invocation and releases reservations. Tests: `tests/test_connection_manager.py::ModalityBindingTests`, `tests/test_provider_service.py::test_modality_binding_*`. This is contract-level integration only; no working adapter for any non-image modality exists, so the item stays PARTIAL. |
+ 
+ ## D — Routing and Selection
+ 
+@@ -146,11 +152,11 @@ GitHub Actions run [#40442372725](https://github.com/attaehmad5-lang/AI_CREATOR_
+ 
+ | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
+ |---:|:---:|---|---|---|
+-| 81 | 🔴 | Latency-Aware Routing | VERIFIED | `HEALTHIEST_FIRST` deterministically orders eligible providers by recorded latency and then configured priority; regression coverage confirms a lower-latency fallback outranks the higher-priority slower primary. Production forecasting and adaptive latency prediction are outside this verified scope. |
++| 81 | 🔴 | Latency-Aware Routing | VERIFIED | `HEALTHIEST_FIRST` deterministically orders eligible providers by recorded latency and then configured priority; regression coverage confirms a lower-latency fallback outranks the higher-priority slower primary. Production forecasting and adaptive latency prediction are outside this verified scope. Local re-verification (2026-11-01): added `tests/test_routing_manager.py::test_healthiest_first_ties_are_broken_by_configured_priority` so the "then configured priority" ordering claim has its own test, alongside the existing lower-latency and malformed-latency tests. |
+ | 82 | 🔴 | Provider Success/Error-Rate Metrics | PARTIAL | `provider_metrics_manager.py` records success/failure/timeout counters and success rate from provider executions; bounded history avoids payload storage. Metrics collection now rejects failing clocks, naive/unsupported timestamps, and durations exceeding seven days so invalid values cannot poison aggregates. Export to production telemetry remains open. |
+ | 83 | 🔴 | Throughput, Queue-Wait and Timeout Metrics | PARTIAL | `ProviderMetricsManager` aggregates bounded latency percentiles, queue-wait averages, timeout counts, and sample throughput; `ProviderService` records execution latency and queue wait. External telemetry export and load-tested throughput metrics remain open. |
+ | 84 | 🔴 | Output Quality Validation/Score Integration | PARTIAL | `provider_quality_policy.py` adds an injected output scorer and `ProviderService` applies its result after file validation; below-threshold or invalid scores prevent an output from being reported successful. A production semantic scorer and modality-specific QA remain open. |
+-| 85 | 🔴 | Task-Specific Quality Thresholds | VERIFIED | `ProviderOutputQualityPolicy` enforces category/modality-specific thresholds before category defaults and the global default, validates thresholds and scores within [0,1], and fails closed for invalid scores or scorer exceptions. Tests cover threshold precedence and rejection behavior; scorer quality/calibration remains a separate production concern under output-quality integration. |
++| 85 | 🔴 | Task-Specific Quality Thresholds | VERIFIED | `ProviderOutputQualityPolicy` enforces category/modality-specific thresholds before category defaults and the global default, validates thresholds and scores within [0,1], and fails closed for invalid scores or scorer exceptions. Tests cover threshold precedence and rejection behavior; scorer quality/calibration remains a separate production concern under output-quality integration. Local re-verification (2026-11-01): `tests/test_provider_quality_policy.py::test_threshold_precedence_is_modality_then_category_then_default` and `test_score_equal_to_threshold_is_accepted_and_booleans_are_rejected` now cover category:modality > category > global-default precedence, the inclusive boundary and boolean-score rejection; service integration is covered by `tests/test_provider_service.py::test_low_output_quality_score_prevents_success_status`. |
+ | 86 | 🔴 | Provider/Model Benchmarking | PARTIAL | `provider_benchmark_manager.py` aggregates bounded provider/model samples by success rate, p50/p95 latency, cost per attempt/success, and optional quality score; `ProviderService` can record execution samples when a model ID is available. Controlled benchmark suites, sample-size confidence, and live provider comparisons remain open. |
+ | 87 | 🔴 | Structured Logs, Metrics and Distributed Traces | PARTIAL | Some structured status metadata exists; end-to-end metrics/tracing is incomplete. |
+ | 88 | 🔴 | Alerts, Dashboards and Incident Diagnostics | PARTIAL | `provider_incident_manager.py` persists deduplicated provider incidents with severity escalation, occurrence counts, acknowledgement/resolution, and safe status summaries; `ProviderService` opens critical incidents for explicit billing/credit exhaustion and records other execution failures. Dashboard and external alert delivery remain open. |
+@@ -220,13 +226,13 @@ GitHub Actions run [#40442372725](https://github.com/attaehmad5-lang/AI_CREATOR_
+ | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
+ |---:|:---:|---|---|---|
+ | 129 | 🟡 | Plugin-based provider adapters | PARTIAL | `projects/generation/providers/provider_manager.py` now validates provider names/class names, restricts module imports to `projects.generation.providers`, rejects traversal/absolute/backslash/non-Python paths and duplicate module entries, stages all instances before swapping the active registry, and preserves the existing registry on failed reload. The loader also requires each instantiated image provider to expose callable `generate_image` before activation. Six regression tests cover trusted loading, traversal rejection, duplicate/invalid entries, atomic failure, stale-provider removal, and missing-interface rejection; all six pass on Ubuntu and Windows in run [#40391867877](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40391867877). Process isolation, signed plugin packages, and full integration with the provider-store catalog remain open. |
+-| 130 | 🟡 | Versioned provider adapter interface | VERIFIED | `ProviderManager` negotiates `PROVIDER_INTERFACE_VERSION` before registration and registry activation; supported 1.0 is accepted, malformed/unsupported declarations fail closed, and legacy adapters without a version are explicitly treated as 1.0. Regression tests cover declared/legacy 1.0, malformed and unsupported versions, and atomic registry preservation. Evidence: `tests/test_generation_provider_interface.py`, cross-platform run [#40446513581](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40446513581). Cross-version migration policy remains tracked under backward-compatibility work. |
++| 130 | 🟡 | Versioned provider adapter interface | VERIFIED | `ProviderManager` negotiates `PROVIDER_INTERFACE_VERSION` before registration and registry activation; supported 1.0 is accepted, malformed/unsupported declarations fail closed, and legacy adapters without a version are explicitly treated as 1.0. Regression tests cover declared/legacy 1.0, malformed and unsupported versions, and atomic registry preservation. Evidence: `tests/test_generation_provider_interface.py`, cross-platform run [#40446513581](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40446513581). Cross-version migration policy remains tracked under backward-compatibility work. Scope audit (2026-11-01): this gate lives in `projects/generation/providers/provider_manager.py` and covers `generate_image` adapters only; it accepts exactly version 1.0 (strict equality, not a multi-version negotiation range) and is separate from the provider-store callable contract (#8). Added `ProviderInterfaceEdgeCaseTests` (unreadable/non-string version, missing method) and `ShippedAdapterContractTests`, a static `ast` check of the shipped Hugging Face and Pollinations adapters (neither declares a version, so both rely on the legacy 1.0 default). The real adapters are not imported in CI because the optional `huggingface_hub` package is not installed. |
+ | 131 | 🟡 | Validated metadata کے ساتھ capability discovery | PARTIAL | Validated capability metadata and discovery exist; live provider metadata trust is incomplete. |
+ | 132 | 🟡 | نئے providers کو محفوظ طریقے سے شامل کرنے کا workflow | PARTIAL | Added `ProviderOnboardingWorkflow` to validate candidate IDs/capabilities and subscription policy, require official HTTPS docs for API providers, reject credential values and duplicate providers, perform explicit bounded probe verification, and register candidates disabled/LOCKED only after authenticated `provider.configure` authorization. Missing authorization managers and denied principals fail closed. Tests cover malformed metadata/URLs, secret rejection, strict probe outcomes, disabled-by-default registration, duplicate prevention, authorization denial, and real catalog integration. Evidence: `tests/test_provider_onboarding.py`, run [#40446513581](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40446513581). Authorized activation approval and real provider-specific probe integrations remain open. Evidence: `tests/test_provider_onboarding.py`. |
+ | 133 | 🔴 | Self-hosted اور local models کی support، جہاں ممکن ہو | PARTIAL | Added `LocalModelProviderAdapter` for local Ollama `/api/generate` text inference; remote/private-network endpoints, URL credentials, query/fragment injection, redirects and malformed/oversized responses are rejected. Installation discovery, model lifecycle/health checks, other local runtimes/modalities, and live server verification remain incomplete. Evidence: `tests/test_local_model_provider_adapter.py`, run [#40389697191](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40389697191), including direct `execute()` provider/request-ID validation. |
+ | 134 | 🔴 | Model deprecation اور end-of-life handling | PARTIAL | Catalog schema records a validated deprecation reason/date and rejects deprecated providers that are enabled; OpenAI Sora is marked deprecated and disabled. General deprecation discovery, replacement migration, and EOL routing remain open. Evidence: `tests/test_provider_catalogs.py::test_deprecated_provider_requires_reason_date_and_stays_disabled`. |
+ | 135 | 🔴 | Provider policy activation سے پہلے simulation | VERIFIED | `simulate_provider_policy` performs a side-effect-free dry run; `set_provider_enabled` requires a successful simulation before persisting activation, blocks deprecated/incomplete API providers, and requires explicit paid-usage approval for subscription-required providers. Regression tests cover free activation, paid approval, malformed input, duplicate IDs/changes, and deprecated providers. Evidence: `tests/test_connection_manager.py::ProviderPolicySimulationTests` and run [#40197075705](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40197075705). |
+-| 136 | 🟡 | Backward compatibility اور automated contract checks | VERIFIED | Automated contract tests now verify the legacy no-version adapter defaults to interface 1.0, explicitly versioned 1.0 adapters load, malformed/unsupported versions are rejected, and a failed later candidate leaves the active registry unchanged. Evidence: `tests/test_generation_provider_interface.py`, cross-platform run [#40446513581](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40446513581). Repository-wide configuration migration and provider-store catalog compatibility remain tracked under their dedicated features. |
++| 136 | 🟡 | Backward compatibility اور automated contract checks | VERIFIED | Automated contract tests now verify the legacy no-version adapter defaults to interface 1.0, explicitly versioned 1.0 adapters load, malformed/unsupported versions are rejected, and a failed later candidate leaves the active registry unchanged. Evidence: `tests/test_generation_provider_interface.py`, cross-platform run [#40446513581](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40446513581). Repository-wide configuration migration and provider-store catalog compatibility remain tracked under their dedicated features. Scope audit (2026-11-01): shares `tests/test_generation_provider_interface.py` with #130; the added static check covers the adapters actually shipped, but CI never imports or instantiates the real Hugging Face adapter. |
+ | 137 | 🔴 | Provider configuration اور policy کے لیے admin controls | PARTIAL | `ProviderService.set_provider_enabled` and `configure_provider` now require explicit role authorization, fail closed when no authorization manager is configured, and forward paid-usage approval to the connection manager. Viewer-level mutation and authorization-failure regressions pass. Full policy editing, tenant-scoped administration, external identity integration, and management UI remain open. Evidence: `tests/test_provider_service.py::ProviderAdminControlTests`, run [#40197348705](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40197348705). |
+ | 138 | 🔴 | Documentation، diagnostics and maintenance tooling | PARTIAL | `provider_diagnostics.py` performs read-only, bounded-size JSON state checks, rejects duplicate object keys/non-finite numbers, detects duplicate paths, and emits secret-free remediation hints. The actual file read is capped as well as the pre-read size check, preventing file-growth races; path-resolution errors fail closed without exposing raw exception details. Regression tests cover both cases. Full maintenance/repair workflows remain open. Evidence: `tests/test_provider_diagnostics.py`, run [#40369663801](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40369663801). |
+ 
+diff --git a/projects/provider_store/TASK_25_AUDIT_MATRIX.md b/projects/provider_store/TASK_25_AUDIT_MATRIX.md
+index ba33b02..908166c 100644
+--- a/projects/provider_store/TASK_25_AUDIT_MATRIX.md
++++ b/projects/provider_store/TASK_25_AUDIT_MATRIX.md
+@@ -1,5 +1,7 @@
+ # Task #25 — A–P Verification Matrix
+ 
++> **Superseded snapshot.** The test counts, PR references (#1/#7) and dispositions below are historical. The current, canonical status is [TASK25_CANONICAL_138_ITEM_LEDGER.md](TASK25_CANONICAL_138_ITEM_LEDGER.md); do not quote figures from this file.
++
+ **Overall status: IN PROGRESS.** PR #1 was merged before Task #25 was complete. Follow-up hardening is isolated in draft PR #7; do not merge it without explicit user approval.
+ 
+ The exact canonical feature names, original baseline markers and item-by-item evidence are maintained in the [canonical 138-item verification ledger](TASK25_CANONICAL_138_ITEM_LEDGER.md). This summary preserves the original A–P headings and ranges; it does not replace the detailed ledger.
+-- 
+2.43.0
+
+
+From 0b25a162a4e6bc41a569be1bb9dcdc1a430e9a81 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 2 Nov 2026 02:24:14 +0000
+Subject: [PATCH 4/4] Task 25: fix intermittent ProviderHealthManager
+ constructor race (load existing state under interprocess lock)
+
+---
+ .../TASK25_CANONICAL_138_ITEM_LEDGER.md       |  2 +-
+ projects/provider_store/health_manager.py     | 18 +++++++++
+ tests/test_health_manager.py                  | 37 +++++++++++++++++++
+ 3 files changed, 56 insertions(+), 1 deletion(-)
+
+diff --git a/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md b/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md
+index e2f21c5..b74f73b 100644
+--- a/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md
++++ b/projects/provider_store/TASK25_CANONICAL_138_ITEM_LEDGER.md
+@@ -14,7 +14,7 @@ GitHub Actions run [#40442372725](https://github.com/attaehmad5-lang/AI_CREATOR_
+ 
+ **Counts at this revision: 29 VERIFIED / 103 PARTIAL / 6 OPEN = 138**, recomputed from the table rows on 2026-11-01 (the five most recent VERIFIED promotions are #135, #81, #85, #130 and #136). The separate 150-point Advanced Provider Store acceptance ledger lives only on the PR #84 branch; that branch's copy of *this* 138-item ledger is an older snapshot (24 VERIFIED / 95 PARTIAL / 19 OPEN) and differs from this file in 17 rows.
+ 
+-**Local verification 2026-11-01 (not CI; Python 3.12.3, run via `python -m projects.provider_store.task25_test_report`):** 650 tests, `OK (skipped=1)` (the skip is the opt-in real-Ollama test), plus `compileall` and provider JSON catalog validation. GitHub Actions has not yet run on this change; run [#40525243664](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40525243664) (633 tests) remains the latest CI evidence. No status was changed by this revision.
++**Local verification 2026-11-01 (not CI; Python 3.12.3, run via `python -m projects.provider_store.task25_test_report`):** 653 tests, `OK (skipped=1)` (the skip is the opt-in real-Ollama test), plus `compileall` and provider JSON catalog validation. During this check `test_health_manager.ProviderHealthManagerTests.test_concurrent_health_updates_across_processes_preserve_history` failed intermittently on the unmodified PR #79 head (1 of 25 full runs); the cause was `ProviderHealthManager.__init__` reading existing state without the interprocess lock, and it is fixed by loading under that lock (a stress script saw 5 spurious `ValueError`s in 1200 constructions before the fix and 0 in 2400 after). `credit_manager.py` and `quota_manager.py` use the same unlocked constructor read; no failure was observed there and they were not changed. GitHub Actions has not yet run on this change; run [#40525243664](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/40525243664) (633 tests) remains the latest CI evidence. No status was changed by this revision.
+ 
+ **Status meanings:** `VERIFIED` = code and relevant regression tests cover the stated item; `PARTIAL` = useful implementation/tests exist but the complete original requirement or live integration is missing; `OPEN` = no adequate implementation/evidence yet.
+ 
+diff --git a/projects/provider_store/health_manager.py b/projects/provider_store/health_manager.py
+index e8fa6c1..f4077c5 100644
+--- a/projects/provider_store/health_manager.py
++++ b/projects/provider_store/health_manager.py
+@@ -42,6 +42,24 @@ class ProviderHealthManager:
+         self._lock = threading.RLock()
+         self.clock = clock or (lambda: datetime.now(timezone.utc))
+         self.data: dict[str, Any] = {"version": "1.0", "providers": {}}
++        self._load_initial_state()
++
++    def _load_initial_state(self) -> None:
++        """Load existing state under the interprocess lock like every other reader.
++
++        Without the lock, another process atomically replacing the file between the two
++        ``fstat`` calls in ``_reload_state`` makes its consistency check raise spuriously.
++        If the lock file cannot be created (for example a read-only directory) the
++        previous plain read is used.
++        """
++        if not self.state_path.exists():
++            self._reload_state()
++            return
++        try:
++            with self._transaction():
++                return
++        except OSError:
++            pass
+         self._reload_state()
+ 
+     @staticmethod
+diff --git a/tests/test_health_manager.py b/tests/test_health_manager.py
+index f918ee5..a1f8148 100644
+--- a/tests/test_health_manager.py
++++ b/tests/test_health_manager.py
+@@ -2,9 +2,12 @@ import json
+ import tempfile
+ import unittest
+ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
++from contextlib import contextmanager
+ from datetime import datetime, timedelta, timezone
+ from pathlib import Path
++from unittest.mock import patch
+ 
++from projects.provider_store import health_manager as health_manager_module
+ from projects.provider_store.health_manager import ProviderHealthManager
+ 
+ 
+@@ -68,6 +71,40 @@ class ProviderHealthManagerTests(unittest.TestCase):
+         self.assertEqual(len(record["history"]), 20)
+         self.assertEqual(record["consecutive_failures"], 20)
+ 
++    def test_constructor_loads_existing_state_under_the_interprocess_lock(self):
++        self.manager.record_result("image", success=True, latency_ms=5)
++        events = []
++        real_lock = health_manager_module.interprocess_file_lock
++
++        @contextmanager
++        def tracking_lock(lock_path):
++            events.append(Path(lock_path).name)
++            with real_lock(lock_path):
++                yield
++
++        with patch.object(health_manager_module, "interprocess_file_lock", tracking_lock):
++            loaded = ProviderHealthManager(
++                self.path, history_limit=3, failure_threshold=2, clock=lambda: self.now[0]
++            )
++        self.assertEqual(events, ["health.json.lock"])
++        self.assertIn("image", loaded.data["providers"])
++
++    def test_constructor_without_existing_state_does_not_create_a_lock_file(self):
++        fresh = Path(self.temp_dir.name) / "fresh" / "health.json"
++        ProviderHealthManager(fresh, history_limit=3, failure_threshold=2)
++        self.assertFalse(fresh.parent.exists())
++
++    def test_constructor_falls_back_to_plain_read_when_lock_file_cannot_be_created(self):
++        self.manager.record_result("image", success=True, latency_ms=5)
++        with patch.object(
++            health_manager_module, "interprocess_file_lock",
++            side_effect=PermissionError("read-only directory"),
++        ):
++            loaded = ProviderHealthManager(
++                self.path, history_limit=3, failure_threshold=2, clock=lambda: self.now[0]
++            )
++        self.assertIn("image", loaded.data["providers"])
++
+     def test_request_id_makes_health_recording_idempotent_and_conflict_safe(self):
+         first = self.manager.record_result(
+             "image", success=True, latency_ms=20, request_id="job-health-1"
+-- 
+2.43.0
+
