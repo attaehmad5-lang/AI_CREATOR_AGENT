@@ -54,9 +54,13 @@ class FakeOpener:
     def __init__(self):
         self.response = FakeResponse()
         self.calls = []
+        self.request_headers = []
 
     def open(self, request, timeout):
         self.calls.append((request, timeout))
+        self.request_headers.append({
+            key.casefold(): value for key, value in request.header_items()
+        })
         return self.response
 
 
@@ -165,7 +169,7 @@ class ProviderSecretsIntegrationTests(unittest.TestCase):
         self.assertTrue(result["authentication_verified"])
         request = opener.calls[0][0]
         self.assertEqual(
-            request.get_header("Authorization"), "Bearer integration-secret-value"
+            opener.request_headers[0]["authorization"], "Bearer integration-secret-value"
         )
         self.assertTrue(captured["lease"].closed)
         self.assertNotIn("integration-secret-value", repr(result))
