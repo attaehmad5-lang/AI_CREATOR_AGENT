@@ -72,20 +72,33 @@ class ProviderModelPricingManager:
         # The endpoint is fixed and public. No secret, account token or user input
         # is included in the request. Redirects are rejected to keep the trust
         # boundary on the official API host.
+        import json
         import requests
 
-        response = requests.get(
+        # Stream and cap the body before buffering it. Content-Length is only an
+        # early rejection hint; the running byte counter is the authoritative cap.
+        with requests.get(
             url,
             timeout=timeout,
             allow_redirects=False,
+            stream=True,
             headers={"Accept": "application/json"},
-        )
-        if 300 <= response.status_code < 400:
-            raise ValueError("pricing catalog redirect rejected")
-        response.raise_for_status()
-        if len(response.content) > MAX_CATALOG_BYTES:
-            raise ValueError("pricing catalog exceeds size limit")
-        return response.json()
+        ) as response:
+            if 300 <= response.status_code < 400:
+                raise ValueError("pricing catalog redirect rejected")
+            response.raise_for_status()
+            declared_length = response.headers.get("Content-Length")
+            if declared_length is not None:
+                if not declared_length.isdigit() or int(declared_length) > MAX_CATALOG_BYTES:
+                    raise ValueError("pricing catalog exceeds size limit")
+            body = bytearray()
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                body.extend(chunk)
+                if len(body) > MAX_CATALOG_BYTES:
+                    raise ValueError("pricing catalog exceeds size limit")
+        return json.loads(body)
 
     @staticmethod
     def _catalog_rows(payload: Any) -> list[dict[str, Any]]:
