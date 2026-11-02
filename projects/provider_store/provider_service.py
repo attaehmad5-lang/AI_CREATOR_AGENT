@@ -42,6 +42,8 @@ class ProviderService:
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
+        if tenant_isolation_manager is not None and authorization_manager is None:
+            raise ValueError("tenant isolation requires authorization_manager")
         expected = (
             (routing_manager, "route", "routing_manager"),
             (health_manager, "record_result", "health_manager"),
@@ -780,22 +782,6 @@ class ProviderService:
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
 
-        if self.tenant_isolation_manager is not None:
-            if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
-                return {"status": "TENANT_CONTEXT_REQUIRED", "executed": False}
-            try:
-                tenant_access = self.tenant_isolation_manager.authorize_project(
-                    tenant_id, project_id, principal_id
-                )
-            except Exception as exc:
-                return {
-                    "status": "TENANT_ISOLATION_CHECK_FAILED",
-                    "executed": False,
-                    "error_type": type(exc).__name__,
-                }
-            if not isinstance(tenant_access, dict) or tenant_access.get("allowed") is not True:
-                return {"status": "TENANT_ISOLATION_DENIED", "executed": False}
-
         degraded_mode_state = None
         if self.degraded_mode_manager is not None:
             try:
@@ -865,6 +851,22 @@ class ProviderService:
                         "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
                     },
                 }
+
+        if self.tenant_isolation_manager is not None:
+            if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
+                return {"status": "TENANT_CONTEXT_REQUIRED", "executed": False}
+            try:
+                tenant_access = self.tenant_isolation_manager.authorize_project(
+                    tenant_id, project_id, principal_id
+                )
+            except Exception as exc:
+                return {
+                    "status": "TENANT_ISOLATION_CHECK_FAILED",
+                    "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(tenant_access, dict) or tenant_access.get("allowed") is not True:
+                return {"status": "TENANT_ISOLATION_DENIED", "executed": False}
 
         sensitive_data_scan = None
         if self.sensitive_data_policy is not None:
