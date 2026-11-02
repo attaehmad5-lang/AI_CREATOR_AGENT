@@ -179,6 +179,9 @@ class BudgetAlertManagerTests(unittest.TestCase):
         seen = []
 
         def blocking_sender(alert):
+            self.assertNotIn("delivery_lease_token", alert)
+            self.assertNotIn("delivery_lease_owner", alert)
+            self.assertNotIn("delivery_lease_until", alert)
             seen.append(alert["event_id"])
             if len(seen) == 1:
                 entered.set()
