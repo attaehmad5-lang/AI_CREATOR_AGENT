@@ -17,7 +17,7 @@ from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 class ProviderQuotaManager:
     MAX_ATTEMPT_HISTORY = 1000
-    TENANT_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\\Z")
+    TENANT_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\Z")
 
     def __init__(
         self,
@@ -71,12 +71,14 @@ class ProviderQuotaManager:
                 raise ValueError("invalid tenant provider quota configuration")
             normalized[tenant_id] = {}
             for provider_id, periods in providers.items():
-                if provider_id not in self.limits or not isinstance(periods, dict):
+                if not isinstance(provider_id, str) or provider_id not in self.limits or not isinstance(periods, dict):
                     raise ValueError("tenant quota references an unknown provider")
                 normalized[tenant_id][provider_id] = {}
                 for period, limit in periods.items():
-                    if period not in {"hourly", "daily", "monthly"}:
+                    if not isinstance(period, str) or period not in {"hourly", "daily", "monthly"}:
                         raise ValueError("unsupported tenant quota period")
+                    if period not in self.limits[provider_id]:
+                        raise ValueError("tenant quota period has no global provider limit")
                     if (
                         isinstance(limit, bool) or not isinstance(limit, int)
                         or limit < 1 or limit > self.limits[provider_id][period]
