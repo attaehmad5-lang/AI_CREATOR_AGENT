@@ -36,7 +36,10 @@ _PRICE_FIELDS = {
 def _amount(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    amount = float(value)
+    try:
+        amount = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
     if not math.isfinite(amount) or amount < 0 or amount > 1e12:
         return None
     return amount
@@ -72,6 +75,8 @@ class ProviderModelPricingManager:
         # The endpoint is fixed and public. No secret, account token or user input
         # is included in the request. Redirects are rejected to keep the trust
         # boundary on the official API host.
+        if url != POLLINATIONS_MODELS_URL:
+            raise ValueError("unsupported pricing catalog URL")
         import json
         import requests
 
@@ -130,7 +135,11 @@ class ProviderModelPricingManager:
         ):
             return None
         currency = pricing.get("currency")
-        if not isinstance(currency, str) or not 1 <= len(currency) <= 16:
+        paid_only = row["paidOnly"] if "paidOnly" in row else row.get("paid_only", False)
+        if (
+            not isinstance(currency, str) or not 1 <= len(currency) <= 16
+            or not isinstance(paid_only, bool)
+        ):
             return None
         rates: dict[str, float] = {}
         for key, value in pricing.items():
@@ -151,7 +160,7 @@ class ProviderModelPricingManager:
             "category": category,
             "currency": currency.upper(),
             "rates": rates,
-            "paid_only": row.get("paidOnly", row.get("paid_only")) is True,
+            "paid_only": paid_only,
             "source": POLLINATIONS_MODELS_URL,
             "observed_at": observed_at.isoformat().replace("+00:00", "Z"),
         }
@@ -166,7 +175,7 @@ class ProviderModelPricingManager:
                 return {"status": "INVALID_PRICING_CLOCK", "updated": False}
             observed_at = observed_at.astimezone(timezone.utc)
             models: dict[str, dict[str, Any]] = {}
-            aliases: dict[str, str] = {}
+            alias_targets: dict[str, set[str]] = {}
             for row in rows:
                 if row.get("category") not in {"text", "image", "video", "audio", "embedding", "decision", "3d"}:
                     continue
@@ -174,13 +183,20 @@ class ProviderModelPricingManager:
                 if normalised is None:
                     continue
                 model_id = normalised["id"]
+                if model_id in models:
+                    return {"status": "DUPLICATE_MODEL_ID_IN_CATALOG", "updated": False}
                 models[model_id] = normalised
-                aliases[model_id.casefold()] = model_id
+                alias_targets.setdefault(model_id.casefold(), set()).add(model_id)
                 for alias in normalised["aliases"]:
-                    # Ambiguous aliases are intentionally removed after the scan.
-                    key = alias.casefold()
-                    aliases[key] = model_id if key not in aliases else ""
-            aliases = {key: value for key, value in aliases.items() if value}
+                    alias_targets.setdefault(alias.casefold(), set()).add(model_id)
+            # A lookup key resolves only when every occurrence points to one model.
+            # Ambiguous aliases are omitted instead of selecting whichever row
+            # happens to appear last in the upstream response.
+            aliases = {
+                key: next(iter(targets))
+                for key, targets in alias_targets.items()
+                if len(targets) == 1
+            }
             if not models:
                 return {"status": "NO_VERIFIED_MODEL_PRICES", "updated": False}
             self._models = models
