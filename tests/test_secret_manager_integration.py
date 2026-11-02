@@ -253,6 +253,25 @@ class ProviderSecretsIntegrationTests(unittest.TestCase):
         self.assertNotIn("private endpoint", repr(result))
         self.assertNotIn("integration-secret-value", repr(result))
 
+
+    def test_managed_execution_rejects_adapter_without_lease_contract_before_secret_read(self):
+        service = self._service(secret_manager=self.secrets)
+        calls = []
+
+        def adapter_without_lease(prompt):
+            calls.append(prompt)
+            return {"started": True, "success": False}
+
+        reads_before = self.backend.reads
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="managed-secret-contract",
+            estimated_cost=0.0, adapter=adapter_without_lease, modality="image",
+            principal_id="admin-1", use_managed_credential=True,
+        )
+        self.assertEqual(result["status"], "ADAPTER_MANAGED_CREDENTIAL_CONTRACT_UNSUPPORTED")
+        self.assertEqual(calls, [])
+        self.assertEqual(self.backend.reads, reads_before)
+
     def test_managed_execution_fails_before_adapter_when_secret_resolution_fails(self):
         class MissingBackend:
             def resolve_secret(self, reference, **kwargs):
