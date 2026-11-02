@@ -299,7 +299,7 @@ class ProviderSecretsManagerTests(unittest.TestCase):
         self.assertEqual(self.vault.rotations[0][1]["idempotency_key"], "rotation-0001")
 
     def test_rotation_requires_valid_idempotency_reference_and_backend_capability(self):
-        for key in ("x", "", "bad key", "rotation"):
+        for key in ("x", "", "bad key", "short1"):
             result = self.manager.rotate_secret(
                 "vault://provider/credential",
                 provider_id="huggingface",
