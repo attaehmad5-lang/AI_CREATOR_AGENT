@@ -182,7 +182,7 @@ GitHub Actions run [#41380089458](https://github.com/attaehmad5-lang/AI_CREATOR_
 | 106 | 🔴 | Every Supported Modality End-to-End Tests | OPEN | Real end-to-end tests for all modalities do not exist yet. |
 | 107 | 🔴 | Failure Injection and Recovery Tests | PARTIAL | Persistence/network error cases are tested; comprehensive cross-manager recovery injection remains open. |
 | 108 | 🟡 | Full Regression Suite and Reproducible Test Reports | PARTIAL | 303 tests pass on Windows and Ubuntu; complete 138-item coverage and production report artifacts remain open. |
-| 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Changes are committed and reviewed in PR #7; dedicated secret scanning and backup verification are not complete. |
+| 109 | 🔴 | Git Commit, Secret-Exclusion Check and Remote Backup Verification | PARTIAL | Task 25 CI now runs `tests/test_secret_exclusions.py` on Ubuntu and Windows to verify credential/generated-asset ignore rules and fail if protected paths appear in the Git index. Full secret-content scanning and independent remote-backup/restore verification remain open. |
 | 110 | 🔴 | Production Release Checklist and Final PASS | OPEN | Task #25 has not met all release gates; no final PASS is claimed. |
 
 ## N — High-Advanced Routing Intelligence
