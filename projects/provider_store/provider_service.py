@@ -886,24 +886,52 @@ class ProviderService:
                         "status": "INVALID_DEGRADED_MODE_STATE_RESPONSE"
                     },
                 }
-            if isinstance(degraded_mode_state, dict):
-                current_mode = degraded_mode_state.get("mode")
-                if current_mode not in {"NORMAL", "DEGRADED", "OUTAGE"}:
-                    return {
-                        "status": "PROVIDER_CATEGORY_HEALTH_UNKNOWN",
-                        "executed": False,
-                        "degraded_mode": {"status": "INVALID_DEGRADED_MODE_STATE"},
-                    }
-                if current_mode == "OUTAGE":
-                    return {
-                        "status": "PROVIDER_CATEGORY_OUTAGE",
-                        "executed": False,
-                        "degraded_mode": degraded_state_result,
-                        "preserve_started_request_accounting": True,
-                    }
-                if current_mode == "DEGRADED":
-                    # Never route degraded-mode work without an up-to-date health gate.
-                    require_fresh_health_check = True
+            current_mode = degraded_mode_state.get("mode")
+            healthy_provider_ids = degraded_mode_state.get("healthy_provider_ids")
+            unhealthy_provider_ids = degraded_mode_state.get("unhealthy_provider_ids")
+            valid_provider_ids = lambda values: (
+                isinstance(values, list)
+                and all(
+                    isinstance(value, str)
+                    and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}", value) is not None
+                    for value in values
+                )
+                and len(set(values)) == len(values)
+            )
+            state_status = f"PROVIDER_CATEGORY_{current_mode}" if current_mode in {"NORMAL", "DEGRADED", "OUTAGE"} else None
+            valid_degraded_state = (
+                state_status is not None
+                and degraded_mode_state.get("category") == category
+                and degraded_state_result.get("status") == state_status
+                and valid_provider_ids(healthy_provider_ids)
+                and valid_provider_ids(unhealthy_provider_ids)
+                and not (set(healthy_provider_ids) & set(unhealthy_provider_ids))
+                and type(degraded_mode_state.get("healthy_count")) is int
+                and degraded_mode_state["healthy_count"] == len(healthy_provider_ids)
+                and type(degraded_mode_state.get("provider_count")) is int
+                and degraded_mode_state["provider_count"] == len(healthy_provider_ids) + len(unhealthy_provider_ids)
+                and (
+                    bool(healthy_provider_ids)
+                    if current_mode in {"NORMAL", "DEGRADED"}
+                    else not healthy_provider_ids
+                )
+            )
+            if not valid_degraded_state:
+                return {
+                    "status": "PROVIDER_CATEGORY_HEALTH_UNKNOWN",
+                    "executed": False,
+                    "degraded_mode": {"status": "INVALID_DEGRADED_MODE_STATE"},
+                }
+            if current_mode == "OUTAGE":
+                return {
+                    "status": "PROVIDER_CATEGORY_OUTAGE",
+                    "executed": False,
+                    "degraded_mode": degraded_state_result,
+                    "preserve_started_request_accounting": True,
+                }
+            if current_mode == "DEGRADED":
+                # Never route degraded-mode work without an up-to-date health gate.
+                require_fresh_health_check = True
 
         feature_flag_result = None
         if self.feature_flag_manager is not None:
