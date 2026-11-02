@@ -1214,7 +1214,7 @@ class ProviderService:
                     "provider": provider_id,
                     "release": released,
                 }
-            if "provider_credential" in options:
+            if "provider_credential" in options or "provider_credential_lease" in options:
                 released = self.release_unstarted_request(
                     project_id=project_id, provider_id=provider_id,
                     request_id=request_id, tenant_id=tenant_id,
@@ -1237,7 +1237,7 @@ class ProviderService:
                     tenant_id=tenant_id,
                     principal_id=principal_id,
                 )
-                options["provider_credential"] = secret_lease.reveal()
+                options["provider_credential_lease"] = secret_lease
             except Exception as exc:
                 if secret_lease is not None:
                     secret_lease.close()
@@ -1317,7 +1317,7 @@ class ProviderService:
             }
         finally:
             if secret_lease is not None:
-                options["provider_credential"] = ""
+                options.pop("provider_credential_lease", None)
                 secret_lease.close()
                 secret_lease = None
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
