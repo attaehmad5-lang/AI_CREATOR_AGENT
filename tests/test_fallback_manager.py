@@ -2,6 +2,7 @@ import unittest
 
 from projects.generation.providers.fallback_manager import FallbackManager
 from projects.generation.providers.pollinations_provider import PollinationsProviderError
+from projects.generation.providers.provider_health import ProviderHealth
 
 
 class ProviderStub:
@@ -64,6 +65,29 @@ class FallbackManagerTests(unittest.TestCase):
         self.assertEqual(result["errors"][0]["provider_error_code"], "insufficient_balance")
         self.assertNotIn(secret, repr(result))
         self.assertNotIn("balance exhausted", repr(result))
+        self.assertEqual(fallback.calls, 0)
+
+    def test_provider_health_does_not_persist_exception_body_or_credentials(self):
+        health = ProviderHealth()
+        error = PollinationsProviderError(
+            "private-api-token response body",
+            status_code=402,
+            retryable=False,
+            provider_error_code="INSUFFICIENT_BALANCE",
+        )
+        primary = ProviderStub(error=error)
+        fallback = ProviderStub(result={"status": "COMPLETED"})
+        manager = FallbackManager(
+            ManagerStub({"primary": primary, "fallback": fallback}),
+            provider_health=health,
+        )
+        result = manager.generate_image(["primary", "fallback"], "prompt", "out.jpg")
+        record = health.get_status("primary")
+        self.assertEqual(record["last_error"], "Provider request failed (HTTP 402)")
+        self.assertEqual(record["provider_error_code"], "insufficient_balance")
+        self.assertNotIn("private-api-token", repr(record))
+        self.assertNotIn("response body", repr(record))
+        self.assertTrue(result["fallback_stopped"])
         self.assertEqual(fallback.calls, 0)
 
     def test_unrecognized_billing_text_is_never_echoed_in_fallback_result(self):
