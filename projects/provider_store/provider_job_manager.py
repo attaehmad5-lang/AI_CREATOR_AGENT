@@ -33,6 +33,7 @@ class ProviderJobManager:
         lease_seconds: int = 120,
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
+        scheduling_strategy: str = "PROJECT_ROUND_ROBIN",
         clock: Any = None,
     ) -> None:
         for value, name, minimum, maximum in (
@@ -45,8 +46,11 @@ class ProviderJobManager:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise ValueError(f"{name} is outside safe limits")
+        if scheduling_strategy not in {"PROJECT_ROUND_ROBIN", "GLOBAL_PRIORITY"}:
+            raise ValueError("scheduling_strategy must be PROJECT_ROUND_ROBIN or GLOBAL_PRIORITY")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
+        self.scheduling_strategy = scheduling_strategy
         self.state_path = Path(state_path)
         self.max_queue_size = max_queue_size
         self.max_job_records = max_job_records
@@ -56,7 +60,10 @@ class ProviderJobManager:
         self.backpressure_retry_seconds = backpressure_retry_seconds
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
-        self.data: dict[str, Any] = {"version": "1.0", "jobs": {}}
+        self.data: dict[str, Any] = {
+            "version": "1.0", "jobs": {},
+            "scheduler": {"last_project_id": None},
+        }
         self._reload()
 
     def _reload(self) -> None:
@@ -75,6 +82,20 @@ class ProviderJobManager:
             or len(loaded["jobs"]) > self.max_job_records
         ):
             raise ValueError("invalid provider job state schema or capacity")
+        scheduler = loaded.get("scheduler", {"last_project_id": None})
+        if (
+            not isinstance(scheduler, dict)
+            or set(scheduler) != {"last_project_id"}
+            or (
+                scheduler["last_project_id"] is not None
+                and (
+                    not isinstance(scheduler["last_project_id"], str)
+                    or not _ID_RE.fullmatch(scheduler["last_project_id"])
+                )
+            )
+        ):
+            raise ValueError("invalid provider job scheduler state")
+        loaded["scheduler"] = scheduler
         for job_id, job in loaded["jobs"].items():
             if (
                 not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
@@ -225,12 +246,37 @@ class ProviderJobManager:
                 job for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "QUEUED"
             ]
-            queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
             if not queued:
                 if changed:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
-            job = queued[0]
+
+            if self.scheduling_strategy == "GLOBAL_PRIORITY":
+                queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
+                job = queued[0]
+            else:
+                project_jobs: dict[str, list[dict[str, Any]]] = {}
+                for candidate in queued:
+                    project_jobs.setdefault(candidate["project_id"], []).append(candidate)
+                project_order = sorted(
+                    project_jobs,
+                    key=lambda project_id: (
+                        min(item["created_at"] for item in project_jobs[project_id]),
+                        project_id,
+                    ),
+                )
+                last_project = self.data["scheduler"]["last_project_id"]
+                if last_project in project_order:
+                    selected_index = (project_order.index(last_project) + 1) % len(project_order)
+                    selected_project = project_order[selected_index]
+                else:
+                    selected_project = project_order[0]
+                candidates = project_jobs[selected_project]
+                candidates.sort(
+                    key=lambda item: (-item["priority"], item["created_at"], item["job_id"])
+                )
+                job = candidates[0]
+                self.data["scheduler"]["last_project_id"] = selected_project
             job["status"] = "RUNNING"
             job["worker_id"] = worker_id
             job["lease_token"] = secrets.token_urlsafe(32)
