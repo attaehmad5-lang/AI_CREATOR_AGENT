@@ -67,3 +67,10 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 - PR #113: audit evidence refreshed for the disabled-state setter and configuration-secret protections in PRs #111–#112. Ubuntu and Windows CI passed (workflow run 41235495613); PR #113 is merged to `main`.
 - PR #114: runtime provider configuration now accepts only the explicit fields `model`, `endpoint`, `probe_endpoint`, and `authentication_required`. Unknown keys—including catalog-only environment-reference keys—are rejected on both read and update paths. Regression tests cover secret-like values and nested unknown fields; Ubuntu and Windows CI passed (workflow run 41235648255); PR #114 is merged to `main`.
 - PR #115: existing persisted configuration fields are validated before any partial update is merged. Malformed authentication policy, model values, or endpoints cannot be carried forward while a new field is reported as saved. Regression coverage and Ubuntu/Windows CI passed (workflow run 41235814516); PR #115 is merged to `main`.
+
+
+## Additional regression hardening (2026-11-02)
+
+- Advanced catalog compatibility views now derive their status, catalog_valid, and ready fields from the same live schema validation used by status() instead of always claiming READY. This prevents a stale or invalid catalog from being represented as ready in the compatibility facade.
+- by_category() now safely rejects non-string and unhashable inputs instead of raising a runtime TypeError.
+- Added regression tests for both cases. CI must pass on Ubuntu and Windows before this update is marked released.
