@@ -14,6 +14,7 @@ from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
+from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
 from projects.provider_store.budget_alert_manager import BudgetAlertManager
 from projects.provider_store.cost_policy import ProviderCostPolicy
 from projects.provider_store.credit_manager import ProviderCreditManager
@@ -61,6 +62,56 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_project_policy_simulation_requires_admin_and_never_persists_candidate(self):
+        policy_path = self.root / "project-policies.json"
+        policy_manager = ProviderProjectPolicyManager(policy_path)
+        original = {"allowed_providers": ["image"], "automatic_fallback": True}
+        self.assertTrue(policy_manager.set_policy("film", original)["saved"])
+        before = policy_path.read_bytes()
+
+        authorization = ProviderAuthorizationManager(self.root / "policy-auth.json")
+        authorization.assign_role("admin-1", "admin")
+        authorization.assign_role("operator-1", "operator")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            project_policy_manager=policy_manager,
+        )
+        scenarios = [{
+            "request_id": "image-request",
+            "provider_id": "image",
+            "capability": "image_generation",
+            "estimated_cost": 0.0,
+        }]
+        admin_result = service.simulate_project_provider_policy(
+            "film",
+            {"allowed_providers": ["other"]},
+            scenarios,
+            principal_id="admin-1",
+        )
+        self.assertEqual(admin_result["status"], "POLICY_SIMULATION_COMPLETED")
+        self.assertFalse(admin_result["persisted"])
+        self.assertFalse(admin_result["results"][0]["proposed"]["allowed"])
+        self.assertEqual(policy_path.read_bytes(), before)
+        self.assertEqual(policy_manager.get_policy("film")["policy"], original)
+
+        operator_result = service.simulate_project_provider_policy(
+            "film", {"allowed_providers": ["image"]}, scenarios,
+            principal_id="operator-1",
+        )
+        self.assertEqual(operator_result["status"], "AUTHORIZATION_DENIED")
+        self.assertFalse(operator_result["persisted"])
+
+    def test_project_policy_simulation_fails_closed_without_authorization_manager(self):
+        result = ProviderService(self.connections).simulate_project_provider_policy(
+            "film", {}, [{
+                "provider_id": "image", "capability": "image_generation",
+            }],
+            principal_id="admin-1",
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertFalse(result["persisted"])
 
     def test_verify_provider_updates_connection_and_health_together(self):
         result = self.service.verify_provider("image", lambda provider, timeout_seconds: True)
