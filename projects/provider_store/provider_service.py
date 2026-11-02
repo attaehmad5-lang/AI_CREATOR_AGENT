@@ -35,6 +35,7 @@ class ProviderService:
         incident_manager: Any | None = None,
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
+        project_policy_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -58,6 +59,7 @@ class ProviderService:
             (incident_manager, "record", "incident_manager"),
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
+            (project_policy_manager, "simulate_policy", "project_policy_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -82,6 +84,7 @@ class ProviderService:
         self.incident_manager = incident_manager
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
+        self.project_policy_manager = project_policy_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -95,6 +98,63 @@ class ProviderService:
                 "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
             }
         return None
+
+    def simulate_project_provider_policy(
+        self,
+        project_id: str,
+        candidate_policy: dict[str, Any],
+        scenarios: list[dict[str, Any]],
+        *,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run an admin-authorized policy preview without changing active policy."""
+        if self.authorization_manager is None:
+            return {
+                "status": "AUTHORIZATION_MANAGER_UNAVAILABLE",
+                "project_id": project_id,
+                "persisted": False,
+            }
+        authorization = self._authorize_operation(principal_id, "provider.policy.simulate")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "project_id": project_id,
+                "persisted": False,
+                "authorization": authorization,
+            }
+        if self.project_policy_manager is None:
+            return {
+                "status": "PROJECT_POLICY_MANAGER_UNAVAILABLE",
+                "project_id": project_id,
+                "persisted": False,
+            }
+        try:
+            result = self.project_policy_manager.simulate_policy(
+                project_id, candidate_policy, scenarios
+            )
+        except Exception as exc:
+            return {
+                "status": "POLICY_SIMULATION_FAILED",
+                "project_id": project_id,
+                "persisted": False,
+                "error_type": type(exc).__name__,
+            }
+        valid_statuses = {
+            "POLICY_SIMULATION_COMPLETED",
+            "INVALID_CANDIDATE_POLICY",
+            "INVALID_SIMULATION_SCENARIOS",
+        }
+        if (
+            not isinstance(result, dict)
+            or result.get("status") not in valid_statuses
+            or result.get("persisted") is not False
+        ):
+            return {
+                "status": "INVALID_POLICY_SIMULATION_RESPONSE",
+                "project_id": project_id,
+                "persisted": False,
+            }
+        return result
 
     def active_probe_provider(
         self,

@@ -31,6 +31,22 @@ class ProviderAuthorizationManagerTests(unittest.TestCase):
         self.assertTrue(self.manager.authorize("creator-1", "provider.generate")["allowed"])
         self.assertFalse(self.manager.authorize("creator-1", "billing.approve")["allowed"])
 
+    def test_policy_simulation_is_an_explicit_admin_only_operation(self):
+        self.manager.assign_role("admin-1", "admin")
+        self.manager.assign_role("operator-1", "operator")
+        self.manager.assign_role("viewer-1", "viewer")
+        self.assertTrue(
+            self.manager.authorize("admin-1", "provider.policy.simulate")["allowed"]
+        )
+        self.assertEqual(
+            self.manager.authorize("operator-1", "provider.policy.simulate")["status"],
+            "ACCESS_DENIED",
+        )
+        self.assertEqual(
+            self.manager.authorize("viewer-1", "provider.policy.simulate")["status"],
+            "ACCESS_DENIED",
+        )
+
     def test_disabled_principal_cannot_authorize_operations(self):
         self.manager.assign_role("operator-1", "operator")
         self.assertTrue(self.manager.authorize("operator-1", "provider.verify")["allowed"])

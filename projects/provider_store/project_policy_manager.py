@@ -136,6 +136,183 @@ class ProviderProjectPolicyManager:
             except FileNotFoundError:
                 pass
 
+    @staticmethod
+    def _evaluate_policy_scenario(policy: dict[str, Any], scenario: dict[str, Any]) -> dict[str, Any]:
+        reasons: list[str] = []
+        provider_id = scenario["provider_id"]
+        capability = scenario["capability"]
+        model_id = scenario.get("model_id")
+        provider_key = provider_id.casefold()
+
+        allowed_providers = policy.get("allowed_providers")
+        denied_providers = policy.get("denied_providers", [])
+        if isinstance(allowed_providers, list) and provider_key not in {
+            value.casefold() for value in allowed_providers
+        }:
+            reasons.append("PROVIDER_NOT_ALLOWLISTED")
+        if provider_key in {value.casefold() for value in denied_providers}:
+            reasons.append("PROVIDER_DENIED")
+
+        allowed_capabilities = policy.get("allowed_capabilities")
+        if isinstance(allowed_capabilities, list) and capability not in allowed_capabilities:
+            reasons.append("CAPABILITY_NOT_ALLOWED")
+
+        allowed_models = policy.get("allowed_models")
+        if isinstance(allowed_models, list):
+            if model_id is None:
+                reasons.append("MODEL_ID_REQUIRED")
+            elif model_id.casefold() not in {value.casefold() for value in allowed_models}:
+                reasons.append("MODEL_NOT_ALLOWED")
+
+        maximum_cost = policy.get("max_estimated_cost")
+        estimated_cost = scenario.get("estimated_cost")
+        if maximum_cost is not None:
+            if estimated_cost is None:
+                reasons.append("ESTIMATED_COST_REQUIRED")
+            elif estimated_cost > maximum_cost:
+                reasons.append("ESTIMATED_COST_LIMIT_EXCEEDED")
+
+        if policy.get("require_health_evidence") is True and scenario.get("health_evidence_verified") is not True:
+            reasons.append("HEALTH_EVIDENCE_REQUIRED")
+        if policy.get("require_verified_connection") is True and scenario.get("connection_verified") is not True:
+            reasons.append("VERIFIED_CONNECTION_REQUIRED")
+
+        automatic_fallback_enabled = policy.get("automatic_fallback", True) is not False
+        return {
+            "allowed": not reasons,
+            "reasons": reasons,
+            "automatic_fallback_allowed": automatic_fallback_enabled,
+            "fallback_requested": scenario.get("request_fallback", False),
+            "fallback_would_be_blocked": (
+                scenario.get("request_fallback", False) is True
+                and not automatic_fallback_enabled
+            ),
+        }
+
+    def simulate_policy(
+        self,
+        project_id: str,
+        candidate_policy: dict[str, Any],
+        scenarios: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Evaluate a candidate project policy without saving or changing active policy."""
+        candidate_errors = self._validate_policy(project_id, candidate_policy)
+        if candidate_errors:
+            return {
+                "status": "INVALID_CANDIDATE_POLICY",
+                "project_id": project_id,
+                "persisted": False,
+                "errors": candidate_errors,
+            }
+        if not isinstance(scenarios, list) or not scenarios or len(scenarios) > 100:
+            return {
+                "status": "INVALID_SIMULATION_SCENARIOS",
+                "project_id": project_id,
+                "persisted": False,
+                "errors": ["scenarios must be a non-empty list of at most 100 items"],
+            }
+
+        scenario_errors: list[dict[str, Any]] = []
+        normalized_scenarios: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        allowed_fields = {
+            "request_id", "provider_id", "capability", "model_id",
+            "estimated_cost", "health_evidence_verified",
+            "connection_verified", "request_fallback",
+        }
+        for index, scenario in enumerate(scenarios):
+            errors: list[str] = []
+            if not isinstance(scenario, dict):
+                scenario_errors.append({"index": index, "errors": ["scenario must be an object"]})
+                continue
+            unknown = set(scenario) - allowed_fields
+            if unknown:
+                errors.append("unsupported scenario fields")
+            request_id = scenario.get("request_id", f"scenario-{index + 1}")
+            if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", request_id):
+                errors.append("invalid request_id")
+            elif request_id in seen_ids:
+                errors.append("duplicate request_id")
+            else:
+                seen_ids.add(request_id)
+
+            provider_id = scenario.get("provider_id")
+            if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}", provider_id):
+                errors.append("invalid provider_id")
+            capability = scenario.get("capability")
+            if not isinstance(capability, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", capability):
+                errors.append("invalid capability")
+            model_id = scenario.get("model_id")
+            if model_id is not None and (
+                not isinstance(model_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}", model_id)
+            ):
+                errors.append("invalid model_id")
+            estimated_cost = scenario.get("estimated_cost")
+            if estimated_cost is not None:
+                estimated_cost = finite_number(estimated_cost, minimum=0)
+                if estimated_cost is None:
+                    errors.append("estimated_cost must be a finite non-negative number")
+            for field in ("health_evidence_verified", "connection_verified", "request_fallback"):
+                if field in scenario and not isinstance(scenario[field], bool):
+                    errors.append(f"{field} must be a boolean")
+            if errors:
+                scenario_errors.append({"index": index, "errors": errors})
+            else:
+                normalized_scenarios.append({
+                    "request_id": request_id,
+                    "provider_id": provider_id,
+                    "capability": capability,
+                    "model_id": model_id,
+                    "estimated_cost": estimated_cost,
+                    "health_evidence_verified": scenario.get("health_evidence_verified", False),
+                    "connection_verified": scenario.get("connection_verified", False),
+                    "request_fallback": scenario.get("request_fallback", False),
+                })
+        if scenario_errors:
+            return {
+                "status": "INVALID_SIMULATION_SCENARIOS",
+                "project_id": project_id,
+                "persisted": False,
+                "errors": scenario_errors,
+            }
+
+        with self._lock, interprocess_file_lock(self.lock_path):
+            current_document = self._load_current()
+            self._validate_document(current_document)
+            current_policy = copy.deepcopy(current_document["projects"].get(project_id, {}))
+
+        candidate = copy.deepcopy(candidate_policy)
+        if "max_estimated_cost" in candidate:
+            candidate["max_estimated_cost"] = finite_number(candidate["max_estimated_cost"], minimum=0)
+
+        results: list[dict[str, Any]] = []
+        changed_decisions = 0
+        for scenario in normalized_scenarios:
+            current_decision = self._evaluate_policy_scenario(current_policy, scenario)
+            proposed_decision = self._evaluate_policy_scenario(candidate, scenario)
+            changed = (
+                current_decision["allowed"] != proposed_decision["allowed"]
+                or current_decision["fallback_would_be_blocked"]
+                != proposed_decision["fallback_would_be_blocked"]
+            )
+            changed_decisions += int(changed)
+            results.append({
+                "request_id": scenario["request_id"],
+                "current": current_decision,
+                "proposed": proposed_decision,
+                "decision_changed": changed,
+            })
+
+        return {
+            "status": "POLICY_SIMULATION_COMPLETED",
+            "project_id": project_id,
+            "persisted": False,
+            "scenario_count": len(results),
+            "changed_decisions": changed_decisions,
+            "results": results,
+        }
+
     def set_policy(self, project_id: str, policy: dict[str, Any]) -> dict[str, Any]:
         errors = self._validate_policy(project_id, policy)
         if errors:
