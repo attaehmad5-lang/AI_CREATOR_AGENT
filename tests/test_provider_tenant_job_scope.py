@@ -167,6 +167,14 @@ class ProviderServiceTenantJobScopeTests(unittest.TestCase):
             job_id="tenant-a-job", project_id="project-a", provider_id="image",
             payload_ref="payload:a", principal_id="user-a", tenant_id="tenant-a",
         )
+        missing_context = self.service.poll_job(
+            job_id="tenant-a-job", principal_id="user-a",
+        )
+        self.assertEqual(missing_context["status"], "TENANT_CONTEXT_REQUIRED")
+        missing_cancel_context = self.service.cancel_job(
+            job_id="tenant-a-job", principal_id="user-a",
+        )
+        self.assertEqual(missing_cancel_context["status"], "TENANT_CONTEXT_REQUIRED")
         hidden = self.service.poll_job(
             job_id="tenant-a-job", principal_id="user-b", tenant_id="tenant-b",
         )
