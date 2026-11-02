@@ -156,6 +156,11 @@ class BudgetAlertManager:
                 raise ValueError("invalid budget alert delivery timestamp")
             if "failed_at" in event and self._parse_timestamp(event.get("failed_at")) is None:
                 raise ValueError("invalid budget alert failure timestamp")
+            if "requeued_at" in event and self._parse_timestamp(event.get("requeued_at")) is None:
+                raise ValueError("invalid budget alert requeue timestamp")
+            requeues = event.get("manual_requeue_count", 0)
+            if isinstance(requeues, bool) or not isinstance(requeues, int) or not 0 <= requeues <= 2**31 - 1:
+                raise ValueError("invalid budget alert manual requeue count")
             lease_token = event.get("delivery_lease_token")
             lease_owner = event.get("delivery_lease_owner")
             lease_until = event.get("delivery_lease_until")
@@ -410,8 +415,10 @@ class BudgetAlertManager:
 
         outcomes = []
         for alert, token in claimed:
+            sender_payload = dict(alert)
+            self._remove_lease(sender_payload)
             try:
-                response = sender(dict(alert))
+                response = sender(sender_payload)
                 delivered = response is True or (
                     isinstance(response, dict) and response.get("delivered") is True
                 )
