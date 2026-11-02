@@ -1,6 +1,8 @@
 import base64
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from pathlib import Path
 
 from projects.generation.providers.pollinations_provider import PollinationsProvider, PollinationsProviderError
@@ -140,6 +142,22 @@ class PollinationsProviderTests(unittest.TestCase):
             provider.generate_image("prompt", "unused.png")
         self.assertTrue(caught.exception.retryable)
         self.assertEqual(caught.exception.retry_after_seconds, 300.0)
+
+    def test_429_parses_http_date_retry_after_and_caps_delay(self):
+        retry_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+        response = FakeResponse(
+            {"error": {"message": "rate limited"}},
+            status_code=429,
+            headers={"Retry-After": format_datetime(retry_at, usegmt=True)},
+        )
+        provider = PollinationsProvider(
+            session=FakeSession(response),
+            environ={"POLLINATIONS_API_KEY": "secret"},
+        )
+        with self.assertRaises(PollinationsProviderError) as caught:
+            provider.generate_image("prompt", "unused.png")
+        self.assertGreater(caught.exception.retry_after_seconds, 0)
+        self.assertLessEqual(caught.exception.retry_after_seconds, 60)
 
     def test_rejects_invalid_base64_and_non_image_payload(self):
         for encoded in ("%%%", base64.b64encode(b"not-an-image").decode()):
