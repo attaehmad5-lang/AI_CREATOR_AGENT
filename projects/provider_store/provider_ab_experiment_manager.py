@@ -99,7 +99,7 @@ class ProviderABExperimentManager:
                 or not 1 <= weight <= 100
             ):
                 return {"status": "INVALID_VARIANT_WEIGHT", "configured": False}
-            if usage_mode not in {"FREE_VERIFIED", "PAID_APPROVED"}:
+            if not isinstance(usage_mode, str) or usage_mode not in {"FREE_VERIFIED", "PAID_APPROVED"}:
                 return {"status": "INVALID_USAGE_MODE", "configured": False}
             if not isinstance(approval_ref, str) or not _REF_RE.fullmatch(approval_ref):
                 return {"status": "MISSING_USAGE_APPROVAL", "configured": False}
@@ -239,7 +239,8 @@ class ProviderABExperimentManager:
                 "model_id": selected["model_id"],
                 "usage_mode": selected["usage_mode"],
                 "spend_limit_per_request": selected["approved_max_cost_per_request"],
-                "provider_call_permitted": True,
+                "provider_call_permitted": False,
+                "eligible_after_downstream_gates": True,
                 "downstream_cost_gate_required": True,
                 "execution_performed": False,
             },
