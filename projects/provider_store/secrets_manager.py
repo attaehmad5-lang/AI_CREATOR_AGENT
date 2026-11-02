@@ -166,6 +166,8 @@ class ProviderSecretsManager:
             return None
         if target.startswith("/") or target.endswith("/") or "//" in target:
             return None
+        if "@" in target:
+            return None
         segments = target.split("/")
         if any(segment in {"", ".", ".."} for segment in segments):
             return None
@@ -359,7 +361,11 @@ class ProviderSecretsManager:
                 "rotated": False,
                 "error_type": type(exc).__name__,
             }
-        if not isinstance(result, dict) or result.get("rotated") is not True:
+        if (
+            not isinstance(result, dict)
+            or not set(result).issubset({"rotated", "version_id", "rotated_at"})
+            or result.get("rotated") is not True
+        ):
             return {"status": "INVALID_ROTATION_RESPONSE", "rotated": False}
         version_id = result.get("version_id")
         rotated_at = result.get("rotated_at")
