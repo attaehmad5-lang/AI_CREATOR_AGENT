@@ -1275,13 +1275,22 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
 
+        called = []
+        unknown_state = service.execute_routed_request(
+            category="video", project_id="film", request_id="video-health-unknown",
+            estimated_cost=0.0, modality="video",
+            adapter=lambda **kwargs: called.append(True),
+        )
+        self.assertEqual(unknown_state["status"], "PROVIDER_CATEGORY_HEALTH_UNKNOWN")
+        self.assertFalse(unknown_state["executed"])
+        self.assertEqual(called, [])
+
         outage = service.evaluate_category_degraded_mode(
             "video", ["video-provider"], principal_id="degraded-operator",
         )
         self.assertEqual(outage["status"], "PROVIDER_CATEGORY_OUTAGE")
         self.assertEqual(outage["state"]["healthy_count"], 0)
 
-        called = []
         blocked = service.execute_routed_request(
             category="video", project_id="film", request_id="video-outage",
             estimated_cost=0.0, modality="video",
