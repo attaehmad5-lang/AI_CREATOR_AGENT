@@ -1027,7 +1027,7 @@ class ProviderService:
                 }
 
         if not isinstance(require_fresh_health_check, bool):
-            release = self.release_unstarted_request(project_id=project_id, provider_id=provider_id, request_id=request_id)
+            release = self.release_unstarted_request(project_id=project_id, provider_id=provider_id, request_id=request_id, tenant_id=tenant_id)
             return {"status": "INVALID_HEALTH_CHECK_POLICY", "executed": False, "release": release}
         if require_fresh_health_check:
             health_fn = getattr(self.health_manager, "is_eligible", None) if self.health_manager is not None else None
