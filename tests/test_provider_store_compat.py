@@ -123,6 +123,9 @@ class ProviderStoreCompatibilityTests(unittest.TestCase):
                     "id": "story", "name": "Story", "category": "script_story",
                     "auth_type": "NONE", "connection_type": "API",
                     "enabled": True, "subscription_required": False,
+                    "allowed_hosts": ["example.com"],
+                    "official_api_url": "https://example.com/api",
+                    "capabilities": ["story_generation"],
                 }],
             }), encoding="utf-8")
             state.write_text(json.dumps({"providers": {}}), encoding="utf-8")
