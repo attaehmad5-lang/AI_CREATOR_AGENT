@@ -58,7 +58,7 @@ class Task25CanonicalLedgerTests(unittest.TestCase):
                 if current_section is not None:
                     section_counts[current_section] += 1
 
-        numbered_rows = [line for line in content.splitlines() if re.match(r"^\\|\\s*\\d+\\s*\\|", line)]
+        numbered_rows = [line for line in content.splitlines() if re.match(r"^\|\s*\d+\s*\|", line)]
         unparsed_rows = [line for line in numbered_rows if not row.match(line)]
         self.assertEqual(
             len(items),
