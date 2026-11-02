@@ -10,6 +10,8 @@ from pathlib import Path
 
 import requests
 
+from .atomic_output import atomic_write_bytes
+
 
 class PollinationsProviderError(RuntimeError):
     """Safe provider error with explicit retry/fallback semantics."""
@@ -101,8 +103,7 @@ class PollinationsProvider:
             destination = Path(output_path)
             if destination.suffix.lower() != extension:
                 destination = destination.with_suffix(extension)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(image_bytes)
+            atomic_write_bytes(destination, image_bytes, max_bytes=self.max_response_bytes)
             return {
                 "status": "COMPLETED",
                 "provider": self.name,
