@@ -321,9 +321,7 @@ class BudgetAlertManager:
                 or event.get("delivery_lease_token") != lease_token
             ):
                 return {"status": "DELIVERY_CLAIM_LOST", "saved": False}
-            attempts = min(int(event.get("delivery_attempts", 0)) + 1, 2**31 - 1)
-            event["delivery_attempts"] = attempts
-            event["last_delivery_attempt_at"] = now.isoformat()
+            attempts = int(event.get("delivery_attempts", 0))
             self._remove_lease(event)
             if delivered:
                 event["status"] = "DELIVERED"
@@ -405,6 +403,9 @@ class BudgetAlertManager:
                     event.pop("next_delivery_at", None)
                     changed = True
                     continue
+                attempts += 1
+                event["delivery_attempts"] = attempts
+                event["last_delivery_attempt_at"] = now.isoformat()
                 token = uuid.uuid4().hex
                 event["delivery_lease_token"] = token
                 event["delivery_lease_owner"] = worker_id
