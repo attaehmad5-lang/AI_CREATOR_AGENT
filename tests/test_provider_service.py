@@ -1552,6 +1552,61 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["media_integrity"]["status"], "MEDIA_CONTAINER_INVALID")
         self.assertFalse(result["output"]["valid"])
 
+    def test_inconsistent_degraded_mode_state_fails_closed_before_adapter(self):
+        import copy
+
+        valid_state = {
+            "category": "image",
+            "mode": "NORMAL",
+            "healthy_provider_ids": ["image"],
+            "unhealthy_provider_ids": ["fallback"],
+            "healthy_count": 1,
+            "provider_count": 2,
+        }
+        invalid_cases = []
+        wrong_category = copy.deepcopy(valid_state)
+        wrong_category["category"] = "video"
+        invalid_cases.append(("wrong category", wrong_category, "PROVIDER_CATEGORY_NORMAL"))
+        duplicate_ids = copy.deepcopy(valid_state)
+        duplicate_ids["healthy_provider_ids"] = ["image", "image"]
+        duplicate_ids["healthy_count"] = 2
+        duplicate_ids["provider_count"] = 3
+        invalid_cases.append(("duplicate provider IDs", duplicate_ids, "PROVIDER_CATEGORY_NORMAL"))
+        overlapping_ids = copy.deepcopy(valid_state)
+        overlapping_ids["unhealthy_provider_ids"] = ["image"]
+        invalid_cases.append(("overlapping provider IDs", overlapping_ids, "PROVIDER_CATEGORY_NORMAL"))
+        inconsistent_count = copy.deepcopy(valid_state)
+        inconsistent_count["provider_count"] = 99
+        invalid_cases.append(("inconsistent provider count", inconsistent_count, "PROVIDER_CATEGORY_NORMAL"))
+        invalid_outage = copy.deepcopy(valid_state)
+        invalid_outage["mode"] = "OUTAGE"
+        invalid_cases.append(("outage with healthy provider", invalid_outage, "PROVIDER_CATEGORY_OUTAGE"))
+        invalid_status = copy.deepcopy(valid_state)
+        invalid_cases.append(("mismatched result status", invalid_status, "PROVIDER_CATEGORY_DEGRADED"))
+
+        for label, state, response_status in invalid_cases:
+            with self.subTest(case=label):
+                class InjectedDegradedMode:
+                    def get_state(self, category):
+                        return {"status": response_status, "state": state}
+
+                called = []
+                service = ProviderService(
+                    self.connections, degraded_mode_manager=InjectedDegradedMode()
+                )
+                result = service.execute_routed_request(
+                    category="image", project_id="film",
+                    request_id=f"invalid-degraded-{label.replace(' ', '-')}",
+                    estimated_cost=0.0, modality="image",
+                    adapter=lambda **kwargs: called.append(True),
+                )
+                self.assertEqual(result["status"], "PROVIDER_CATEGORY_HEALTH_UNKNOWN")
+                self.assertFalse(result["executed"])
+                self.assertEqual(
+                    result["degraded_mode"]["status"], "INVALID_DEGRADED_MODE_STATE"
+                )
+                self.assertEqual(called, [])
+
     def test_unknown_degraded_mode_value_fails_closed_before_adapter(self):
         class CorruptDegradedMode:
             def get_state(self, category):
