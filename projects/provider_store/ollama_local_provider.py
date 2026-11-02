@@ -33,7 +33,8 @@ class OllamaLocalProvider:
         try:
             parsed = urlsplit(endpoint)
             host = parsed.hostname
-            port = parsed.port or 11434
+            explicit_port = parsed.port
+            port = explicit_port if explicit_port is not None else 11434
         except ValueError as exc:
             raise ValueError("invalid local model endpoint") from exc
         if (
@@ -142,6 +143,8 @@ class OllamaLocalProvider:
 
     def discover_models(self) -> dict[str, Any]:
         """Fetch and validate the local /api/tags model list."""
+        with self._lock:
+            self._available_models.clear()
         result = self._request_json("GET", "/api/tags")
         if result["status"] != "LOCAL_RESPONSE_AVAILABLE":
             return {key: value for key, value in result.items() if key != "data"} | {
