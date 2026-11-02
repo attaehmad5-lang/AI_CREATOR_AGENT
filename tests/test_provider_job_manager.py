@@ -66,6 +66,35 @@ class ProviderJobManagerTests(unittest.TestCase):
             claimed["job"]["lease_token"],
         )
 
+    def test_completed_job_clears_worker_lease_identity(self):
+        self.submit("job-1")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        completed = self.manager.complete(
+            job_id="job-1", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+        self.assertEqual(completed["status"], "JOB_COMPLETED")
+        self.assertIsNone(completed["job"]["worker_id"])
+        self.assertIsNone(completed["job"]["lease_token"])
+        reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertEqual(reloaded.data["jobs"]["job-1"]["status"], "FAILED")
+
+    def test_legacy_terminal_job_worker_id_remains_backward_compatible(self):
+        self.submit("job-1")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.manager.complete(
+            job_id="job-1", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["jobs"]["job-1"]["worker_id"] = "worker-1"
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertEqual(reloaded.data["jobs"]["job-1"]["worker_id"], "worker-1")
+        self.assertIsNone(reloaded.data["jobs"]["job-1"]["lease_token"])
+
     def test_persisted_queued_job_accepts_null_lease_token(self):
         self.submit("job-1")
         reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
