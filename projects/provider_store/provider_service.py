@@ -1143,6 +1143,32 @@ class ProviderService:
                 if isinstance(provider_error, dict)
                 else "EXECUTION_OUTCOME_UNKNOWN"
             )
+            incident_result = None
+            if (
+                self.incident_manager is not None
+                and isinstance(provider_error, dict)
+            ):
+                incident_category = provider_error.get("category")
+                severity = (
+                    "critical"
+                    if incident_category in {"billing", "credits_exhausted"}
+                    else "warning"
+                    if incident_category == "transient"
+                    else "error"
+                )
+                try:
+                    incident_result = self.incident_manager.record(
+                        provider_id=provider_id,
+                        category=category,
+                        severity=severity,
+                        code=reason,
+                    )
+                except Exception as incident_exc:
+                    incident_result = {
+                        "status": "INCIDENT_RECORD_FAILED",
+                        "saved": False,
+                        "error_type": type(incident_exc).__name__,
+                    }
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
@@ -1151,6 +1177,7 @@ class ProviderService:
                 "reservations_retained": True,
                 "error_type": type(exc).__name__,
                 "provider_error": provider_error,
+                "incident": incident_result,
                 "retry_decision": {"retry": False, "reason": reason},
             }
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
