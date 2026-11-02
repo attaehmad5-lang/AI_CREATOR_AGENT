@@ -344,16 +344,19 @@ class PollinationsAccountBalanceProbe:
                     "required_scope": "account:usage",
                 }
             total = account_balance.get("total")
-            if (
-                isinstance(total, bool) or not isinstance(total, (int, float))
-                or not math.isfinite(float(total)) or float(total) < 0
-            ):
+            if isinstance(total, bool) or not isinstance(total, (int, float)):
+                return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
+            try:
+                total_value = float(total)
+            except (OverflowError, TypeError, ValueError):
+                return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
+            if not math.isfinite(total_value) or total_value < 0:
                 return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
             result = {
                 "status": "POLLINATIONS_ACCOUNT_BALANCE_VERIFIED",
                 "provider": "pollinations",
                 "verified": True,
-                "account_balance_total": float(total),
+                "account_balance_total": total_value,
                 "unit": "POLLEN",
                 "source": "pollinations-account-balance-accountBalance.total",
                 "required_scope": "account:usage",
@@ -362,12 +365,15 @@ class PollinationsAccountBalanceProbe:
                 value = account_balance.get(field)
                 if value is None:
                     continue
-                if (
-                    isinstance(value, bool) or not isinstance(value, (int, float))
-                    or not math.isfinite(float(value)) or float(value) < 0
-                ):
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
                     return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
-                result["tier" if field == "tier" else "paid"] = float(value)
+                try:
+                    numeric_value = float(value)
+                except (OverflowError, TypeError, ValueError):
+                    return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
+                if not math.isfinite(numeric_value) or numeric_value < 0:
+                    return {"status": "BALANCE_AMOUNT_INVALID", "provider": "pollinations", "verified": False}
+                result["tier" if field == "tier" else "paid"] = numeric_value
             return result
         finally:
             try:
