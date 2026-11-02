@@ -36,6 +36,7 @@ class ProviderService:
         feature_flag_manager: Any | None = None,
         media_integrity_validator: Any | None = None,
         project_policy_manager: Any | None = None,
+        slo_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -60,6 +61,7 @@ class ProviderService:
             (feature_flag_manager, "evaluate", "feature_flag_manager"),
             (media_integrity_validator, "validate", "media_integrity_validator"),
             (project_policy_manager, "simulate_policy", "project_policy_manager"),
+            (slo_manager, "record", "slo_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -85,6 +87,7 @@ class ProviderService:
         self.feature_flag_manager = feature_flag_manager
         self.media_integrity_validator = media_integrity_validator
         self.project_policy_manager = project_policy_manager
+        self.slo_manager = slo_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -98,6 +101,64 @@ class ProviderService:
                 "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
             }
         return None
+
+    def configure_service_level_objective(
+        self,
+        slo_id: str,
+        *,
+        provider_id: str,
+        category: str,
+        availability_target: float,
+        max_p95_latency_ms: float,
+        window_seconds: int = 3600,
+        minimum_samples: int = 20,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Configure an SLO using administrator-only provider configuration permission."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        if self.slo_manager is None:
+            return {"status": "SLO_MANAGER_UNAVAILABLE", "saved": False}
+        try:
+            result = self.slo_manager.configure(
+                slo_id, provider_id=provider_id, category=category,
+                availability_target=availability_target,
+                max_p95_latency_ms=max_p95_latency_ms,
+                window_seconds=window_seconds,
+                minimum_samples=minimum_samples,
+            )
+        except Exception as exc:
+            return {"status": "SLO_CONFIGURATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("saved") is not True:
+            return result if isinstance(result, dict) else {
+                "status": "INVALID_SLO_CONFIGURATION_RESPONSE", "saved": False,
+            }
+        return result
+
+    def evaluate_service_level_objective(
+        self,
+        slo_id: str,
+        *,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Read a rolling SLO evaluation after provider.read authorization."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "evaluation": None}
+        authorization = self._authorize_operation(principal_id, "provider.read")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "evaluation": None, "authorization": authorization}
+        if self.slo_manager is None:
+            return {"status": "SLO_MANAGER_UNAVAILABLE", "evaluation": None}
+        try:
+            result = self.slo_manager.evaluate(slo_id)
+        except Exception as exc:
+            return {"status": "SLO_EVALUATION_FAILED", "evaluation": None, "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or not isinstance(result.get("status"), str):
+            return {"status": "INVALID_SLO_EVALUATION_RESPONSE", "evaluation": None}
+        return result
 
     def simulate_project_provider_policy(
         self,
@@ -982,6 +1043,24 @@ class ProviderService:
                     "saved": False,
                     "error_type": type(exc).__name__,
                 }
+        slo_result = None
+        if self.slo_manager is not None:
+            if not self._valid_amount(latency_ms):
+                slo_result = {"status": "SLO_LATENCY_UNAVAILABLE", "saved": False}
+            else:
+                try:
+                    slo_result = self.slo_manager.record(
+                        provider_id=provider_id,
+                        category=category,
+                        success=final_success,
+                        latency_ms=latency_ms,
+                    )
+                except Exception as exc:
+                    slo_result = {
+                        "status": "SLO_OBSERVATION_FAILED",
+                        "saved": False,
+                        "error_type": type(exc).__name__,
+                    }
         budget_alerts = None
         if self.budget_alert_manager is not None and self.cost_policy is not None:
             try:
@@ -1079,6 +1158,7 @@ class ProviderService:
             "quality": quality_result,
             "finalization": finalization,
             "metrics": metrics_result,
+            "slo_observation": slo_result,
             "benchmark": benchmark_result,
             "incident": incident_result,
             "provider_error": provider_error,
