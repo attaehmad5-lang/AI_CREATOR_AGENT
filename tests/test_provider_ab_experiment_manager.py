@@ -110,7 +110,7 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
             experiment_id="false-free", modality="image",
             variants=self.variants(),
         )
-        self.assertEqual(result["status"], "APPROVED_COST_LIMIT_INSUFFICIENT")
+        self.assertEqual(result["status"], "FREE_USAGE_NOT_VERIFIED")
 
     def test_invalid_weights_duplicate_variants_and_nonzero_free_cost_are_rejected(self):
         variants = self.variants()
@@ -192,6 +192,18 @@ class ProviderABExperimentManagerTests(unittest.TestCase):
         self.assertLess(control_only, 3200)
         self.assertGreater(selected, 800)
         self.assertLess(selected, 1200)
+
+        self.configure(experiment_id="weighted-test", traffic_percent=100)
+        weighted_counts = {"control": 0, "candidate": 0}
+        for index in range(4000):
+            result = self.manager.assign(
+                experiment_id="weighted-test", request_id=f"weighted-{index}",
+            )
+            weighted_counts[result["assignment"]["variant_id"]] += 1
+        self.assertGreater(weighted_counts["control"], 2600)
+        self.assertLess(weighted_counts["control"], 3000)
+        self.assertGreater(weighted_counts["candidate"], 1000)
+        self.assertLess(weighted_counts["candidate"], 1400)
 
     def test_disabled_unknown_and_invalid_request_assignments_fail_closed(self):
         self.configure()
