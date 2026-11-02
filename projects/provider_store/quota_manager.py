@@ -10,12 +10,14 @@ from typing import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+import re
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 
 class ProviderQuotaManager:
     MAX_ATTEMPT_HISTORY = 1000
+    TENANT_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\Z")
 
     def __init__(
         self,
@@ -24,6 +26,8 @@ class ProviderQuotaManager:
         limits: dict[str, dict[str, int]],
         clock: Callable[[], datetime] | None = None,
         max_records: int = 100_000,
+        tenant_limits: dict[str, dict[str, dict[str, int]]] | None = None,
+        max_tenants: int = 10_000,
     ) -> None:
         if not isinstance(limits, dict):
             raise ValueError("limits must be a provider-to-limit mapping")
@@ -40,15 +44,52 @@ class ProviderQuotaManager:
                 normalized[provider_id][period] = limit
         if isinstance(max_records, bool) or not isinstance(max_records, int) or not 1 <= max_records <= 1_000_000:
             raise ValueError("max_records must be within 1..1000000")
+        if isinstance(max_tenants, bool) or not isinstance(max_tenants, int) or not 1 <= max_tenants <= 100_000:
+            raise ValueError("max_tenants must be within 1..100000")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
         self.limits = normalized
         self.max_records = max_records
+        self.max_tenants = max_tenants
+        self.tenant_limits = self._normalize_tenant_limits(tenant_limits or {})
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "requests": {}}
         self._reload_state()
+
+    def _normalize_tenant_limits(
+        self, configuration: dict[str, dict[str, dict[str, int]]]
+    ) -> dict[str, dict[str, dict[str, int]]]:
+        if not isinstance(configuration, dict) or len(configuration) > self.max_tenants:
+            raise ValueError("invalid tenant quota policy configuration")
+        normalized: dict[str, dict[str, dict[str, int]]] = {}
+        for tenant_id, providers in configuration.items():
+            if not isinstance(tenant_id, str) or self.TENANT_ID_RE.fullmatch(tenant_id) is None:
+                raise ValueError("invalid tenant quota policy identifier")
+            if not isinstance(providers, dict):
+                raise ValueError("invalid tenant provider quota configuration")
+            normalized[tenant_id] = {}
+            for provider_id, periods in providers.items():
+                if not isinstance(provider_id, str) or provider_id not in self.limits or not isinstance(periods, dict):
+                    raise ValueError("tenant quota references an unknown provider")
+                normalized[tenant_id][provider_id] = {}
+                for period, limit in periods.items():
+                    if not isinstance(period, str) or period not in {"hourly", "daily", "monthly"}:
+                        raise ValueError("unsupported tenant quota period")
+                    if period not in self.limits[provider_id]:
+                        raise ValueError("tenant quota period has no global provider limit")
+                    if (
+                        isinstance(limit, bool) or not isinstance(limit, int)
+                        or limit < 1 or limit > self.limits[provider_id][period]
+                    ):
+                        raise ValueError("tenant quota must be positive and no greater than global limit")
+                    normalized[tenant_id][provider_id][period] = limit
+        return normalized
+
+    @classmethod
+    def _valid_tenant_id(cls, tenant_id: Any) -> bool:
+        return isinstance(tenant_id, str) and cls.TENANT_ID_RE.fullmatch(tenant_id) is not None
 
     def _reload_state(self) -> None:
         """Reload the latest atomically written state while holding the process lock."""
@@ -77,6 +118,9 @@ class ProviderQuotaManager:
                 self._parse_timestamp(record.get("committed_at"))
             if record.get("status") == "RELEASED":
                 self._parse_timestamp(record.get("released_at"))
+            tenant_id = record.get("tenant_id")
+            if tenant_id is not None and not self._valid_tenant_id(tenant_id):
+                raise ValueError("invalid quota tenant identifier")
             history = record.get("attempt_history", [])
             if (
                 not isinstance(history, list)
@@ -116,15 +160,23 @@ class ProviderQuotaManager:
             result = result.replace(tzinfo=timezone.utc)
         return result.astimezone(timezone.utc)
 
-    def reserve(self, *, provider_id: str, request_id: str) -> dict[str, Any]:
+    def reserve(
+        self, *, provider_id: str, request_id: str, tenant_id: str | None = None
+    ) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not provider_id.strip() or not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST", "reserved": False}
+        if tenant_id is not None and not self._valid_tenant_id(tenant_id):
+            return {"status": "INVALID_TENANT_ID", "reserved": False}
+        if self.tenant_limits and tenant_id is None:
+            return {"status": "TENANT_CONTEXT_REQUIRED", "reserved": False}
         if provider_id not in self.limits:
             return {"status": "NO_QUOTA_POLICY", "provider": provider_id, "reserved": False}
         with self._transaction():
             existing = self.data["requests"].get(request_id)
             now = self.clock().astimezone(timezone.utc)
             if existing is not None:
+                if existing.get("tenant_id") != tenant_id:
+                    return {"status": "TENANT_ISOLATION_DENIED", "request_id": request_id, "reserved": False}
                 if existing.get("status") == "RELEASED" and existing.get("provider_id") != provider_id:
                     # A released attempt is known not to have started; preserve its
                     # audit snapshot and permit a new provider attempt under the same
@@ -169,6 +221,19 @@ class ProviderQuotaManager:
                 }
             for period, limit in self.limits[provider_id].items():
                 count = self._count_in_period(provider_id, period, now)
+                if tenant_id is not None:
+                    tenant_limit = self.tenant_limits.get(tenant_id, {}).get(provider_id, {}).get(period, limit)
+                    tenant_used = self._count_tenant_in_period(tenant_id, provider_id, period, now)
+                    if tenant_used >= tenant_limit:
+                        return {
+                            "status": "TENANT_QUOTA_EXCEEDED",
+                            "tenant_id": tenant_id,
+                            "provider": provider_id,
+                            "period": period,
+                            "limit": tenant_limit,
+                            "used": tenant_used,
+                            "reserved": False,
+                        }
                 if count >= limit:
                     return {
                         "status": "QUOTA_EXCEEDED",
@@ -178,21 +243,30 @@ class ProviderQuotaManager:
                         "used": count,
                         "reserved": False,
                     }
-            self.data["requests"][request_id] = {
+            record = {
                 "provider_id": provider_id,
                 "status": "RESERVED",
                 "created_at": now.isoformat(),
             }
+            if tenant_id is not None:
+                record["tenant_id"] = tenant_id
+            self.data["requests"][request_id] = record
             self._save()
             return {"status": "RESERVED", "provider": provider_id, "request_id": request_id, "reserved": True}
 
-    def commit(self, *, request_id: str) -> dict[str, Any]:
+    def commit(
+        self, *, request_id: str, tenant_id: str | None = None
+    ) -> dict[str, Any]:
         if not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST", "committed": False}
+        if tenant_id is not None and not self._valid_tenant_id(tenant_id):
+            return {"status": "INVALID_TENANT_ID", "committed": False}
         with self._transaction():
             record = self.data["requests"].get(request_id)
             if not isinstance(record, dict):
                 return {"status": "RESERVATION_NOT_FOUND", "committed": False}
+            if record.get("tenant_id") != tenant_id:
+                return {"status": "TENANT_ISOLATION_DENIED", "committed": False}
             if record.get("status") == "COMMITTED":
                 return {"status": "ALREADY_COMMITTED", "committed": False}
             if record.get("status") != "RESERVED":
@@ -202,13 +276,20 @@ class ProviderQuotaManager:
             self._save()
             return {"status": "COMMITTED", "request_id": request_id, "committed": True}
 
-    def release(self, *, request_id: str, provider_id: str | None = None) -> dict[str, Any]:
+    def release(
+        self, *, request_id: str, provider_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         if not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST", "released": False}
+        if tenant_id is not None and not self._valid_tenant_id(tenant_id):
+            return {"status": "INVALID_TENANT_ID", "released": False}
         with self._transaction():
             record = self.data["requests"].get(request_id)
             if not isinstance(record, dict):
                 return {"status": "RESERVATION_NOT_FOUND", "released": False}
+            if record.get("tenant_id") != tenant_id:
+                return {"status": "TENANT_ISOLATION_DENIED", "released": False}
             if provider_id is not None and record.get("provider_id") != provider_id:
                 return {"status": "REQUEST_PROVIDER_MISMATCH", "released": False}
             if record.get("status") == "COMMITTED":
@@ -231,6 +312,43 @@ class ProviderQuotaManager:
                 period: self._count_in_period(provider_id, period, now)
                 for period in self.limits.get(provider_id, {})
             }
+
+    def tenant_usage(self, *, tenant_id: str, provider_id: str) -> dict[str, int]:
+        """Return committed plus reserved request counts for one tenant/provider."""
+        if not self._valid_tenant_id(tenant_id) or not isinstance(provider_id, str) or not provider_id.strip():
+            return {}
+        with self._transaction():
+            now = self.clock().astimezone(timezone.utc)
+            return {
+                period: self._count_tenant_in_period(tenant_id, provider_id, period, now)
+                for period in self.limits.get(provider_id, {})
+            }
+
+    def _count_tenant_in_period(
+        self, tenant_id: str, provider_id: str, period: str, now: datetime
+    ) -> int:
+        if period == "monthly":
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif period == "daily":
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start = now.replace(minute=0, second=0, microsecond=0)
+        count = 0
+        for record in self.data["requests"].values():
+            if (
+                not isinstance(record, dict)
+                or record.get("tenant_id") != tenant_id
+                or record.get("provider_id") != provider_id
+                or record.get("status") == "RELEASED"
+            ):
+                continue
+            try:
+                created = self._parse_timestamp(record.get("created_at"))
+            except ValueError:
+                continue
+            if start <= created <= now:
+                count += 1
+        return count
 
     def _count_in_period(self, provider_id: str, period: str, now: datetime) -> int:
         if period == "monthly":

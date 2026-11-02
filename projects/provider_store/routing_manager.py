@@ -140,6 +140,7 @@ class ProviderRoutingManager:
         estimated_cost_unit: str = "USD",
         free_credits: dict[str, float] | None = None,
         request_id: str | None = None,
+        tenant_id: str | None = None,
         paid_approved_providers: set[str] | frozenset[str] | None = None,
         excluded_providers: set[str] | frozenset[str] | None = None,
         require_health_evidence: bool = False,
@@ -156,6 +157,11 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_REQUIRED"}
         if not isinstance(project_id, str) or not project_id.strip():
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "PROJECT_REQUIRED"}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}", tenant_id)
+        ):
+            return {"allowed": False, "status": "INVALID_TENANT_ID"}
         if required_region is not None and (
             not isinstance(required_region, str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", required_region)
@@ -651,7 +657,16 @@ class ProviderRoutingManager:
 
             if self.quota_manager is not None:
                 try:
-                    quota = self.quota_manager.reserve(provider_id=provider_id, request_id=request_id)
+                    quota = (
+                        self.quota_manager.reserve(
+                            provider_id=provider_id, request_id=request_id,
+                            tenant_id=tenant_id,
+                        )
+                        if tenant_id is not None
+                        else self.quota_manager.reserve(
+                            provider_id=provider_id, request_id=request_id
+                        )
+                    )
                 except Exception as exc:
                     cleanup = self._cleanup_new_reservations(
                         project_id=project_id, provider_id=provider_id, request_id=request_id,
@@ -772,6 +787,7 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_FAILED_PROVIDER"}
         if not isinstance(release_reservations, bool):
             return {"allowed": False, "status": "INVALID_RESERVATION_RELEASE_POLICY"}
+        tenant_id = route_options.get("tenant_id")
         if not isinstance(route_options.get("category"), str) or not isinstance(route_options.get("project_id"), str):
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_AND_PROJECT_REQUIRED"}
         request_id = route_options.get("request_id")
@@ -833,8 +849,15 @@ class ProviderRoutingManager:
                 has_old_reservation = True
                 if release_reservations:
                     try:
-                        released = self.quota_manager.release(
-                            request_id=old_request_id, provider_id=failed_provider
+                        released = (
+                            self.quota_manager.release(
+                                request_id=old_request_id, provider_id=failed_provider,
+                                tenant_id=tenant_id,
+                            )
+                            if tenant_id is not None
+                            else self.quota_manager.release(
+                                request_id=old_request_id, provider_id=failed_provider
+                            )
                         )
                         if (
                             not isinstance(released, dict)
