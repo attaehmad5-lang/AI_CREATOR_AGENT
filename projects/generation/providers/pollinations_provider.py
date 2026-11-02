@@ -8,6 +8,8 @@ import binascii
 import math
 import os
 import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import requests
@@ -95,7 +97,15 @@ class PollinationsProvider:
         try:
             seconds = float(value)
         except (TypeError, ValueError, OverflowError):
-            return None
+            try:
+                retry_at = parsedate_to_datetime(value) if isinstance(value, str) else None
+                if retry_at is None:
+                    return None
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                seconds = (retry_at - datetime.now(timezone.utc)).total_seconds()
+            except (TypeError, ValueError, OverflowError, IndexError):
+                return None
         if not math.isfinite(seconds) or seconds < 0:
             return None
         return min(seconds, 300.0)
