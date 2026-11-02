@@ -28,6 +28,13 @@ _AUTH_CODES = {"invalid_api_key", "invalid_token", "unauthorized"}
 _PERMISSION_CODES = {"permission_denied", "insufficient_scope", "forbidden"}
 _TRANSIENT_CODES = {"temporarily_unavailable", "overloaded", "server_overloaded"}
 
+# Provider-documented Pollinations codes from https://gen.pollinations.ai/docs.
+# These are allowlisted codes only; arbitrary provider response text is never parsed
+# into a public status or copied into logs/results.
+_POLLINATIONS_CREDIT_CODES = {"insufficient_balance", "key_budget_exhausted"}
+_POLLINATIONS_PAID_TIER_CODES = {"quest_pollen_only"}
+_POLLINATIONS_BILLED_FAILURE_CODES = {"output_token_limit_exceeded"}
+
 
 def _normalize_code(value: Any) -> str | None:
     if value is None:
@@ -52,6 +59,7 @@ def _retry_after(value: Any) -> float | None:
 def classify_provider_error(
     http_status: Any,
     *,
+    provider_id: Any = None,
     provider_code: Any = None,
     retry_after_seconds: Any = None,
 ) -> dict[str, Any]:
@@ -74,6 +82,32 @@ def classify_provider_error(
         }
 
     code = _normalize_code(provider_code)
+    provider = _normalize_code(provider_id)
+    if provider == "pollinations":
+        if http_status == 402 and code in _POLLINATIONS_CREDIT_CODES:
+            return {
+                "status": "CREDITS_EXHAUSTED",
+                "category": "credits_exhausted",
+                "retryable": False,
+                "action": "stop_paid_attempt_and_refresh_verified_balance",
+                "http_status": http_status,
+            }
+        if http_status == 402 and code in _POLLINATIONS_PAID_TIER_CODES:
+            return {
+                "status": "PAID_BALANCE_REQUIRED",
+                "category": "billing",
+                "retryable": False,
+                "action": "review_paid_balance_or_choose_an_eligible_model",
+                "http_status": http_status,
+            }
+        if http_status == 400 and code in _POLLINATIONS_BILLED_FAILURE_CODES:
+            return {
+                "status": "BILLABLE_OUTPUT_LIMIT_FAILURE",
+                "category": "billing",
+                "retryable": False,
+                "action": "record_reported_usage_and_do_not_retry_or_fallback",
+                "http_status": http_status,
+            }
     if http_status == 402 or code in _BILLING_ACTION_CODES:
         return {
             "status": "BILLING_ACTION_REQUIRED",
