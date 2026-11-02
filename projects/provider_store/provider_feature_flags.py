@@ -18,7 +18,16 @@ _PROJECT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
 
 
 class ProviderFeatureFlagManager:
-    def __init__(self, state_path: str | os.PathLike[str]) -> None:
+    def __init__(
+        self, state_path: str | os.PathLike[str], *, max_flags: int = 10_000,
+        max_projects_per_flag: int = 500,
+    ) -> None:
+        if isinstance(max_flags, bool) or not isinstance(max_flags, int) or not 1 <= max_flags <= 100_000:
+            raise ValueError("max_flags must be within 1..100000")
+        if isinstance(max_projects_per_flag, bool) or not isinstance(max_projects_per_flag, int) or not 1 <= max_projects_per_flag <= 10_000:
+            raise ValueError("max_projects_per_flag must be within 1..10000")
+        self.max_flags = max_flags
+        self.max_projects_per_flag = max_projects_per_flag
         self.state_path = Path(state_path)
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "flags": {}}
@@ -34,8 +43,13 @@ class ProviderFeatureFlagManager:
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValueError("invalid feature flag state JSON") from exc
         flags = loaded.get("flags") if isinstance(loaded, dict) else None
-        if not isinstance(flags, dict):
-            raise ValueError("invalid feature flag state schema")
+        if (
+            not isinstance(loaded, dict)
+            or loaded.get("version") != "1.0"
+            or not isinstance(flags, dict)
+            or len(flags) > self.max_flags
+        ):
+            raise ValueError("invalid feature flag state schema or capacity")
         for name, flag in flags.items():
             if (
                 not isinstance(name, str) or not _FLAG_RE.fullmatch(name)
@@ -46,7 +60,11 @@ class ProviderFeatureFlagManager:
                 or not 0 <= flag["rollout_percent"] <= 100
                 or not isinstance(flag.get("allow_projects"), list)
                 or not isinstance(flag.get("deny_projects"), list)
+                or len(flag["allow_projects"]) > self.max_projects_per_flag
+                or len(flag["deny_projects"]) > self.max_projects_per_flag
                 or any(not isinstance(p, str) or not _PROJECT_RE.fullmatch(p) for p in flag["allow_projects"] + flag["deny_projects"])
+                or len(set(flag["allow_projects"])) != len(flag["allow_projects"])
+                or len(set(flag["deny_projects"])) != len(flag["deny_projects"])
             ):
                 raise ValueError("invalid feature flag record")
         self.data = loaded
@@ -96,11 +114,15 @@ class ProviderFeatureFlagManager:
             return {"status": "INVALID_ROLLOUT_PERCENT", "saved": False}
         if not isinstance(allow_projects, (tuple, list)) or not isinstance(deny_projects, (tuple, list)):
             return {"status": "INVALID_PROJECT_SCOPE", "saved": False}
+        if len(allow_projects) > self.max_projects_per_flag or len(deny_projects) > self.max_projects_per_flag:
+            return {"status": "PROJECT_SCOPE_CAPACITY_REACHED", "saved": False}
         if any(not isinstance(p, str) or not _PROJECT_RE.fullmatch(p) for p in list(allow_projects) + list(deny_projects)):
             return {"status": "INVALID_PROJECT_SCOPE", "saved": False}
         if len(set(allow_projects)) != len(allow_projects) or len(set(deny_projects)) != len(deny_projects):
             return {"status": "DUPLICATE_PROJECT_SCOPE", "saved": False}
         with self._transaction():
+            if name not in self.data["flags"] and len(self.data["flags"]) >= self.max_flags:
+                return {"status": "FEATURE_FLAG_CAPACITY_REACHED", "saved": False}
             self.data["flags"][name] = {
                 "enabled": enabled,
                 "rollout_percent": float(rollout_percent),
