@@ -1552,6 +1552,26 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["media_integrity"]["status"], "MEDIA_CONTAINER_INVALID")
         self.assertFalse(result["output"]["valid"])
 
+    def test_unknown_degraded_mode_value_fails_closed_before_adapter(self):
+        class CorruptDegradedMode:
+            def get_state(self, category):
+                return {"status": "UNKNOWN", "state": {
+                    "category": category, "mode": "CORRUPT",
+                    "healthy_provider_ids": ["image"],
+                }}
+
+        called = []
+        service = ProviderService(self.connections, degraded_mode_manager=CorruptDegradedMode())
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="corrupt-mode-request",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: called.append(True),
+        )
+        self.assertEqual(result["status"], "PROVIDER_CATEGORY_HEALTH_UNKNOWN")
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["degraded_mode"]["status"], "INVALID_DEGRADED_MODE_STATE")
+        self.assertEqual(called, [])
+
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
         self.assertEqual(service.route_request(category="image", project_id="film")["status"], "ROUTING_MANAGER_UNAVAILABLE")
