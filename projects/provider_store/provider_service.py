@@ -151,7 +151,9 @@ class ProviderService:
 
         status = result.get("status")
         recorded_statuses = {"HEALTHY", "TIMEOUT", "NETWORK_ERROR", "PROBE_FAILED"}
-        if status not in recorded_statuses | {"HEALTH_RECORD_FAILED"}:
+        if not isinstance(status, str) or status not in recorded_statuses | {"HEALTH_RECORD_FAILED"}:
+            return {"status": "INVALID_ACTIVE_PROBE_RESPONSE", "provider": provider_id, "verified": False, "saved": False}
+        if (status == "HEALTHY") != (result.get("verified") is True):
             return {"status": "INVALID_ACTIVE_PROBE_RESPONSE", "provider": provider_id, "verified": False, "saved": False}
         verified = status == "HEALTHY" and result.get("verified") is True
         saved = status in recorded_statuses
