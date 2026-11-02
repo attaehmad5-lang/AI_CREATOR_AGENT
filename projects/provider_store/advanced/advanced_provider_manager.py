@@ -31,9 +31,13 @@ class AdvancedProviderManager:
 
     @property
     def catalog(self) -> dict[str, Any]:
+        """Return a detached advanced-only view with truthful catalog validity."""
+        summary = self.status()
         return {
             "version": "1.0",
-            "status": "READY",
+            "status": summary["status"],
+            "catalog_valid": summary["catalog_valid"],
+            "ready": summary["ready"],
             "providers": self.list_providers(),
         }
 
@@ -51,7 +55,7 @@ class AdvancedProviderManager:
 
     def by_category(self, category: str) -> list[dict[str, Any]]:
         """List advanced providers in one exact, declared category."""
-        if category not in ADVANCED_CATEGORIES:
+        if not isinstance(category, str) or category not in ADVANCED_CATEGORIES:
             return []
         return [
             provider for provider in self.list_providers()

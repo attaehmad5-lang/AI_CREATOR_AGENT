@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from projects.provider_store.advanced.advanced_provider_manager import AdvancedProviderManager
@@ -150,6 +151,29 @@ class AdvancedProviderStoreTests(unittest.TestCase):
             self.assertEqual(result["status"], "PROBE_FAILED")
             self.assertNotIn("sensitive probe detail", str(result))
             self.assertEqual(manager.status()["connected_verified"], 0)
+
+    def test_catalog_view_reports_validation_failure_instead_of_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            with patch.object(
+                manager.store.manager,
+                "validate_catalog_schema",
+                return_value={"valid": False, "errors": ["simulated schema failure"]},
+            ):
+                view = manager.catalog
+                status = manager.status()
+            self.assertEqual(view["status"], "ERROR")
+            self.assertFalse(view["catalog_valid"])
+            self.assertFalse(view["ready"])
+            self.assertEqual(status["status"], "ERROR")
+            self.assertFalse(status["catalog_valid"])
+
+    def test_by_category_rejects_non_string_inputs_without_raising(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            for category in (None, 7, [], {}):
+                with self.subTest(category=category):
+                    self.assertEqual(manager.by_category(category), [])
 
     def test_unknown_and_core_provider_ids_are_not_exposed(self):
         with tempfile.TemporaryDirectory() as tmp:
