@@ -101,7 +101,20 @@ class ProviderHTTPConnectivityProbe:
         environ: dict[str, str] | None = None,
         opener: Any = None,
         max_response_bytes: int = 4096,
+        secret_manager: Any | None = None,
+        tenant_id: str | None = None,
+        principal_id: str | None = None,
     ) -> None:
+        if secret_manager is not None and not callable(getattr(secret_manager, "resolve_secret", None)):
+            raise ValueError("secret_manager must support secret resolution")
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128
+        ):
+            raise ValueError("tenant_id is invalid")
+        if principal_id is not None and (
+            not isinstance(principal_id, str) or not principal_id.strip() or len(principal_id) > 128
+        ):
+            raise ValueError("principal_id is invalid")
         if environ is not None and not isinstance(environ, dict):
             raise ValueError("environ must be a mapping of environment names to values")
         if (
@@ -116,6 +129,9 @@ class ProviderHTTPConnectivityProbe:
         self.environ = os.environ if environ is None else environ
         self.opener = opener or build_opener(_RejectRedirects())
         self.max_response_bytes = max_response_bytes
+        self.secret_manager = secret_manager
+        self.tenant_id = tenant_id
+        self.principal_id = principal_id
 
     def __call__(self, provider: dict[str, Any], *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         if not isinstance(provider, dict):
@@ -160,16 +176,40 @@ class ProviderHTTPConnectivityProbe:
             raise ProviderAuthenticationVerificationRequired(
                 "configure a documented endpoint that validates provider authentication"
             )
+        secret_lease = None
+        auth_header_name = None
         if credentialed_auth:
-            token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env") or self._DEFAULT_TOKEN_ENV.get(
-                str(provider.get("id", "")).casefold()
-            )
-            if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
-                raise PermissionError("credential environment reference is not configured")
-            token = self.environ.get(token_env)
+            secret_ref = provider.get("secret_ref")
+            if secret_ref is not None:
+                if self.secret_manager is None:
+                    raise PermissionError("managed provider credential is unavailable")
+                try:
+                    secret_lease = self.secret_manager.resolve_secret(
+                        secret_ref,
+                        provider_id=str(provider.get("id", "")),
+                        purpose="connectivity_probe",
+                        tenant_id=self.tenant_id,
+                        principal_id=self.principal_id,
+                    )
+                    token = secret_lease.reveal()
+                except Exception:
+                    if secret_lease is not None:
+                        secret_lease.close()
+                    raise PermissionError("managed provider credential is unavailable") from None
+            else:
+                token_env = provider.get("token_env") or provider.get("api_key_env") or provider.get("credential_env") or self._DEFAULT_TOKEN_ENV.get(
+                    str(provider.get("id", "")).casefold()
+                )
+                if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,79}", token_env):
+                    raise PermissionError("credential environment reference is not configured")
+                token = self.environ.get(token_env)
             if not isinstance(token, str) or not token.strip():
+                if secret_lease is not None:
+                    secret_lease.close()
                 raise PermissionError("provider credential is missing")
             if len(token) > 16384 or any(ord(char) < 32 or ord(char) == 127 for char in token):
+                if secret_lease is not None:
+                    secret_lease.close()
                 raise PermissionError("provider credential format is invalid")
             default_header, default_scheme = self._DEFAULT_AUTH.get(
                 str(provider.get("id", "")).casefold(), ("Authorization", "Bearer")
@@ -185,65 +225,85 @@ class ProviderHTTPConnectivityProbe:
                 or not re.fullmatch(r"[A-Za-z0-9-]{1,80}", header_name)
                 or header_name.casefold() not in allowed_auth_headers
             ):
+                if secret_lease is not None:
+                    secret_lease.close()
                 raise ValueError("provider auth header name is not permitted")
-            # Basic auth needs a separate username/password encoder; do not mislabel a raw token as Basic credentials.
             allowed_auth_schemes = {"", "bearer", "key", "token"}
             if (
                 not isinstance(auth_scheme, str)
                 or auth_scheme.casefold() not in allowed_auth_schemes
             ):
+                if secret_lease is not None:
+                    secret_lease.close()
                 raise ValueError("provider auth scheme is not permitted")
+            auth_header_name = header_name
             headers[header_name] = f"{auth_scheme} {token}" if auth_scheme else token
 
-        request = Request(endpoint.strip(), headers=headers, method="GET")
-        try:
-            response = self.opener.open(request, timeout=timeout_value)
-        except HTTPError as exc:
-            status_code = exc.code
-            # Cleanup failures must not replace the safe HTTP status classification.
-            try:
-                exc.close()
-            except Exception:
-                pass
-            if status_code in {401, 403}:
-                raise ProviderHTTPAuthError(status_code) from None
-            if 300 <= status_code < 400:
-                raise ConnectionError("provider endpoint redirected; redirects are not followed") from None
-            retry_after = None
-            try:
-                raw_retry_after = exc.headers.get("Retry-After") if exc.headers else None
-                if (
-                    isinstance(raw_retry_after, str)
-                    and len(raw_retry_after) <= 128
-                    and not any(ord(char) < 32 or ord(char) == 127 for char in raw_retry_after)
-                ):
-                    retry_after = raw_retry_after
-            except Exception:
-                retry_after = None
-            raise ProviderHTTPStatusError(status_code, retry_after) from None
-        except URLError as exc:
-            reason = getattr(exc, "reason", None)
-            if isinstance(reason, TimeoutError) or "timeout" in type(reason).__name__.casefold():
-                raise TimeoutError("provider probe timed out") from None
-            raise ConnectionError("provider endpoint is unreachable") from None
+        def clear_credential() -> None:
+            nonlocal secret_lease
+            if auth_header_name is not None:
+                headers[auth_header_name] = ""
+            if secret_lease is not None:
+                secret_lease.close()
+                secret_lease = None
 
+        request = None
         try:
-            status = response.getcode() if callable(getattr(response, "getcode", None)) else getattr(response, "status", None)
-            if not isinstance(status, int) or not 200 <= status < 300:
-                raise ConnectionError("provider did not return a successful HTTP status")
-            # Bound any response read and never return or log response content.
-            response.read(self.max_response_bytes + 1)
-            result = {"ok": True, "http_status": status}
-            if credentialed_auth:
-                result["authentication_verified"] = True
-            return result
-        finally:
-            # A custom response object may expose a failing close property or
-            # raise during cleanup. Cleanup must not mask the probe's actual
-            # HTTP/authentication result or exception.
+            request = Request(endpoint.strip(), headers=headers, method="GET")
             try:
-                close = getattr(response, "close", None)
-                if callable(close):
-                    close()
+                response = self.opener.open(request, timeout=timeout_value)
+            except HTTPError as exc:
+                clear_credential()
+                status_code = exc.code
+                try:
+                    exc.close()
+                except Exception:
+                    pass
+                if status_code in {401, 403}:
+                    raise ProviderHTTPAuthError(status_code) from None
+                if 300 <= status_code < 400:
+                    raise ConnectionError("provider endpoint redirected; redirects are not followed") from None
+                retry_after = None
+                try:
+                    raw_retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                    if (
+                        isinstance(raw_retry_after, str)
+                        and len(raw_retry_after) <= 128
+                        and not any(ord(char) < 32 or ord(char) == 127 for char in raw_retry_after)
+                    ):
+                        retry_after = raw_retry_after
+                except Exception:
+                    retry_after = None
+                raise ProviderHTTPStatusError(status_code, retry_after) from None
+            except URLError as exc:
+                clear_credential()
+                reason = getattr(exc, "reason", None)
+                if isinstance(reason, TimeoutError) or "timeout" in type(reason).__name__.casefold():
+                    raise TimeoutError("provider probe timed out") from None
+                raise ConnectionError("provider endpoint is unreachable") from None
             except Exception:
-                pass
+                clear_credential()
+                raise
+            try:
+                status = response.getcode() if callable(getattr(response, "getcode", None)) else getattr(response, "status", None)
+                if not isinstance(status, int) or not 200 <= status < 300:
+                    raise ConnectionError("provider did not return a successful HTTP status")
+                response.read(self.max_response_bytes + 1)
+                result = {"ok": True, "http_status": status}
+                if credentialed_auth:
+                    result["authentication_verified"] = True
+                return result
+            finally:
+                try:
+                    close = getattr(response, "close", None)
+                    if callable(close):
+                        close()
+                except Exception:
+                    pass
+        finally:
+            if request is not None and auth_header_name is not None:
+                try:
+                    request.remove_header(auth_header_name)
+                except Exception:
+                    pass
+            clear_credential()

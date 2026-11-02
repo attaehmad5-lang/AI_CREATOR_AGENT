@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from typing import Any
+import inspect
 import re
 import time
 
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
+from .secrets_manager import SecretManagerError
 
 
 class ProviderService:
@@ -39,11 +41,18 @@ class ProviderService:
         slo_manager: Any | None = None,
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
+        secret_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
         if tenant_isolation_manager is not None and authorization_manager is None:
             raise ValueError("tenant isolation requires authorization_manager")
+        resolved_secret_manager = secret_manager or getattr(connection_manager, "secret_manager", None)
+        if resolved_secret_manager is not None and (
+            not callable(getattr(resolved_secret_manager, "resolve_secret", None))
+            or not callable(getattr(resolved_secret_manager, "rotate_secret", None))
+        ):
+            raise ValueError("secret_manager must support secret resolution and rotation")
         expected = (
             (routing_manager, "route", "routing_manager"),
             (health_manager, "record_result", "health_manager"),
@@ -99,6 +108,7 @@ class ProviderService:
         self.slo_manager = slo_manager
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
+        self.secret_manager = resolved_secret_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -458,6 +468,78 @@ class ProviderService:
             "health": health,
         }
 
+    def rotate_provider_secret(
+        self,
+        provider_id: str,
+        *,
+        idempotency_key: str,
+        confirmed: bool,
+        principal_id: str | None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Rotate a provider secret through its configured vault after admin approval."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_REQUIRED", "rotated": False}
+        authorization = self._authorize_operation(
+            principal_id, "provider.credentials.rotate"
+        )
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "rotated": False}
+        if self.secret_manager is None:
+            return {"status": "SECRET_MANAGER_UNAVAILABLE", "rotated": False}
+        if self.tenant_isolation_manager is not None and (
+            getattr(self.secret_manager, "tenant_isolation_manager", None)
+            is not self.tenant_isolation_manager
+        ):
+            return {"status": "TENANT_CREDENTIAL_AUTHORIZATION_NOT_CONFIGURED", "rotated": False}
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER_ID", "rotated": False}
+        try:
+            provider = self.connection_manager.get_provider(provider_id)
+        except Exception as exc:
+            return {"status": "PROVIDER_LOOKUP_FAILED", "rotated": False, "error_type": type(exc).__name__}
+        if not isinstance(provider, dict):
+            return {"status": "PROVIDER_NOT_FOUND", "rotated": False}
+        secret_ref = provider.get("secret_ref")
+        if not isinstance(secret_ref, str):
+            return {"status": "PROVIDER_SECRET_REFERENCE_REQUIRED", "rotated": False}
+        try:
+            result = self.secret_manager.rotate_secret(
+                secret_ref,
+                provider_id=provider_id,
+                idempotency_key=idempotency_key,
+                principal_id=principal_id,
+                confirmed=confirmed,
+                tenant_id=tenant_id,
+            )
+        except Exception as exc:
+            return {
+                "status": "SECRET_ROTATION_FAILED",
+                "rotated": False,
+                "error_type": type(exc).__name__,
+            }
+        if (
+            not isinstance(result, dict)
+            or result.get("rotated") is not True
+            or result.get("status") != "SECRET_ROTATED"
+        ):
+            candidate_status = result.get("status") if isinstance(result, dict) else None
+            safe_status = (
+                candidate_status
+                if isinstance(candidate_status, str)
+                and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", candidate_status)
+                else "INVALID_ROTATION_RESPONSE"
+            )
+            return {"status": safe_status, "rotated": False}
+        return {
+            "status": "PROVIDER_SECRET_ROTATED",
+            "rotated": True,
+            "provider_id": provider_id,
+            "backend": result.get("backend"),
+            **({"version_id": result["version_id"]} if isinstance(result.get("version_id"), str) else {}),
+            **({"rotated_at": result["rotated_at"]} if isinstance(result.get("rotated_at"), str) else {}),
+        }
+
     def verify_http_provider(
         self,
         provider_id: str,
@@ -467,6 +549,7 @@ class ProviderService:
         opener: Any = None,
         max_response_bytes: int = 4096,
         principal_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify a configured allowlisted HTTPS endpoint using the built-in safe probe.
 
@@ -486,6 +569,9 @@ class ProviderService:
                 environ=environ,
                 opener=opener,
                 max_response_bytes=max_response_bytes,
+                secret_manager=self.secret_manager,
+                tenant_id=tenant_id,
+                principal_id=principal_id,
             )
         except Exception as exc:
             return {
@@ -841,6 +927,7 @@ class ProviderService:
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
         require_modality_binding: bool = False,
+        use_managed_credential: bool = False,
         require_fresh_health_check: bool = False,
         health_stale_after_seconds: float = 300.0,
         health_max_latency_ms: float | None = None,
@@ -855,6 +942,8 @@ class ProviderService:
             return {"status": "INVALID_ADAPTER", "executed": False}
         if not isinstance(adapter_options, (dict, type(None))):
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
+        if not isinstance(use_managed_credential, bool):
+            return {"status": "INVALID_MANAGED_CREDENTIAL_POLICY", "executed": False}
         if not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST_ID", "executed": False}
         if not isinstance(category, str) or not category.strip():
@@ -1119,6 +1208,93 @@ class ProviderService:
         options = dict(adapter_options or {})
         options["provider_id"] = provider_id
         options["request_id"] = request_id
+        secret_lease = None
+        if use_managed_credential:
+            try:
+                adapter_parameters = inspect.signature(adapter).parameters.values()
+                supports_managed_lease = any(
+                    parameter.name == "provider_credential_lease"
+                    or parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in adapter_parameters
+                )
+            except (TypeError, ValueError):
+                supports_managed_lease = False
+            if not supports_managed_lease:
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "ADAPTER_MANAGED_CREDENTIAL_CONTRACT_UNSUPPORTED",
+                    "executed": False,
+                    "provider": provider_id,
+                    "release": released,
+                }
+            if self.tenant_isolation_manager is not None and (
+                getattr(self.secret_manager, "tenant_isolation_manager", None)
+                is not self.tenant_isolation_manager
+            ):
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "TENANT_CREDENTIAL_AUTHORIZATION_NOT_CONFIGURED",
+                    "executed": False,
+                    "provider": provider_id,
+                    "release": released,
+                }
+            if self.secret_manager is None:
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "SECRET_MANAGER_UNAVAILABLE",
+                    "executed": False,
+                    "provider": provider_id,
+                    "release": released,
+                }
+            if "provider_credential" in options or "provider_credential_lease" in options:
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED",
+                    "executed": False,
+                    "provider": provider_id,
+                    "release": released,
+                }
+            try:
+                provider_record = self.connection_manager.get_provider(provider_id)
+                secret_ref = provider_record.get("secret_ref") if isinstance(provider_record, dict) else None
+                if not isinstance(secret_ref, str):
+                    raise SecretManagerError("PROVIDER_SECRET_REFERENCE_REQUIRED")
+                secret_lease = self.secret_manager.resolve_secret(
+                    secret_ref,
+                    provider_id=provider_id,
+                    purpose="provider_execution",
+                    tenant_id=tenant_id,
+                    principal_id=principal_id,
+                )
+                options["provider_credential_lease"] = secret_lease
+            except Exception as exc:
+                if secret_lease is not None:
+                    secret_lease.close()
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                safe_status = getattr(exc, "status", None)
+                if not isinstance(safe_status, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", safe_status):
+                    safe_status = "MANAGED_SECRET_RESOLUTION_FAILED"
+                return {
+                    "status": safe_status,
+                    "executed": False,
+                    "provider": provider_id,
+                    "release": released,
+                }
         started_at = time.monotonic()
         try:
             adapter_result = adapter(**options)
@@ -1180,6 +1356,11 @@ class ProviderService:
                 "incident": incident_result,
                 "retry_decision": {"retry": False, "reason": reason},
             }
+        finally:
+            if secret_lease is not None:
+                options.pop("provider_credential_lease", None)
+                secret_lease.close()
+                secret_lease = None
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
