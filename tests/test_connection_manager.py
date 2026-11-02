@@ -1,11 +1,16 @@
 import json
+import shutil
 import tempfile
+from types import SimpleNamespace
 import threading
 import unittest
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
-from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.connection_manager import (
+    MODALITY_CONTRACTS, MODALITY_OUTPUT_KINDS, ConnectionManager,
+)
+from projects.provider_store.output_validator import ProviderOutputValidator
 
 
 def _set_provider_state_in_process(args):
@@ -1712,6 +1717,91 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "DISABLED")
         self.assertFalse(result["verified"])
         self.assertFalse(probe_called)
+
+
+
+
+class ModalityBindingTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.catalog_path = self.root / "provider_catalog.json"
+        self.state_path = self.root / "connection_state.json"
+        providers = [
+            {"id": "img", "auth_type": "NONE", "category": "image", "enabled": True},
+            {"id": "edit", "auth_type": "NONE", "category": "Image-Editing", "enabled": True},
+            {"id": "vid", "auth_type": "NONE", "category": "video", "enabled": True},
+            {"id": "mus", "auth_type": "NONE", "category": "music", "enabled": True},
+            {"id": "dub", "auth_type": "NONE", "category": "dubbing", "enabled": True},
+            {"id": "holo", "auth_type": "NONE", "category": "hologram", "enabled": True},
+        ]
+        self.catalog_path.write_text(json.dumps({"providers": providers}), encoding="utf-8")
+        self.state_path.write_text(json.dumps({"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}), encoding="utf-8")
+        self.manager = ConnectionManager(self.catalog_path, self.state_path)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_binding_reports_contract_and_output_modalities(self):
+        expected = {
+            "img": (["image"], [["generate_image"]]),
+            "vid": (["video"], [["generate_video"]]),
+            "mus": (["audio"], [["generate_music"]]),
+            "dub": (["audio", "video"], [["dub"]]),
+        }
+        for provider_id, (kinds, methods) in expected.items():
+            with self.subTest(provider=provider_id):
+                binding = self.manager.get_modality_binding(provider_id)
+                self.assertEqual(binding["status"], "VALID")
+                self.assertTrue(binding["valid"])
+                self.assertEqual(binding["output_modalities"], kinds)
+                self.assertEqual(binding["contract_methods"], methods)
+                self.assertEqual(binding["runtime_contract"], "NOT_LOADED")
+
+    def test_binding_normalizes_category_spelling(self):
+        binding = self.manager.get_modality_binding("edit")
+        self.assertEqual(binding["category"], "image_editing")
+        self.assertEqual(binding["output_modalities"], ["image"])
+
+    def test_binding_rejects_unknown_provider_and_unsupported_category(self):
+        self.assertEqual(self.manager.get_modality_binding("missing")["status"], "NOT_FOUND")
+        unsupported = self.manager.get_modality_binding("holo")
+        self.assertEqual(unsupported["status"], "UNSUPPORTED_MODALITY")
+        self.assertFalse(unsupported["valid"])
+        self.assertNotIn("output_modalities", unsupported)
+
+    def test_loaded_instance_must_still_satisfy_its_contract(self):
+        instance = SimpleNamespace(generate_image=lambda *args, **kwargs: None)
+        self.assertEqual(self.manager.load_provider("img", lambda metadata: instance)["status"], "LOADED")
+        self.assertEqual(self.manager.get_modality_binding("img")["runtime_contract"], "VALID")
+        instance.generate_image = None
+        broken = self.manager.get_modality_binding("img")
+        self.assertEqual(broken["status"], "CONTRACT_VIOLATION")
+        self.assertFalse(broken["valid"])
+        self.assertNotIn("output_modalities", broken)
+
+    def test_contract_and_output_tables_are_consistent(self):
+        self.assertEqual(set(MODALITY_CONTRACTS), set(MODALITY_OUTPUT_KINDS))
+        validator_modalities = set(ProviderOutputValidator.EXTENSIONS)
+        for category, kinds in MODALITY_OUTPUT_KINDS.items():
+            with self.subTest(category=category):
+                self.assertTrue(kinds)
+                self.assertLessEqual(kinds, validator_modalities)
+                self.assertTrue(MODALITY_CONTRACTS[category])
+                for alternatives in MODALITY_CONTRACTS[category]:
+                    self.assertTrue(alternatives)
+                    self.assertTrue(all(isinstance(name, str) and name for name in alternatives))
+
+    def test_every_category_in_the_shipped_catalog_has_a_binding(self):
+        shipped = Path(__file__).resolve().parents[1] / "projects" / "provider_store" / "provider_catalog.json"
+        copy = self.root / "shipped_catalog.json"
+        shutil.copyfile(shipped, copy)
+        manager = ConnectionManager(copy, self.state_path)
+        providers = manager.list_providers()
+        self.assertGreater(len(providers), 0)
+        for provider in providers:
+            with self.subTest(provider=provider.get("id")):
+                self.assertEqual(manager.get_modality_binding(provider["id"])["status"], "VALID")
 
 
 if __name__ == "__main__":

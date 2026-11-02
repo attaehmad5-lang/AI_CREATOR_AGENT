@@ -1,5 +1,7 @@
 # Task #25 — Provider Connection Manager Verification Audit
 
+> **Superseded snapshot.** Historical test counts, PR references and dispositions in this file are not the current status. Use [TASK25_CANONICAL_138_ITEM_LEDGER.md](TASK25_CANONICAL_138_ITEM_LEDGER.md) as the canonical Task 25 ledger; do not infer completion from this snapshot.
+
 **Follow-up branch:** `task-25-followup-audit`  
 **Pull request:** #1 (merged; follow-up work requires a new branch/PR)  
 **Audit status:** In progress — do not mark Task #25 complete yet.

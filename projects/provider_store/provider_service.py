@@ -469,6 +469,10 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        require_modality_binding: bool = False,
+        require_fresh_health_check: bool = False,
+        health_stale_after_seconds: float = 300.0,
+        health_max_latency_ms: float | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
@@ -551,6 +555,63 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+
+        if not isinstance(require_modality_binding, bool):
+            release = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id, request_id=request_id
+            )
+            return {"status": "INVALID_MODALITY_BINDING_POLICY", "executed": False, "release": release}
+        if require_modality_binding:
+            binding_fn = getattr(self.connection_manager, "get_modality_binding", None)
+            if not callable(binding_fn):
+                binding = {"valid": False, "status": "MODALITY_BINDING_UNAVAILABLE"}
+            else:
+                try:
+                    binding = binding_fn(provider_id)
+                except Exception as exc:
+                    binding = {"valid": False, "status": "MODALITY_BINDING_CHECK_FAILED", "error_type": type(exc).__name__}
+            requested_modality = modality.strip().casefold() if isinstance(modality, str) else None
+            allowed_modalities = binding.get("output_modalities") if isinstance(binding, dict) else None
+            binding_valid = isinstance(binding, dict) and binding.get("valid") is True and isinstance(allowed_modalities, list)
+            if not binding_valid or requested_modality not in allowed_modalities:
+                release = self.release_unstarted_request(project_id=project_id, provider_id=provider_id, request_id=request_id)
+                safe_binding = {
+                    "valid": False,
+                    "status": binding.get("status") if isinstance(binding, dict) and isinstance(binding.get("status"), str) else "INVALID_MODALITY_BINDING_RESPONSE",
+                }
+                if binding_valid:
+                    safe_binding["category"] = binding.get("category")
+                    safe_binding["output_modalities"] = list(allowed_modalities)
+                    safe_binding["requested_modality"] = requested_modality[:64] if requested_modality is not None else None
+                return {
+                    "status": "MODALITY_MISMATCH" if binding_valid else "PROVIDER_MODALITY_REJECTED",
+                    "executed": False, "provider": provider_id, "modality_binding": safe_binding, "release": release,
+                }
+
+        if not isinstance(require_fresh_health_check, bool):
+            release = self.release_unstarted_request(project_id=project_id, provider_id=provider_id, request_id=request_id)
+            return {"status": "INVALID_HEALTH_CHECK_POLICY", "executed": False, "release": release}
+        if require_fresh_health_check:
+            health_fn = getattr(self.health_manager, "is_eligible", None) if self.health_manager is not None else None
+            if not callable(health_fn):
+                health = {"eligible": False, "status": "HEALTH_CHECK_UNAVAILABLE"}
+            else:
+                try:
+                    health = health_fn(
+                        provider_id, stale_after_seconds=health_stale_after_seconds,
+                        max_latency_ms=health_max_latency_ms,
+                    )
+                except Exception as exc:
+                    health = {"eligible": False, "status": "HEALTH_CHECK_FAILED", "error_type": type(exc).__name__}
+            if not isinstance(health, dict) or health.get("eligible") is not True:
+                release = self.release_unstarted_request(project_id=project_id, provider_id=provider_id, request_id=request_id)
+                safe_health = {
+                    "eligible": False,
+                    "status": health.get("status") if isinstance(health, dict) and isinstance(health.get("status"), str) else "INVALID_HEALTH_CHECK_RESPONSE",
+                }
+                if isinstance(health, dict) and isinstance(health.get("reason"), str):
+                    safe_health["reason"] = health["reason"][:80]
+                return {"status": "PROVIDER_HEALTH_REJECTED", "executed": False, "provider": provider_id, "health": safe_health, "release": release}
 
         data_policy_result = None
         if self.data_handling_policy is not None:
