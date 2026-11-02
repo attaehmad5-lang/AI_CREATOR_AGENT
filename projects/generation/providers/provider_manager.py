@@ -17,7 +17,7 @@ class ProviderManager:
     @staticmethod
     def _module_from_path(module_path: str) -> str:
         """Resolve only Python modules inside the trusted generation-provider package."""
-        if not isinstance(module_path, str) or not module_path or "\\\\" in module_path:
+        if not isinstance(module_path, str) or not module_path or "\\" in module_path:
             raise ValueError("Invalid provider module path")
         path = PurePosixPath(module_path)
         if path.is_absolute() or any(part in ("", ".", "..") for part in path.parts):

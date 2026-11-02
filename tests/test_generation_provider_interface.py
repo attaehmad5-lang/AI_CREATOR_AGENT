@@ -47,8 +47,55 @@ class ProviderInterfaceEdgeCaseTests(unittest.TestCase):
                 self.assertNotIn("private provider details", repr(caught.exception.__cause__))
                 self.assertEqual(manager.providers, {})
 
+    def test_register_accepts_legacy_and_explicit_supported_versions(self):
+        class LegacyProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        class VersionedProvider:
+            PROVIDER_INTERFACE_VERSION = "1.0"
+            def generate_image(self, prompt, output_path):
+                return None
+
+        for provider_class in (LegacyProvider, VersionedProvider):
+            with self.subTest(provider_class=provider_class.__name__):
+                manager = ProviderManager()
+                with patch(
+                    "projects.generation.providers.provider_manager.importlib.import_module",
+                    return_value=SimpleNamespace(CandidateProvider=provider_class),
+                ):
+                    registered = manager.register("Candidate", "projects.generation.providers.candidate", "CandidateProvider")
+                self.assertIs(registered, manager.get("Candidate"))
+                self.assertTrue(callable(registered.generate_image))
+
+    def test_registry_activation_preserves_existing_providers_on_failure(self):
+        existing = object()
+        manager = ProviderManager()
+        manager.providers = {"Existing": existing}
+        class ValidProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+        class InvalidProvider:
+            PROVIDER_INTERFACE_VERSION = 2
+            def generate_image(self, prompt, output_path):
+                return None
+        modules = {
+            "projects.generation.providers.valid": SimpleNamespace(ValidProvider=ValidProvider),
+            "projects.generation.providers.invalid": SimpleNamespace(InvalidProvider=InvalidProvider),
+        }
+        with patch(
+            "projects.generation.providers.provider_manager.importlib.import_module",
+            side_effect=lambda name: modules[name],
+        ):
+            with self.assertRaises(ValueError):
+                manager.load_registry({"provider_modules": {
+                    "Valid": "projects/generation/providers/valid.py",
+                    "Invalid": "projects/generation/providers/invalid.py",
+                }})
+        self.assertEqual(manager.providers, {"Existing": existing})
+
     def test_unsafe_module_paths_are_rejected(self):
-        for value in ("../outside.py", "/tmp/provider.py", "projects/generation/providers/../outside.py", "projects/other/provider.py"):
+        for value in ("../outside.py", "/tmp/provider.py", "projects/generation/providers/../outside.py", "projects/other/provider.py", "projects\\generation\\providers\\candidate.py"):
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):
                     ProviderManager._module_from_path(value)
