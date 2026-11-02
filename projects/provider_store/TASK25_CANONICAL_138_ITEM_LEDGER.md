@@ -214,7 +214,7 @@ These changes advance only their documented item scopes. The canonical 138-item 
 | 119 | 🔴 | Multi-Project/Multi-Tenant Provider Policies | OPEN | Complete multi-tenant provider policy isolation is not implemented. |
 | 120 | 🔴 | Tenant Isolation for Credentials, Quotas and Job Data | OPEN | Credential, quota and job data tenant isolation is not implemented. |
 | 121 | 🔴 | Separate User/Project/Tenant Usage Limits | PARTIAL | Project quotas exist; distinct user/project/tenant limits are not fully implemented. |
-| 122 | 🔴 | Fair Scheduling and Workload Prioritization | OPEN | Fair scheduling and priority queues are not implemented. |
+| 122 | 🔴 | Fair Scheduling and Workload Prioritization | PARTIAL | `ProviderJobManager` now defaults to persisted per-project round-robin claiming, so one project cannot consume every claim while another project remains queued; priority is retained within each project's queue. Legacy GLOBAL_PRIORITY mode remains selectable and old state files migrate safely. Cross-tenant fairness, weighted service classes, workload-cost fairness and sustained multi-worker/load validation remain open. |
 | 123 | 🔴 | Provider/Regional Outage Handling | PARTIAL | Health and fallback primitives exist; region-wide outage handling is not integrated. |
 | 124 | 🔴 | Disaster Recovery and Restore Procedures | PARTIAL | Catalog restore and atomic persistence exist; full disaster recovery/restore drills are not verified. |
 | 125 | 🔴 | Degraded Mode During Partial Service Outages | OPEN | Explicit degraded-mode orchestration is not implemented. |
