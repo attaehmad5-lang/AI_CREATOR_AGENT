@@ -36,6 +36,7 @@ class BudgetAlertManager:
         thresholds: tuple[float, ...] = (0.5, 0.8, 1.0),
         clock: Any = None,
         max_delivery_attempts: int = 5,
+        max_events: int = 100_000,
         retry_base_seconds: float = 30.0,
         retry_max_seconds: float = 900.0,
         dispatch_lease_seconds: int = 120,
@@ -58,6 +59,8 @@ class BudgetAlertManager:
             or not 1 <= max_delivery_attempts <= 20
         ):
             raise ValueError("max_delivery_attempts must be within 1..20")
+        if isinstance(max_events, bool) or not isinstance(max_events, int) or not 1 <= max_events <= 1_000_000:
+            raise ValueError("max_events must be within 1..1000000")
         base = finite_number(retry_base_seconds, minimum=0)
         maximum = finite_number(retry_max_seconds, minimum=0)
         if base is None or base <= 0 or maximum is None or maximum < base or maximum > 86400:
@@ -73,6 +76,7 @@ class BudgetAlertManager:
         self.thresholds = tuple(normalized)
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.max_delivery_attempts = max_delivery_attempts
+        self.max_events = max_events
         self.retry_base_seconds = float(base)
         self.retry_max_seconds = float(maximum)
         self.dispatch_lease_seconds = dispatch_lease_seconds
@@ -117,8 +121,9 @@ class BudgetAlertManager:
             not isinstance(loaded, dict)
             or loaded.get("version", "1.0") != "1.0"
             or not isinstance(loaded.get("events"), dict)
+            or len(loaded.get("events", {})) > self.max_events
         ):
-            raise ValueError("invalid budget alert state schema")
+            raise ValueError("invalid budget alert state schema or event limit")
         for event_id, event in loaded["events"].items():
             if (
                 not isinstance(event_id, str)
@@ -243,6 +248,7 @@ class BudgetAlertManager:
         timestamp = now.isoformat()
         alerts = []
         with self._transaction():
+            candidates = []
             for threshold in self.thresholds:
                 if ratio < threshold:
                     continue
@@ -252,6 +258,11 @@ class BudgetAlertManager:
                 if budget_period_id is not None:
                     identity += f"\0{budget_period_id}"
                 event_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+                candidates.append((threshold, event_id))
+            new_events = sum(event_id not in self.data["events"] for _, event_id in candidates)
+            if len(self.data["events"]) + new_events > self.max_events:
+                return {"status": "ALERT_STORE_LIMIT_REACHED", "project_id": project_id, "alerts": []}
+            for threshold, event_id in candidates:
                 event = self.data["events"].get(event_id)
                 if event is None:
                     event = {
