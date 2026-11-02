@@ -28,6 +28,79 @@ class ProviderJobManagerTests(unittest.TestCase):
             payload_ref=f"payload:{job_id}", priority=priority,
         )
 
+    def test_persisted_running_job_requires_well_formed_lease_token(self):
+        self.submit("job-1")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["jobs"]["job-1"]["lease_token"] = "bad-token"
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "provider job record"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
+    def test_persisted_running_job_requires_lease_identity_pair(self):
+        self.submit("job-1")
+        self.manager.claim_next(worker_id="worker-1")
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["jobs"]["job-1"]["lease_token"] = None
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "provider job record"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
+    def test_persisted_running_job_requires_valid_worker_id(self):
+        self.submit("job-1")
+        self.manager.claim_next(worker_id="worker-1")
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["jobs"]["job-1"]["worker_id"] = "../invalid"
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "provider job record"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
+    def test_persisted_running_job_accepts_valid_lease_identity(self):
+        self.submit("job-1")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertEqual(reloaded.data["jobs"]["job-1"]["worker_id"], "worker-1")
+        self.assertEqual(
+            reloaded.data["jobs"]["job-1"]["lease_token"],
+            claimed["job"]["lease_token"],
+        )
+
+    def test_completed_job_clears_worker_lease_identity(self):
+        self.submit("job-1")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        completed = self.manager.complete(
+            job_id="job-1", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+        self.assertEqual(completed["status"], "JOB_COMPLETED")
+        self.assertIsNone(completed["job"]["worker_id"])
+        self.assertIsNone(completed["job"]["lease_token"])
+        reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertEqual(reloaded.data["jobs"]["job-1"]["status"], "FAILED")
+
+    def test_legacy_terminal_job_worker_id_remains_backward_compatible(self):
+        self.submit("job-1")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.manager.complete(
+            job_id="job-1", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["jobs"]["job-1"]["worker_id"] = "worker-1"
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertEqual(reloaded.data["jobs"]["job-1"]["worker_id"], "worker-1")
+        self.assertIsNone(reloaded.data["jobs"]["job-1"]["lease_token"])
+
+    def test_persisted_queued_job_accepts_null_lease_token(self):
+        self.submit("job-1")
+        reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertIsNone(reloaded.data["jobs"]["job-1"].get("lease_token"))
+        self.assertIsNone(reloaded.data["jobs"]["job-1"].get("worker_id"))
+
     def test_job_history_capacity_preserves_terminal_idempotency_records(self):
         limited = ProviderJobManager(
             self.path, max_queue_size=2, max_concurrent=1,

@@ -105,6 +105,24 @@ class ProviderJobManager:
                 or not isinstance(job.get("project_id"), str)
                 or not isinstance(job.get("provider_id"), str)
                 or not isinstance(job.get("payload_ref"), str)
+                or not isinstance(job.get("worker_id"), (str, type(None)))
+                or (
+                    job.get("worker_id") is not None
+                    and not _ID_RE.fullmatch(job["worker_id"])
+                )
+                or not isinstance(job.get("lease_token"), (str, type(None)))
+                or (
+                    job.get("lease_token") is not None
+                    and not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", job["lease_token"])
+                )
+                or (
+                    job.get("status") == "RUNNING"
+                    and (job.get("worker_id") is None or job.get("lease_token") is None)
+                )
+                or (
+                    job.get("status") != "RUNNING"
+                    and job.get("lease_token") is not None
+                )
                 or (
                     job.get("tenant_id") is not None
                     and (
@@ -393,6 +411,7 @@ class ProviderJobManager:
             job["updated_at"] = now
             job["lease_until"] = None
             job["lease_token"] = None
+            job["worker_id"] = None
             self._save()
             return {"status": "JOB_COMPLETED", "saved": True, "job": dict(job)}
 
