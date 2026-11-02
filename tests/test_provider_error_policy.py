@@ -95,7 +95,7 @@ class ProviderErrorPolicyTests(unittest.TestCase):
         self.assertEqual(result["category"], "billing")
         self.assertFalse(result["retryable"])
         self.assertEqual(
-            result["action"], "record_reported_usage_and_do_not_retry_or_fallback"
+            result["action"], "retain_reservation_and_reconcile_usage_before_retry_or_fallback"
         )
 
     def test_pollinations_codes_are_not_applied_to_other_providers(self):
