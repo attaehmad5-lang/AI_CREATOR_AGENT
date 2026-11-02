@@ -29,9 +29,13 @@ class _Opener:
         self.response = response or _Response()
         self.error = error
         self.calls = []
+        self.request_headers = []
 
     def open(self, request, timeout):
         self.calls.append((request, timeout))
+        self.request_headers.append({
+            key.casefold(): value for key, value in request.header_items()
+        })
         if self.error is not None:
             raise self.error
         return self.response
@@ -112,7 +116,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         })
         self.assertEqual(result["http_status"], 200)
         self.assertTrue(result["authentication_verified"])
-        self.assertEqual(opener.calls[0][0].get_header("Authorization"), f"Bearer {secret}")
+        self.assertEqual(opener.request_headers[0].get("authorization"), f"Bearer {secret}")
         self.assertNotIn(secret, repr(result))
 
     def test_provider_specific_auth_header_defaults_are_supported(self):
@@ -133,7 +137,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                     "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
                 })
                 self.assertTrue(result["ok"])
-                headers = {key.casefold(): value for key, value in opener.calls[0][0].header_items()}
+                headers = opener.request_headers[0]
                 self.assertEqual(headers[expected_header], expected_value)
 
     def test_http_probe_integrates_with_connection_manager_verified_state(self):
@@ -353,7 +357,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
         })
         self.assertTrue(result["ok"])
-        headers = {name.casefold(): value for name, value in opener.calls[0][0].header_items()}
+        headers = opener.request_headers[0]
         self.assertEqual(headers.get("x-goog-api-key"), secret)
         self.assertNotIn(secret, repr(result))
 
@@ -397,7 +401,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
         })
         self.assertTrue(result["ok"])
-        headers = {key.casefold(): value for key, value in opener.calls[0][0].header_items()}
+        headers = opener.request_headers[0]
         self.assertEqual(headers["authorization"], f"Bearer {secret}")
         self.assertNotIn(secret, repr(result))
 
@@ -435,7 +439,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 }
                 result = probe(metadata)
                 self.assertTrue(result["ok"], result)
-                headers = {key.casefold(): value for key, value in opener.calls[0][0].header_items()}
+                headers = opener.request_headers[0]
                 self.assertIn(provider.get("auth_header_name", "Authorization").casefold(), headers)
                 if provider["id"] == "anthropic_claude_script":
                     self.assertEqual(headers["anthropic-version"], "2023-06-01")
