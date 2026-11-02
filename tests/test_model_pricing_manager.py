@@ -292,11 +292,52 @@ class ProviderModelPricingRoutingTests(unittest.TestCase):
             result["decisions"],
         )
 
+
+    def test_paid_only_models_do_not_use_undifferentiated_free_credit_balance(self):
+        paid_manager = ProviderModelPricingManager(
+            fetcher=lambda url, timeout: {
+                "data": [{
+                    "id": "community/example/paid-model",
+                    "aliases": ["paid-model"],
+                    "category": "image",
+                    "paidOnly": True,
+                    "pricing": {"currency": "pollen", "completionImageTokens": 0.25},
+                }]
+            }
+        )
+        paid_manager.refresh_pollinations_catalog()
+        router = ProviderRoutingManager(
+            self.connections,
+            credit_manager=self.credits,
+            model_pricing_manager=paid_manager,
+            require_verified_connection=False,
+        )
+        result = router.route(
+            category="image",
+            project_id="film",
+            model="paid-model",
+            strategy="LOWEST_COST",
+            estimated_cost_unit="POLLEN",
+            pricing_usage={"completion_images": 1},
+            request_id="priced-route-paid-only",
+            paid_approved_providers={"pollinations"},
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "MODEL_PRICE_COMPARISON_INCOMPLETE")
+        self.assertIn(
+            {
+                "provider": "pollinations",
+                "status": "PAID_ONLY_MODEL_REQUIRES_PAID_CREDIT_GATE",
+            },
+            result["decisions"],
+        )
+
     def test_live_price_unit_mismatch_is_never_converted_implicitly(self):
         router = ProviderRoutingManager(
             self.connections,
             credit_manager=self.credits,
             model_pricing_manager=self.pricing,
+            require_verified_connection=False,
         )
         result = router.route(
             category="image",
