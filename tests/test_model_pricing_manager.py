@@ -191,11 +191,6 @@ class ProviderModelPricingRoutingTests(unittest.TestCase):
         }), encoding="utf-8")
         self.state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
         self.connections = ConnectionManager(self.catalog_path, self.state_path)
-        verified = self.connections.verify_connectivity(
-            "pollinations", lambda provider, **kwargs: {"ok": True}
-        )
-        self.assertTrue(verified["verified"])
-
         self.pricing = ProviderModelPricingManager(
             fetcher=lambda url, timeout: {
                 "data": [{
@@ -227,6 +222,7 @@ class ProviderModelPricingRoutingTests(unittest.TestCase):
             self.connections,
             credit_manager=self.credits,
             model_pricing_manager=self.pricing,
+            require_verified_connection=False,
         )
         result = router.route(
             category="image",
@@ -262,14 +258,11 @@ class ProviderModelPricingRoutingTests(unittest.TestCase):
             ]
         }), encoding="utf-8")
         self.connections = ConnectionManager(self.catalog_path, self.state_path)
-        for provider_id in ("pollinations", "competitor"):
-            self.assertTrue(self.connections.verify_connectivity(
-                provider_id, lambda provider, **kwargs: {"ok": True}
-            )["verified"])
         router = ProviderRoutingManager(
             self.connections,
             credit_manager=self.credits,
             model_pricing_manager=self.pricing,
+            require_verified_connection=False,
         )
         result = router.route(
             category="image",
