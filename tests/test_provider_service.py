@@ -141,9 +141,13 @@ class ProviderServiceTests(unittest.TestCase):
             def __init__(self):
                 self.response = Response()
                 self.calls = []
+                self.request_headers = []
 
             def open(self, request, timeout):
                 self.calls.append((request, timeout))
+                self.request_headers.append({
+                    key.casefold(): value for key, value in request.header_items()
+                })
                 return self.response
 
         catalog = self.root / "http-providers.json"
@@ -171,7 +175,7 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["health"]["status"], "HEALTHY")
         self.assertEqual(opener.calls[0][1], 1.5)
         self.assertEqual(
-            opener.calls[0][0].get_header("Authorization"), "Bearer do-not-persist"
+            opener.request_headers[0].get("authorization"), "Bearer do-not-persist"
         )
         self.assertTrue(opener.response.closed)
         self.assertNotIn("do-not-persist", state.read_text(encoding="utf-8"))
@@ -192,8 +196,12 @@ class ProviderServiceTests(unittest.TestCase):
             def __init__(self):
                 self.response = Response()
                 self.calls = []
+                self.request_headers = []
             def open(self, request, timeout):
                 self.calls.append((request, timeout))
+                self.request_headers.append({
+                    key.casefold(): value for key, value in request.header_items()
+                })
                 return self.response
 
         class OAuthStub:
@@ -222,7 +230,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.verify_oauth_provider("oauth_image", OAuthStub(), opener=opener)
         self.assertTrue(result["verified"])
         self.assertEqual(result["status"], "CONNECTED")
-        self.assertEqual(opener.calls[0][0].get_header("Authorization"), "Bearer oauth-access-secret")
+        self.assertEqual(opener.request_headers[0].get("authorization"), "Bearer oauth-access-secret")
         self.assertEqual(opener.calls[0][0].full_url, "https://api.example.com/health")
         self.assertEqual(manager.get_provider_configuration("oauth_image")["configuration"]["endpoint"], "https://api.example.com/generate")
         self.assertTrue(opener.response.closed)
