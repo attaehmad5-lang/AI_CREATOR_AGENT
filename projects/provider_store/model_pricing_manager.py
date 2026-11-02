@@ -5,7 +5,7 @@ called, and missing/unsupported price components are never treated as free.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import math
 from typing import Any, Callable
 
@@ -40,18 +40,6 @@ def _amount(value: Any) -> float | None:
     if not math.isfinite(amount) or amount < 0 or amount > 1e12:
         return None
     return amount
-
-
-def _utc(value: Any) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return None
-    return parsed.astimezone(timezone.utc)
 
 
 class ProviderModelPricingManager:
