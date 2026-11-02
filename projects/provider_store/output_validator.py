@@ -44,7 +44,8 @@ class ProviderOutputValidator:
 
     def __init__(
         self, *, min_size_bytes: int = 1, max_size_bytes: int = 1_000_000_000,
-        max_json_depth: int = 128,
+        max_json_depth: int = 128, max_image_dimension: int = 32768,
+        max_image_pixels: int = 100_000_000,
     ) -> None:
         if (
             not isinstance(min_size_bytes, int)
@@ -62,9 +63,113 @@ class ProviderOutputValidator:
             or max_json_depth > 4096
         ):
             raise ValueError("max_json_depth must be an integer between 1 and 4096")
+        for label, value in (
+            ("max_image_dimension", max_image_dimension),
+            ("max_image_pixels", max_image_pixels),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"{label} must be a positive integer")
         self.min_size_bytes = min_size_bytes
         self.max_size_bytes = max_size_bytes
         self.max_json_depth = max_json_depth
+        self.max_image_dimension = max_image_dimension
+        self.max_image_pixels = max_image_pixels
+
+    @staticmethod
+    def _image_dimensions(stream: Any, mime: str, file_size: int) -> tuple[int, int] | None:
+        """Read dimensions from bounded format headers; no image decompression is performed."""
+        if mime == "image/png":
+            if file_size < 24:
+                return None
+            stream.seek(8)
+            chunk_length = stream.read(4)
+            chunk_type = stream.read(4)
+            dimensions = stream.read(8)
+            if chunk_length == b"\\x00\\x00\\x00\\x0d" and chunk_type == b"IHDR" and len(dimensions) == 8:
+                return int.from_bytes(dimensions[:4], "big"), int.from_bytes(dimensions[4:], "big")
+            return None
+
+        if mime == "image/gif":
+            if file_size < 10:
+                return None
+            stream.seek(6)
+            dimensions = stream.read(4)
+            if len(dimensions) == 4:
+                return int.from_bytes(dimensions[:2], "little"), int.from_bytes(dimensions[2:], "little")
+            return None
+
+        if mime == "image/jpeg":
+            # JPEG dimensions are carried by a Start Of Frame segment. Inspect at
+            # most the first MiB and never read a segment beyond the declared file.
+            stream.seek(2)
+            scan_limit = min(file_size, 1024 * 1024)
+            sof_markers = {
+                0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+            }
+            while stream.tell() < scan_limit:
+                prefix = stream.read(1)
+                if prefix != b"\\xff":
+                    return None
+                marker_byte = stream.read(1)
+                while marker_byte == b"\\xff":
+                    marker_byte = stream.read(1)
+                if len(marker_byte) != 1:
+                    return None
+                marker = marker_byte[0]
+                if marker in {0xD9, 0xDA}:
+                    return None
+                if marker == 0xD8 or marker == 0x01 or 0xD0 <= marker <= 0xD7:
+                    continue
+                raw_length = stream.read(2)
+                if len(raw_length) != 2:
+                    return None
+                segment_length = int.from_bytes(raw_length, "big")
+                segment_end = stream.tell() + segment_length - 2
+                if segment_length < 2 or segment_end > file_size:
+                    return None
+                if marker in sof_markers:
+                    frame = stream.read(min(segment_length - 2, 5))
+                    if len(frame) < 5:
+                        return None
+                    height = int.from_bytes(frame[1:3], "big")
+                    width = int.from_bytes(frame[3:5], "big")
+                    return width, height
+                stream.seek(segment_end)
+            return None
+
+        if mime == "image/webp":
+            if file_size < 25:
+                return None
+            stream.seek(12)
+            chunk_type = stream.read(4)
+            chunk_size = int.from_bytes(stream.read(4), "little")
+            if chunk_size < 5 or 20 + chunk_size > file_size:
+                return None
+            stream.seek(20)
+            if chunk_type == b"VP8X":
+                header = stream.read(10)
+                if len(header) != 10:
+                    return None
+                width = 1 + int.from_bytes(header[4:7], "little")
+                height = 1 + int.from_bytes(header[7:10], "little")
+                return width, height
+            if chunk_type == b"VP8 ":
+                header = stream.read(10)
+                if len(header) != 10 or header[3:6] != b"\\x9d\\x01\\x2a":
+                    return None
+                width = int.from_bytes(header[6:8], "little") & 0x3FFF
+                height = int.from_bytes(header[8:10], "little") & 0x3FFF
+                return width, height
+            if chunk_type == b"VP8L":
+                header = stream.read(5)
+                if len(header) != 5 or header[0] != 0x2F:
+                    return None
+                width = 1 + header[1] + ((header[2] & 0x3F) << 8)
+                height = 1 + ((header[2] >> 6) | (header[3] << 2) | ((header[4] & 0x0F) << 10))
+                return width, height
+            return None
+        return None
 
     @staticmethod
     def _json_depth_within_limit(stream: Any, max_depth: int) -> bool:
@@ -131,10 +236,35 @@ class ProviderOutputValidator:
                 if size > self.max_size_bytes:
                     return {"valid": False, "status": "OUTPUT_TOO_LARGE", "size_bytes": size}
                 header = stream.read(32)
+                image_metadata: dict[str, Any] = {
+                    "image_dimensions_validated": False,
+                }
                 if normalized_modality in self.SIGNATURES:
                     mime = self._match_signature(normalized_modality, header)
                     if mime is None:
                         return {"valid": False, "status": "SIGNATURE_MISMATCH"}
+                    if normalized_modality == "image":
+                        dimensions = self._image_dimensions(stream, mime, size)
+                        if dimensions is not None:
+                            width, height = dimensions
+                            if width < 1 or height < 1:
+                                return {"valid": False, "status": "INVALID_IMAGE_DIMENSIONS"}
+                            if (
+                                width > self.max_image_dimension
+                                or height > self.max_image_dimension
+                                or width * height > self.max_image_pixels
+                            ):
+                                return {
+                                    "valid": False,
+                                    "status": "IMAGE_DIMENSIONS_EXCEEDED",
+                                    "width": width,
+                                    "height": height,
+                                }
+                            image_metadata = {
+                                "image_dimensions_validated": True,
+                                "width": width,
+                                "height": height,
+                            }
                 elif normalized_modality == "text":
                     stream.seek(0)
                     decoder = codecs.getincrementaldecoder("utf-8")()
@@ -197,6 +327,7 @@ class ProviderOutputValidator:
             "mime_type": mime,
             "size_bytes": size,
             "sha256": digest.hexdigest(),
+            **(image_metadata if normalized_modality == "image" else {}),
         }
 
     @classmethod
