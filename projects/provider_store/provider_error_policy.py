@@ -31,7 +31,8 @@ _TRANSIENT_CODES = {"temporarily_unavailable", "overloaded", "server_overloaded"
 # Provider-documented Pollinations codes from https://gen.pollinations.ai/docs.
 # These are allowlisted codes only; arbitrary provider response text is never parsed
 # into a public status or copied into logs/results.
-_POLLINATIONS_CREDIT_CODES = {"insufficient_balance", "key_budget_exhausted"}
+_POLLINATIONS_CREDIT_CODES = {"insufficient_balance"}
+_POLLINATIONS_KEY_BUDGET_CODES = {"key_budget_exhausted"}
 _POLLINATIONS_PAID_TIER_CODES = {"quest_pollen_only"}
 _POLLINATIONS_BILLED_FAILURE_CODES = {"output_token_limit_exceeded"}
 
@@ -93,6 +94,14 @@ def classify_provider_error(
                 "category": "credits_exhausted",
                 "retryable": False,
                 "action": "stop_paid_attempt_and_refresh_verified_balance",
+                "http_status": http_status,
+            }
+        if http_status == 402 and code in _POLLINATIONS_KEY_BUDGET_CODES:
+            return {
+                "status": "PROVIDER_KEY_BUDGET_EXHAUSTED",
+                "category": "billing",
+                "retryable": False,
+                "action": "stop_attempt_and_review_provider_api_key_budget",
                 "http_status": http_status,
             }
         if http_status == 402 and code in _POLLINATIONS_PAID_TIER_CODES:
