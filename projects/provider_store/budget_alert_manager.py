@@ -134,8 +134,10 @@ class BudgetAlertManager:
                 or finite_number(event.get("ratio"), minimum=0) is None
                 or not isinstance(event.get("request_id"), str)
                 or not event["request_id"].strip()
+                or not isinstance(event.get("status"), str)
                 or event.get("status") not in _STATUSES
                 or self._parse_timestamp(event.get("created_at")) is None
+                or (event.get("event_id") is not None and event.get("event_id") != event_id)
             ):
                 raise ValueError("invalid budget alert event")
             period_id = event.get("budget_period_id")
@@ -150,7 +152,10 @@ class BudgetAlertManager:
                 raise ValueError("invalid budget alert retry timestamp")
             if "last_delivery_attempt_at" in event and self._parse_timestamp(event.get("last_delivery_attempt_at")) is None:
                 raise ValueError("invalid budget alert attempt timestamp")
-            if "last_delivery_error_code" in event and event.get("last_delivery_error_code") not in _ERROR_CODES:
+            if "last_delivery_error_code" in event and (
+                not isinstance(event.get("last_delivery_error_code"), str)
+                or event.get("last_delivery_error_code") not in _ERROR_CODES
+            ):
                 raise ValueError("invalid budget alert delivery error code")
             if "delivered_at" in event and self._parse_timestamp(event.get("delivered_at")) is None:
                 raise ValueError("invalid budget alert delivery timestamp")
