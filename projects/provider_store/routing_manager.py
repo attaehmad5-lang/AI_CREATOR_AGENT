@@ -787,6 +787,7 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_FAILED_PROVIDER"}
         if not isinstance(release_reservations, bool):
             return {"allowed": False, "status": "INVALID_RESERVATION_RELEASE_POLICY"}
+        tenant_id = route_options.get("tenant_id")
         if not isinstance(route_options.get("category"), str) or not isinstance(route_options.get("project_id"), str):
             return {"allowed": False, "status": "INVALID_ROUTE_REQUEST", "reason": "CATEGORY_AND_PROJECT_REQUIRED"}
         request_id = route_options.get("request_id")
