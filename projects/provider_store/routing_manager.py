@@ -33,6 +33,7 @@ class ProviderRoutingManager:
         credit_manager: Any | None = None,
         project_policy_manager: Any | None = None,
         benchmark_manager: Any | None = None,
+        model_pricing_manager: Any | None = None,
         default_strategy: str = "PRIMARY_THEN_FALLBACK",
         require_verified_connection: bool = True,
     ) -> None:
@@ -50,6 +51,11 @@ class ProviderRoutingManager:
             raise ValueError("project_policy_manager must support policy lookup")
         if benchmark_manager is not None and not callable(getattr(benchmark_manager, "compare", None)):
             raise ValueError("benchmark_manager must support comparison")
+        if model_pricing_manager is not None and (
+            not callable(getattr(model_pricing_manager, "get_model_record", None))
+            or not callable(getattr(model_pricing_manager, "estimate_request", None))
+        ):
+            raise ValueError("model_pricing_manager must support verified model lookup and price estimation")
         if not isinstance(require_verified_connection, bool):
             raise ValueError("require_verified_connection must be boolean")
         if require_verified_connection and not callable(getattr(connection_manager, "get_state", None)):
@@ -64,6 +70,7 @@ class ProviderRoutingManager:
         self.credit_manager = credit_manager
         self.project_policy_manager = project_policy_manager
         self.benchmark_manager = benchmark_manager
+        self.model_pricing_manager = model_pricing_manager
         self.default_strategy = normalized_strategy
         self.require_verified_connection = require_verified_connection
         self._round_robin_counters: dict[str, int] = {}
@@ -151,6 +158,7 @@ class ProviderRoutingManager:
         max_benchmark_p95_latency_ms: float | None = None,
         allow_low_confidence_fallback: bool = True,
         required_region: str | None = None,
+        pricing_usage: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Return the first policy-compliant provider and the decisions that led to it."""
         if not isinstance(category, str) or not category.strip():
@@ -226,6 +234,15 @@ class ProviderRoutingManager:
             return {"allowed": False, "status": "INVALID_COST_ESTIMATES"}
         if not isinstance(estimated_cost_unit, str) or not estimated_cost_unit.strip() or len(estimated_cost_unit) > 32:
             return {"allowed": False, "status": "INVALID_COST_UNIT"}
+        if pricing_usage is not None:
+            if not isinstance(pricing_usage, dict) or not pricing_usage:
+                return {"allowed": False, "status": "INVALID_PRICING_USAGE"}
+            if self.model_pricing_manager is None:
+                return {"allowed": False, "status": "MODEL_PRICING_MANAGER_REQUIRED"}
+            if model is None:
+                return {"allowed": False, "status": "MODEL_REQUIRED_FOR_PRICING"}
+            if estimated_costs is not None:
+                return {"allowed": False, "status": "CONFLICTING_COST_ESTIMATE_SOURCES"}
         if free_credits is not None and not isinstance(free_credits, dict):
             return {"allowed": False, "status": "INVALID_FREE_CREDIT_MAP"}
         if self.credit_manager is not None and free_credits is not None:
@@ -347,6 +364,7 @@ class ProviderRoutingManager:
             ]
 
         candidates: list[dict[str, Any]] = []
+        price_comparison_incomplete = False
         for provider in discovered:
             if not isinstance(provider, dict):
                 continue
@@ -357,18 +375,33 @@ class ProviderRoutingManager:
                 continue
             if model is not None:
                 model_records = provider.get("supported_models")
-                if not isinstance(model_records, list):
-                    decisions.append({"provider": provider_id, "status": "MODEL_METADATA_UNVERIFIED"})
-                    continue
-                model_record = next(
-                    (
-                        item for item in model_records
-                        if isinstance(item, dict) and item.get("id") == model
-                    ),
-                    None,
-                )
+                model_record = None
+                if isinstance(model_records, list):
+                    model_record = next(
+                        (
+                            item for item in model_records
+                            if isinstance(item, dict) and item.get("id") == model
+                        ),
+                        None,
+                    )
+                if model_record is None and self.model_pricing_manager is not None:
+                    try:
+                        live_model = self.model_pricing_manager.get_model_record(
+                            provider_id, model, modality=category.strip()
+                        )
+                    except Exception as exc:
+                        live_model = {"status": "MODEL_LOOKUP_FAILED", "error_type": type(exc).__name__}
+                    if isinstance(live_model, dict) and live_model.get("status") == "MODEL_FOUND":
+                        model_record = live_model.get("model")
+                    elif live_model.get("status") == "MODEL_CATALOG_STALE":
+                        decisions.append({"provider": provider_id, "status": "MODEL_CATALOG_STALE"})
+                        price_comparison_incomplete = price_comparison_incomplete or pricing_usage is not None
+                        continue
                 if model_record is None:
-                    decisions.append({"provider": provider_id, "status": "MODEL_NOT_SUPPORTED"})
+                    status = "MODEL_METADATA_UNVERIFIED" if not isinstance(model_records, list) else "MODEL_NOT_SUPPORTED"
+                    decisions.append({"provider": provider_id, "status": status})
+                    if status == "MODEL_METADATA_UNVERIFIED" and pricing_usage is not None:
+                        price_comparison_incomplete = True
                     continue
                 if model_version is not None:
                     versions = model_record.get("versions")
@@ -417,7 +450,37 @@ class ProviderRoutingManager:
                 raw_health = raw_providers.get(provider_id, {}) if isinstance(raw_providers, dict) else {}
                 if isinstance(raw_health, dict):
                     health_record = raw_health
-            cost = estimates.get(provider_id, estimated_cost)
+            price_evidence = None
+            if pricing_usage is not None:
+                try:
+                    price_result = self.model_pricing_manager.estimate_request(
+                        provider_id=provider_id,
+                        model_id=model,
+                        modality=category.strip(),
+                        usage=pricing_usage,
+                        model_version=model_version,
+                    )
+                except Exception as exc:
+                    price_result = {"status": "MODEL_PRICE_LOOKUP_FAILED", "error_type": type(exc).__name__}
+                if not isinstance(price_result, dict) or price_result.get("status") != "MODEL_PRICE_ESTIMATED":
+                    status = price_result.get("status", "MODEL_PRICE_UNAVAILABLE") if isinstance(price_result, dict) else "INVALID_MODEL_PRICE_RESPONSE"
+                    decisions.append({"provider": provider_id, "status": status})
+                    price_comparison_incomplete = True
+                    continue
+                price_unit = price_result.get("unit")
+                if not isinstance(price_unit, str) or price_unit.casefold() != estimated_cost_unit.strip().casefold():
+                    decisions.append({"provider": provider_id, "status": "MODEL_PRICE_UNIT_MISMATCH"})
+                    price_comparison_incomplete = True
+                    continue
+                cost = price_result.get("estimated_cost")
+                price_evidence = {
+                    "source": price_result.get("source"),
+                    "observed_at": price_result.get("observed_at"),
+                    "unit": price_unit,
+                    "components": price_result.get("components", {}),
+                }
+            else:
+                cost = estimates.get(provider_id, estimated_cost)
             if not self._valid_amount(cost):
                 decisions.append({"provider": provider_id, "status": "INVALID_COST_AMOUNT"})
                 continue
@@ -454,6 +517,7 @@ class ProviderRoutingManager:
             candidates.append({
                 **provider,
                 "_route_cost": float(cost),
+                "_route_price_evidence": price_evidence,
                 "_route_credits": credit_sort,
                 "_route_latency": health_record.get("last_latency_ms", float("inf")),
             })
@@ -516,6 +580,16 @@ class ProviderRoutingManager:
                     "category": category.strip(), "strategy": selected_strategy,
                     "model": model, "decisions": decisions,
                 }
+
+        if pricing_usage is not None and selected_strategy == "LOWEST_COST" and price_comparison_incomplete:
+            return {
+                "allowed": False,
+                "status": "MODEL_PRICE_COMPARISON_INCOMPLETE",
+                "category": category.strip(),
+                "model": model,
+                "estimated_cost_unit": estimated_cost_unit.strip(),
+                "decisions": decisions,
+            }
 
         if confidence_status == "CONFIDENCE_AWARE_ROUTING":
             # Benchmark order already accounts for success rate, quality, latency, and cost.
@@ -735,6 +809,8 @@ class ProviderRoutingManager:
                 "health_verified": self.health_manager is not None,
                 "prior_decisions": decisions,
             }
+            if provider.get("_route_price_evidence") is not None:
+                result["model_price_evidence"] = provider["_route_price_evidence"]
             if confidence_status is not None:
                 result["confidence_routing_status"] = confidence_status
             if confidence_evidence is not None:
