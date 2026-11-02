@@ -103,9 +103,12 @@ class ProviderHealthProbeFacadeTests(unittest.TestCase):
         )
         self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
         self.assertFalse(denied["saved"])
+        invalid_timeout_service = ProviderService(
+            ConnectionStub(), health_manager=health,
+        )
         for invalid in (0, -1, 31, float("nan"), True):
             with self.subTest(timeout=invalid):
-                result = service.active_probe_provider(
+                result = invalid_timeout_service.active_probe_provider(
                     "image", lambda **kwargs: True, timeout_seconds=invalid,
                 )
                 self.assertEqual(result["status"], "INVALID_TIMEOUT")
