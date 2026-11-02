@@ -87,6 +87,142 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(claimed["job"]["job_id"], "high")
         self.assertEqual(self.manager.claim_next(worker_id="worker-2")["status"], "CONCURRENCY_LIMIT")
 
+    def test_project_round_robin_prevents_one_project_from_monopolizing_queue(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=1,
+            scheduling_strategy="PROJECT_ROUND_ROBIN",
+            clock=lambda: self.now[0],
+        )
+        for job_id in ("alpha-1", "alpha-2", "alpha-3", "alpha-4"):
+            manager.submit(
+                job_id=job_id, project_id="alpha", provider_id="image",
+                payload_ref=f"payload:{job_id}", priority=100,
+            )
+        for job_id in ("beta-1", "beta-2", "beta-3"):
+            manager.submit(
+                job_id=job_id, project_id="beta", provider_id="image",
+                payload_ref=f"payload:{job_id}", priority=1,
+            )
+
+        claimed_projects = []
+        claimed_jobs = []
+        for index in range(4):
+            claimed = manager.claim_next(worker_id=f"worker-{index}")
+            self.assertEqual(claimed["status"], "JOB_CLAIMED")
+            claimed_projects.append(claimed["job"]["project_id"])
+            claimed_jobs.append(claimed["job"]["job_id"])
+            manager.complete(
+                job_id=claimed["job"]["job_id"],
+                worker_id=f"worker-{index}",
+                lease_token=claimed["job"]["lease_token"],
+                success=False,
+                error_code="TEST_DONE",
+            )
+        self.assertEqual(claimed_projects, ["alpha", "beta", "alpha", "beta"])
+        self.assertEqual(claimed_jobs, ["alpha-1", "beta-1", "alpha-2", "beta-2"])
+
+    def test_fair_scheduler_keeps_priority_order_within_each_project(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=1,
+            scheduling_strategy="PROJECT_ROUND_ROBIN",
+            clock=lambda: self.now[0],
+        )
+        for job_id, project, priority in (
+            ("alpha-low", "alpha", 1),
+            ("alpha-high", "alpha", 90),
+            ("beta-mid", "beta", 40),
+        ):
+            manager.submit(
+                job_id=job_id, project_id=project, provider_id="image",
+                payload_ref=f"payload:{job_id}", priority=priority,
+            )
+        first = manager.claim_next(worker_id="worker-1")
+        self.assertEqual(first["job"]["job_id"], "alpha-high")
+        manager.complete(
+            job_id=first["job"]["job_id"], worker_id="worker-1",
+            lease_token=first["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+        second = manager.claim_next(worker_id="worker-2")
+        self.assertEqual(second["job"]["job_id"], "beta-mid")
+
+    def test_fair_scheduler_cursor_persists_across_manager_restart(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=1,
+            clock=lambda: self.now[0],
+        )
+        manager.submit(
+            job_id="alpha-1", project_id="alpha", provider_id="image",
+            payload_ref="payload:alpha-1",
+        )
+        manager.submit(
+            job_id="beta-1", project_id="beta", provider_id="image",
+            payload_ref="payload:beta-1",
+        )
+        first = manager.claim_next(worker_id="worker-1")
+        self.assertEqual(first["job"]["project_id"], "alpha")
+        manager.complete(
+            job_id="alpha-1", worker_id="worker-1",
+            lease_token=first["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+
+        restarted = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=1,
+            clock=lambda: self.now[0],
+        )
+        second = restarted.claim_next(worker_id="worker-2")
+        self.assertEqual(second["job"]["project_id"], "beta")
+        self.assertEqual(restarted.data["scheduler"]["last_project_id"], "beta")
+
+    def test_global_priority_mode_preserves_legacy_cross_project_order(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=1,
+            scheduling_strategy="GLOBAL_PRIORITY",
+            clock=lambda: self.now[0],
+        )
+        manager.submit(
+            job_id="alpha-low", project_id="alpha", provider_id="image",
+            payload_ref="payload:alpha-low", priority=10,
+        )
+        manager.submit(
+            job_id="beta-high", project_id="beta", provider_id="image",
+            payload_ref="payload:beta-high", priority=90,
+        )
+        claimed = manager.claim_next(worker_id="worker-1")
+        self.assertEqual(claimed["job"]["job_id"], "beta-high")
+
+    def test_legacy_job_state_without_scheduler_cursor_loads_and_migrates(self):
+        self.path.write_text(json.dumps({
+            "version": "1.0",
+            "jobs": {
+                "alpha-1": {
+                    "job_id": "alpha-1", "project_id": "alpha",
+                    "provider_id": "image", "payload_ref": "payload:alpha-1",
+                    "priority": 50, "status": "QUEUED", "attempts": 0,
+                    "created_at": self.now[0].isoformat(),
+                    "updated_at": self.now[0].isoformat(),
+                    "cancel_requested": False,
+                },
+            },
+        }), encoding="utf-8")
+        manager = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertEqual(manager.data["scheduler"], {"last_project_id": None})
+        claimed = manager.claim_next(worker_id="worker-1")
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["scheduler"]["last_project_id"], "alpha")
+
+    def test_invalid_fair_scheduling_configuration_and_persisted_cursor_fail_closed(self):
+        with self.assertRaises(ValueError):
+            ProviderJobManager(self.path, scheduling_strategy="UNFAIR")
+        self.path.write_text(json.dumps({
+            "version": "1.0", "jobs": {},
+            "scheduler": {"last_project_id": "../invalid"},
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "scheduler state"):
+            ProviderJobManager(self.path)
+
     def test_job_lifecycle_poll_and_result_reference(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
