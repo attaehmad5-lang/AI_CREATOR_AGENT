@@ -898,7 +898,8 @@ class ProviderService:
                 )
                 and len(set(values)) == len(values)
             )
-            state_status = f"PROVIDER_CATEGORY_{current_mode}" if current_mode in {"NORMAL", "DEGRADED", "OUTAGE"} else None
+            known_mode = isinstance(current_mode, str) and current_mode in {"NORMAL", "DEGRADED", "OUTAGE"}
+            state_status = f"PROVIDER_CATEGORY_{current_mode}" if known_mode else None
             valid_degraded_state = (
                 state_status is not None
                 and degraded_mode_state.get("category") == category
