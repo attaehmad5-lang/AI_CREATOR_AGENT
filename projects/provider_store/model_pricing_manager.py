@@ -138,7 +138,7 @@ class ProviderModelPricingManager:
             "category": category,
             "currency": currency.upper(),
             "rates": rates,
-            "paid_only": row.get("paid_only") is True,
+            "paid_only": row.get("paidOnly", row.get("paid_only")) is True,
             "source": POLLINATIONS_MODELS_URL,
             "observed_at": observed_at.isoformat().replace("+00:00", "Z"),
         }
