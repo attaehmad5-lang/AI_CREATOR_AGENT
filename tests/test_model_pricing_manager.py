@@ -111,6 +111,69 @@ class ProviderModelPricingManagerTests(unittest.TestCase):
         self.assertEqual(estimate["status"], "MODEL_PRICE_ESTIMATED")
         self.assertTrue(estimate["paid_only"])
 
+
+    def test_ambiguous_alias_is_not_assigned_to_arbitrary_model(self):
+        self.payload["data"].extend([
+            {
+                "id": "publisher/first-model",
+                "aliases": ["shared-alias"],
+                "category": "image",
+                "pricing": {"currency": "pollen", "completionImageTokens": 0.1},
+            },
+            {
+                "id": "publisher/second-model",
+                "aliases": ["shared-alias"],
+                "category": "image",
+                "pricing": {"currency": "pollen", "completionImageTokens": 0.2},
+            },
+        ])
+        self.manager.refresh_pollinations_catalog()
+        self.assertEqual(
+            self.manager.get_model_record(
+                "pollinations", "shared-alias", modality="image"
+            )["status"],
+            "MODEL_NOT_FOUND",
+        )
+        self.assertEqual(
+            self.manager.get_model_record(
+                "pollinations", "publisher/first-model", modality="image"
+            )["status"],
+            "MODEL_FOUND",
+        )
+
+    def test_unrepresentably_large_prices_and_malformed_paid_only_flags_are_rejected(self):
+        self.payload["data"].extend([
+            {
+                "id": "publisher/overflow",
+                "category": "image",
+                "pricing": {"currency": "pollen", "completionImageTokens": 10**1000},
+            },
+            {
+                "id": "publisher/malformed-paid-only",
+                "category": "image",
+                "paidOnly": "false",
+                "pricing": {"currency": "pollen", "completionImageTokens": 0.1},
+            },
+        ])
+        refreshed = self.manager.refresh_pollinations_catalog()
+        self.assertEqual(refreshed["status"], "MODEL_PRICING_UPDATED")
+        self.assertEqual(
+            self.manager.get_model_record(
+                "pollinations", "publisher/overflow", modality="image"
+            )["status"],
+            "MODEL_NOT_FOUND",
+        )
+        self.assertEqual(
+            self.manager.get_model_record(
+                "pollinations", "publisher/malformed-paid-only", modality="image"
+            )["status"],
+            "MODEL_NOT_FOUND",
+        )
+
+    def test_http_fetch_rejects_non_official_catalog_urls_before_network_access(self):
+        with self.assertRaisesRegex(ValueError, "unsupported pricing catalog URL"):
+            ProviderModelPricingManager._http_fetch("https://example.invalid/catalog", timeout=1.0)
+
     def test_stale_catalog_never_authorizes_a_price_estimate(self):
         self.manager.refresh_pollinations_catalog()
         self.now[0] += timedelta(seconds=61)
