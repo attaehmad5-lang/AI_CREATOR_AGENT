@@ -38,9 +38,12 @@ class ProviderService:
         project_policy_manager: Any | None = None,
         slo_manager: Any | None = None,
         degraded_mode_manager: Any | None = None,
+        tenant_isolation_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
+        if tenant_isolation_manager is not None and authorization_manager is None:
+            raise ValueError("tenant isolation requires authorization_manager")
         expected = (
             (routing_manager, "route", "routing_manager"),
             (health_manager, "record_result", "health_manager"),
@@ -67,6 +70,7 @@ class ProviderService:
             (slo_manager, "evaluate", "slo_manager"),
             (degraded_mode_manager, "evaluate", "degraded_mode_manager"),
             (degraded_mode_manager, "get_state", "degraded_mode_manager"),
+            (tenant_isolation_manager, "authorize_project", "tenant_isolation_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -94,6 +98,7 @@ class ProviderService:
         self.project_policy_manager = project_policy_manager
         self.slo_manager = slo_manager
         self.degraded_mode_manager = degraded_mode_manager
+        self.tenant_isolation_manager = tenant_isolation_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -745,6 +750,7 @@ class ProviderService:
         adapter: Any,
         modality: str,
         principal_id: str | None = None,
+        tenant_id: str | None = None,
         data_categories: tuple[str, ...] | list[str] = ("user_content",),
         retention_days: int = 0,
         provider_training_use: bool = False,
@@ -845,6 +851,22 @@ class ProviderService:
                         "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
                     },
                 }
+
+        if self.tenant_isolation_manager is not None:
+            if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
+                return {"status": "TENANT_CONTEXT_REQUIRED", "executed": False}
+            try:
+                tenant_access = self.tenant_isolation_manager.authorize_project(
+                    tenant_id, project_id, principal_id
+                )
+            except Exception as exc:
+                return {
+                    "status": "TENANT_ISOLATION_CHECK_FAILED",
+                    "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(tenant_access, dict) or tenant_access.get("allowed") is not True:
+                return {"status": "TENANT_ISOLATION_DENIED", "executed": False}
 
         sensitive_data_scan = None
         if self.sensitive_data_policy is not None:

@@ -52,7 +52,7 @@ These changes advance only their documented item scopes. The canonical 138-item 
 | 17 | 🟡 | Image Generation Providers | PARTIAL | Hugging Face and Pollinations are cataloged; this task's manager tests do not prove live generation outputs. |
 | 18 | 🔴 | Video Generation Providers | OPEN | No verified working video adapter and end-to-end generation test in this manager scope. |
 | 19 | 🔴 | Voice/Speech/Audio Providers | OPEN | No verified provider-specific voice/audio generation adapter and live test. |
-| 20 | 🔴 | Text/Script/Language Model Providers | OPEN | No complete provider-specific text/script generation adapter coverage in this manager. |
+| 20 | 🔴 | Text/Script/Language Model Providers | PARTIAL | `OllamaLocalProvider` now provides a provider-specific local text-generation adapter with model discovery, bounded non-streaming generation and loopback-only transport tests. It is not yet registered/routed through every provider manager, and cloud/script-provider coverage plus live model validation remain open. Evidence: `projects/provider_store/ollama_local_provider.py`, `tests/test_ollama_local_provider.py`. |
 | 21 | 🔴 | Music Generation Providers | OPEN | No verified music generation adapter and output validation test. |
 | 22 | 🔴 | Image Editing/Upscaling/Restoration | OPEN | No verified end-to-end editing/upscaling/restoration adapters. |
 | 23 | 🔴 | Transcription, Translation and Dubbing | OPEN | No verified end-to-end transcription/translation/dubbing adapters. |
@@ -211,8 +211,8 @@ These changes advance only their documented item scopes. The canonical 138-item 
 
 | # | Baseline | Canonical feature (original wording) | Current audit | Evidence / remaining gap |
 |---:|:---:|---|---|---|
-| 119 | 🔴 | Multi-Project/Multi-Tenant Provider Policies | OPEN | Complete multi-tenant provider policy isolation is not implemented. |
-| 120 | 🔴 | Tenant Isolation for Credentials, Quotas and Job Data | OPEN | Credential, quota and job data tenant isolation is not implemented. |
+| 119 | 🔴 | Multi-Project/Multi-Tenant Provider Policies | PARTIAL | `ProviderTenantIsolationManager` persists tenant membership and unique project ownership; `ProviderService.execute_routed_request` requires authenticated principal authorization and validates tenant/project/principal ownership before sensitive-data checks, routing or adapter execution. Tenant-specific policy evaluation, admin-gated lifecycle APIs and quota/job integration remain open. Evidence: `tests/test_provider_tenant_isolation.py`. |
+| 120 | 🔴 | Tenant Isolation for Credentials, Quotas and Job Data | PARTIAL | `ProviderTenantIsolationManager` stores only opaque credential references, enforces unique tenant ownership, checks access against tenant membership, and rejects cross-tenant project/credential access. Actual credential-vault lookup, tenant-scoped quota accounting and tenant IDs in persisted provider jobs are not yet integrated. Evidence: `tests/test_provider_tenant_isolation.py`. |
 | 121 | 🔴 | Separate User/Project/Tenant Usage Limits | PARTIAL | Project quotas exist; distinct user/project/tenant limits are not fully implemented. |
 | 122 | 🔴 | Fair Scheduling and Workload Prioritization | PARTIAL | `ProviderJobManager` now defaults to persisted per-project round-robin claiming, so one project cannot consume every claim while another project remains queued; priority is retained within each project's queue. Legacy GLOBAL_PRIORITY mode remains selectable and old state files migrate safely. Cross-tenant fairness, weighted service classes, workload-cost fairness and sustained multi-worker/load validation remain open. |
 | 123 | 🔴 | Provider/Regional Outage Handling | PARTIAL | Provider-category outage states and execution blocking are now implemented through `ProviderDegradedModeManager`/`ProviderService`; region identity, cross-region failover/quorum and multi-region recovery orchestration remain open. |
