@@ -277,3 +277,7 @@ class PollinationsAccountBalanceProbeTests(unittest.TestCase):
         result = self.make_probe()("huggingface")
         self.assertEqual(result["status"], "INVALID_PROVIDER")
         self.assertFalse(result["verified"])
+
+
+if __name__ == "__main__":
+    unittest.main()
