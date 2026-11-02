@@ -110,15 +110,19 @@ class BudgetAlertManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.pending_alerts()["alerts"], [])
 
     def test_failed_delivery_uses_exponential_backoff_and_can_be_retried(self):
-        self.manager.record(
+        manager = BudgetAlertManager(
+            self.path, thresholds=(0.5,), clock=lambda: self.now[0],
+            retry_base_seconds=30, retry_max_seconds=300,
+        )
+        manager.record(
             project_id="film", spend=9.0, budget=10.0, request_id="job-retry"
         )
-        failed = self.manager.dispatch_pending(
+        failed = manager.dispatch_pending(
             lambda alert: (_ for _ in ()).throw(RuntimeError("private webhook response")),
             limit=1,
         )
         self.assertEqual(failed["failed"], 1)
-        pending = self.manager.pending_alerts(limit=1)["alerts"][0]
+        pending = manager.pending_alerts(limit=1)["alerts"][0]
         self.assertEqual(pending["delivery_attempts"], 1)
         self.assertEqual(pending["last_delivery_error_code"], "DELIVERY_CALLBACK_FAILED")
         self.assertEqual(
@@ -128,15 +132,15 @@ class BudgetAlertManagerTests(unittest.TestCase):
         self.assertNotIn("private webhook response", repr(pending))
 
         called = []
-        deferred = self.manager.dispatch_pending(lambda alert: called.append(alert) or True, limit=1)
+        deferred = manager.dispatch_pending(lambda alert: called.append(alert) or True, limit=1)
         self.assertEqual(deferred["attempted"], 0)
         self.assertEqual(deferred["deferred"], 1)
         self.assertEqual(called, [])
 
         self.now[0] += timedelta(seconds=30)
-        retried = self.manager.dispatch_pending(lambda alert: {"delivered": True}, limit=10)
+        retried = manager.dispatch_pending(lambda alert: {"delivered": True}, limit=10)
         self.assertEqual(retried["delivered"], 2)
-        self.assertEqual(len(self.manager.pending_alerts()["alerts"]), 0)
+        self.assertEqual(len(manager.pending_alerts()["alerts"]), 0)
 
     def test_delivery_attempts_exhaust_to_dead_letter_and_can_be_requeued(self):
         manager = BudgetAlertManager(
