@@ -951,15 +951,21 @@ class ProviderServiceTests(unittest.TestCase):
             project_id="film", provider_id="pollinations", estimated_cost=2.0,
             request_id="pollinations-billing-exception",
         )
-        self.quota.reserve(
+        pollinations_quota = ProviderQuotaManager(
+            self.root / "pollinations-quota.json",
+            limits={"pollinations": {"daily": 10}},
+        )
+        pollinations_quota.reserve(
             provider_id="pollinations", request_id="pollinations-billing-exception"
         )
+        incidents = ProviderIncidentManager(self.root / "pollinations-incidents.json")
         service = ProviderService(
             self.connections,
             routing_manager=RoutingStub(),
             retry_policy=self.retry,
             cost_policy=self.cost,
-            quota_manager=self.quota,
+            quota_manager=pollinations_quota,
+            incident_manager=incidents,
         )
         result = service.execute_routed_request(
             category="image",
@@ -978,6 +984,12 @@ class ProviderServiceTests(unittest.TestCase):
             "pollinations-billing-exception",
             self.cost.ledger["projects"]["film"]["reservations"],
         )
+        self.assertEqual(
+            pollinations_quota.data["requests"]["pollinations-billing-exception"]["status"],
+            "RESERVED",
+        )
+        self.assertEqual(result["incident"]["status"], "INCIDENT_OPENED")
+        self.assertEqual(result["incident"]["incident"]["severity"], "critical")
         self.assertNotIn("safe message", repr(result))
 
     def test_execution_queues_budget_alert_after_spend_crosses_threshold(self):
