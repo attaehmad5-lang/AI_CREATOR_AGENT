@@ -393,7 +393,7 @@ class ProviderRoutingManager:
                         live_model = {"status": "MODEL_LOOKUP_FAILED", "error_type": type(exc).__name__}
                     if isinstance(live_model, dict) and live_model.get("status") == "MODEL_FOUND":
                         model_record = live_model.get("model")
-                    elif live_model.get("status") == "MODEL_CATALOG_STALE":
+                    elif isinstance(live_model, dict) and live_model.get("status") == "MODEL_CATALOG_STALE":
                         decisions.append({"provider": provider_id, "status": "MODEL_CATALOG_STALE"})
                         price_comparison_incomplete = price_comparison_incomplete or pricing_usage is not None
                         continue
@@ -468,6 +468,10 @@ class ProviderRoutingManager:
                     price_comparison_incomplete = True
                     continue
                 price_unit = price_result.get("unit")
+                if price_result.get("paid_only") is True:
+                    decisions.append({"provider": provider_id, "status": "PAID_ONLY_MODEL_REQUIRES_PAID_CREDIT_GATE"})
+                    price_comparison_incomplete = True
+                    continue
                 if not isinstance(price_unit, str) or price_unit.casefold() != estimated_cost_unit.strip().casefold():
                     decisions.append({"provider": provider_id, "status": "MODEL_PRICE_UNIT_MISMATCH"})
                     price_comparison_incomplete = True
@@ -485,6 +489,10 @@ class ProviderRoutingManager:
                 decisions.append({"provider": provider_id, "status": "INVALID_COST_AMOUNT"})
                 continue
             max_estimated_cost = project_policy.get("max_estimated_cost")
+            if pricing_usage is not None and price_unit.casefold() != "usd" and max_estimated_cost is not None:
+                decisions.append({"provider": provider_id, "status": "PROJECT_BUDGET_UNIT_MISMATCH"})
+                price_comparison_incomplete = True
+                continue
             if max_estimated_cost is not None and cost > max_estimated_cost:
                 decisions.append({"provider": provider_id, "status": "PROJECT_COST_LIMIT_EXCEEDED"})
                 continue
