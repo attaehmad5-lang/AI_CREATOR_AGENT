@@ -39,8 +39,14 @@ class ProviderTenantQuotaIntegrationTests(unittest.TestCase):
         self.tenant_manager.bind_project("tenant-a", "project-a")
         self.quota = ProviderQuotaManager(
             self.root / "quota.json",
-            limits={"image": {"hourly": 5, "daily": 10}},
-            tenant_limits={"tenant-a": {"image": {"hourly": 1, "daily": 2}}},
+            limits={
+                "image": {"hourly": 5, "daily": 10},
+                "local-image": {"hourly": 5, "daily": 10},
+            },
+            tenant_limits={"tenant-a": {
+                "image": {"hourly": 1, "daily": 2},
+                "local-image": {"hourly": 1, "daily": 2},
+            }},
         )
 
     def tearDown(self):
