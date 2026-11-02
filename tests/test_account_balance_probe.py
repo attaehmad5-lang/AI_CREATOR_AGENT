@@ -4,7 +4,10 @@ import unittest
 from pathlib import Path
 from urllib.error import HTTPError
 
-from projects.provider_store.account_balance_probe import ProviderJSONBalanceProbe
+from projects.provider_store.account_balance_probe import (
+    ProviderJSONBalanceProbe,
+    PollinationsAccountBalanceProbe,
+)
 from projects.provider_store.credit_manager import ProviderCreditManager
 
 
@@ -214,10 +217,7 @@ class PollinationsAccountBalanceProbeTests(unittest.TestCase):
             })),
         }
         options.update(overrides)
-        return __import__(
-            "projects.provider_store.account_balance_probe",
-            fromlist=["PollinationsAccountBalanceProbe"],
-        ).PollinationsAccountBalanceProbe(**options)
+        return PollinationsAccountBalanceProbe(**options)
 
     def test_reads_account_total_and_paid_tier_without_exposing_key(self):
         opener = _Opener(_Response({
@@ -265,7 +265,7 @@ class PollinationsAccountBalanceProbeTests(unittest.TestCase):
         self.assertNotIn("secret-key", repr(result))
 
     def test_invalid_nested_balance_fails_closed(self):
-        for value in (True, -1, "4.5", float("inf")):
+        for value in (True, -1, "4.5", float("inf"), 10**1000):
             with self.subTest(value=repr(value)):
                 result = self.make_probe(_Opener(_Response({
                     "accountBalance": {"total": value}
