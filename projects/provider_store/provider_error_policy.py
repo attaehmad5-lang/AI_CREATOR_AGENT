@@ -50,7 +50,10 @@ def _normalize_code(value: Any) -> str | None:
 def _retry_after(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    seconds = float(value)
+    try:
+        seconds = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
     if not math.isfinite(seconds) or seconds < 0:
         return None
     return min(seconds, 300.0)
@@ -105,7 +108,7 @@ def classify_provider_error(
                 "status": "BILLABLE_OUTPUT_LIMIT_FAILURE",
                 "category": "billing",
                 "retryable": False,
-                "action": "record_reported_usage_and_do_not_retry_or_fallback",
+                "action": "retain_reservation_and_reconcile_usage_before_retry_or_fallback",
                 "http_status": http_status,
             }
     if http_status == 402 or code in _BILLING_ACTION_CODES:
