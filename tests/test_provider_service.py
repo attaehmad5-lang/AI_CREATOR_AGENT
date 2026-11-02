@@ -601,6 +601,95 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "MODALITY_MISMATCH")
         self.assertEqual(released, ["modality-release"])
 
+    def test_fresh_health_gate_allows_measured_healthy_provider(self):
+        self.health.record_result("image", success=True, latency_ms=25)
+        calls = []
+        result = self.service.execute_routed_request(
+            category="image", project_id="film", request_id="fresh-health-allowed",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs) or {
+                "started": False, "success": False,
+            },
+            require_fresh_health_check=True,
+            health_stale_after_seconds=300,
+            health_max_latency_ms=100,
+        )
+        self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
+        self.assertEqual(len(calls), 1)
+
+    def test_fresh_health_gate_rejects_unhealthy_provider_before_adapter(self):
+        for _ in range(3):
+            self.health.record_result("image", success=False, error_code="SIMULATED_OUTAGE")
+        calls = []
+        result = self.service.execute_routed_request(
+            category="image", project_id="film", request_id="fresh-health-unhealthy",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            require_fresh_health_check=True,
+        )
+        self.assertEqual(result["status"], "PROVIDER_HEALTH_REJECTED")
+        self.assertEqual(result["health"]["status"], "UNHEALTHY")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+        self.assertTrue(result["release"]["released"])
+
+    def test_fresh_health_gate_fails_closed_on_health_manager_exception(self):
+        class RaisingHealthManager:
+            def is_eligible(self, provider_id, **kwargs):
+                raise RuntimeError("private health backend details")
+
+            def record_result(self, provider_id, **kwargs):
+                return {"saved": True}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=ProviderRoutingManager(self.connections),
+            health_manager=RaisingHealthManager(),
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="fresh-health-exception",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            require_fresh_health_check=True,
+        )
+        self.assertEqual(result["status"], "PROVIDER_HEALTH_REJECTED")
+        self.assertEqual(result["health"]["status"], "HEALTH_CHECK_FAILED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+        self.assertTrue(result["release"]["released"])
+        self.assertNotIn("private health backend details", repr(result))
+
+    def test_fresh_health_gate_rejects_malformed_health_response(self):
+        class MalformedHealthManager:
+            def is_eligible(self, provider_id, **kwargs):
+                return {"eligible": 1, "status": "MALFORMED"}
+
+            def record_result(self, provider_id, **kwargs):
+                return {"saved": True}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=ProviderRoutingManager(self.connections),
+            health_manager=MalformedHealthManager(),
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="fresh-health-malformed",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            require_fresh_health_check=True,
+        )
+        self.assertEqual(result["status"], "PROVIDER_HEALTH_REJECTED")
+        self.assertEqual(result["health"]["status"], "MALFORMED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+        self.assertTrue(result["release"]["released"])
+
     def test_routed_generation_health_gate_fails_closed_without_manager(self):
         service = self._modality_service()
         calls = []
