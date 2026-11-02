@@ -48,6 +48,33 @@ class FallbackManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "COMPLETED")
         self.assertEqual(fallback.calls, 1)
 
+    def test_billing_failure_redacts_exception_text_and_stops_fallback(self):
+        secret = "private-api-token"
+        primary = ProviderStub(error=PollinationsProviderError(
+            "provider said private-api-token; balance exhausted",
+            status_code=402,
+            retryable=False,
+            provider_error_code="INSUFFICIENT_BALANCE",
+        ))
+        fallback = ProviderStub(result={"status": "COMPLETED"})
+        manager = FallbackManager(ManagerStub({"primary": primary, "fallback": fallback}))
+        result = manager.generate_image(["primary", "fallback"], "prompt", "out.jpg")
+        self.assertTrue(result["fallback_stopped"])
+        self.assertEqual(result["errors"][0]["status_code"], 402)
+        self.assertEqual(result["errors"][0]["provider_error_code"], "insufficient_balance")
+        self.assertNotIn(secret, repr(result))
+        self.assertNotIn("balance exhausted", repr(result))
+        self.assertEqual(fallback.calls, 0)
+
+    def test_unrecognized_billing_text_is_never_echoed_in_fallback_result(self):
+        primary = ProviderStub(error=RuntimeError("sensitive provider response body"))
+        fallback = ProviderStub(result={"status": "COMPLETED"})
+        manager = FallbackManager(ManagerStub({"primary": primary, "fallback": fallback}))
+        result = manager.generate_image(["primary", "fallback"], "prompt", "out.jpg")
+        self.assertEqual(result["status"], "COMPLETED")
+        self.assertNotIn("sensitive provider response body", repr(result))
+        self.assertEqual(fallback.calls, 1)
+
     def test_legacy_exceptions_remain_fallback_compatible(self):
         primary = ProviderStub(error=RuntimeError("legacy provider error"))
         fallback = ProviderStub(result={"status": "COMPLETED"})
