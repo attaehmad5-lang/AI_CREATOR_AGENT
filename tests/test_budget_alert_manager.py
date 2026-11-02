@@ -182,6 +182,7 @@ class BudgetAlertManagerTests(unittest.TestCase):
             self.assertNotIn("delivery_lease_token", alert)
             self.assertNotIn("delivery_lease_owner", alert)
             self.assertNotIn("delivery_lease_until", alert)
+            self.assertEqual(alert["delivery_attempts"], 1)
             seen.append(alert["event_id"])
             if len(seen) == 1:
                 entered.set()
@@ -220,6 +221,37 @@ class BudgetAlertManagerTests(unittest.TestCase):
         result = reloaded.dispatch_pending(lambda _: True, limit=1)
         self.assertEqual(result["recovered"], 1)
         self.assertEqual(result["delivered"], 1)
+
+
+    def test_crashed_worker_consumes_attempt_budget_and_expired_lease_dead_letters(self):
+        manager = BudgetAlertManager(
+            self.path, thresholds=(0.5,), clock=lambda: self.now[0],
+            max_delivery_attempts=1,
+        )
+        event = manager.record(
+            project_id="film", spend=9.0, budget=10.0, request_id="job-crash-limit"
+        )["alerts"][0]
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        stored["events"][event["event_id"]].update({
+            "delivery_attempts": 1,
+            "last_delivery_attempt_at": (self.now[0] - timedelta(seconds=130)).isoformat(),
+            "delivery_lease_token": "b" * 32,
+            "delivery_lease_owner": "crashed-worker",
+            "delivery_lease_until": (self.now[0] - timedelta(seconds=1)).isoformat(),
+        })
+        self.path.write_text(json.dumps(stored), encoding="utf-8")
+        reloaded = BudgetAlertManager(
+            self.path, clock=lambda: self.now[0], max_delivery_attempts=1
+        )
+        sent = []
+        result = reloaded.dispatch_pending(lambda alert: sent.append(alert) or True)
+        self.assertEqual(result["attempted"], 0)
+        self.assertEqual(result["recovered"], 1)
+        self.assertEqual(sent, [])
+        failed = reloaded.failed_alerts()["alerts"]
+        self.assertEqual(failed[0]["event_id"], event["event_id"])
+        self.assertEqual(failed[0]["status"], "FAILED_PERMANENT")
+        self.assertEqual(failed[0]["delivery_attempts"], 1)
 
     def test_dispatch_rejects_invalid_callback_limit_and_worker(self):
         self.assertEqual(self.manager.dispatch_pending(None)["status"], "INVALID_DELIVERY_CALLBACK")
