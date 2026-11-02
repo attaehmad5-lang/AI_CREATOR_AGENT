@@ -12,6 +12,7 @@ from projects.provider_store.provider_quality_policy import ProviderOutputQualit
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_slo_manager import ProviderSLOManager
+from projects.provider_store.provider_degraded_mode import ProviderDegradedModeManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
@@ -1250,6 +1251,71 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["failure_count"], 1)
         self.assertEqual(snapshot["avg_latency_ms"], 25.0)
         self.assertEqual(snapshot["avg_queue_wait_ms"], 12.0)
+
+    def test_service_uses_health_evidence_for_degraded_mode_and_blocks_category_outage(self):
+        auth = ProviderAuthorizationManager(self.root / "degraded-auth.json")
+        auth.assign_role("degraded-admin", "admin")
+        auth.assign_role("degraded-operator", "operator")
+        degraded = ProviderDegradedModeManager(self.root / "degraded-mode.json")
+        service = ProviderService(
+            self.connections,
+            health_manager=self.health,
+            authorization_manager=auth,
+            degraded_mode_manager=degraded,
+        )
+        configured = service.configure_category_degraded_mode(
+            "video", normal_min_healthy_providers=1,
+            degraded_min_healthy_providers=1,
+            recovery_success_samples=2,
+            principal_id="degraded-admin",
+        )
+        self.assertEqual(configured["status"], "DEGRADED_MODE_POLICY_SAVED")
+        denied = service.configure_category_degraded_mode(
+            "image", principal_id="degraded-operator",
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+
+        outage = service.evaluate_category_degraded_mode(
+            "video", ["video-provider"], principal_id="degraded-operator",
+        )
+        self.assertEqual(outage["status"], "PROVIDER_CATEGORY_OUTAGE")
+        self.assertEqual(outage["state"]["healthy_count"], 0)
+
+        called = []
+        blocked = service.execute_routed_request(
+            category="video", project_id="film", request_id="video-outage",
+            estimated_cost=0.0, modality="video",
+            adapter=lambda **kwargs: called.append(True),
+        )
+        self.assertEqual(blocked["status"], "PROVIDER_CATEGORY_OUTAGE")
+        self.assertFalse(blocked["executed"])
+        self.assertEqual(called, [])
+
+    def test_degraded_mode_evaluation_fails_closed_without_health_or_authorization(self):
+        degraded = ProviderDegradedModeManager(self.root / "degraded-no-auth.json")
+        degraded.configure("image")
+        no_auth = ProviderService(
+            self.connections,
+            health_manager=self.health,
+            degraded_mode_manager=degraded,
+        )
+        self.assertEqual(
+            no_auth.evaluate_category_degraded_mode("image", ["image"])["status"],
+            "AUTHORIZATION_MANAGER_UNAVAILABLE",
+        )
+        auth = ProviderAuthorizationManager(self.root / "degraded-no-health-auth.json")
+        auth.assign_role("admin", "admin")
+        no_health = ProviderService(
+            self.connections,
+            authorization_manager=auth,
+            degraded_mode_manager=degraded,
+        )
+        self.assertEqual(
+            no_health.evaluate_category_degraded_mode(
+                "image", ["image"], principal_id="admin",
+            )["status"],
+            "HEALTH_MANAGER_UNAVAILABLE",
+        )
 
     def test_service_configures_slos_for_admin_and_limits_read_to_authorized_principals(self):
         auth = ProviderAuthorizationManager(self.root / "slo-auth.json")
