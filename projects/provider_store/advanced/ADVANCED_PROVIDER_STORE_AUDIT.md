@@ -73,4 +73,4 @@ This document tracks the Advanced Provider Store as a distinct feature. It is no
 
 - Advanced catalog compatibility views now derive their status, catalog_valid, and ready fields from the same live schema validation used by status() instead of always claiming READY. This prevents a stale or invalid catalog from being represented as ready in the compatibility facade.
 - by_category() now safely rejects non-string and unhashable inputs instead of raising a runtime TypeError.
-- Added regression tests for both cases. CI must pass on Ubuntu and Windows before this update is marked released.
+- Added regression tests for both cases. **PASS / released:** PR [#152](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/pull/152) merged as `e5811956fa10847a50b611075290a947452f9e94`; GitHub Actions run [#41380517071](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/41380517071) passed on Ubuntu and Windows, with 518 tests passing on each platform, zero failures, compile checks and provider JSON catalog validation passing.
