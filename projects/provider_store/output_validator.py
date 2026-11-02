@@ -85,7 +85,7 @@ class ProviderOutputValidator:
             chunk_length = stream.read(4)
             chunk_type = stream.read(4)
             dimensions = stream.read(8)
-            if chunk_length == b"\\x00\\x00\\x00\\x0d" and chunk_type == b"IHDR" and len(dimensions) == 8:
+            if chunk_length == b"\x00\x00\x00\x0d" and chunk_type == b"IHDR" and len(dimensions) == 8:
                 return int.from_bytes(dimensions[:4], "big"), int.from_bytes(dimensions[4:], "big")
             return None
 
@@ -109,7 +109,7 @@ class ProviderOutputValidator:
             }
             while stream.tell() < scan_limit:
                 prefix = stream.read(1)
-                if prefix != b"\\xff":
+                if prefix != b"\xff":
                     return None
                 marker_byte = stream.read(1)
                 while marker_byte == b"\\xff":
@@ -156,7 +156,7 @@ class ProviderOutputValidator:
                 return width, height
             if chunk_type == b"VP8 ":
                 header = stream.read(10)
-                if len(header) != 10 or header[3:6] != b"\\x9d\\x01\\x2a":
+                if len(header) != 10 or header[3:6] != b"\x9d\x01\x2a":
                     return None
                 width = int.from_bytes(header[6:8], "little") & 0x3FFF
                 height = int.from_bytes(header[8:10], "little") & 0x3FFF
