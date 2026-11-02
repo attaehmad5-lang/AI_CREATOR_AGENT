@@ -18,6 +18,36 @@ class ProviderOutputQualityPolicyTests(unittest.TestCase):
         accepted = policy.evaluate("asset:image", modality="image", category="image")
         self.assertTrue(accepted["allowed"])
 
+    def test_threshold_precedence_is_modality_then_category_then_default(self):
+        policy = ProviderOutputQualityPolicy(
+            lambda path, **kwargs: {"score": 0.6},
+            thresholds={"documentary:text": 0.9, "documentary": 0.5},
+            default_threshold=0.7,
+        )
+        specific = policy.evaluate("asset:1", modality="text", category="documentary")
+        self.assertEqual(specific["threshold"], 0.9)
+        self.assertFalse(specific["allowed"])
+        category_level = policy.evaluate("asset:2", modality="audio", category="documentary")
+        self.assertEqual(category_level["threshold"], 0.5)
+        self.assertTrue(category_level["allowed"])
+        global_default = policy.evaluate("asset:3", modality="image", category="other")
+        self.assertEqual(global_default["threshold"], 0.7)
+        self.assertFalse(global_default["allowed"])
+
+    def test_score_equal_to_threshold_is_accepted_and_booleans_are_rejected(self):
+        exact = ProviderOutputQualityPolicy(lambda path, **kwargs: 0.8, default_threshold=0.8).evaluate(
+            "asset:1", modality="image", category="image"
+        )
+        self.assertTrue(exact["allowed"])
+        self.assertEqual(exact["status"], "QUALITY_ACCEPTED")
+        for value in (True, False):
+            with self.subTest(value=value):
+                result = ProviderOutputQualityPolicy(
+                    lambda path, **kwargs: value, default_threshold=0.0
+                ).evaluate("asset:1", modality="image", category="image")
+                self.assertEqual(result["status"], "INVALID_QUALITY_SCORE")
+                self.assertFalse(result["allowed"])
+
     def test_invalid_scores_and_scorer_errors_fail_closed(self):
         for value in (float("nan"), float("inf"), -0.1, 1.1, "high"):
             with self.subTest(value=value):

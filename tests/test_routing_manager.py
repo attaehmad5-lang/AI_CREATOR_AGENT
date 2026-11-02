@@ -966,5 +966,21 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         )
 
 
+    def test_healthiest_first_ties_are_broken_by_configured_priority(self):
+        health = ProviderHealthManager(self.health_path)
+        for provider_id in ("primary", "fallback"):
+            self.assertEqual(
+                health.record_result(provider_id, success=True, latency_ms=40)["status"],
+                "HEALTHY",
+            )
+        router = ProviderRoutingManager(self.connections, health_manager=health)
+        results = [
+            router.route(category="image", project_id="film", strategy="HEALTHIEST_FIRST")
+            for _ in range(3)
+        ]
+        self.assertTrue(all(result["allowed"] for result in results))
+        self.assertEqual({result["provider"] for result in results}, {"primary"})
+
+
 if __name__ == "__main__":
     unittest.main()
