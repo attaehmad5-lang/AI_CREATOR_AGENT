@@ -37,7 +37,7 @@ class ProviderQuotaTenantTests(unittest.TestCase):
             provider_id="image", request_id="tenant-b-1", tenant_id="tenant-b",
         )
         unscoped = self.manager.reserve(
-            provider_id="image", request_id="global-1",
+            provider_id="image", request_id="global-1", tenant_id="tenant-c",
         )
         self.assertEqual(first["status"], "RESERVED")
         self.assertEqual(blocked["status"], "TENANT_QUOTA_EXCEEDED")
@@ -48,7 +48,7 @@ class ProviderQuotaTenantTests(unittest.TestCase):
     def test_tenant_usage_isolated_from_other_tenants_and_unscoped_records(self):
         self.manager.reserve(provider_id="image", request_id="a1", tenant_id="tenant-a")
         self.manager.reserve(provider_id="image", request_id="b1", tenant_id="tenant-b")
-        self.manager.reserve(provider_id="image", request_id="global")
+        self.manager.reserve(provider_id="image", request_id="global", tenant_id="tenant-c")
         self.assertEqual(
             self.manager.tenant_usage(tenant_id="tenant-a", provider_id="image"),
             {"hourly": 1, "daily": 1, "monthly": 1},
@@ -165,9 +165,14 @@ class ProviderQuotaTenantTests(unittest.TestCase):
         )
 
     def test_existing_tenantless_quota_records_remain_compatible(self):
-        result = self.manager.reserve(provider_id="image", request_id="legacy")
+        legacy_manager = ProviderQuotaManager(
+            self.path,
+            limits={"image": {"hourly": 5, "daily": 10, "monthly": 50}},
+            clock=lambda: self.now[0],
+        )
+        result = legacy_manager.reserve(provider_id="image", request_id="legacy")
         self.assertEqual(result["status"], "RESERVED")
-        self.assertIsNone(self.manager.data["requests"]["legacy"].get("tenant_id"))
+        self.assertIsNone(legacy_manager.data["requests"]["legacy"].get("tenant_id"))
         reloaded = ProviderQuotaManager(
             self.path,
             limits={"image": {"hourly": 5, "daily": 10, "monthly": 50}},
