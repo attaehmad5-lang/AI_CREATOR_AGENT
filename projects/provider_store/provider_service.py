@@ -37,6 +37,7 @@ class ProviderService:
         media_integrity_validator: Any | None = None,
         project_policy_manager: Any | None = None,
         slo_manager: Any | None = None,
+        degraded_mode_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -64,6 +65,8 @@ class ProviderService:
             (slo_manager, "record", "slo_manager"),
             (slo_manager, "configure", "slo_manager"),
             (slo_manager, "evaluate", "slo_manager"),
+            (degraded_mode_manager, "evaluate", "degraded_mode_manager"),
+            (degraded_mode_manager, "get_state", "degraded_mode_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -90,6 +93,7 @@ class ProviderService:
         self.media_integrity_validator = media_integrity_validator
         self.project_policy_manager = project_policy_manager
         self.slo_manager = slo_manager
+        self.degraded_mode_manager = degraded_mode_manager
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
@@ -103,6 +107,86 @@ class ProviderService:
                 "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
             }
         return None
+
+    def configure_category_degraded_mode(
+        self,
+        category: str,
+        *,
+        normal_min_healthy_providers: int = 2,
+        degraded_min_healthy_providers: int = 1,
+        recovery_success_samples: int = 3,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Configure outage/degraded thresholds using admin-only permission."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        if self.degraded_mode_manager is None:
+            return {"status": "DEGRADED_MODE_MANAGER_UNAVAILABLE", "saved": False}
+        try:
+            result = self.degraded_mode_manager.configure(
+                category,
+                normal_min_healthy_providers=normal_min_healthy_providers,
+                degraded_min_healthy_providers=degraded_min_healthy_providers,
+                recovery_success_samples=recovery_success_samples,
+            )
+        except Exception as exc:
+            return {"status": "DEGRADED_MODE_CONFIGURATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("saved") is not True:
+            return result if isinstance(result, dict) else {
+                "status": "INVALID_DEGRADED_MODE_CONFIGURATION_RESPONSE", "saved": False,
+            }
+        return result
+
+    def evaluate_category_degraded_mode(
+        self,
+        category: str,
+        provider_ids: list[str],
+        *,
+        stale_after_seconds: float = 300.0,
+        max_latency_ms: float | None = None,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate configured mode from current health evidence, fail-closed on missing probes."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "evaluated": False}
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "evaluated": False, "authorization": authorization}
+        if self.degraded_mode_manager is None:
+            return {"status": "DEGRADED_MODE_MANAGER_UNAVAILABLE", "evaluated": False}
+        is_eligible = getattr(self.health_manager, "is_eligible", None)
+        if not callable(is_eligible):
+            return {"status": "HEALTH_MANAGER_UNAVAILABLE", "evaluated": False}
+        if not isinstance(provider_ids, list) or not 1 <= len(provider_ids) <= 1000:
+            return {"status": "INVALID_PROVIDER_LIST", "evaluated": False}
+        statuses: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for provider_id in provider_ids:
+            if not isinstance(provider_id, str) or not provider_id.strip() or provider_id in seen:
+                return {"status": "INVALID_PROVIDER_LIST", "evaluated": False}
+            seen.add(provider_id)
+            try:
+                evidence = is_eligible(
+                    provider_id,
+                    stale_after_seconds=stale_after_seconds,
+                    max_latency_ms=max_latency_ms,
+                )
+            except Exception as exc:
+                evidence = {"eligible": False, "status": "HEALTH_PROBE_FAILED", "error_type": type(exc).__name__}
+            eligible = isinstance(evidence, dict) and evidence.get("eligible") is True
+            statuses.append({"provider_id": provider_id, "eligible": eligible})
+        try:
+            result = self.degraded_mode_manager.evaluate(category, statuses)
+        except Exception as exc:
+            return {"status": "DEGRADED_MODE_EVALUATION_FAILED", "evaluated": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("evaluated") is not True:
+            return result if isinstance(result, dict) else {
+                "status": "INVALID_DEGRADED_MODE_RESPONSE", "evaluated": False,
+            }
+        return result
 
     def configure_service_level_objective(
         self,
@@ -692,6 +776,33 @@ class ProviderService:
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
 
+        degraded_mode_state = None
+        if self.degraded_mode_manager is not None:
+            try:
+                degraded_state_result = self.degraded_mode_manager.get_state(category)
+            except Exception as exc:
+                return {
+                    "status": "DEGRADED_MODE_STATE_FAILED",
+                    "executed": False,
+                    "error_type": type(exc).__name__,
+                }
+            degraded_mode_state = (
+                degraded_state_result.get("state")
+                if isinstance(degraded_state_result, dict) else None
+            )
+            if isinstance(degraded_mode_state, dict):
+                current_mode = degraded_mode_state.get("mode")
+                if current_mode == "OUTAGE":
+                    return {
+                        "status": "PROVIDER_CATEGORY_OUTAGE",
+                        "executed": False,
+                        "degraded_mode": degraded_state_result,
+                        "preserve_started_request_accounting": True,
+                    }
+                if current_mode == "DEGRADED":
+                    # Never route degraded-mode work without an up-to-date health gate.
+                    require_fresh_health_check = True
+
         feature_flag_result = None
         if self.feature_flag_manager is not None:
             try:
@@ -754,6 +865,19 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+        if isinstance(degraded_mode_state, dict) and degraded_mode_state.get("mode") == "DEGRADED":
+            eligible_ids = degraded_mode_state.get("healthy_provider_ids")
+            if not isinstance(eligible_ids, list) or provider_id not in eligible_ids:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                )
+                return {
+                    "status": "PROVIDER_NOT_ELIGIBLE_DURING_DEGRADED_MODE",
+                    "executed": False,
+                    "provider": provider_id,
+                    "release": release,
+                    "degraded_mode": degraded_mode_state,
+                }
 
         if not isinstance(require_modality_binding, bool):
             release = self.release_unstarted_request(
@@ -1161,6 +1285,7 @@ class ProviderService:
             "finalization": finalization,
             "metrics": metrics_result,
             "slo_observation": slo_result,
+            "degraded_mode": degraded_mode_state,
             "benchmark": benchmark_result,
             "incident": incident_result,
             "provider_error": provider_error,
