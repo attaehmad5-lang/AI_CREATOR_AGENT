@@ -59,6 +59,47 @@ class ProviderErrorPolicyTests(unittest.TestCase):
                 self.assertEqual(result["status"], "INVALID_PROVIDER_ERROR_INPUT")
                 self.assertFalse(result["retryable"])
 
+    def test_pollinations_documented_balance_codes_are_provider_specific(self):
+        for code in ("INSUFFICIENT_BALANCE", "KEY_BUDGET_EXHAUSTED"):
+            with self.subTest(code=code):
+                result = classify_provider_error(
+                    402, provider_id="pollinations", provider_code=code
+                )
+                self.assertEqual(result["status"], "CREDITS_EXHAUSTED")
+                self.assertEqual(result["category"], "credits_exhausted")
+                self.assertFalse(result["retryable"])
+
+    def test_pollinations_paid_only_model_requires_paid_balance(self):
+        result = classify_provider_error(
+            402, provider_id="pollinations", provider_code="QUEST_POLLEN_ONLY"
+        )
+        self.assertEqual(result["status"], "PAID_BALANCE_REQUIRED")
+        self.assertEqual(result["category"], "billing")
+        self.assertFalse(result["retryable"])
+
+    def test_pollinations_billable_output_limit_failure_never_retries_or_falls_back(self):
+        result = classify_provider_error(
+            400, provider_id="pollinations",
+            provider_code="output_token_limit_exceeded",
+        )
+        self.assertEqual(result["status"], "BILLABLE_OUTPUT_LIMIT_FAILURE")
+        self.assertEqual(result["category"], "billing")
+        self.assertFalse(result["retryable"])
+        self.assertEqual(
+            result["action"], "record_reported_usage_and_do_not_retry_or_fallback"
+        )
+
+    def test_pollinations_codes_are_not_applied_to_other_providers(self):
+        credit = classify_provider_error(
+            402, provider_id="huggingface", provider_code="INSUFFICIENT_BALANCE"
+        )
+        billed = classify_provider_error(
+            400, provider_id="huggingface",
+            provider_code="output_token_limit_exceeded",
+        )
+        self.assertEqual(credit["status"], "BILLING_ACTION_REQUIRED")
+        self.assertEqual(billed["status"], "PROVIDER_REQUEST_REJECTED")
+
     def test_unknown_error_code_is_never_echoed(self):
         result = classify_provider_error(
             400, provider_code="secret-token-value"
