@@ -113,6 +113,34 @@ class ProviderService:
             }
         return None
 
+    def _authorize_tenant_project(
+        self,
+        *,
+        tenant_id: str | None,
+        project_id: str,
+        principal_id: str | None,
+    ) -> dict[str, Any] | None:
+        """Require a matching tenant/project/principal binding when tenant mode is active."""
+        if self.tenant_isolation_manager is None:
+            return None
+        if (
+            not isinstance(tenant_id, str) or not tenant_id.strip()
+            or len(tenant_id) > 128
+        ):
+            return {"status": "TENANT_CONTEXT_REQUIRED"}
+        try:
+            result = self.tenant_isolation_manager.authorize_project(
+                tenant_id, project_id, principal_id
+            )
+        except Exception as exc:
+            return {
+                "status": "TENANT_ISOLATION_CHECK_FAILED",
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict) or result.get("allowed") is not True:
+            return {"status": "TENANT_ISOLATION_DENIED"}
+        return None
+
     def configure_category_degraded_mode(
         self,
         category: str,
@@ -592,32 +620,63 @@ class ProviderService:
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "accepted": False, "authorization": authorization}
+        tenant_error = self._authorize_tenant_project(
+            tenant_id=tenant_id, project_id=project_id, principal_id=principal_id
+        )
+        if tenant_error is not None:
+            return {"status": tenant_error["status"], "accepted": False}
         try:
-            result = self.job_manager.submit(
-                job_id=job_id, project_id=project_id, provider_id=provider_id,
-                payload_ref=payload_ref, priority=priority,
-            )
+            submit_args = {
+                "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
+                "payload_ref": payload_ref, "priority": priority,
+            }
+            if self.tenant_isolation_manager is not None:
+                submit_args["tenant_id"] = tenant_id
+            result = self.job_manager.submit(**submit_args)
         except Exception as exc:
             return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
 
-    def poll_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
+    def poll_job(
+        self, *, job_id: str, principal_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
         authorization = self._authorize_operation(principal_id, "provider.read")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
+        if self.tenant_isolation_manager is not None and (
+            not isinstance(tenant_id, str) or not tenant_id.strip()
+        ):
+            return {"status": "TENANT_CONTEXT_REQUIRED", "job": None}
         try:
-            result = self.job_manager.poll(job_id=job_id)
+            result = (
+                self.job_manager.poll(job_id=job_id, tenant_id=tenant_id)
+                if self.tenant_isolation_manager is not None
+                else self.job_manager.poll(job_id=job_id)
+            )
         except Exception as exc:
             return {"status": "JOB_POLL_FAILED", "job": None, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+        job = result.get("job")
+        if self.tenant_isolation_manager is not None and isinstance(job, dict):
+            tenant_error = self._authorize_tenant_project(
+                tenant_id=tenant_id,
+                project_id=job.get("project_id"),
+                principal_id=principal_id,
+            )
+            if tenant_error is not None:
+                return {"status": tenant_error["status"], "job": None}
+        return result
 
     def claim_next_job(self, *, worker_id: str, principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
@@ -665,14 +724,37 @@ class ProviderService:
             return {"status": "JOB_COMPLETION_FAILED", "saved": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
 
-    def cancel_job(self, *, job_id: str, principal_id: str | None = None) -> dict[str, Any]:
+    def cancel_job(
+        self, *, job_id: str, principal_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        if self.tenant_isolation_manager is not None and (
+            not isinstance(tenant_id, str) or not tenant_id.strip()
+        ):
+            return {"status": "TENANT_CONTEXT_REQUIRED", "saved": False}
         try:
-            result = self.job_manager.cancel(job_id=job_id)
+            if self.tenant_isolation_manager is not None:
+                existing = self.job_manager.poll(job_id=job_id, tenant_id=tenant_id)
+                if not isinstance(existing, dict) or not isinstance(existing.get("job"), dict):
+                    return {
+                        "status": existing.get("status", "JOB_NOT_FOUND") if isinstance(existing, dict) else "INVALID_JOB_MANAGER_RESPONSE",
+                        "saved": False,
+                    }
+                tenant_error = self._authorize_tenant_project(
+                    tenant_id=tenant_id,
+                    project_id=existing["job"].get("project_id"),
+                    principal_id=principal_id,
+                )
+                if tenant_error is not None:
+                    return {"status": tenant_error["status"], "saved": False}
+                result = self.job_manager.cancel(job_id=job_id, tenant_id=tenant_id)
+            else:
+                result = self.job_manager.cancel(job_id=job_id)
         except Exception as exc:
             return {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}

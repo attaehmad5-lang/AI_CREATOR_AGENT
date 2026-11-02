@@ -105,6 +105,13 @@ class ProviderJobManager:
                 or not isinstance(job.get("project_id"), str)
                 or not isinstance(job.get("provider_id"), str)
                 or not isinstance(job.get("payload_ref"), str)
+                or (
+                    job.get("tenant_id") is not None
+                    and (
+                        not isinstance(job.get("tenant_id"), str)
+                        or not _ID_RE.fullmatch(job.get("tenant_id"))
+                    )
+                )
                 or isinstance(job.get("attempts"), bool)
                 or not isinstance(job.get("attempts"), int) or job["attempts"] < 0
                 or isinstance(job.get("priority"), bool)
@@ -149,18 +156,25 @@ class ProviderJobManager:
         provider_id: str,
         payload_ref: str,
         priority: int = 50,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         for value, name in ((job_id, "job_id"), (project_id, "project_id"), (provider_id, "provider_id")):
             if not isinstance(value, str) or not _ID_RE.fullmatch(value):
                 return {"status": f"INVALID_{name.upper()}", "accepted": False}
         if not isinstance(payload_ref, str) or not _REF_RE.fullmatch(payload_ref):
             return {"status": "INVALID_PAYLOAD_REFERENCE", "accepted": False}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "accepted": False}
         if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
             return {"status": "INVALID_PRIORITY", "accepted": False}
         now = self.clock().astimezone(timezone.utc).isoformat()
         with self._transaction():
             existing = self.data["jobs"].get(job_id)
             if isinstance(existing, dict):
+                if existing.get("tenant_id") != tenant_id:
+                    return {"status": "TENANT_ISOLATION_DENIED", "accepted": False}
                 same = all(existing.get(key) == value for key, value in {
                     "project_id": project_id, "provider_id": provider_id,
                     "payload_ref": payload_ref, "priority": priority,
@@ -188,6 +202,8 @@ class ProviderJobManager:
                 "attempts": 0, "created_at": now, "updated_at": now,
                 "cancel_requested": False,
             }
+            if tenant_id is not None:
+                job["tenant_id"] = tenant_id
             self.data["jobs"][job_id] = job
             self._save()
             return {"status": "JOB_QUEUED", "accepted": True, "job": dict(job)}
@@ -380,14 +396,22 @@ class ProviderJobManager:
             self._save()
             return {"status": "JOB_COMPLETED", "saved": True, "job": dict(job)}
 
-    def cancel(self, *, job_id: str) -> dict[str, Any]:
+    def cancel(
+        self, *, job_id: str, tenant_id: str | None = None
+    ) -> dict[str, Any]:
         if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
             return {"status": "INVALID_JOB_ID", "saved": False}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "saved": False}
         now = self.clock().astimezone(timezone.utc).isoformat()
         with self._transaction():
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
                 return {"status": "JOB_NOT_FOUND", "saved": False}
+            if job.get("tenant_id") != tenant_id:
+                return {"status": "TENANT_ISOLATION_DENIED", "saved": False}
             if job.get("status") == "QUEUED":
                 job["status"] = "CANCELLED"
                 job["completed_at"] = now
@@ -399,11 +423,19 @@ class ProviderJobManager:
             self._save()
             return {"status": "CANCEL_REQUESTED" if job["status"] == "RUNNING" else "JOB_CANCELLED", "saved": True, "job": dict(job)}
 
-    def poll(self, *, job_id: str) -> dict[str, Any]:
+    def poll(
+        self, *, job_id: str, tenant_id: str | None = None
+    ) -> dict[str, Any]:
         if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
             return {"status": "INVALID_JOB_ID", "job": None}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "job": None}
         with self._transaction():
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
                 return {"status": "JOB_NOT_FOUND", "job": None}
+            if job.get("tenant_id") != tenant_id:
+                return {"status": "TENANT_ISOLATION_DENIED", "job": None}
             return {"status": "JOB_STATUS", "job": dict(job)}
