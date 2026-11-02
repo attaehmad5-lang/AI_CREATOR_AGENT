@@ -355,6 +355,8 @@ class ProviderSecretsManager:
                 tenant_id=tenant_id,
                 idempotency_key=idempotency_key,
             )
+        except SecretManagerError as exc:
+            return {"status": exc.status, "rotated": False}
         except Exception as exc:
             return {
                 "status": "SECRET_ROTATION_TIMEOUT" if isinstance(exc, TimeoutError) else "SECRET_ROTATION_FAILED",
