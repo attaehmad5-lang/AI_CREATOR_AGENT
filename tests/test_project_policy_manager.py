@@ -72,6 +72,131 @@ class ProviderProjectPolicyManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.get_policy("film-project")["status"], "PROJECT_POLICY_NOT_FOUND")
         self.assertFalse(self.manager.remove_policy("missing")["removed"])
 
+    def test_policy_simulation_compares_candidates_without_persisting(self):
+        original_policy = {
+            "allowed_providers": ["huggingface", "pollinations"],
+            "automatic_fallback": True,
+        }
+        self.manager.set_policy("film-project", original_policy)
+        before = self.path.read_bytes()
+        candidate = {
+            "allowed_providers": ["huggingface"],
+            "denied_providers": ["pollinations"],
+            "allowed_capabilities": ["image_generation"],
+            "allowed_models": ["stabilityai/sdxl"],
+            "max_estimated_cost": 1.0,
+            "automatic_fallback": False,
+            "require_health_evidence": True,
+            "require_verified_connection": True,
+        }
+        scenarios = [
+            {
+                "request_id": "allowed-image",
+                "provider_id": "huggingface",
+                "capability": "image_generation",
+                "model_id": "stabilityai/sdxl",
+                "estimated_cost": 0.5,
+                "health_evidence_verified": True,
+                "connection_verified": True,
+            },
+            {
+                "request_id": "denied-provider",
+                "provider_id": "pollinations",
+                "capability": "image_generation",
+                "model_id": "stabilityai/sdxl",
+                "estimated_cost": 0.5,
+                "health_evidence_verified": True,
+                "connection_verified": True,
+            },
+            {
+                "request_id": "over-budget",
+                "provider_id": "huggingface",
+                "capability": "image_generation",
+                "model_id": "stabilityai/sdxl",
+                "estimated_cost": 2.0,
+                "health_evidence_verified": True,
+                "connection_verified": True,
+            },
+            {
+                "request_id": "missing-health",
+                "provider_id": "huggingface",
+                "capability": "image_generation",
+                "model_id": "stabilityai/sdxl",
+                "estimated_cost": 0.5,
+                "connection_verified": True,
+            },
+            {
+                "request_id": "missing-connection",
+                "provider_id": "huggingface",
+                "capability": "image_generation",
+                "model_id": "stabilityai/sdxl",
+                "estimated_cost": 0.5,
+                "health_evidence_verified": True,
+            },
+        ]
+        result = self.manager.simulate_policy("film-project", candidate, scenarios)
+        self.assertEqual(result["status"], "POLICY_SIMULATION_COMPLETED")
+        self.assertFalse(result["persisted"])
+        self.assertEqual(result["scenario_count"], 5)
+        self.assertEqual(result["changed_decisions"], 4)
+        decisions = {item["request_id"]: item for item in result["results"]}
+        self.assertTrue(decisions["allowed-image"]["proposed"]["allowed"])
+        self.assertFalse(decisions["denied-provider"]["proposed"]["allowed"])
+        self.assertIn("PROVIDER_NOT_ALLOWLISTED", decisions["denied-provider"]["proposed"]["reasons"])
+        self.assertIn("ESTIMATED_COST_LIMIT_EXCEEDED", decisions["over-budget"]["proposed"]["reasons"])
+        self.assertIn("HEALTH_EVIDENCE_REQUIRED", decisions["missing-health"]["proposed"]["reasons"])
+        self.assertIn("VERIFIED_CONNECTION_REQUIRED", decisions["missing-connection"]["proposed"]["reasons"])
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.manager.get_policy("film-project")["policy"], original_policy)
+
+    def test_policy_simulation_reports_fallback_restriction_without_denial(self):
+        result = self.manager.simulate_policy(
+            "film-project",
+            {"automatic_fallback": False},
+            [{
+                "request_id": "fallback-request",
+                "provider_id": "huggingface",
+                "capability": "image_generation",
+                "request_fallback": True,
+            }],
+        )
+        self.assertEqual(result["status"], "POLICY_SIMULATION_COMPLETED")
+        decision = result["results"][0]["proposed"]
+        self.assertTrue(decision["allowed"])
+        self.assertFalse(decision["automatic_fallback_allowed"])
+        self.assertTrue(decision["fallback_would_be_blocked"])
+
+    def test_policy_simulation_rejects_invalid_candidates_and_scenarios(self):
+        invalid_candidate = self.manager.simulate_policy(
+            "film-project", {"max_estimated_cost": float("nan")}, [{
+                "provider_id": "huggingface", "capability": "image_generation",
+            }],
+        )
+        self.assertEqual(invalid_candidate["status"], "INVALID_CANDIDATE_POLICY")
+        self.assertFalse(invalid_candidate["persisted"])
+
+        invalid_scenarios = (
+            [{"provider_id": "huggingface", "capability": "image_generation", "unknown": True}],
+            [{"provider_id": "../outside", "capability": "image_generation"}],
+            [{"provider_id": "huggingface", "capability": "image_generation", "estimated_cost": float("inf")}],
+            [
+                {"request_id": "same", "provider_id": "huggingface", "capability": "image_generation"},
+                {"request_id": "same", "provider_id": "pollinations", "capability": "image_generation"},
+            ],
+        )
+        for scenarios in invalid_scenarios:
+            with self.subTest(scenarios=scenarios):
+                result = self.manager.simulate_policy("film-project", {}, scenarios)
+                self.assertEqual(result["status"], "INVALID_SIMULATION_SCENARIOS")
+                self.assertFalse(result["persisted"])
+                self.assertNotIn("results", result)
+
+    def test_policy_simulation_requires_one_to_one_hundred_scenarios(self):
+        for scenarios in ([], [{}] * 101):
+            with self.subTest(count=len(scenarios)):
+                result = self.manager.simulate_policy("film-project", {}, scenarios)
+                self.assertEqual(result["status"], "INVALID_SIMULATION_SCENARIOS")
+
     def test_corrupt_store_fails_closed(self):
         self.path.write_text("{invalid-json", encoding="utf-8")
         with self.assertRaises(ValueError):
