@@ -247,8 +247,9 @@ class ProviderHTTPConnectivityProbe:
                 secret_lease.close()
                 secret_lease = None
 
-        request = Request(endpoint.strip(), headers=headers, method="GET")
+        request = None
         try:
+            request = Request(endpoint.strip(), headers=headers, method="GET")
             try:
                 response = self.opener.open(request, timeout=timeout_value)
             except HTTPError as exc:
@@ -300,4 +301,9 @@ class ProviderHTTPConnectivityProbe:
                 except Exception:
                     pass
         finally:
+            if request is not None and auth_header_name is not None:
+                try:
+                    request.remove_header(auth_header_name)
+                except Exception:
+                    pass
             clear_credential()
