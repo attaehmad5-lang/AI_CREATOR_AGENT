@@ -32,7 +32,7 @@ class ProviderModelPricingManagerTests(unittest.TestCase):
                     "id": "community/example/text-model",
                     "aliases": ["text-model"],
                     "category": "text",
-                    "paid_only": True,
+                    "paidOnly": True,
                     "pricing": {
                         "currency": "pollen",
                         "promptTextTokens": 0.000001,
@@ -98,6 +98,18 @@ class ProviderModelPricingManagerTests(unittest.TestCase):
         )
         self.assertEqual(complete["status"], "MODEL_PRICE_ESTIMATED")
         self.assertAlmostEqual(complete["estimated_cost"], 0.002)
+
+
+    def test_paid_only_catalog_field_is_preserved(self):
+        self.manager.refresh_pollinations_catalog()
+        estimate = self.manager.estimate_request(
+            provider_id="pollinations",
+            model_id="text-model",
+            modality="text",
+            usage={"prompt_text_tokens": 1000, "completion_text_tokens": 500},
+        )
+        self.assertEqual(estimate["status"], "MODEL_PRICE_ESTIMATED")
+        self.assertTrue(estimate["paid_only"])
 
     def test_stale_catalog_never_authorizes_a_price_estimate(self):
         self.manager.refresh_pollinations_catalog()
