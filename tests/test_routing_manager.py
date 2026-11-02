@@ -442,6 +442,40 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
         self.assertEqual(result["decisions"][0]["status"], "COST_POLICY_REQUIRED")
 
+
+    def test_project_budget_hard_stop_blocks_all_routes_after_budget_is_spent(self):
+        policy = ProviderCostPolicy(
+            self.root / "hard-stop-ledger.json",
+            project_budgets={"film": 5.0},
+        )
+        reserved = policy.reserve_usage(
+            project_id="film", provider_id="primary",
+            estimated_cost=5.0, request_id="previous-request",
+        )
+        self.assertEqual(reserved["status"], "RESERVED")
+        reconciled = policy.reconcile_usage(
+            project_id="film", provider_id="primary",
+            estimated_cost=5.0, actual_cost=5.0,
+            request_id="previous-request",
+        )
+        self.assertEqual(reconciled["status"], "RECONCILED")
+
+        router = ProviderRoutingManager(self.connections, cost_policy=policy)
+        result = router.route(
+            category="image",
+            project_id="film",
+            estimated_cost=0.01,
+            estimated_cost_unit="USD",
+            paid_approved_providers={"primary", "fallback"},
+            request_id="after-budget-exhaustion",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertEqual(
+            [decision["status"] for decision in result["decisions"]],
+            ["PROJECT_BUDGET_EXCEEDED", "PROJECT_BUDGET_EXCEEDED"],
+        )
+
     def test_cost_policy_blocks_paid_route_without_budget_or_approval(self):
         policy = ProviderCostPolicy(project_budgets={"film": 5.0})
         router = ProviderRoutingManager(self.connections, cost_policy=policy)
