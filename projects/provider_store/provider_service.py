@@ -996,7 +996,7 @@ class ProviderService:
 
         if not isinstance(require_modality_binding, bool):
             release = self.release_unstarted_request(
-                project_id=project_id, provider_id=provider_id, request_id=request_id
+                project_id=project_id, provider_id=provider_id, request_id=request_id, tenant_id=tenant_id
             )
             return {"status": "INVALID_MODALITY_BINDING_POLICY", "executed": False, "release": release}
         if require_modality_binding:
@@ -1063,7 +1063,7 @@ class ProviderService:
                 )
             except Exception as exc:
                 release = self.release_unstarted_request(
-                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                    project_id=project_id, provider_id=provider_id, request_id=request_id, tenant_id=tenant_id
                 )
                 return {
                     "status": "PROVIDER_DATA_POLICY_CHECK_FAILED", "executed": False,
@@ -1071,7 +1071,7 @@ class ProviderService:
                 }
             if not isinstance(data_policy_result, dict) or data_policy_result.get("allowed") is not True:
                 release = self.release_unstarted_request(
-                    project_id=project_id, provider_id=provider_id, request_id=request_id
+                    project_id=project_id, provider_id=provider_id, request_id=request_id, tenant_id=tenant_id
                 )
                 return {
                     "status": "PROVIDER_DATA_POLICY_REJECTED", "executed": False,
@@ -1128,7 +1128,7 @@ class ProviderService:
                     "reservations_retained": True,
                 }
             released = self.release_unstarted_request(
-                project_id=project_id, provider_id=provider_id, request_id=request_id
+                project_id=project_id, provider_id=provider_id, request_id=request_id, tenant_id=tenant_id
             )
             return {
                 "status": "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED",
@@ -1456,6 +1456,10 @@ class ProviderService:
         """
         if not all(isinstance(value, str) and value.strip() for value in (project_id, provider_id, request_id)):
             return {"status": "INVALID_USAGE_RECORD", "finalized": False}
+        if self.tenant_isolation_manager is not None and (
+            not isinstance(tenant_id, str) or not tenant_id.strip()
+        ):
+            return {"status": "TENANT_CONTEXT_REQUIRED", "finalized": False}
         if not isinstance(success, bool):
             return {"status": "INVALID_EXECUTION_RESULT", "finalized": False}
         if not isinstance(charge_outcome, str) or charge_outcome not in {"unknown", "incurred", "not_incurred"}:
@@ -1663,6 +1667,10 @@ class ProviderService:
         """Release reservations only when the caller knows no provider request started."""
         if not all(isinstance(value, str) and value.strip() for value in (project_id, provider_id, request_id)):
             return {"status": "INVALID_USAGE_RECORD", "released": False}
+        if self.tenant_isolation_manager is not None and (
+            not isinstance(tenant_id, str) or not tenant_id.strip()
+        ):
+            return {"status": "TENANT_CONTEXT_REQUIRED", "released": False}
         results: dict[str, Any] = {}
         if self.cost_policy is None and self.quota_manager is None and self.credit_manager is None:
             return {"status": "RESERVATION_MANAGERS_UNAVAILABLE", "released": False}
