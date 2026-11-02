@@ -96,6 +96,80 @@ class ProviderService:
             }
         return None
 
+    def active_probe_provider(
+        self,
+        provider_id: str,
+        probe: Any,
+        *,
+        timeout_seconds: float = 5.0,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one bounded, authorized provider probe and return only safe evidence."""
+        authorization = self._authorize_operation(principal_id, "provider.verify")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "verified": False, "saved": False, "authorization": authorization,
+            }
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER", "provider": None, "verified": False, "saved": False}
+        timeout = finite_number(timeout_seconds, minimum=0)
+        if timeout is None or timeout <= 0 or timeout > 30:
+            return {"status": "INVALID_TIMEOUT", "provider": provider_id, "verified": False, "saved": False}
+        if not callable(probe):
+            return {"status": "INVALID_PROBE", "provider": provider_id, "verified": False, "saved": False}
+
+        get_provider = getattr(self.connection_manager, "get_provider", None)
+        if not callable(get_provider):
+            return {"status": "PROVIDER_LOOKUP_UNAVAILABLE", "provider": provider_id, "verified": False, "saved": False}
+        try:
+            provider = get_provider(provider_id)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_LOOKUP_FAILED", "provider": provider_id,
+                "verified": False, "saved": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(provider, dict):
+            return {"status": "NOT_FOUND", "provider": provider_id, "verified": False, "saved": False}
+        if provider.get("enabled") is not True:
+            return {"status": "PROVIDER_DISABLED", "provider": provider_id, "verified": False, "saved": False}
+
+        if self.health_manager is None:
+            return {"status": "HEALTH_MANAGER_UNAVAILABLE", "provider": provider_id, "verified": False, "saved": False}
+        active_probe = getattr(self.health_manager, "active_probe", None)
+        if not callable(active_probe):
+            return {"status": "ACTIVE_PROBE_UNAVAILABLE", "provider": provider_id, "verified": False, "saved": False}
+        try:
+            result = active_probe(provider_id, probe, timeout_seconds=timeout)
+        except Exception as exc:
+            return {
+                "status": "ACTIVE_PROBE_FAILED", "provider": provider_id,
+                "verified": False, "saved": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_ACTIVE_PROBE_RESPONSE", "provider": provider_id, "verified": False, "saved": False}
+
+        status = result.get("status")
+        recorded_statuses = {"HEALTHY", "TIMEOUT", "NETWORK_ERROR", "PROBE_FAILED"}
+        if status not in recorded_statuses | {"HEALTH_RECORD_FAILED"}:
+            return {"status": "INVALID_ACTIVE_PROBE_RESPONSE", "provider": provider_id, "verified": False, "saved": False}
+        verified = status == "HEALTHY" and result.get("verified") is True
+        saved = status in recorded_statuses
+        response: dict[str, Any] = {
+            "status": status,
+            "provider": provider_id,
+            "verified": verified,
+            "saved": saved,
+        }
+        if verified:
+            latency = finite_number(result.get("latency_ms"), minimum=0)
+            if latency is not None:
+                response["latency_ms"] = round(latency, 2)
+        error_type = result.get("error_type")
+        if isinstance(error_type, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", error_type):
+            response["error_type"] = error_type
+        return response
+
     def verify_provider(
         self,
         provider_id: str,
