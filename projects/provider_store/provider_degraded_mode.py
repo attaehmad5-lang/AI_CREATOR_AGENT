@@ -13,7 +13,7 @@ from typing import Any, Iterator
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\\Z")
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
 _MODES = {"NORMAL", "DEGRADED", "OUTAGE"}
 
 
@@ -72,10 +72,16 @@ class ProviderDegradedModeManager:
         for category, policy in loaded["policies"].items():
             if (
                 not self._valid_id(category) or not isinstance(policy, dict)
-                or policy.get("normal_min_healthy_providers") not in range(1, 1001)
-                or policy.get("degraded_min_healthy_providers") not in range(1, 1001)
+                or isinstance(policy.get("normal_min_healthy_providers"), bool)
+                or not isinstance(policy.get("normal_min_healthy_providers"), int)
+                or not 1 <= policy["normal_min_healthy_providers"] <= 1000
+                or isinstance(policy.get("degraded_min_healthy_providers"), bool)
+                or not isinstance(policy.get("degraded_min_healthy_providers"), int)
+                or not 1 <= policy["degraded_min_healthy_providers"] <= 1000
                 or policy["degraded_min_healthy_providers"] > policy["normal_min_healthy_providers"]
-                or policy.get("recovery_success_samples") not in range(1, 101)
+                or isinstance(policy.get("recovery_success_samples"), bool)
+                or not isinstance(policy.get("recovery_success_samples"), int)
+                or not 1 <= policy["recovery_success_samples"] <= 100
             ):
                 raise ValueError("invalid degraded-mode policy")
         for category, state in loaded["states"].items():
@@ -119,7 +125,7 @@ class ProviderDegradedModeManager:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 json.dump(self.data, stream, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)
-                stream.write("\\n")
+                stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             atomic_replace_with_retry(temp_name, self.state_path)
