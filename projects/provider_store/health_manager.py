@@ -42,6 +42,18 @@ class ProviderHealthManager:
         self._lock = threading.RLock()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}}
+        self._load_initial_state()
+
+    def _load_initial_state(self) -> None:
+        """Read existing state under the same interprocess lock used by writers."""
+        if not self.state_path.exists():
+            self._reload_state()
+            return
+        try:
+            with self._transaction():
+                return
+        except OSError:
+            pass
         self._reload_state()
 
     @staticmethod

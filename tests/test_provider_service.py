@@ -457,6 +457,32 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(credits.usable_free_credits(unit="USD"), {"image": 4.0})
         self.assertEqual(len(self.health.data["providers"]["image"]["history"]), 1)
 
+    def test_modality_binding_opt_in_rejects_mismatch_before_adapter(self):
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost, quota_manager=self.quota)
+        service = ProviderService(self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota)
+        calls = []
+        result = service.execute_routed_request(category="image", project_id="film", request_id="modality-mismatch",
+            estimated_cost=0.0, adapter=lambda **kwargs: calls.append(kwargs) or {"started": True},
+            modality="video", require_modality_binding=True)
+        self.assertEqual(result["status"], "MODALITY_MISMATCH")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
+    def test_modality_binding_opt_in_allows_matching_modality(self):
+        router = ProviderRoutingManager(self.connections, cost_policy=self.cost, quota_manager=self.quota)
+        service = ProviderService(self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota)
+        output_path = self.root / "modality-valid.png"
+        output_path.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"safe-test-image")
+        result = service.execute_routed_request(category="image", project_id="film", request_id="modality-valid",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: {"started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": str(output_path), "latency_ms": 5.0},
+            modality="image", require_modality_binding=True)
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertTrue(result["output"]["valid"])
+
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota

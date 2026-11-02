@@ -31,6 +31,45 @@ class ProviderAuthenticationVerificationRequired(PermissionError):
 
 
 
+# Single source of truth for callable methods required by each provider category.
+# Each inner tuple lists alternatives; at least one alternative must be callable.
+MODALITY_CONTRACTS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "image": (("generate_image",),),
+    "video": (("generate_video",),),
+    "voice": (("generate_speech", "generate_audio"),),
+    "audio": (("generate_audio", "generate_speech"),),
+    "music": (("generate_music",),),
+    "text": (("generate_text",),),
+    "language_model": (("generate_text",),),
+    "transcription": (("transcribe",),),
+    "translation": (("translate",),),
+    "dubbing": (("dub",),),
+    "image_editing": (("edit_image",),),
+    "advanced_image_editing": (("edit_image",),),
+    "upscaling": (("upscale_image",),),
+    "advanced_upscaling": (("upscale_image", "upscale_video"),),
+    "lipsync": (("generate_lipsync",),),
+    "script_story": (("generate_text",),),
+    "advanced_transcription": (("transcribe",),),
+    "advanced_audio": (("generate_audio", "generate_speech", "generate_music"),),
+    "video_editing": (("edit_video",),),
+    "advanced_video_editing": (("edit_video",),),
+}
+
+MODALITY_OUTPUT_KINDS: dict[str, frozenset[str]] = {
+    "image": frozenset({"image"}), "video": frozenset({"video"}),
+    "voice": frozenset({"audio"}), "audio": frozenset({"audio"}),
+    "music": frozenset({"audio"}), "text": frozenset({"text"}),
+    "language_model": frozenset({"text"}), "script_story": frozenset({"text"}),
+    "transcription": frozenset({"text"}), "advanced_transcription": frozenset({"text"}),
+    "translation": frozenset({"text"}), "dubbing": frozenset({"audio", "video"}),
+    "image_editing": frozenset({"image"}), "advanced_image_editing": frozenset({"image"}),
+    "upscaling": frozenset({"image"}), "advanced_upscaling": frozenset({"image", "video"}),
+    "lipsync": frozenset({"video"}), "advanced_audio": frozenset({"audio"}),
+    "video_editing": frozenset({"video"}), "advanced_video_editing": frozenset({"video"}),
+}
+
+
 class ConnectionManager:
     VALID_STATES = {
         "LOCKED",
@@ -621,28 +660,7 @@ class ConnectionManager:
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
-        contracts: dict[str, tuple[tuple[str, ...], ...]] = {
-            "image": (("generate_image",),),
-            "video": (("generate_video",),),
-            "voice": (("generate_speech", "generate_audio"),),
-            "audio": (("generate_audio", "generate_speech"),),
-            "music": (("generate_music",),),
-            "text": (("generate_text",),),
-            "language_model": (("generate_text",),),
-            "transcription": (("transcribe",),),
-            "translation": (("translate",),),
-            "dubbing": (("dub",),),
-            "image_editing": (("edit_image",),),
-            "advanced_image_editing": (("edit_image",),),
-            "upscaling": (("upscale_image",),),
-            "advanced_upscaling": (("upscale_image", "upscale_video"),),
-            "lipsync": (("generate_lipsync",),),
-            "script_story": (("generate_text",),),
-            "advanced_transcription": (("transcribe",),),
-            "advanced_audio": (("generate_audio", "generate_speech", "generate_music"),),
-            "video_editing": (("edit_video",),),
-            "advanced_video_editing": (("edit_video",),),
-        }
+        contracts = MODALITY_CONTRACTS
         requirements = contracts.get(category)
         if requirements is None:
             return {
@@ -667,6 +685,39 @@ class ConnectionManager:
             "provider": provider_id,
             "valid": not missing,
             "missing_methods": missing,
+            "contract_version": "1.0",
+        }
+
+    def get_modality_binding(self, provider_id: str) -> dict[str, Any]:
+        """Report the declared output modality without contacting a provider or writing state."""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+        category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
+        requirements = MODALITY_CONTRACTS.get(category)
+        output_kinds = MODALITY_OUTPUT_KINDS.get(category)
+        if requirements is None or output_kinds is None:
+            return {
+                "status": "UNSUPPORTED_MODALITY", "provider": provider_id, "valid": False,
+                "category": category, "contract_version": "1.0",
+            }
+        runtime_contract = "NOT_LOADED"
+        instance = self.get_loaded_provider(provider_id)
+        if instance is not None:
+            checked = self.validate_provider_contract(provider_id, instance)
+            runtime_contract = checked.get("status", "CONTRACT_VIOLATION")
+            if checked.get("valid") is not True:
+                return {
+                    "status": "CONTRACT_VIOLATION", "provider": provider_id, "valid": False,
+                    "category": category, "runtime_contract": runtime_contract,
+                    "contract_version": "1.0",
+                }
+        return {
+            "status": "VALID", "provider": provider_id, "valid": True,
+            "category": category,
+            "contract_methods": [list(alternatives) for alternatives in requirements],
+            "output_modalities": sorted(output_kinds),
+            "runtime_contract": runtime_contract,
             "contract_version": "1.0",
         }
 

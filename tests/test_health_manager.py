@@ -1,10 +1,13 @@
 import json
 import tempfile
+from contextlib import contextmanager
 import unittest
+from unittest.mock import patch
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from projects.provider_store import health_manager as health_manager_module
 from projects.provider_store.health_manager import ProviderHealthManager
 
 
@@ -67,6 +70,33 @@ class ProviderHealthManagerTests(unittest.TestCase):
         record = loaded.data["providers"]["image"]
         self.assertEqual(len(record["history"]), 20)
         self.assertEqual(record["consecutive_failures"], 20)
+
+    def test_constructor_loads_existing_state_under_the_interprocess_lock(self):
+        self.manager.record_result("image", success=True, latency_ms=5)
+        events = []
+        real_lock = health_manager_module.interprocess_file_lock
+
+        @contextmanager
+        def tracking_lock(lock_path):
+            events.append(Path(lock_path).name)
+            with real_lock(lock_path):
+                yield
+
+        with patch.object(health_manager_module, "interprocess_file_lock", tracking_lock):
+            loaded = ProviderHealthManager(self.path, history_limit=3, failure_threshold=2, clock=lambda: self.now[0])
+        self.assertEqual(events, ["health.json.lock"])
+        self.assertIn("image", loaded.data["providers"])
+
+    def test_constructor_without_existing_state_does_not_create_a_lock_file(self):
+        fresh = Path(self.temp_dir.name) / "fresh" / "health.json"
+        ProviderHealthManager(fresh, history_limit=3, failure_threshold=2)
+        self.assertFalse(fresh.parent.exists())
+
+    def test_constructor_falls_back_to_plain_read_when_lock_file_cannot_be_created(self):
+        self.manager.record_result("image", success=True, latency_ms=5)
+        with patch.object(health_manager_module, "interprocess_file_lock", side_effect=PermissionError("read-only directory")):
+            loaded = ProviderHealthManager(self.path, history_limit=3, failure_threshold=2, clock=lambda: self.now[0])
+        self.assertIn("image", loaded.data["providers"])
 
     def test_request_id_makes_health_recording_idempotent_and_conflict_safe(self):
         first = self.manager.record_result(
