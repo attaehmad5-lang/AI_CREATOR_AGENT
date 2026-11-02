@@ -62,6 +62,8 @@ class ProviderService:
             (media_integrity_validator, "validate", "media_integrity_validator"),
             (project_policy_manager, "simulate_policy", "project_policy_manager"),
             (slo_manager, "record", "slo_manager"),
+            (slo_manager, "configure", "slo_manager"),
+            (slo_manager, "evaluate", "slo_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
