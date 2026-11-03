@@ -16,7 +16,9 @@ class FakeConnectionManager:
 
 
 class AllowAuthorizationManager:
-    def authorize(self, principal_id, operation):
+    supports_provider_scopes = True
+
+    def authorize(self, principal_id, operation, *, provider_id=None):
         if not isinstance(principal_id, str) or not principal_id:
             return {"allowed": False, "status": "INVALID_PRINCIPAL"}
         return {"allowed": True, "principal_id": principal_id, "operation": operation}
