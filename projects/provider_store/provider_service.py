@@ -1251,6 +1251,17 @@ class ProviderService:
             if not isinstance(tenant_access, dict) or tenant_access.get("allowed") is not True:
                 return {"status": "TENANT_ISOLATION_DENIED", "executed": False}
 
+        # Reject caller-supplied managed credentials before generic payload scanning
+        # so the precise credential-injection contract remains deterministic.
+        if use_managed_credential and isinstance(adapter_options, dict) and (
+            "provider_credential" in adapter_options
+            or "provider_credential_lease" in adapter_options
+        ):
+            return {
+                "status": "CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED",
+                "executed": False,
+            }
+
         sensitive_data_scan = None
         if self.sensitive_data_policy is not None:
             try:
