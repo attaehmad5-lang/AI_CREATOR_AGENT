@@ -15,7 +15,9 @@ class FakeConnectionManager:
 
 
 class FakeAuthorizationManager:
-    def authorize(self, principal_id, operation):
+    supports_provider_scopes = True
+
+    def authorize(self, principal_id, operation, *, provider_id=None):
         return {"allowed": True, "principal_id": principal_id, "operation": operation}
 
 
