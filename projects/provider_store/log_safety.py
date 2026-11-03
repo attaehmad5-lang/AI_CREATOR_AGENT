@@ -57,13 +57,43 @@ def redact_text(value: str) -> str:
     if not isinstance(value, str):
         raise TypeError("redact_text requires a string")
     value = _PRIVATE_KEY_RE.sub("[REDACTED_PRIVATE_KEY]", value)
-    value = _URL_PASSWORD_RE.sub(r"\1[REDACTED]@", value)
+    value = _URL_PASSWORD_RE.sub(r"\\1[REDACTED]@", value)
     value = _AUTH_ASSIGNMENT_RE.sub(lambda match: match.group(1) + "[REDACTED]", value)
     value = _SENSITIVE_ASSIGNMENT_RE.sub(lambda match: match.group(1) + "[REDACTED]", value)
     value = _BEARER_RE.sub("Bearer [REDACTED]", value)
     value = _KNOWN_TOKEN_RE.sub("[REDACTED_TOKEN]", value)
     value = _JWT_RE.sub("[REDACTED_JWT]", value)
     return value
+
+
+def _safe_exception_text(exc_info: Any) -> str:
+    """Render exception metadata without exposing traceback source lines or paths."""
+    try:
+        exc_type, exc_value, _ = exc_info
+        if exc_value is None:
+            return redact_text(getattr(exc_type, "__name__", "Exception"))
+        sections: list[str] = []
+        current = exc_value
+        seen: set[int] = set()
+        for _ in range(5):
+            if current is None or id(current) in seen:
+                break
+            seen.add(id(current))
+            current_type = redact_text(type(current).__name__)
+            try:
+                current_message = redact_text(str(current))
+            except Exception:
+                current_message = "[UNAVAILABLE_EXCEPTION_MESSAGE]"
+            sections.append(f"{current_type}: {current_message}")
+            frames = traceback.extract_tb(current.__traceback__, limit=20) if current.__traceback__ else []
+            for frame in frames[-20:]:
+                sections.append(f"  at {redact_text(frame.name)}:{int(frame.lineno)}")
+            current = current.__cause__
+            if current is None and not getattr(exc_value, "__suppress_context__", False):
+                current = exc_value.__context__
+        return "\\n".join(sections) or "[REDACTED_EXCEPTION]"
+    except Exception:
+        return "[REDACTED_EXCEPTION]"
 
 
 def _sensitive_key(key: Any) -> bool:
@@ -141,7 +171,7 @@ class SecretRedactionFilter(logging.Filter):
 
         if record.exc_info:
             try:
-                rendered_exception = "".join(traceback.format_exception(*record.exc_info))
+                rendered_exception = _safe_exception_text(record.exc_info)
                 record.exc_text = redact_text(rendered_exception)
             except Exception:
                 record.exc_text = "[REDACTED_EXCEPTION]"
@@ -176,7 +206,7 @@ class JsonLogFormatter(logging.Formatter):
         exception_text = record.exc_text
         if record.exc_info:
             try:
-                exception_text = "".join(traceback.format_exception(*record.exc_info))
+                exception_text = _safe_exception_text(record.exc_info)
             except Exception:
                 exception_text = "[REDACTED_EXCEPTION]"
         if exception_text:
