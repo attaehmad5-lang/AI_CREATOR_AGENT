@@ -89,6 +89,33 @@ class ProviderAuthorizationManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "authorization timestamp"):
             ProviderAuthorizationManager(self.path, clock=lambda: self.now)
 
+
+    def test_access_management_is_an_explicit_admin_only_permission(self):
+        self.manager.assign_role("admin-1", "admin")
+        self.manager.assign_role("operator-1", "operator")
+        self.manager.assign_role("viewer-1", "viewer")
+        self.assertTrue(
+            self.manager.authorize("admin-1", "provider.access.manage")["allowed"]
+        )
+        for principal in ("operator-1", "viewer-1"):
+            result = self.manager.authorize(principal, "provider.access.manage")
+            self.assertFalse(result["allowed"])
+            self.assertEqual(result["status"], "ACCESS_DENIED")
+
+    def test_last_active_admin_cannot_be_disabled_or_demoted(self):
+        self.manager.assign_role("admin-1", "admin")
+        self.assertEqual(
+            self.manager.disable_principal("admin-1")["status"],
+            "LAST_ACTIVE_ADMIN_REQUIRED",
+        )
+        self.assertEqual(
+            self.manager.assign_role("admin-1", "operator")["status"],
+            "LAST_ACTIVE_ADMIN_REQUIRED",
+        )
+        self.manager.assign_role("admin-2", "admin")
+        self.assertTrue(self.manager.disable_principal("admin-1")["saved"])
+        self.assertTrue(self.manager.authorize("admin-2", "provider.access.manage")["allowed"])
+
     def test_invalid_assignments_fail_closed(self):
         self.assertEqual(self.manager.assign_role("bad id", "admin")["status"], "INVALID_PRINCIPAL_ID")
         self.assertEqual(self.manager.assign_role("creator-1", "root")["status"], "INVALID_ROLE")

@@ -112,6 +112,9 @@ class ProviderService:
 
     def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
         if self.authorization_manager is None:
+            if principal_id is not None:
+                return {"allowed": False, "status": "AUTHORIZATION_MANAGER_UNAVAILABLE"}
+            # principal_id=None is reserved for trusted in-process calls only.
             return None
         try:
             result = self.authorization_manager.authorize(principal_id, operation)
@@ -122,6 +125,58 @@ class ProviderService:
                 "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
             }
         return None
+
+    def assign_provider_role(
+        self,
+        target_principal_id: str,
+        role: str,
+        *,
+        actor_principal_id: str | None,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        """Assign a role only after an authenticated administrator is authorized."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(
+            actor_principal_id, "provider.access.manage"
+        )
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        assign = getattr(self.authorization_manager, "assign_role", None)
+        if not callable(assign):
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        try:
+            result = assign(target_principal_id, role, enabled=enabled)
+        except Exception as exc:
+            return {"status": "ROLE_ASSIGNMENT_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        return result
+
+    def disable_provider_principal(
+        self,
+        target_principal_id: str,
+        *,
+        actor_principal_id: str | None,
+    ) -> dict[str, Any]:
+        """Disable an identity only through the administrator-gated service facade."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(
+            actor_principal_id, "provider.access.manage"
+        )
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        disable = getattr(self.authorization_manager, "disable_principal", None)
+        if not callable(disable):
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        try:
+            result = disable(target_principal_id)
+        except Exception as exc:
+            return {"status": "PRINCIPAL_DISABLE_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        return result
 
     def _authorize_tenant_project(
         self,
@@ -1044,19 +1099,12 @@ class ProviderService:
                     },
                 }
 
-        authorization = None
-        if self.authorization_manager is not None:
-            try:
-                authorization = self.authorization_manager.authorize(principal_id, "provider.generate")
-            except Exception as exc:
-                return {"status": "AUTHORIZATION_CHECK_FAILED", "executed": False, "error_type": type(exc).__name__}
-            if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
-                return {
-                    "status": "AUTHORIZATION_DENIED", "executed": False,
-                    "authorization": authorization if isinstance(authorization, dict) else {
-                        "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
-                    },
-                }
+        authorization = self._authorize_operation(principal_id, "provider.generate")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "executed": False,
+                "authorization": authorization,
+            }
 
         if self.tenant_isolation_manager is not None:
             if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
