@@ -49,15 +49,17 @@ class LogSafetyTests(unittest.TestCase):
             "access_token": "access-secret-123",
             "nested": [
                 {"refresh_token": "refresh-secret-123", "healthy": True},
-                {"api_key": "api-secret-123", "count": 4},
+                {"api_key": "api-secret-123", "clientSecret": "camel-case-secret-123", "count": 4},
             ],
         }
         cleaned = redact_value(original)
         self.assertEqual(cleaned["access_token"], "[REDACTED]")
         self.assertEqual(cleaned["nested"][0]["refresh_token"], "[REDACTED]")
         self.assertEqual(cleaned["nested"][1]["api_key"], "[REDACTED]")
+        self.assertEqual(cleaned["nested"][1]["clientSecret"], "[REDACTED]")
         self.assertEqual(cleaned["nested"][1]["count"], 4)
         self.assertEqual(original["access_token"], "access-secret-123")
+        self.assertEqual(original["nested"][1]["clientSecret"], "camel-case-secret-123")
 
     def test_handles_cycles_bytes_depth_and_arbitrary_objects_safely(self):
         circular = {}
