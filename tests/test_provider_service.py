@@ -1137,6 +1137,17 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertTrue(enabled["saved"])
 
+
+    def test_provider_management_endpoints_fail_closed_without_authorization_manager(self):
+        service = ProviderService(self.connections)
+        configured = service.configure_provider(
+            "image", principal_id=None, model="unprotected-model"
+        )
+        enabled = service.set_provider_enabled("image", False, principal_id=None)
+        self.assertEqual(configured["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertEqual(enabled["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertTrue(self.connections.is_provider_enabled("image"))
+
     def test_provider_scopes_gate_verification_and_generation_routing(self):
         authorization = ProviderAuthorizationManager(self.root / "provider-scopes-auth.json")
         authorization.assign_role("admin-user", "admin")
