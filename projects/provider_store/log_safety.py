@@ -57,7 +57,7 @@ def redact_text(value: str) -> str:
     if not isinstance(value, str):
         raise TypeError("redact_text requires a string")
     value = _PRIVATE_KEY_RE.sub("[REDACTED_PRIVATE_KEY]", value)
-    value = _URL_PASSWORD_RE.sub(r"\\1[REDACTED]@", value)
+    value = _URL_PASSWORD_RE.sub(r"\1[REDACTED]@", value)
     value = _AUTH_ASSIGNMENT_RE.sub(lambda match: match.group(1) + "[REDACTED]", value)
     value = _SENSITIVE_ASSIGNMENT_RE.sub(lambda match: match.group(1) + "[REDACTED]", value)
     value = _BEARER_RE.sub("Bearer [REDACTED]", value)
@@ -88,10 +88,11 @@ def _safe_exception_text(exc_info: Any) -> str:
             frames = traceback.extract_tb(current.__traceback__, limit=20) if current.__traceback__ else []
             for frame in frames[-20:]:
                 sections.append(f"  at {redact_text(frame.name)}:{int(frame.lineno)}")
-            current = current.__cause__
-            if current is None and not getattr(exc_value, "__suppress_context__", False):
-                current = exc_value.__context__
-        return "\\n".join(sections) or "[REDACTED_EXCEPTION]"
+            next_exception = current.__cause__
+            if next_exception is None and not getattr(current, "__suppress_context__", False):
+                next_exception = current.__context__
+            current = next_exception
+        return "\n".join(sections) or "[REDACTED_EXCEPTION]"
     except Exception:
         return "[REDACTED_EXCEPTION]"
 
@@ -99,7 +100,7 @@ def _safe_exception_text(exc_info: Any) -> str:
 def _sensitive_key(key: Any) -> bool:
     if not isinstance(key, str):
         key = str(key)
-    normalized = key.strip().lower().replace(" ", "_")
+    normalized = re.sub(r"(?<!^)(?=[A-Z])", "_", key.strip()).lower().replace(" ", "_")
     return bool(_SENSITIVE_KEY_RE.search(normalized))
 
 
