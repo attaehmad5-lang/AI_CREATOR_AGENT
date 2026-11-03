@@ -116,6 +116,76 @@ class ProviderAuthorizationManagerTests(unittest.TestCase):
         self.assertTrue(self.manager.disable_principal("admin-1")["saved"])
         self.assertTrue(self.manager.authorize("admin-2", "provider.access.manage")["allowed"])
 
+
+    def test_provider_scopes_are_operation_specific_and_fail_closed(self):
+        self.manager.assign_role("creator-1", "creator")
+        saved = self.manager.set_provider_scopes(
+            "creator-1", {"provider.generate": ["image-main", "image-backup"]}
+        )
+        self.assertTrue(saved["saved"])
+        self.assertTrue(self.manager.authorize(
+            "creator-1", "provider.generate", provider_id="image-main"
+        )["allowed"])
+        self.assertEqual(self.manager.authorize(
+            "creator-1", "provider.generate", provider_id="voice"
+        )["status"], "PROVIDER_SCOPE_DENIED")
+        self.assertEqual(self.manager.authorize(
+            "creator-1", "provider.generate"
+        )["status"], "PROVIDER_SCOPE_REQUIRED")
+        self.assertEqual(self.manager.authorize(
+            "creator-1", "provider.read", provider_id="image-main"
+        )["status"], "PROVIDER_SCOPE_DENIED")
+        candidates = self.manager.authorize(
+            "creator-1", "provider.generate", provider_id="*"
+        )
+        self.assertTrue(candidates["allowed"])
+        self.assertEqual(candidates["allowed_provider_ids"], ["image-main", "image-backup"])
+
+    def test_provider_scopes_validate_operation_ids_and_role_permissions(self):
+        self.manager.assign_role("creator-1", "creator")
+        self.assertEqual(
+            self.manager.set_provider_scopes(
+                "creator-1", {"provider.configure": ["image"]}
+            )["status"],
+            "ROLE_OPERATION_NOT_PERMITTED",
+        )
+        for bad in (
+            {"provider.generate": ["bad id"]},
+            {"provider.generate": ["image", "image"]},
+            {"provider.root": ["image"]},
+            {"provider.generate": "image"},
+        ):
+            with self.subTest(scopes=bad):
+                result = self.manager.set_provider_scopes("creator-1", bad)
+                self.assertFalse(result["saved"])
+        self.assertTrue(self.manager.set_provider_scopes(
+            "creator-1", {"provider.generate": ["image"]}
+        )["saved"])
+        with self.assertRaises(ValueError):
+            self.path.write_text(json.dumps({
+                "version":"1.0","principals":{
+                    "creator-1":{
+                        "role":"creator","enabled":True,
+                        "updated_at":self.now.isoformat(),
+                        "provider_scopes":{"provider.configure":["image"]},
+                    }
+                }
+            }),encoding="utf-8")
+            ProviderAuthorizationManager(self.path, clock=lambda:self.now)
+
+    def test_provider_scope_restrictions_survive_role_changes(self):
+        self.manager.assign_role("creator-1", "creator")
+        self.manager.set_provider_scopes("creator-1", {
+            "provider.generate": ["image"]
+        })
+        self.manager.assign_role("creator-1", "operator")
+        self.assertEqual(self.manager.authorize(
+            "creator-1", "provider.generate", provider_id="voice"
+        )["status"], "PROVIDER_SCOPE_DENIED")
+        self.assertTrue(self.manager.authorize(
+            "creator-1", "provider.generate", provider_id="image"
+        )["allowed"])
+
     def test_invalid_assignments_fail_closed(self):
         self.assertEqual(self.manager.assign_role("bad id", "admin")["status"], "INVALID_PRINCIPAL_ID")
         self.assertEqual(self.manager.assign_role("creator-1", "root")["status"], "INVALID_ROLE")
