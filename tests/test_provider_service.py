@@ -1270,6 +1270,29 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(called, [])
 
 
+
+    def test_default_sensitive_data_policy_blocks_pii_field_labels_before_routing(self):
+        calls = {"route": 0, "adapter": 0}
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls["route"] += 1
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        service = ProviderService(
+            self.connections, routing_manager=RoutingStub(),
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="default-pii-block",
+            estimated_cost=0.0, modality="image",
+            adapter_options={"userProfile": {"email": "jane@example.com"}},
+            adapter=lambda **kwargs: calls.update(adapter=calls["adapter"] + 1),
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(calls, {"route": 0, "adapter": 0})
+        self.assertNotIn("jane@example.com", repr(result))
+
     def test_sensitive_credentials_are_blocked_by_default_before_routing(self):
         calls = {"route": 0, "adapter": 0}
 
