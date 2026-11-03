@@ -175,6 +175,8 @@ class ProviderService:
         authentication_required: bool | None = None,
     ) -> dict[str, Any]:
         """Authorize provider-scoped configuration before updating connection state."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
         authorization = self._authorize_operation(
             principal_id, "provider.configure", provider_id=provider_id
         )
@@ -200,6 +202,8 @@ class ProviderService:
         principal_id: str | None,
     ) -> dict[str, Any]:
         """Enable or disable a provider only with the matching admin operation."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
         if not isinstance(enabled, bool):
             return {"status": "INVALID_ENABLED_VALUE", "provider": provider_id, "saved": False}
         operation = "provider.enable" if enabled else "provider.disable"
@@ -881,8 +885,10 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
-        authorization = self._authorize_operation(principal_id, "provider.read")
-        if authorization is not None:
+        authorization = self._authorize_operation(
+            principal_id, "provider.read", provider_id="*", return_decision=True
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
         if self.tenant_isolation_manager is not None and (
             not isinstance(tenant_id, str) or not tenant_id.strip()
@@ -899,6 +905,12 @@ class ProviderService:
         if not isinstance(result, dict):
             return {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
         job = result.get("job")
+        if isinstance(job, dict):
+            scoped_authorization = self._authorize_operation(
+                principal_id, "provider.read", provider_id=job.get("provider_id")
+            )
+            if scoped_authorization is not None:
+                return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": scoped_authorization}
         if self.tenant_isolation_manager is not None and isinstance(job, dict):
             tenant_error = self._authorize_tenant_project(
                 tenant_id=tenant_id,
@@ -961,24 +973,36 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
-        authorization = self._authorize_operation(principal_id, "provider.generate")
-        if authorization is not None:
+        authorization = self._authorize_operation(
+            principal_id, "provider.generate", provider_id="*", return_decision=True
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
         if self.tenant_isolation_manager is not None and (
             not isinstance(tenant_id, str) or not tenant_id.strip()
         ):
             return {"status": "TENANT_CONTEXT_REQUIRED", "saved": False}
         try:
+            existing = (
+                self.job_manager.poll(job_id=job_id, tenant_id=tenant_id)
+                if self.tenant_isolation_manager is not None
+                else self.job_manager.poll(job_id=job_id)
+            )
+            if not isinstance(existing, dict) or not isinstance(existing.get("job"), dict):
+                return {
+                    "status": existing.get("status", "JOB_NOT_FOUND") if isinstance(existing, dict) else "INVALID_JOB_MANAGER_RESPONSE",
+                    "saved": False,
+                }
+            job = existing["job"]
+            scoped_authorization = self._authorize_operation(
+                principal_id, "provider.generate", provider_id=job.get("provider_id")
+            )
+            if scoped_authorization is not None:
+                return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": scoped_authorization}
             if self.tenant_isolation_manager is not None:
-                existing = self.job_manager.poll(job_id=job_id, tenant_id=tenant_id)
-                if not isinstance(existing, dict) or not isinstance(existing.get("job"), dict):
-                    return {
-                        "status": existing.get("status", "JOB_NOT_FOUND") if isinstance(existing, dict) else "INVALID_JOB_MANAGER_RESPONSE",
-                        "saved": False,
-                    }
                 tenant_error = self._authorize_tenant_project(
                     tenant_id=tenant_id,
-                    project_id=existing["job"].get("project_id"),
+                    project_id=job.get("project_id"),
                     principal_id=principal_id,
                 )
                 if tenant_error is not None:
