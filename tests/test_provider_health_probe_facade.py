@@ -39,11 +39,13 @@ class HealthStub:
 
 
 class AuthorizationStub:
+    supports_provider_scopes = True
+
     def __init__(self, allowed):
         self.allowed = allowed
         self.calls = []
 
-    def authorize(self, principal_id, operation):
+    def authorize(self, principal_id, operation, *, provider_id=None):
         self.calls.append((principal_id, operation))
         return {"allowed": self.allowed, "status": "ALLOWED" if self.allowed else "ACCESS_DENIED"}
 
