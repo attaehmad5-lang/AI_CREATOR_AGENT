@@ -1061,6 +1061,51 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertEqual(len(alerts.pending_alerts()["alerts"]), 1)
 
+
+    def test_provider_role_management_requires_admin_permission(self):
+        authorization = ProviderAuthorizationManager(self.root / "role-management-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        authorization.assign_role("operator-user", "operator")
+        service = ProviderService(self.connections, authorization_manager=authorization)
+
+        denied_assign = service.assign_provider_role(
+            "new-user", "creator", actor_principal_id="operator-user"
+        )
+        denied_disable = service.disable_provider_principal(
+            "admin-user", actor_principal_id="operator-user"
+        )
+        self.assertEqual(denied_assign["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(denied_disable["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(authorization.authorize("new-user", "provider.read")["status"], "PRINCIPAL_NOT_FOUND")
+        self.assertTrue(authorization.authorize("admin-user", "provider.access.manage")["allowed"])
+
+        assigned = service.assign_provider_role(
+            "new-user", "creator", actor_principal_id="admin-user"
+        )
+        self.assertTrue(assigned["saved"])
+        self.assertTrue(authorization.authorize("new-user", "provider.generate")["allowed"])
+        disabled = service.disable_provider_principal(
+            "new-user", actor_principal_id="admin-user"
+        )
+        self.assertTrue(disabled["saved"])
+        self.assertEqual(authorization.authorize("new-user", "provider.generate")["status"], "PRINCIPAL_DISABLED")
+
+    def test_attributed_request_fails_closed_without_authorization_manager(self):
+        service = ProviderService(self.connections)
+        called = []
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="missing-auth-manager",
+            estimated_cost=0.0,
+            modality="image",
+            principal_id="caller-1",
+            adapter=lambda **kwargs: called.append(kwargs),
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(result["authorization"]["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertEqual(called, [])
+
     def test_least_privilege_authorization_blocks_generation_before_adapter(self):
         authorization = ProviderAuthorizationManager(self.root / "service-auth.json")
         authorization.assign_role("read-only-user", "viewer")
