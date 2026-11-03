@@ -1148,6 +1148,28 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(enabled["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
         self.assertTrue(self.connections.is_provider_enabled("image"))
 
+
+    def test_provider_scoped_actions_fail_closed_for_legacy_authorization_adapters(self):
+        class LegacyAuthorization:
+            def authorize(self, principal_id, operation):
+                return {"allowed": True, "status": "AUTHORIZED"}
+
+        legacy = ProviderService(
+            self.connections, authorization_manager=LegacyAuthorization()
+        )
+        calls = []
+        result = legacy.verify_provider(
+            "image",
+            lambda provider, **kwargs: calls.append(provider["id"]) or {"ok": True},
+            principal_id="caller-1",
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(
+            result["authorization"]["status"],
+            "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE",
+        )
+        self.assertEqual(calls, [])
+
     def test_provider_scopes_gate_verification_and_generation_routing(self):
         authorization = ProviderAuthorizationManager(self.root / "provider-scopes-auth.json")
         authorization.assign_role("admin-user", "admin")
