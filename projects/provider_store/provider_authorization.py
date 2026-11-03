@@ -21,7 +21,8 @@ ROLE_PERMISSIONS = {
     "admin": frozenset({
         "provider.read", "provider.verify", "provider.generate",
         "provider.configure", "provider.enable", "provider.disable",
-        "provider.credentials.rotate", "provider.policy.simulate", "billing.approve",
+        "provider.credentials.rotate", "provider.policy.simulate", "provider.access.manage",
+        "billing.approve",
     }),
 }
 KNOWN_OPERATIONS = frozenset().union(*ROLE_PERMISSIONS.values())
@@ -110,6 +111,29 @@ class ProviderAuthorizationManager:
                 pass
             raise
 
+    def _active_admin_count(self) -> int:
+        principals = self.data.get("principals", {})
+        if not isinstance(principals, dict):
+            return 0
+        return sum(
+            1 for record in principals.values()
+            if isinstance(record, dict)
+            and record.get("role") == "admin"
+            and record.get("enabled") is True
+        )
+
+    def _would_remove_last_active_admin(
+        self, principal_id: str, role: str, enabled: bool
+    ) -> bool:
+        current = self.data["principals"].get(principal_id)
+        currently_admin = (
+            isinstance(current, dict)
+            and current.get("role") == "admin"
+            and current.get("enabled") is True
+        )
+        remains_admin = role == "admin" and enabled is True
+        return currently_admin and not remains_admin and self._active_admin_count() <= 1
+
     def assign_role(self, principal_id: str, role: str, *, enabled: bool = True) -> dict[str, Any]:
         if not self._valid_principal(principal_id):
             return {"status": "INVALID_PRINCIPAL_ID", "saved": False}
@@ -118,6 +142,8 @@ class ProviderAuthorizationManager:
         if not isinstance(enabled, bool):
             return {"status": "INVALID_ENABLED_FLAG", "saved": False}
         with self._transaction():
+            if self._would_remove_last_active_admin(principal_id, role, enabled):
+                return {"status": "LAST_ACTIVE_ADMIN_REQUIRED", "saved": False}
             if principal_id not in self.data["principals"] and len(self.data["principals"]) >= self.max_principals:
                 return {"status": "PRINCIPAL_CAPACITY_REACHED", "saved": False}
             self.data["principals"][principal_id] = {
@@ -158,6 +184,8 @@ class ProviderAuthorizationManager:
             record = self.data["principals"].get(principal_id)
             if not isinstance(record, dict):
                 return {"status": "PRINCIPAL_NOT_FOUND", "saved": False}
+            if record.get("role") == "admin" and record.get("enabled") is True and self._active_admin_count() <= 1:
+                return {"status": "LAST_ACTIVE_ADMIN_REQUIRED", "saved": False}
             record["enabled"] = False
             record["updated_at"] = self.clock().astimezone(timezone.utc).isoformat()
             self._save()
