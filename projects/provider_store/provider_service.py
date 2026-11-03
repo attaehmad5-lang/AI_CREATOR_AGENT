@@ -110,21 +110,111 @@ class ProviderService:
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
 
-    def _authorize_operation(self, principal_id: str | None, operation: str) -> dict[str, Any] | None:
+    def _authorize_operation(
+        self,
+        principal_id: str | None,
+        operation: str,
+        *,
+        provider_id: str | None = None,
+        return_decision: bool = False,
+    ) -> dict[str, Any] | None:
         if self.authorization_manager is None:
             if principal_id is not None:
                 return {"allowed": False, "status": "AUTHORIZATION_MANAGER_UNAVAILABLE"}
             # principal_id=None is reserved for trusted in-process calls only.
-            return None
+            return {"allowed": True, "status": "TRUSTED_INTERNAL"} if return_decision else None
         try:
-            result = self.authorization_manager.authorize(principal_id, operation)
+            authorize = self.authorization_manager.authorize
+            if provider_id is not None and getattr(
+                self.authorization_manager, "supports_provider_scopes", False
+            ) is True:
+                result = authorize(principal_id, operation, provider_id=provider_id)
+            else:
+                result = authorize(principal_id, operation)
         except Exception as exc:
             return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
-        if not isinstance(result, dict) or result.get("allowed") is not True:
-            return result if isinstance(result, dict) else {
-                "allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"
-            }
-        return None
+        if not isinstance(result, dict):
+            result = {"allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"}
+        if result.get("allowed") is not True:
+            return result
+        return result if return_decision else None
+
+
+    def set_provider_access_scopes(
+        self,
+        target_principal_id: str,
+        provider_scopes: dict[str, list[str]] | None,
+        *,
+        actor_principal_id: str | None,
+    ) -> dict[str, Any]:
+        """Set operation-specific provider allowlists under admin authorization."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(actor_principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        setter = getattr(self.authorization_manager, "set_provider_scopes", None)
+        if not callable(setter):
+            return {"status": "AUTHORIZATION_SCOPE_MANAGER_UNAVAILABLE", "saved": False}
+        try:
+            result = setter(target_principal_id, provider_scopes)
+        except Exception as exc:
+            return {"status": "PROVIDER_SCOPE_UPDATE_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False
+        }
+
+    def configure_provider(
+        self,
+        provider_id: str,
+        *,
+        principal_id: str | None,
+        model: str | None = None,
+        endpoint: str | None = None,
+        probe_endpoint: str | None = None,
+        authentication_required: bool | None = None,
+    ) -> dict[str, Any]:
+        """Authorize provider-scoped configuration before updating connection state."""
+        authorization = self._authorize_operation(
+            principal_id, "provider.configure", provider_id=provider_id
+        )
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "provider": provider_id, "saved": False, "authorization": authorization}
+        configure = getattr(self.connection_manager, "configure_provider", None)
+        if not callable(configure):
+            return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
+        try:
+            return configure(
+                provider_id, model=model, endpoint=endpoint,
+                probe_endpoint=probe_endpoint,
+                authentication_required=authentication_required,
+            )
+        except Exception as exc:
+            return {"status": "PROVIDER_CONFIGURATION_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
+
+    def set_provider_enabled(
+        self,
+        provider_id: str,
+        enabled: bool,
+        *,
+        principal_id: str | None,
+    ) -> dict[str, Any]:
+        """Enable or disable a provider only with the matching admin operation."""
+        if not isinstance(enabled, bool):
+            return {"status": "INVALID_ENABLED_VALUE", "provider": provider_id, "saved": False}
+        operation = "provider.enable" if enabled else "provider.disable"
+        authorization = self._authorize_operation(
+            principal_id, operation, provider_id=provider_id
+        )
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "provider": provider_id, "saved": False, "authorization": authorization}
+        setter = getattr(self.connection_manager, "set_provider_enabled", None)
+        if not callable(setter):
+            return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
+        try:
+            return setter(provider_id, enabled)
+        except Exception as exc:
+            return {"status": "PROVIDER_ENABLEMENT_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
 
     def assign_provider_role(
         self,
@@ -301,7 +391,7 @@ class ProviderService:
         """Configure an SLO using administrator-only provider configuration permission."""
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
-        authorization = self._authorize_operation(principal_id, "provider.configure")
+        authorization = self._authorize_operation(principal_id, "provider.configure", provider_id=provider_id)
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
         if self.slo_manager is None:
@@ -410,7 +500,7 @@ class ProviderService:
         principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Run one bounded, authorized provider probe and return only safe evidence."""
-        authorization = self._authorize_operation(principal_id, "provider.verify")
+        authorization = self._authorize_operation(principal_id, "provider.verify", provider_id=provider_id)
         if authorization is not None:
             return {
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
@@ -487,7 +577,7 @@ class ProviderService:
         principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify connection using an injected provider-specific probe and record health."""
-        authorization = self._authorize_operation(principal_id, "provider.verify")
+        authorization = self._authorize_operation(principal_id, "provider.verify", provider_id=provider_id)
         if authorization is not None:
             return {
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
@@ -536,7 +626,7 @@ class ProviderService:
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_REQUIRED", "rotated": False}
         authorization = self._authorize_operation(
-            principal_id, "provider.credentials.rotate"
+            principal_id, "provider.credentials.rotate", provider_id=provider_id
         )
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "rotated": False}
@@ -611,7 +701,7 @@ class ProviderService:
         This checks reachability and authentication only; it does not certify model
         support, account credits, generation quality, or provider-specific capabilities.
         """
-        authorization = self._authorize_operation(principal_id, "provider.verify")
+        authorization = self._authorize_operation(principal_id, "provider.verify", provider_id=provider_id)
         if authorization is not None:
             return {
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
@@ -661,7 +751,7 @@ class ProviderService:
         Token refresh is explicit: call the OAuth manager's refresh method only when the
         provider supports it and the user-authorized session allows it.
         """
-        authorization = self._authorize_operation(principal_id, "provider.verify")
+        authorization = self._authorize_operation(principal_id, "provider.verify", provider_id=provider_id)
         if authorization is not None:
             return {
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
@@ -719,7 +809,7 @@ class ProviderService:
         principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify an externally authorized account session and record safe health metadata."""
-        authorization = self._authorize_operation(principal_id, "provider.verify")
+        authorization = self._authorize_operation(principal_id, "provider.verify", provider_id=provider_id)
         if authorization is not None:
             return {
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
@@ -765,7 +855,7 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
-        authorization = self._authorize_operation(principal_id, "provider.generate")
+        authorization = self._authorize_operation(principal_id, "provider.generate", provider_id=provider_id)
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "accepted": False, "authorization": authorization}
         tenant_error = self._authorize_tenant_project(
@@ -1099,12 +1189,17 @@ class ProviderService:
                     },
                 }
 
-        authorization = self._authorize_operation(principal_id, "provider.generate")
-        if authorization is not None:
+        authorization = self._authorize_operation(
+            principal_id, "provider.generate", provider_id="*", return_decision=True
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
             return {
                 "status": "AUTHORIZATION_DENIED", "executed": False,
-                "authorization": authorization,
+                "authorization": authorization or {"allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"},
             }
+        allowed_provider_ids = authorization.get("allowed_provider_ids")
+        if isinstance(allowed_provider_ids, list):
+            route_options["allowed_provider_ids"] = set(allowed_provider_ids)
 
         if self.tenant_isolation_manager is not None:
             if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
@@ -1151,6 +1246,19 @@ class ProviderService:
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+        scoped_authorization = self._authorize_operation(
+            principal_id, "provider.generate", provider_id=provider_id
+        )
+        if scoped_authorization is not None:
+            release = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id,
+                request_id=request_id, tenant_id=tenant_id,
+            )
+            return {
+                "status": "AUTHORIZATION_DENIED", "executed": False,
+                "authorization": scoped_authorization,
+                "reservation_release": release,
+            }
         if isinstance(degraded_mode_state, dict) and degraded_mode_state.get("mode") == "DEGRADED":
             eligible_ids = degraded_mode_state.get("healthy_provider_ids")
             if not isinstance(eligible_ids, list) or provider_id not in eligible_ids:
