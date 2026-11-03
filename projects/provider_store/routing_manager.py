@@ -150,6 +150,7 @@ class ProviderRoutingManager:
         tenant_id: str | None = None,
         paid_approved_providers: set[str] | frozenset[str] | None = None,
         excluded_providers: set[str] | frozenset[str] | None = None,
+        allowed_provider_ids: set[str] | frozenset[str] | None = None,
         require_health_evidence: bool = False,
         automatic_fallback: bool = True,
         confidence_aware: bool = False,
@@ -290,6 +291,21 @@ class ProviderRoutingManager:
             all_unit_credits = {}
         approvals = set() if paid_approved_providers is None else paid_approved_providers
         excluded = set() if excluded_providers is None else excluded_providers
+        if allowed_provider_ids is not None and not isinstance(
+            allowed_provider_ids, (set, frozenset)
+        ):
+            return {"allowed": False, "status": "INVALID_PROVIDER_ACCESS_SCOPE"}
+        allowed_scope = None if allowed_provider_ids is None else set(allowed_provider_ids)
+        if allowed_scope is not None and (
+            not allowed_scope
+            or len(allowed_scope) > 256
+            or any(
+                not isinstance(provider_id, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}", provider_id) is None
+                for provider_id in allowed_scope
+            )
+        ):
+            return {"allowed": False, "status": "INVALID_PROVIDER_ACCESS_SCOPE"}
         if any(not isinstance(key, str) or not self._valid_amount(value) for key, value in estimates.items()):
             return {"allowed": False, "status": "INVALID_COST_ESTIMATES"}
         if any(not isinstance(key, str) or not self._valid_amount(value) for key, value in credits.items()):
@@ -330,6 +346,9 @@ class ProviderRoutingManager:
             if not isinstance(item, dict):
                 continue
             item_id = item.get("id")
+            if allowed_scope is not None and item_id not in allowed_scope:
+                decisions.append({"provider": item_id, "status": "PROVIDER_ACCESS_SCOPE_DENIED"})
+                continue
             if allowed_providers is not None and item_id not in allowed_providers:
                 decisions.append({"provider": item_id, "status": "PROJECT_PROVIDER_NOT_ALLOWED"})
                 continue

@@ -1106,6 +1106,136 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["authorization"]["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
         self.assertEqual(called, [])
 
+
+    def test_provider_management_endpoints_require_admin_and_provider_scope(self):
+        authorization = ProviderAuthorizationManager(self.root / "provider-management-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        authorization.assign_role("creator-user", "creator")
+        service = ProviderService(
+            self.connections, authorization_manager=authorization
+        )
+        denied_configure = service.configure_provider(
+            "image", principal_id="creator-user", model="private-model"
+        )
+        denied_disable = service.set_provider_enabled(
+            "image", False, principal_id="creator-user"
+        )
+        self.assertEqual(denied_configure["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(denied_disable["status"], "AUTHORIZATION_DENIED")
+        self.assertTrue(self.connections.is_provider_enabled("image"))
+
+        configured = service.configure_provider(
+            "image", principal_id="admin-user", model="safe-model"
+        )
+        self.assertEqual(configured["status"], "CONFIGURED")
+        disabled = service.set_provider_enabled(
+            "image", False, principal_id="admin-user"
+        )
+        self.assertTrue(disabled["saved"])
+        enabled = service.set_provider_enabled(
+            "image", True, principal_id="admin-user"
+        )
+        self.assertTrue(enabled["saved"])
+
+
+    def test_provider_management_endpoints_fail_closed_without_authorization_manager(self):
+        service = ProviderService(self.connections)
+        configured = service.configure_provider(
+            "image", principal_id=None, model="unprotected-model"
+        )
+        enabled = service.set_provider_enabled("image", False, principal_id=None)
+        self.assertEqual(configured["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertEqual(enabled["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertTrue(self.connections.is_provider_enabled("image"))
+
+
+    def test_provider_scoped_actions_fail_closed_for_legacy_authorization_adapters(self):
+        class LegacyAuthorization:
+            def authorize(self, principal_id, operation):
+                return {"allowed": True, "status": "AUTHORIZED"}
+
+        legacy = ProviderService(
+            self.connections, authorization_manager=LegacyAuthorization()
+        )
+        calls = []
+        result = legacy.verify_provider(
+            "image",
+            lambda provider, **kwargs: calls.append(provider["id"]) or {"ok": True},
+            principal_id="caller-1",
+        )
+        self.assertEqual(result["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(
+            result["authorization"]["status"],
+            "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE",
+        )
+        self.assertEqual(calls, [])
+
+    def test_provider_scopes_gate_verification_and_generation_routing(self):
+        authorization = ProviderAuthorizationManager(self.root / "provider-scopes-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        authorization.assign_role("operator-user", "operator")
+        authorization.assign_role("creator-user", "creator")
+        service = ProviderService(
+            self.connections,
+            routing_manager=ProviderRoutingManager(
+                self.connections, cost_policy=self.cost, quota_manager=self.quota
+            ),
+            cost_policy=self.cost,
+            quota_manager=self.quota,
+            authorization_manager=authorization,
+        )
+        scopes = service.set_provider_access_scopes(
+            "operator-user",
+            {"provider.verify": ["image"]},
+            actor_principal_id="admin-user",
+        )
+        self.assertTrue(scopes["saved"])
+        calls = []
+        allowed = service.verify_provider(
+            "image",
+            lambda provider, **kwargs: calls.append(provider["id"]) or {"ok": True},
+            principal_id="operator-user",
+        )
+        self.assertTrue(allowed["verified"])
+        denied = service.verify_provider(
+            "unlisted-provider",
+            lambda provider, **kwargs: calls.append(provider["id"]) or {"ok": True},
+            principal_id="operator-user",
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(denied["authorization"]["status"], "PROVIDER_SCOPE_DENIED")
+        self.assertEqual(calls, ["image"])
+
+        assigned = service.set_provider_access_scopes(
+            "creator-user",
+            {"provider.generate": ["not-image"]},
+            actor_principal_id="admin-user",
+        )
+        self.assertTrue(assigned["saved"])
+        adapter_calls = []
+        route_denied = service.execute_routed_request(
+            category="image", project_id="film", request_id="provider-scope-denied",
+            estimated_cost=0.0, modality="image", principal_id="creator-user",
+            adapter=lambda **kwargs: adapter_calls.append(kwargs),
+        )
+        self.assertEqual(route_denied["status"], "ROUTING_REJECTED")
+        self.assertEqual(adapter_calls, [])
+        service.set_provider_access_scopes(
+            "creator-user",
+            {"provider.generate": ["image"]},
+            actor_principal_id="admin-user",
+        )
+        route_allowed = service.execute_routed_request(
+            category="image", project_id="film", request_id="provider-scope-allowed",
+            estimated_cost=0.0, modality="image", principal_id="creator-user",
+            adapter=lambda **kwargs: adapter_calls.append(kwargs) or {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred",
+            },
+        )
+        self.assertTrue(route_allowed["executed"])
+        self.assertEqual(len(adapter_calls), 1)
+
     def test_least_privilege_authorization_blocks_generation_before_adapter(self):
         authorization = ProviderAuthorizationManager(self.root / "service-auth.json")
         authorization.assign_role("read-only-user", "viewer")

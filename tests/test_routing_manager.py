@@ -211,6 +211,31 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(result["allowed"])
         self.assertEqual(result["provider"], "primary")
 
+
+    def test_allowed_provider_ids_filter_before_primary_and_fallback_selection(self):
+        router = ProviderRoutingManager(self.connections)
+        result = router.route(
+            category="image", project_id="film",
+            allowed_provider_ids={"fallback"},
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+        denied = router.route(
+            category="image", project_id="film",
+            allowed_provider_ids={"voice"},
+        )
+        self.assertFalse(denied["allowed"])
+        self.assertEqual(denied["status"], "NO_POLICY_COMPLIANT_PROVIDER")
+        self.assertIn(
+            "PROVIDER_ACCESS_SCOPE_DENIED",
+            [decision["status"] for decision in denied["decisions"]],
+        )
+        invalid = router.route(
+            category="image", project_id="film",
+            allowed_provider_ids=set(),
+        )
+        self.assertEqual(invalid["status"], "INVALID_PROVIDER_ACCESS_SCOPE")
+
     def test_primary_route_skips_disabled_and_orders_by_priority(self):
         router = ProviderRoutingManager(self.connections)
         result = router.route(category="image", project_id="film")

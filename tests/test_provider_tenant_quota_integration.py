@@ -12,7 +12,9 @@ from projects.provider_store.provider_tenant_isolation import ProviderTenantIsol
 
 
 class AllowAuthorizationManager:
-    def authorize(self, principal_id, operation):
+    supports_provider_scopes = True
+
+    def authorize(self, principal_id, operation, *, provider_id=None):
         return {
             "allowed": isinstance(principal_id, str) and bool(principal_id),
             "principal_id": principal_id,

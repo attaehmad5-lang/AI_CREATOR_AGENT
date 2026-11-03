@@ -26,11 +26,19 @@ ROLE_PERMISSIONS = {
     }),
 }
 KNOWN_OPERATIONS = frozenset().union(*ROLE_PERMISSIONS.values())
+PROVIDER_SCOPED_OPERATIONS = frozenset({
+    "provider.read", "provider.verify", "provider.generate",
+    "provider.configure", "provider.enable", "provider.disable",
+    "provider.credentials.rotate",
+})
+_PROVIDER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}")
 _PRINCIPAL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}")
 
 
 class ProviderAuthorizationManager:
-    """Persist explicit role assignments and deny unknown identities/operations."""
+    """Persist role permissions and optional fail-closed provider allowlists."""
+
+    supports_provider_scopes = True
 
     def __init__(
         self, state_path: str | os.PathLike[str], *, clock: Any = None,
@@ -81,6 +89,24 @@ class ProviderAuthorizationManager:
                 datetime.fromisoformat(record["updated_at"])
             except ValueError as exc:
                 raise ValueError("invalid principal authorization timestamp") from exc
+            if "provider_scopes" in record:
+                scopes = record["provider_scopes"]
+                if not isinstance(scopes, dict) or len(scopes) > len(PROVIDER_SCOPED_OPERATIONS):
+                    raise ValueError("invalid provider authorization scopes")
+                for operation, provider_ids in scopes.items():
+                    if (
+                        operation not in PROVIDER_SCOPED_OPERATIONS
+                        or operation not in ROLE_PERMISSIONS[record["role"]]
+                        or not isinstance(provider_ids, list)
+                        or len(provider_ids) > 256
+                        or any(
+                            not isinstance(provider_id, str)
+                            or _PROVIDER_ID_RE.fullmatch(provider_id) is None
+                            for provider_id in provider_ids
+                        )
+                        or len(set(provider_ids)) != len(provider_ids)
+                    ):
+                        raise ValueError("invalid provider authorization scope entry")
         self.data = loaded
 
     @contextmanager
@@ -146,19 +172,96 @@ class ProviderAuthorizationManager:
                 return {"status": "LAST_ACTIVE_ADMIN_REQUIRED", "saved": False}
             if principal_id not in self.data["principals"] and len(self.data["principals"]) >= self.max_principals:
                 return {"status": "PRINCIPAL_CAPACITY_REACHED", "saved": False}
-            self.data["principals"][principal_id] = {
+            record = {
                 "role": role,
                 "enabled": enabled,
                 "updated_at": self.clock().astimezone(timezone.utc).isoformat(),
             }
+            previous = self.data["principals"].get(principal_id)
+            if isinstance(previous, dict) and "provider_scopes" in previous:
+                record["provider_scopes"] = {
+                    operation: list(provider_ids)
+                    for operation, provider_ids in previous["provider_scopes"].items()
+                    if operation in ROLE_PERMISSIONS[role]
+                }
+            self.data["principals"][principal_id] = record
             self._save()
         return {"status": "ROLE_ASSIGNED", "saved": True, "principal_id": principal_id, "role": role}
 
-    def authorize(self, principal_id: str, operation: str) -> dict[str, Any]:
+    def set_provider_scopes(
+        self,
+        principal_id: str,
+        provider_scopes: dict[str, list[str]] | None,
+    ) -> dict[str, Any]:
+        """Replace provider allowlists; absent operation keys deny that provider action."""
+        if not self._valid_principal(principal_id):
+            return {"status": "INVALID_PRINCIPAL_ID", "saved": False}
+        if provider_scopes is not None and (
+            not isinstance(provider_scopes, dict)
+            or len(provider_scopes) > len(PROVIDER_SCOPED_OPERATIONS)
+        ):
+            return {"status": "INVALID_PROVIDER_SCOPES", "saved": False}
+        normalized: dict[str, list[str]] | None = None
+        if provider_scopes is not None:
+            normalized = {}
+            for operation, provider_ids in provider_scopes.items():
+                if operation not in PROVIDER_SCOPED_OPERATIONS:
+                    return {"status": "INVALID_SCOPED_OPERATION", "saved": False}
+                if (
+                    not isinstance(provider_ids, list)
+                    or len(provider_ids) > 256
+                    or any(
+                        not isinstance(provider_id, str)
+                        or _PROVIDER_ID_RE.fullmatch(provider_id) is None
+                        for provider_id in provider_ids
+                    )
+                    or len(set(provider_ids)) != len(provider_ids)
+                ):
+                    return {"status": "INVALID_PROVIDER_SCOPE_LIST", "saved": False}
+                normalized[operation] = list(provider_ids)
+        with self._transaction():
+            record = self.data["principals"].get(principal_id)
+            if not isinstance(record, dict):
+                return {"status": "PRINCIPAL_NOT_FOUND", "saved": False}
+            role = record.get("role")
+            if not isinstance(role, str) or role not in ROLE_PERMISSIONS:
+                return {"status": "INVALID_ASSIGNED_ROLE", "saved": False}
+            if normalized is None:
+                record.pop("provider_scopes", None)
+            else:
+                if any(operation not in ROLE_PERMISSIONS[role] for operation in normalized):
+                    return {"status": "ROLE_OPERATION_NOT_PERMITTED", "saved": False}
+                record["provider_scopes"] = normalized
+            record["updated_at"] = self.clock().astimezone(timezone.utc).isoformat()
+            self._save()
+        return {
+            "status": "PROVIDER_SCOPES_UPDATED",
+            "saved": True,
+            "principal_id": principal_id,
+            "scoped_operations": sorted(normalized) if normalized is not None else [],
+            "provider_counts": (
+                {operation: len(provider_ids) for operation, provider_ids in normalized.items()}
+                if normalized is not None else {}
+            ),
+            "global_provider_access": normalized is None,
+        }
+
+    def authorize(
+        self,
+        principal_id: str,
+        operation: str,
+        *,
+        provider_id: str | None = None,
+    ) -> dict[str, Any]:
         if not self._valid_principal(principal_id):
             return {"allowed": False, "status": "INVALID_PRINCIPAL_ID"}
         if not isinstance(operation, str) or operation not in KNOWN_OPERATIONS:
             return {"allowed": False, "status": "UNKNOWN_OPERATION"}
+        if provider_id is not None and (
+            not isinstance(provider_id, str)
+            or (provider_id != "*" and _PROVIDER_ID_RE.fullmatch(provider_id) is None)
+        ):
+            return {"allowed": False, "status": "INVALID_PROVIDER_ID"}
         with self._transaction():
             record = self.data["principals"].get(principal_id)
             if not isinstance(record, dict):
@@ -168,14 +271,40 @@ class ProviderAuthorizationManager:
             role = record.get("role")
             if role not in ROLE_PERMISSIONS:
                 return {"allowed": False, "status": "INVALID_ASSIGNED_ROLE"}
-            allowed = operation in ROLE_PERMISSIONS[role]
-            return {
-                "allowed": allowed,
-                "status": "AUTHORIZED" if allowed else "ACCESS_DENIED",
-                "principal_id": principal_id,
-                "role": role,
-                "operation": operation,
+            if operation not in ROLE_PERMISSIONS[role]:
+                return {
+                    "allowed": False, "status": "ACCESS_DENIED",
+                    "principal_id": principal_id, "role": role, "operation": operation,
+                }
+            result = {
+                "allowed": True, "status": "AUTHORIZED",
+                "principal_id": principal_id, "role": role, "operation": operation,
             }
+            scopes = record.get("provider_scopes")
+            if operation in PROVIDER_SCOPED_OPERATIONS and isinstance(scopes, dict):
+                allowed_ids = scopes.get(operation, [])
+                if provider_id == "*":
+                    if not allowed_ids:
+                        return {
+                            "allowed": False, "status": "PROVIDER_SCOPE_DENIED",
+                            "principal_id": principal_id, "role": role, "operation": operation,
+                        }
+                    result["allowed_provider_ids"] = list(allowed_ids)
+                    result["scope_status"] = "SCOPED"
+                    return result
+                if provider_id is None:
+                    return {
+                        "allowed": False, "status": "PROVIDER_SCOPE_REQUIRED",
+                        "principal_id": principal_id, "role": role, "operation": operation,
+                    }
+                if provider_id not in allowed_ids:
+                    return {
+                        "allowed": False, "status": "PROVIDER_SCOPE_DENIED",
+                        "principal_id": principal_id, "role": role, "operation": operation,
+                        "provider_id": provider_id,
+                    }
+                result["scope_status"] = "SCOPED"
+            return result
 
     def disable_principal(self, principal_id: str) -> dict[str, Any]:
         if not self._valid_principal(principal_id):
