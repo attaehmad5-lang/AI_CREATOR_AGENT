@@ -125,9 +125,12 @@ class ProviderService:
             return {"allowed": True, "status": "TRUSTED_INTERNAL"} if return_decision else None
         try:
             authorize = self.authorization_manager.authorize
-            if provider_id is not None and getattr(
-                self.authorization_manager, "supports_provider_scopes", False
-            ) is True:
+            if provider_id is not None:
+                if getattr(self.authorization_manager, "supports_provider_scopes", False) is not True:
+                    return {
+                        "allowed": False,
+                        "status": "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE",
+                    }
                 result = authorize(principal_id, operation, provider_id=provider_id)
             else:
                 result = authorize(principal_id, operation)
