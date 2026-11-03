@@ -9,6 +9,7 @@ import time
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
 from .secrets_manager import SecretManagerError
+from .sensitive_data_policy import SensitiveDataPolicy
 
 
 class ProviderService:
@@ -94,7 +95,19 @@ class ProviderService:
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
         self.budget_alert_manager = budget_alert_manager
         self.authorization_manager = authorization_manager
-        self.sensitive_data_policy = sensitive_data_policy
+        # A default credential scanner is always active. Callers may inject a stricter
+        # policy for additional personal-data categories and deployment-specific limits.
+        self.sensitive_data_policy = (
+            sensitive_data_policy
+            if sensitive_data_policy is not None
+            else SensitiveDataPolicy(
+                blocked_categories=(
+                    "credential", "email", "phone", "financial",
+                    "government_id", "personal_identifier", "location",
+                    "health", "biometric", "network_identifier",
+                )
+            )
+        )
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
         self.job_manager = job_manager
@@ -1243,6 +1256,17 @@ class ProviderService:
                 }
             if not isinstance(tenant_access, dict) or tenant_access.get("allowed") is not True:
                 return {"status": "TENANT_ISOLATION_DENIED", "executed": False}
+
+        # Reject caller-supplied managed credentials before generic payload scanning
+        # so the precise credential-injection contract remains deterministic.
+        if use_managed_credential and isinstance(adapter_options, dict) and (
+            "provider_credential" in adapter_options
+            or "provider_credential_lease" in adapter_options
+        ):
+            return {
+                "status": "CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED",
+                "executed": False,
+            }
 
         sensitive_data_scan = None
         if self.sensitive_data_policy is not None:
