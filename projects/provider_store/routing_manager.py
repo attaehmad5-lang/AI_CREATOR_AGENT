@@ -291,6 +291,10 @@ class ProviderRoutingManager:
             all_unit_credits = {}
         approvals = set() if paid_approved_providers is None else paid_approved_providers
         excluded = set() if excluded_providers is None else excluded_providers
+        if allowed_provider_ids is not None and not isinstance(
+            allowed_provider_ids, (set, frozenset)
+        ):
+            return {"allowed": False, "status": "INVALID_PROVIDER_ACCESS_SCOPE"}
         allowed_scope = None if allowed_provider_ids is None else set(allowed_provider_ids)
         if allowed_scope is not None and (
             not allowed_scope
