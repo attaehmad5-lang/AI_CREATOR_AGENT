@@ -100,7 +100,13 @@ class ProviderService:
         self.sensitive_data_policy = (
             sensitive_data_policy
             if sensitive_data_policy is not None
-            else SensitiveDataPolicy()
+            else SensitiveDataPolicy(
+                blocked_categories=(
+                    "credential", "email", "phone", "financial",
+                    "government_id", "personal_identifier", "location",
+                    "health", "biometric", "network_identifier",
+                )
+            )
         )
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
