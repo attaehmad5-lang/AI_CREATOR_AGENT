@@ -9,6 +9,7 @@ import time
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
 from .secrets_manager import SecretManagerError
+from .sensitive_data_policy import SensitiveDataPolicy
 
 
 class ProviderService:
@@ -94,7 +95,13 @@ class ProviderService:
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
         self.budget_alert_manager = budget_alert_manager
         self.authorization_manager = authorization_manager
-        self.sensitive_data_policy = sensitive_data_policy
+        # A default credential scanner is always active. Callers may inject a stricter
+        # policy for additional personal-data categories and deployment-specific limits.
+        self.sensitive_data_policy = (
+            sensitive_data_policy
+            if sensitive_data_policy is not None
+            else SensitiveDataPolicy()
+        )
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
         self.job_manager = job_manager
