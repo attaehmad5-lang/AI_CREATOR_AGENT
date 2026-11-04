@@ -1608,6 +1608,25 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertNotIn(secret, repr(result))
 
+    def test_default_service_policy_blocks_luhn_valid_payment_cards_before_routing(self):
+        calls = []
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        card_number = "4111 1111 1111 1111"
+        result = service.route_request(
+            category="image", project_id="film", notes="billing card " + card_number
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(calls, [])
+        self.assertNotIn(card_number, repr(result))
+
     def test_sensitive_data_policy_is_enabled_by_default_before_adapter(self):
         calls = []
         service = ProviderService(self.connections, routing_manager=type(
