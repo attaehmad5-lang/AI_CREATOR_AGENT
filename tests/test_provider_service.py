@@ -106,6 +106,26 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(operator_result["status"], "AUTHORIZATION_DENIED")
         self.assertFalse(operator_result["persisted"])
 
+    def test_authorization_manager_credentials_are_withheld_from_service_results(self):
+        token = "Bearer " + ("u" * 40)
+
+        class AuthorizationStub:
+            def authorize(self, principal_id, operation, **kwargs):
+                return {
+                    "allowed": False,
+                    "status": "AUTHORIZATION_DENIED",
+                    "diagnostics": {"access_token": token},
+                }
+
+        service = ProviderService(
+            self.connections, authorization_manager=AuthorizationStub()
+        )
+        result = service._authorize_operation("principal-1", "provider.read")
+
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertNotIn(token, repr(result))
+
     def test_project_policy_simulation_fails_closed_without_authorization_manager(self):
         result = ProviderService(self.connections).simulate_project_provider_policy(
             "film", {}, [{
