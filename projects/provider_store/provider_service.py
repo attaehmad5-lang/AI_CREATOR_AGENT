@@ -1214,6 +1214,17 @@ class ProviderService:
         """Verify a provider callback without persisting its secret or body."""
         if self.webhook_verifier is None:
             return {"verified": False, "status": "WEBHOOK_VERIFIER_UNAVAILABLE"}
+        if not isinstance(payload, bytes):
+            return {"verified": False, "status": "INVALID_WEBHOOK_PAYLOAD"}
+        try:
+            payload_text = payload.decode("utf-8")
+        except UnicodeDecodeError:
+            return {"verified": False, "status": "INVALID_WEBHOOK_PAYLOAD_ENCODING"}
+        payload_rejection = self._sensitive_input_rejection(
+            {"webhook_payload": payload_text}
+        )
+        if payload_rejection is not None:
+            return {"verified": False, **payload_rejection}
         try:
             result = self.webhook_verifier.verify(
                 provider_id=provider_id,
