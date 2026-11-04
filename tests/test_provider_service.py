@@ -1492,6 +1492,24 @@ class ProviderServiceTests(unittest.TestCase):
             "SUCCEEDED",
         )
 
+
+    def test_job_response_sanitizer_removes_raw_and_hashed_lease_verifiers(self):
+        secret = "A" * 43
+        digest = "b" * 64
+        result = ProviderService._sanitize_job_response({
+            "status": "JOB_STATUS",
+            "job": {
+                "job_id": "job-privacy",
+                "lease_token": secret,
+                "lease_token_hash": digest,
+            },
+        })
+        self.assertNotIn("lease_token", result["job"])
+        self.assertNotIn("lease_token_hash", result["job"])
+        self.assertNotIn(secret, repr(result))
+        self.assertNotIn(digest, repr(result))
+
+
     def test_cancel_response_redacts_running_worker_lease_token(self):
         jobs = ProviderJobManager(self.root / "cancel-redaction-jobs.json")
         authorization = ProviderAuthorizationManager(self.root / "cancel-redaction-auth.json")
