@@ -242,7 +242,7 @@ class ProviderConfigLifecycleManager:
         try:
             with os.fdopen(fd_restore, "w", encoding="utf-8") as stream:
                 json.dump(original, stream, indent=2, ensure_ascii=False, allow_nan=False)
-                stream.write("\\n")
+                stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             atomic_replace_with_retry(restore_name, config_path)
