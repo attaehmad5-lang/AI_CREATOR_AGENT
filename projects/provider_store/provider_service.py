@@ -1136,6 +1136,27 @@ class ProviderService:
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
+        if self.sensitive_data_policy is not None:
+            try:
+                scan = self.sensitive_data_policy.inspect({"route_options": route_options})
+            except Exception as exc:
+                return {
+                    "allowed": False,
+                    "status": "SENSITIVE_DATA_SCAN_FAILED",
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(scan, dict) or scan.get("allowed") is not True:
+                safe_scan = scan if isinstance(scan, dict) else {
+                    "allowed": False,
+                    "status": "INVALID_SENSITIVE_DATA_SCAN_RESPONSE",
+                    "findings": [],
+                    "blocked_categories": [],
+                }
+                return {
+                    "allowed": False,
+                    "status": "SENSITIVE_DATA_BLOCKED",
+                    "sensitive_data_scan": safe_scan,
+                }
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:

@@ -1335,6 +1335,57 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(calls, {"route": 0, "adapter": 0})
         self.assertNotIn("opaque-value-not-for-logs", repr(result))
 
+
+    def test_direct_route_request_blocks_sensitive_metadata_before_routing(self):
+        calls = []
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            sensitive_data_policy=SensitiveDataPolicy(),
+        )
+        secret = "Bearer " + ("x" * 40)
+        result = service.route_request(
+            category="image",
+            project_id="film",
+            authorization=secret,
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(calls, [])
+        self.assertNotIn(secret, repr(result))
+        self.assertIn("authorization", repr(result["sensitive_data_scan"]["findings"]))
+
+    def test_direct_route_request_fails_closed_when_sensitive_scan_raises(self):
+        calls = []
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        class BrokenPolicy:
+            def inspect(self, payload):
+                raise RuntimeError("sensitive internal details")
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            sensitive_data_policy=BrokenPolicy(),
+        )
+        result = service.route_request(category="image", project_id="film")
+        self.assertEqual(result["status"], "SENSITIVE_DATA_SCAN_FAILED")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["error_type"], "RuntimeError")
+        self.assertNotIn("sensitive internal details", repr(result))
+        self.assertEqual(calls, [])
+
+
     def test_unknown_provider_data_policy_blocks_adapter_execution(self):
         calls = []
 
