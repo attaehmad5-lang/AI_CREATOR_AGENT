@@ -1554,7 +1554,15 @@ class ProviderService:
             return {"status": "PRIVACY_LIFECYCLE_MANAGER_UNAVAILABLE", "confirmed": False, "completed": False}
         if confirmed is not True:
             return {"status": "RETENTION_PURGE_CONFIRMATION_REQUIRED", "confirmed": False, "completed": False}
-        if not isinstance(cutoff, datetime) or cutoff.tzinfo is None or cutoff.utcoffset() is None:
+        try:
+            cutoff_is_aware = (
+                isinstance(cutoff, datetime)
+                and cutoff.tzinfo is not None
+                and cutoff.utcoffset() is not None
+            )
+        except Exception:
+            cutoff_is_aware = False
+        if not cutoff_is_aware:
             return {"status": "INVALID_RETENTION_PURGE_SCOPE", "confirmed": False, "completed": False}
         rejection = self._sensitive_input_rejection({
             "privacy_retention_request": {
