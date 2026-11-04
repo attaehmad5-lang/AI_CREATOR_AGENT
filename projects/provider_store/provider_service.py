@@ -524,12 +524,15 @@ class ProviderService:
             )
         except Exception as exc:
             return {"status": "DEGRADED_MODE_CONFIGURATION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        if not isinstance(result, dict) or result.get("saved") is not True:
-            return result if isinstance(result, dict) else {
-                "status": "INVALID_DEGRADED_MODE_CONFIGURATION_RESPONSE", "saved": False,
+        if not isinstance(result, dict):
+            return {
+                "status": "INVALID_DEGRADED_MODE_CONFIGURATION_RESPONSE",
+                "saved": False,
             }
         if self._sensitive_input_rejection({"degraded_mode_configuration_response": result}) is not None:
             return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
+        if result.get("saved") is not True:
+            return result
         return result
 
     def evaluate_category_degraded_mode(
@@ -574,12 +577,15 @@ class ProviderService:
             result = self.degraded_mode_manager.evaluate(category, statuses)
         except Exception as exc:
             return {"status": "DEGRADED_MODE_EVALUATION_FAILED", "evaluated": False, "error_type": type(exc).__name__}
-        if not isinstance(result, dict) or result.get("evaluated") is not True:
-            return result if isinstance(result, dict) else {
-                "status": "INVALID_DEGRADED_MODE_RESPONSE", "evaluated": False,
+        if not isinstance(result, dict):
+            return {
+                "status": "INVALID_DEGRADED_MODE_RESPONSE",
+                "evaluated": False,
             }
         if self._sensitive_input_rejection({"degraded_mode_evaluation_response": result}) is not None:
             return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "evaluated": False}
+        if result.get("evaluated") is not True:
+            return result
         return result
 
     def configure_service_level_objective(
@@ -612,12 +618,15 @@ class ProviderService:
             )
         except Exception as exc:
             return {"status": "SLO_CONFIGURATION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        if not isinstance(result, dict) or result.get("saved") is not True:
-            return result if isinstance(result, dict) else {
-                "status": "INVALID_SLO_CONFIGURATION_RESPONSE", "saved": False,
+        if not isinstance(result, dict):
+            return {
+                "status": "INVALID_SLO_CONFIGURATION_RESPONSE",
+                "saved": False,
             }
         if self._sensitive_input_rejection({"slo_configuration_response": result}) is not None:
             return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
+        if result.get("saved") is not True:
+            return result
         return result
 
     def evaluate_service_level_objective(
