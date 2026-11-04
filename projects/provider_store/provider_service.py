@@ -163,7 +163,9 @@ class ProviderService:
         self.authorization_manager = authorization_manager
         self.identity_authenticator = identity_authenticator
         self.sensitive_data_policy = (
-            sensitive_data_policy if sensitive_data_policy is not None else SensitiveDataPolicy()
+            sensitive_data_policy if sensitive_data_policy is not None else SensitiveDataPolicy(
+                blocked_categories=("credential", "payment_card")
+            )
         )
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
