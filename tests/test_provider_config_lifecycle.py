@@ -197,6 +197,18 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         lock_context.__enter__.assert_called_once_with()
         migrate_locked.assert_called_once()
 
+    def test_deeply_nested_config_file_is_rejected_without_crashing_or_rewriting(self):
+        path = self.root / "deep-config.json"
+        content = "[" * 2000 + "0" + "]" * 2000
+        path.write_text(content, encoding="utf-8")
+
+        result = self.manager.migrate_file(
+            path, target_version="2", migrations={}
+        )
+
+        self.assertEqual(result["status"], "INVALID_CONFIG_FILE")
+        self.assertEqual(path.read_text(encoding="utf-8"), content)
+
     def test_invalid_config_file_is_not_overwritten(self):
         path = self.root / "bad.json"
         path.write_text("{broken", encoding="utf-8")
