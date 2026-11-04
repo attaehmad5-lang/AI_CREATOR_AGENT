@@ -153,6 +153,18 @@ class EncryptedJSONStateStore:
             raise EncryptedStateError("state encryption key must be exactly 32 bytes")
         return key
 
+    def verify_key(self) -> bool:
+        """Check that the deployment key callback currently returns a valid key.
+
+        The key bytes are validated in-process and are never returned or cached.
+        This is intended for strict deployment startup checks.
+        """
+        try:
+            self._key()
+        except EncryptedStateError:
+            return False
+        return True
+
     def _aad(self) -> bytes:
         return f"{_FORMAT}:{_VERSION}:{self.context}".encode("ascii")
 
