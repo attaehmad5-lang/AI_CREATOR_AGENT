@@ -491,6 +491,25 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(manager._config_store(path).read({}), original)
         self.assertTrue(Path(result["backup_path"]).exists())
 
+    def test_encrypted_backup_rejects_symlink_without_overwriting_target(self):
+        target = self.root / "backup-target.json"
+        target.write_text("unmodified-target", encoding="utf-8")
+        link_path = self.root / "provider-config.json.bak.enc"
+        try:
+            link_path.symlink_to(target)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            backup_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
+
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            manager._backup_store(link_path)
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "unmodified-target")
+        self.assertTrue(link_path.is_symlink())
+
     def test_file_migration_runs_inside_interprocess_lock(self):
         path = self.root / "provider-config.json"
         path.write_text(
