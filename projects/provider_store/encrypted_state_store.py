@@ -16,7 +16,7 @@ from typing import Any, Callable
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from .interprocess_lock import atomic_replace_with_retry
+from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 _FORMAT = "AI_CREATOR_AGENT_ENCRYPTED_JSON_STATE"
 _VERSION = 1
@@ -70,6 +70,43 @@ class EncryptedJSONStateStore:
         self.context = context
         self.migrate_legacy_plaintext = migrate_legacy_plaintext
         self.max_state_bytes = max_state_bytes
+    def rotate_key(
+        self,
+        default: Any,
+        *,
+        new_key_provider: Callable[[str], bytes],
+    ) -> dict[str, Any]:
+        """Re-encrypt an existing ciphertext file with a new deployment key.
+
+        The full read/re-encrypt/atomic-replace operation is serialized with
+        normal state writers. Plaintext migration is deliberately not treated
+        as key rotation; use the manager's explicit legacy migration flow.
+        """
+        if not callable(new_key_provider):
+            raise ValueError("new state encryption key provider must be callable")
+        if not self.path.is_file():
+            raise EncryptedStateError("state key rotation requires an existing encrypted file")
+
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        with interprocess_file_lock(lock_path):
+            value = self.read(default)
+            if self.migration_required:
+                raise EncryptedStateError("plaintext state must be migrated before key rotation")
+            previous_provider = self.key_provider
+            self.key_provider = new_key_provider
+            try:
+                # write() encrypts to a private temporary file and only replaces
+                # the original after the new key and payload have been validated.
+                self.write(value)
+            except Exception:
+                self.key_provider = previous_provider
+                raise
+        return {
+            "status": "STATE_KEY_ROTATED",
+            "rotated": True,
+            "context": self.context,
+        }
+
         self.migration_required = False
 
     def _key(self) -> bytes:
