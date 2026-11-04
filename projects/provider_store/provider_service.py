@@ -200,6 +200,14 @@ class ProviderService:
         authorization = self._authorize_operation(actor_principal_id, "provider.access.manage")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        rejection = self._sensitive_input_rejection({
+            "provider_scope_assignment": {
+                "target_principal_id": target_principal_id,
+                "provider_scopes": provider_scopes,
+            },
+        })
+        if rejection is not None:
+            return {"saved": False, **rejection}
         setter = getattr(self.authorization_manager, "set_provider_scopes", None)
         if not callable(setter):
             return {"status": "AUTHORIZATION_SCOPE_MANAGER_UNAVAILABLE", "saved": False}
@@ -229,6 +237,16 @@ class ProviderService:
         )
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "provider": provider_id, "saved": False, "authorization": authorization}
+        rejection = self._sensitive_input_rejection({
+            "provider_configuration": {
+                "provider_id": provider_id,
+                "model": model,
+                "endpoint": endpoint,
+                "probe_endpoint": probe_endpoint,
+            },
+        })
+        if rejection is not None:
+            return {"provider": provider_id, "saved": False, **rejection}
         configure = getattr(self.connection_manager, "configure_provider", None)
         if not callable(configure):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
@@ -283,6 +301,15 @@ class ProviderService:
         )
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        rejection = self._sensitive_input_rejection({
+            "principal_role_assignment": {
+                "target_principal_id": target_principal_id,
+                "role": role,
+                "enabled": enabled,
+            },
+        })
+        if rejection is not None:
+            return {"saved": False, **rejection}
         assign = getattr(self.authorization_manager, "assign_role", None)
         if not callable(assign):
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
@@ -308,6 +335,11 @@ class ProviderService:
         )
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        rejection = self._sensitive_input_rejection({
+            "principal_disable": {"target_principal_id": target_principal_id},
+        })
+        if rejection is not None:
+            return {"saved": False, **rejection}
         disable = getattr(self.authorization_manager, "disable_principal", None)
         if not callable(disable):
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}

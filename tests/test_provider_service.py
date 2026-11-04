@@ -1488,6 +1488,71 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
 
+
+    def test_provider_configuration_blocks_credentialed_endpoint_before_manager_write(self):
+        authorization = ProviderAuthorizationManager(self.root / "config-privacy-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        calls = []
+
+        def configure_provider(*args, **kwargs):
+            calls.append((args, kwargs))
+            return {"status": "CONFIGURED", "saved": True}
+
+        self.connections.configure_provider = configure_provider
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            sensitive_data_policy=SensitiveDataPolicy(),
+        )
+        secret = "endpoint-password"
+        result = service.configure_provider(
+            "image",
+            principal_id="admin-user",
+            endpoint=f"https://user:{secret}@api.example.com/v1",
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["saved"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(calls, [])
+
+    def test_access_control_writes_respect_configured_email_blocking(self):
+        authorization = ProviderAuthorizationManager(self.root / "access-privacy-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        authorization.assign_role("existing-person@example.com", "creator")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            sensitive_data_policy=SensitiveDataPolicy(
+                blocked_categories=("credential", "email"),
+            ),
+        )
+
+        assigned = service.assign_provider_role(
+            "new-person@example.com",
+            "creator",
+            actor_principal_id="admin-user",
+        )
+        self.assertEqual(assigned["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(assigned["saved"])
+        self.assertNotIn("new-person@example.com", authorization.data["principals"])
+
+        scopes = service.set_provider_access_scopes(
+            "existing-person@example.com",
+            {"provider.generate": ["image"]},
+            actor_principal_id="admin-user",
+        )
+        self.assertEqual(scopes["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(scopes["saved"])
+        self.assertNotIn("provider_scopes", authorization.data["principals"]["existing-person@example.com"])
+
+        disabled = service.disable_provider_principal(
+            "existing-person@example.com",
+            actor_principal_id="admin-user",
+        )
+        self.assertEqual(disabled["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(disabled["saved"])
+        self.assertTrue(authorization.data["principals"]["existing-person@example.com"]["enabled"])
+
     def test_async_job_queue_facade_enforces_access_and_backpressure(self):
         jobs = ProviderJobManager(
             self.root / "service-jobs.json",
