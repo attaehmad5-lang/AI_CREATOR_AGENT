@@ -1470,6 +1470,17 @@ class ProviderServiceTests(unittest.TestCase):
             worker_id="worker-1", principal_id="creator-job-user",
         )
         self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        lease_token = claimed["job"]["lease_token"]
+        self.assertTrue(lease_token)
+
+        # A general read caller can inspect running-job status but must not
+        # receive the worker capability that is needed to complete the job.
+        running_status = service.poll_job(
+            job_id="job-1", principal_id="viewer-job-user",
+        )
+        self.assertEqual(running_status["job"]["status"], "RUNNING")
+        self.assertNotIn("lease_token", running_status["job"])
+        self.assertNotIn(lease_token, repr(running_status))
         completed = service.complete_job(
             job_id="job-1", worker_id="worker-1",
             lease_token=claimed["job"]["lease_token"], success=True,
@@ -1480,6 +1491,30 @@ class ProviderServiceTests(unittest.TestCase):
             service.poll_job(job_id="job-1", principal_id="viewer-job-user")["job"]["status"],
             "SUCCEEDED",
         )
+
+    def test_cancel_response_redacts_running_worker_lease_token(self):
+        jobs = ProviderJobManager(self.root / "cancel-redaction-jobs.json")
+        authorization = ProviderAuthorizationManager(self.root / "cancel-redaction-auth.json")
+        authorization.assign_role("viewer", "viewer")
+        authorization.assign_role("creator", "creator")
+        service = ProviderService(
+            self.connections, job_manager=jobs,
+            authorization_manager=authorization,
+        )
+        submitted = service.submit_job(
+            job_id="cancel-redaction-job", project_id="film", provider_id="image",
+            payload_ref="payload:cancel-redaction", principal_id="creator",
+        )
+        self.assertTrue(submitted["accepted"])
+        claimed = service.claim_next_job(worker_id="worker-redaction", principal_id="creator")
+        lease_token = claimed["job"]["lease_token"]
+        cancelled = service.cancel_job(
+            job_id="cancel-redaction-job", principal_id="creator",
+        )
+        self.assertEqual(cancelled["status"], "CANCEL_REQUESTED")
+        self.assertNotIn("lease_token", cancelled["job"])
+        self.assertNotIn(lease_token, repr(cancelled))
+
 
     def test_execution_records_latency_queue_wait_and_failure_metrics(self):
         outer = self
