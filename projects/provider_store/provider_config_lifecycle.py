@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
+from .sensitive_data_policy import SensitiveDataPolicy
 
 
 class ProviderConfigLifecycleManager:
@@ -20,12 +21,16 @@ class ProviderConfigLifecycleManager:
         validator: Callable[[dict[str, Any]], Any],
         *,
         max_history: int = 5,
+        sensitive_data_policy: SensitiveDataPolicy | None = None,
     ) -> None:
         if not callable(validator):
             raise ValueError("validator must be callable")
         if isinstance(max_history, bool) or not isinstance(max_history, int) or not 1 <= max_history <= 100:
             raise ValueError("max_history is outside safe limits")
+        if sensitive_data_policy is not None and not callable(getattr(sensitive_data_policy, "inspect", None)):
+            raise ValueError("sensitive_data_policy must support inspect")
         self.validator = validator
+        self.sensitive_data_policy = sensitive_data_policy or SensitiveDataPolicy()
         self.max_history = max_history
         self._lock = threading.RLock()
         self.active_config: dict[str, Any] | None = None
@@ -37,6 +42,12 @@ class ProviderConfigLifecycleManager:
             return False, "CONFIG_NOT_A_MAPPING"
         try:
             json.dumps(config, allow_nan=False)
+            scan = self.sensitive_data_policy.inspect(config)
+            if not isinstance(scan, dict) or scan.get("allowed") is not True:
+                return False, (
+                    scan.get("status", "SENSITIVE_DATA_SCAN_FAILED")
+                    if isinstance(scan, dict) else "SENSITIVE_DATA_SCAN_FAILED"
+                )
             result = self.validator(copy.deepcopy(config))
         except Exception as exc:
             return False, f"CONFIG_VALIDATION_FAILED:{type(exc).__name__}"
@@ -57,6 +68,15 @@ class ProviderConfigLifecycleManager:
             return {"status": "INVALID_TARGET_VERSION", "migrated": False}
         if not isinstance(migrations, dict):
             return {"status": "INVALID_MIGRATION_MAP", "migrated": False}
+        initial_scan = self.sensitive_data_policy.inspect(config)
+        if not isinstance(initial_scan, dict) or initial_scan.get("allowed") is not True:
+            return {
+                "status": (
+                    initial_scan.get("status", "SENSITIVE_DATA_SCAN_FAILED")
+                    if isinstance(initial_scan, dict) else "SENSITIVE_DATA_SCAN_FAILED"
+                ),
+                "migrated": False,
+            }
         candidate = copy.deepcopy(config)
         visited = set()
         steps = 0
