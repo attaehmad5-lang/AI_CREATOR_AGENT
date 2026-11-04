@@ -307,6 +307,112 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(path.read_text(encoding="utf-8"), original_text)
         self.assertEqual(legacy_backup.read_text(encoding="utf-8"), json.dumps({"private": "legacy-backup"}))
 
+    def test_encrypted_config_backup_erasure_requires_confirmation_and_destroys_backup_key(self):
+        path = self.root / "erase-provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        path.write_text(json.dumps(original), encoding="utf-8")
+        keyring = {}
+        destroyed = []
+
+        def key_provider(context):
+            keyring.setdefault(context, b"0123456789abcdef0123456789abcdef")
+            return keyring[context]
+
+        manager = ProviderConfigLifecycleManager(
+            valid_config, backup_encryption_key_provider=key_provider
+        )
+        migrated = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+        backup_path = Path(migrated["backup_path"])
+        self.assertTrue(backup_path.exists())
+
+        def destroy_key(context):
+            destroyed.append(context)
+            return keyring.pop(context, None) is not None
+
+        unconfirmed = manager.erase_encrypted_backup(
+            path, key_destroyer=destroy_key, confirmed=False
+        )
+        self.assertEqual(
+            unconfirmed["status"],
+            "CONFIG_BACKUP_ERASURE_CONFIRMATION_REQUIRED",
+        )
+        self.assertTrue(backup_path.exists())
+        self.assertEqual(destroyed, [])
+
+        erased = manager.erase_encrypted_backup(
+            path, key_destroyer=destroy_key, confirmed=True
+        )
+        self.assertEqual(
+            erased["status"], "CONFIG_BACKUP_CRYPTOGRAPHICALLY_ERASED"
+        )
+        self.assertTrue(erased["erased"])
+        self.assertFalse(backup_path.exists())
+        self.assertEqual(len(destroyed), 1)
+        self.assertNotIn(str(backup_path), repr(erased))
+
+    def test_encrypted_backup_erasure_refuses_to_ignore_legacy_plaintext_backup(self):
+        path = self.root / "legacy-backup-provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        path.write_text(json.dumps(original), encoding="utf-8")
+        keyring = {}
+        def key_provider(context):
+            keyring.setdefault(context, b"0123456789abcdef0123456789abcdef")
+            return keyring[context]
+
+        manager = ProviderConfigLifecycleManager(
+            valid_config, backup_encryption_key_provider=key_provider
+        )
+        migrated = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+        backup_path = Path(migrated["backup_path"])
+        legacy = path.with_name(path.name + ".bak")
+        legacy.write_text(json.dumps({"private": "old-plaintext-copy"}), encoding="utf-8")
+        calls = []
+
+        result = manager.erase_encrypted_backup(
+            path,
+            key_destroyer=lambda context: calls.append(context) or True,
+            confirmed=True,
+        )
+
+        self.assertEqual(
+            result["status"],
+            "CONFIG_PLAINTEXT_BACKUP_REQUIRES_MANUAL_CLEANUP",
+        )
+        self.assertFalse(result["erased"])
+        self.assertTrue(backup_path.exists())
+        self.assertTrue(legacy.exists())
+        self.assertEqual(calls, [])
+
+    def test_encrypted_backup_erasure_preserves_backup_when_key_destruction_fails(self):
+        path = self.root / "failed-erase-provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        path.write_text(json.dumps(original), encoding="utf-8")
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            backup_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
+        migrated = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+        backup_path = Path(migrated["backup_path"])
+
+        result = manager.erase_encrypted_backup(
+            path, key_destroyer=lambda context: False, confirmed=True
+        )
+
+        self.assertEqual(
+            result["status"], "STATE_KEY_DESTRUCTION_NOT_CONFIRMED"
+        )
+        self.assertFalse(result["erased"])
+        self.assertTrue(backup_path.exists())
+        self.assertEqual(
+            manager._backup_store(backup_path).read({}), original
+        )
+
     def test_file_migration_runs_inside_interprocess_lock(self):
         path = self.root / "provider-config.json"
         path.write_text(
