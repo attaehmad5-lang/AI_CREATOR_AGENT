@@ -437,7 +437,12 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertNotIn("owner.private@example.com", path.read_text(encoding="utf-8"))
         self.assertEqual(
             manager._config_store(path).read({}),
-            {"schema_version": "2", "providers": {"image": {}}},
+            {
+                "schema_version": "2",
+                "providers": {"image": {}},
+                "owner_contact": "owner.private@example.com",
+                "reload_mode": "atomic",
+            },
         )
         backup_path = Path(result["backup_path"])
         self.assertTrue(backup_path.name.endswith(".bak.enc"))
