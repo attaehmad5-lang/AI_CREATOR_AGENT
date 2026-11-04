@@ -271,12 +271,24 @@ class ProviderConfigLifecycleManager:
         if result.get("migrated") is not True:
             return result
         backup_path = self._backup_path(config_path)
-        fd, temp_name = tempfile.mkstemp(
-            prefix=f".{config_path.name}.", suffix=".tmp",
-            dir=str(config_path.parent), text=True,
-        )
+        legacy_plaintext_backup = config_path.with_name(config_path.name + ".bak")
+        if (
+            self.backup_encryption_key_provider is not None
+            and legacy_plaintext_backup.exists()
+        ):
+            return {
+                "status": "CONFIG_PLAINTEXT_BACKUP_REQUIRES_MANUAL_CLEANUP",
+                "migrated": False,
+            }
+        temp_name = None
         try:
+            # Complete and durably verify the backup before allocating the new
+            # configuration temp file; a failed KMS call cannot leak a file handle.
             self._write_backup(config_path, backup_path, original)
+            fd, temp_name = tempfile.mkstemp(
+                prefix=f".{config_path.name}.", suffix=".tmp",
+                dir=str(config_path.parent), text=True,
+            )
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 json.dump(result["config"], stream, indent=2, ensure_ascii=False, allow_nan=False)
                 stream.write("\n")
@@ -284,10 +296,11 @@ class ProviderConfigLifecycleManager:
                 os.fsync(stream.fileno())
             atomic_replace_with_retry(temp_name, config_path)
         except Exception as exc:
-            try:
-                os.unlink(temp_name)
-            except FileNotFoundError:
-                pass
+            if temp_name is not None:
+                try:
+                    os.unlink(temp_name)
+                except FileNotFoundError:
+                    pass
             return {"status": "CONFIG_MIGRATION_WRITE_FAILED", "migrated": False, "error_type": type(exc).__name__}
         reloaded = self.reload(result["config"])
         if reloaded.get("reloaded") is not True:
