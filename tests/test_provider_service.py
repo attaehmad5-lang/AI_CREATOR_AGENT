@@ -1684,6 +1684,33 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn(secret, repr(result))
 
 
+    def test_claim_response_keeps_worker_token_but_never_exposes_lease_hash(self):
+        lease_token = "worker-lease-capability"
+        lease_hash = "private-lease-verifier-hash"
+
+        class JobManagerStub:
+            def claim_next(self, *, worker_id):
+                return {
+                    "status": "CLAIMED",
+                    "job": {
+                        "job_id": "job-privacy-1",
+                        "lease_token": lease_token,
+                        "lease_token_hash": lease_hash,
+                    },
+                }
+
+        service = ProviderService(
+            self.connections,
+            job_manager=JobManagerStub(),
+        )
+        result = service.claim_next_job(worker_id="worker-privacy-1")
+
+        self.assertEqual(result["status"], "CLAIMED")
+        self.assertEqual(result["job"]["lease_token"], lease_token)
+        self.assertNotIn("lease_token_hash", result["job"])
+        self.assertNotIn(lease_hash, repr(result))
+
+
     def test_sensitive_credentials_are_blocked_before_routing_and_adapter(self):
         calls = {"route": 0, "adapter": 0}
 
