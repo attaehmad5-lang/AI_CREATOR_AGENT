@@ -1213,9 +1213,12 @@ class ProviderService:
                 "status": "WEBHOOK_VERIFICATION_FAILED",
                 "error_type": type(exc).__name__,
             }
-        return result if isinstance(result, dict) else {
-            "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
-        }
+        if not isinstance(result, dict):
+            return {"verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"}
+        rejection = self._sensitive_input_rejection({"webhook_verifier_response": result})
+        if rejection is not None:
+            return {"verified": False, **rejection}
+        return result
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
@@ -1227,9 +1230,12 @@ class ProviderService:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
             return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
-        }
+        if not isinstance(result, dict):
+            return {"allowed": False, "status": "INVALID_ROUTING_RESPONSE"}
+        rejection = self._sensitive_input_rejection({"routing_response": result})
+        if rejection is not None:
+            return {"allowed": False, **rejection}
+        return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
         if self.output_validator is None:
@@ -1727,6 +1733,24 @@ class ProviderService:
                 options.pop("provider_credential_lease", None)
                 secret_lease.close()
                 secret_lease = None
+        adapter_rejection = self._sensitive_input_rejection(
+            {"adapter_response": adapter_result}
+        )
+        if adapter_rejection is not None:
+            # An adapter may already have transmitted a paid request. Do not
+            # release reservations when its response cannot safely be disclosed.
+            return {
+                "status": adapter_rejection["status"],
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                "execution_outcome": "UNKNOWN",
+                "reservations_retained": True,
+                **({"error_type": adapter_rejection["error_type"]}
+                   if "error_type" in adapter_rejection else {}),
+                **({"sensitive_data_scan": adapter_rejection["sensitive_data_scan"]}
+                   if "sensitive_data_scan" in adapter_rejection else {}),
+            }
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
