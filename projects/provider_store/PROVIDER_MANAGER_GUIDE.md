@@ -103,6 +103,7 @@ The service checks caller-controlled routing/adapter options before routing, and
 
 `EncryptedJSONStateStore` can also encrypt these persistent manager state files when a deployment supplies a KMS/secret-manager-backed key callback:
 
+- `ConnectionManager` — `provider-connection-state-v1`
 - `ProviderAuthorizationManager` — `provider-authorization-v1`
 - `ProviderTenantIsolationManager` — `provider-tenant-isolation-v1`
 - `ProviderJobManager` — `provider-job-state-v1`
