@@ -28,7 +28,6 @@ class ProviderConfigLifecycleManager:
         backup_encryption_context: str = "provider-config-backup-v1",
         config_encryption_key_provider: Any = None,
         config_encryption_context: str = "provider-active-config-v1",
-        migrate_legacy_plaintext_config: bool = False,
     ) -> None:
         if not callable(validator):
             raise ValueError("validator must be callable")
@@ -40,10 +39,6 @@ class ProviderConfigLifecycleManager:
             raise ValueError("backup_encryption_key_provider must be callable")
         if config_encryption_key_provider is not None and not callable(config_encryption_key_provider):
             raise ValueError("config_encryption_key_provider must be callable")
-        if not isinstance(migrate_legacy_plaintext_config, bool):
-            raise ValueError("migrate_legacy_plaintext_config must be boolean")
-        if migrate_legacy_plaintext_config and config_encryption_key_provider is None:
-            raise ValueError("legacy config migration requires config encryption")
         for context, label in (
             (backup_encryption_context, "backup_encryption_context"),
             (config_encryption_context, "config_encryption_context"),
@@ -61,7 +56,6 @@ class ProviderConfigLifecycleManager:
         )
         self.config_encryption_key_provider = config_encryption_key_provider
         self.config_encryption_context = config_encryption_context
-        self.migrate_legacy_plaintext_config = migrate_legacy_plaintext_config
         # Reuse the deployment KMS callback by default, with a separate context,
         # so enabling active-config encryption cannot silently create plaintext backups.
         self.backup_encryption_key_provider = (
@@ -217,17 +211,30 @@ class ProviderConfigLifecycleManager:
         *,
         target_version: str,
         migrations: dict[str, Callable[[dict[str, Any]], dict[str, Any]]],
+        allow_legacy_plaintext: bool = False,
     ) -> dict[str, Any]:
+        if not isinstance(allow_legacy_plaintext, bool):
+            return {"status": "INVALID_LEGACY_MIGRATION_FLAG", "migrated": False}
+        if allow_legacy_plaintext and self.config_encryption_key_provider is None:
+            return {"status": "CONFIG_ENCRYPTION_REQUIRED_FOR_LEGACY_MIGRATION", "migrated": False}
         config_path = Path(path)
         lock_path = config_path.with_name(config_path.name + ".lock")
         # Serialize the complete read/validate/backup/replace/reload transaction
         # across processes so concurrent migrations cannot overwrite each other.
         with interprocess_file_lock(lock_path):
             return self._migrate_file_locked(
-                config_path, target_version=target_version, migrations=migrations
+                config_path,
+                target_version=target_version,
+                migrations=migrations,
+                allow_legacy_plaintext=allow_legacy_plaintext,
             )
 
-    def _config_store(self, config_path: Path) -> EncryptedJSONStateStore:
+    def _config_store(
+        self,
+        config_path: Path,
+        *,
+        allow_legacy_plaintext: bool = False,
+    ) -> EncryptedJSONStateStore:
         if self.config_encryption_key_provider is None:
             raise ValueError("active config encryption key provider is unavailable")
         path_digest = hashlib.sha256(str(config_path.resolve()).encode("utf-8")).hexdigest()[:24]
@@ -238,7 +245,7 @@ class ProviderConfigLifecycleManager:
             config_path,
             key_provider=self.config_encryption_key_provider,
             context=context,
-            migrate_legacy_plaintext=self.migrate_legacy_plaintext_config,
+            migrate_legacy_plaintext=allow_legacy_plaintext,
         )
 
     def _backup_path(self, config_path: Path) -> Path:
@@ -371,6 +378,7 @@ class ProviderConfigLifecycleManager:
         *,
         target_version: str,
         migrations: dict[str, Callable[[dict[str, Any]], dict[str, Any]]],
+        allow_legacy_plaintext: bool,
     ) -> dict[str, Any]:
         if config_path.is_symlink():
             return {"status": "CONFIG_FILE_SYMLINK_REJECTED", "migrated": False}
@@ -378,7 +386,9 @@ class ProviderConfigLifecycleManager:
             return {"status": "CONFIG_FILE_NOT_FOUND", "migrated": False}
         try:
             if self.config_encryption_key_provider is not None:
-                original = self._config_store(config_path).read({})
+                original = self._config_store(
+                    config_path, allow_legacy_plaintext=allow_legacy_plaintext
+                ).read({})
             else:
                 with config_path.open("r", encoding="utf-8") as stream:
                     original = json.load(stream)
