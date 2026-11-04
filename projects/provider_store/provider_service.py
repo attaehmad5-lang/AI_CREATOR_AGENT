@@ -944,15 +944,14 @@ class ProviderService:
         """
         safe_result = dict(result)
         job = safe_result.get("job")
-        if not isinstance(job, dict):
-            return safe_result
-
-        safe_job = dict(job)
-        safe_job.pop("lease_token", None)
-        safe_job.pop("lease_token_hash", None)
+        if isinstance(job, dict):
+            safe_job = dict(job)
+            safe_job.pop("lease_token", None)
+            safe_job.pop("lease_token_hash", None)
+            safe_result["job"] = safe_job
         if sensitive_data_policy is not None:
             try:
-                scan = sensitive_data_policy.inspect(safe_job)
+                scan = sensitive_data_policy.inspect(safe_result)
             except Exception:
                 scan = {
                     "allowed": False,
@@ -971,7 +970,6 @@ class ProviderService:
                         "blocked_categories": [],
                     },
                 }
-        safe_result["job"] = safe_job
         return safe_result
 
     def _sensitive_input_rejection(self, payload: Any) -> dict[str, Any] | None:
@@ -1091,7 +1089,20 @@ class ProviderService:
             result = self.job_manager.claim_next(worker_id=worker_id)
         except Exception as exc:
             return {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+        safe_result = dict(result)
+        if isinstance(safe_result.get("job"), dict):
+            safe_job = dict(safe_result["job"])
+            # A freshly claimed lease token is the sole intentionally exposed
+            # capability; exclude only these two worker-only fields from scanning.
+            safe_job.pop("lease_token", None)
+            safe_job.pop("lease_token_hash", None)
+            safe_result["job"] = safe_job
+        rejection = self._sensitive_input_rejection({"job_claim_response": safe_result})
+        if rejection is not None:
+            return {"status": rejection["status"], "job": None}
+        return result
 
     def renew_job_lease(
         self, *, job_id: str, worker_id: str, lease_token: str,
@@ -1108,7 +1119,12 @@ class ProviderService:
             )
         except Exception as exc:
             return {"status": "JOB_LEASE_RENEWAL_FAILED", "renewed": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "renewed": False}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_MANAGER_RESPONSE", "renewed": False}
+        rejection = self._sensitive_input_rejection({"job_lease_renewal_response": result})
+        if rejection is not None:
+            return {"status": rejection["status"], "renewed": False}
+        return result
 
     def complete_job(self, *, job_id: str, worker_id: str, lease_token: str, success: bool,
                      result_ref: str | None = None, error_code: str | None = None,
@@ -1296,16 +1312,6 @@ class ProviderService:
         # Managed credentials must be supplied only by the server-side secret manager.
         # Reject caller injection before routing can create any billable reservation.
         if use_managed_credential and adapter_options and (
-            "provider_credential" in adapter_options
-            or "provider_credential_lease" in adapter_options
-        ):
-            return {
-                "status": "CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED",
-                "executed": False,
-            }
-        # Preserve the managed-secret contract and reject caller injection before
-        # routing, reservation, or any external manager is invoked.
-        if use_managed_credential and isinstance(adapter_options, dict) and (
             "provider_credential" in adapter_options
             or "provider_credential_lease" in adapter_options
         ):
@@ -2042,7 +2048,7 @@ class ProviderService:
             status = "EXECUTION_SUCCEEDED"
         else:
             status = "EXECUTION_FINALIZATION_PARTIAL"
-        return {
+        response = {
             "status": status,
             "executed": True,
             "provider": provider_id,
@@ -2065,6 +2071,16 @@ class ProviderService:
             "data_policy": data_policy_result,
             "retry_decision": retry,
         }
+        rejection = self._sensitive_input_rejection({"service_response": response})
+        if rejection is not None:
+            return {
+                "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                "executed": True,
+                "provider": provider_id,
+                "request_id": request_id,
+                "accounting_finalized": finalization.get("finalized") is True,
+            }
+        return response
 
     def retry_decision(self, **failure: Any) -> dict[str, Any]:
         if self.retry_policy is None:
