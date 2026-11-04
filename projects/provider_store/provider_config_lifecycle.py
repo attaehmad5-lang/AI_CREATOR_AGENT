@@ -43,7 +43,9 @@ class ProviderConfigLifecycleManager:
         ):
             raise ValueError("backup_encryption_context is invalid")
         self.validator = validator
-        self.sensitive_data_policy = sensitive_data_policy or SensitiveDataPolicy()
+        self.sensitive_data_policy = sensitive_data_policy or SensitiveDataPolicy(
+            blocked_categories=("credential", "payment_card")
+        )
         self.backup_encryption_key_provider = backup_encryption_key_provider
         self.backup_encryption_context = backup_encryption_context
         self.max_history = max_history
