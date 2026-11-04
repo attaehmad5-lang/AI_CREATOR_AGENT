@@ -13,7 +13,7 @@ from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_tenant_isolation import ProviderTenantIsolationManager
 
 
-KEY = b"test-state-encryption-key-32bytes"
+KEY = b"0123456789abcdef0123456789abcdef"
 
 
 class EncryptedJSONStateStoreTests(unittest.TestCase):
