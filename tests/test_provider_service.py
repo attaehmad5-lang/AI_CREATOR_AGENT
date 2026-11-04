@@ -1538,6 +1538,64 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn(secret, repr(result))
 
 
+    def test_project_policy_simulation_blocks_sensitive_input_before_manager(self):
+        calls = []
+        authorization = ProviderAuthorizationManager(self.root / "privacy-policy-auth.json")
+        authorization.assign_role("policy-admin", "admin")
+
+        class PolicyManager:
+            def simulate_policy(self, project_id, candidate_policy, scenarios):
+                calls.append((project_id, candidate_policy, scenarios))
+                return {
+                    "status": "POLICY_SIMULATION_COMPLETED",
+                    "project_id": project_id,
+                    "persisted": False,
+                }
+
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            project_policy_manager=PolicyManager(),
+        )
+        secret = "sk-" + ("p" * 40)
+        result = service.simulate_project_provider_policy(
+            "film",
+            {"provider": "image", "api_key": secret},
+            [{"provider": "image", "allowed": True}],
+            principal_id="policy-admin",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["persisted"])
+        self.assertEqual(calls, [])
+        self.assertNotIn(secret, repr(result))
+
+    def test_provider_role_manager_response_is_scanned_before_return(self):
+        secret = "Bearer " + ("a" * 40)
+        authorization = ProviderAuthorizationManager(self.root / "privacy-role-auth.json")
+        authorization.assign_role("role-admin", "admin")
+        original_assign = authorization.assign_role
+
+        def contaminated_assign(target_principal_id, role, *, enabled=True):
+            result = original_assign(target_principal_id, role, enabled=enabled)
+            return {**result, "metadata": {"authorization": secret}}
+
+        authorization.assign_role = contaminated_assign
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+        )
+        result = service.assign_provider_role(
+            "role-target",
+            "creator",
+            actor_principal_id="role-admin",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["saved"])
+        self.assertNotIn(secret, repr(result))
+
+
     def test_sensitive_credentials_are_blocked_before_routing_and_adapter(self):
         calls = {"route": 0, "adapter": 0}
 
