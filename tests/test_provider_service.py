@@ -394,8 +394,8 @@ class ProviderServiceTests(unittest.TestCase):
         class RetryStub:
             def decide(self, **failure):
                 return type("Decision", (), {
-                    "retry": True, "attempt": 2,
-                    "delay_seconds": 0.5, "reason": token,
+                    "retry": True, "attempt": token,
+                    "delay_seconds": token, "reason": token,
                 })()
 
         service = ProviderService(
@@ -405,8 +405,8 @@ class ProviderServiceTests(unittest.TestCase):
 
         self.assertTrue(result["retry"])
         self.assertEqual(result["reason"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
-        self.assertEqual(result["attempt"], 2)
-        self.assertEqual(result["delay_seconds"], 0.5)
+        self.assertEqual(result["attempt"], 0)
+        self.assertEqual(result["delay_seconds"], 0.0)
         self.assertNotIn(token, repr(result))
 
     def test_output_validation_and_retry_decision_are_delegated(self):
