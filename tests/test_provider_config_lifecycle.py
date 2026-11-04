@@ -176,6 +176,74 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["schema_version"], "2")
         self.assertEqual(json.loads(Path(str(path) + ".bak").read_text(encoding="utf-8"))["schema_version"], "1")
 
+    def test_file_migration_encrypts_backup_when_deployment_key_is_configured(self):
+        path = self.root / "provider-config.json"
+        original = {
+            "schema_version": "1",
+            "providers": {"image": {}},
+            "owner_contact": "private.owner@example.com",
+        }
+        path.write_text(json.dumps(original), encoding="utf-8")
+        key_provider = lambda context: b"0123456789abcdef0123456789abcdef"
+        manager = ProviderConfigLifecycleManager(
+            valid_config, backup_encryption_key_provider=key_provider
+        )
+
+        result = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        backup_path = Path(result["backup_path"])
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_APPLIED")
+        self.assertTrue(backup_path.name.endswith(".bak.enc"))
+        self.assertFalse(path.with_name(path.name + ".bak").exists())
+        self.assertNotIn(b"private.owner@example.com", backup_path.read_bytes())
+        self.assertEqual(manager._backup_store(backup_path).read({}), original)
+
+    def test_encrypted_config_backup_restores_original_after_reload_rejection(self):
+        path = self.root / "provider-config.json"
+        original = {
+            "schema_version": "1",
+            "providers": {"image": {}},
+            "owner_contact": "private.owner@example.com",
+        }
+        path.write_text(json.dumps(original), encoding="utf-8")
+        key_provider = lambda context: b"0123456789abcdef0123456789abcdef"
+        manager = ProviderConfigLifecycleManager(
+            valid_config, backup_encryption_key_provider=key_provider
+        )
+        with patch.object(manager, "reload", return_value={"reloaded": False}):
+            result = manager.migrate_file(
+                path, target_version="2", migrations={"1": migrate_v1_to_v2}
+            )
+
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_ROLLED_BACK")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), original)
+        backup_path = Path(result["backup_path"])
+        self.assertNotIn(b"private.owner@example.com", backup_path.read_bytes())
+        self.assertEqual(manager._backup_store(backup_path).read({}), original)
+
+    def test_encrypted_config_backup_is_bound_to_its_source_path(self):
+        first_path = self.root / "first" / "provider-config.json"
+        second_path = self.root / "second" / "provider-config.json"
+        first_path.parent.mkdir()
+        second_path.parent.mkdir()
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        first_path.write_text(json.dumps(original), encoding="utf-8")
+        second_path.write_text(json.dumps(original), encoding="utf-8")
+        key_provider = lambda context: b"0123456789abcdef0123456789abcdef"
+        manager = ProviderConfigLifecycleManager(
+            valid_config, backup_encryption_key_provider=key_provider
+        )
+        result = manager.migrate_file(
+            first_path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+        backup_path = Path(result["backup_path"])
+        transplanted = second_path.with_name(second_path.name + ".bak.enc")
+        transplanted.write_bytes(backup_path.read_bytes())
+        with self.assertRaises(Exception):
+            manager._backup_store(transplanted).read({})
+
     def test_file_migration_runs_inside_interprocess_lock(self):
         path = self.root / "provider-config.json"
         path.write_text(
