@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
+from .encrypted_state_store import EncryptedJSONStateStore
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .safe_numbers import finite_number
 
@@ -26,7 +27,12 @@ class ProviderHealthManager:
         failure_threshold: int = 3,
         recovery_success_threshold: int = 1,
         clock: Callable[[], datetime] | None = None,
+        state_encryption_key_provider: Any = None,
+        state_encryption_context: str = "provider-health-history-v1",
+        migrate_legacy_plaintext_state: bool = False,
     ) -> None:
+        if state_encryption_key_provider is None and migrate_legacy_plaintext_state:
+            raise ValueError("legacy state migration requires an encryption key provider")
         if (
             not isinstance(history_limit, int) or isinstance(history_limit, bool) or history_limit < 1
             or not isinstance(failure_threshold, int) or isinstance(failure_threshold, bool) or failure_threshold < 1
@@ -36,6 +42,15 @@ class ProviderHealthManager:
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
+        self.state_store = (
+            EncryptedJSONStateStore(
+                self.state_path,
+                key_provider=state_encryption_key_provider,
+                context=state_encryption_context,
+                migrate_legacy_plaintext=migrate_legacy_plaintext_state,
+            )
+            if state_encryption_key_provider is not None else None
+        )
         self.history_limit = history_limit
         self.failure_threshold = failure_threshold
         self.recovery_success_threshold = recovery_success_threshold
@@ -46,15 +61,11 @@ class ProviderHealthManager:
 
     def _load_initial_state(self) -> None:
         """Read existing state under the same interprocess lock used by writers."""
-        if not self.state_path.exists():
+        lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+        with interprocess_file_lock(lock_path):
             self._reload_state()
-            return
-        try:
-            with self._transaction():
-                return
-        except OSError:
-            pass
-        self._reload_state()
+            if self.state_store is not None and self.state_store.migration_required:
+                self._save()
 
     @staticmethod
     def _parse_timestamp(value: Any) -> datetime:
@@ -70,14 +81,21 @@ class ProviderHealthManager:
 
     def _reload_state(self) -> None:
         """Reload the latest valid state while holding the interprocess lock."""
-        if not self.state_path.exists():
-            self.data = {"version": "1.0", "providers": {}}
-            return
-        try:
-            with self.state_path.open("r", encoding="utf-8") as stream:
-                loaded = json.load(stream)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise ValueError("Invalid provider health state JSON") from exc
+        default = {"version": "1.0", "providers": {}}
+        if self.state_store is not None:
+            loaded = self.state_store.read(default)
+            if not self.state_path.exists():
+                self.data = loaded
+                return
+        else:
+            if not self.state_path.exists():
+                self.data = default
+                return
+            try:
+                with self.state_path.open("r", encoding="utf-8") as stream:
+                    loaded = json.load(stream)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ValueError("Invalid provider health state JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("providers", {}), dict):
             raise ValueError("Invalid provider health state")
         loaded.setdefault("providers", {})
@@ -359,6 +377,9 @@ class ProviderHealthManager:
         return {"eligible": True, "status": record.get("status", "UNKNOWN"), "age_seconds": age}
 
     def _save(self) -> None:
+        if self.state_store is not None:
+            self.state_store.write(self.data)
+            return
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{self.state_path.name}.", suffix=".tmp",
