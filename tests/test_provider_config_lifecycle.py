@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
+from projects.provider_store.encrypted_state_store import EncryptedStateError
 from projects.provider_store.provider_config_lifecycle import ProviderConfigLifecycleManager
 import projects.provider_store.provider_config_lifecycle as lifecycle_module
 
@@ -241,7 +242,7 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         backup_path = Path(result["backup_path"])
         transplanted = second_path.with_name(second_path.name + ".bak.enc")
         transplanted.write_bytes(backup_path.read_bytes())
-        with self.assertRaises(Exception):
+        with self.assertRaises(EncryptedStateError):
             manager._backup_store(transplanted).read({})
 
     def test_file_migration_runs_inside_interprocess_lock(self):
