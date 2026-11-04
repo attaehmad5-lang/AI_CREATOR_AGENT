@@ -44,7 +44,10 @@ class ProviderService:
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
         secret_manager: Any | None = None,
+        require_encrypted_state: bool = False,
     ) -> None:
+        if not isinstance(require_encrypted_state, bool):
+            raise ValueError("require_encrypted_state must be boolean")
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
         if tenant_isolation_manager is not None and authorization_manager is None:
@@ -93,6 +96,47 @@ class ProviderService:
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
                 raise ValueError(f"{label} does not support {method}")
+        # Only managers with persistent state are checked. In-memory adapters
+        # remain supported; an activated file-backed manager must expose the
+        # authenticated state-store contract when strict storage is requested.
+        resolved_credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        storage_managers = {
+            "connection_manager": connection_manager,
+            "authorization_manager": authorization_manager,
+            "tenant_isolation_manager": tenant_isolation_manager,
+            "job_manager": job_manager,
+            "cost_policy": cost_policy,
+            "quota_manager": quota_manager,
+            "credit_manager": resolved_credit_manager,
+            "budget_alert_manager": budget_alert_manager,
+            "webhook_verifier": webhook_verifier,
+            "incident_manager": incident_manager,
+            "health_manager": health_manager,
+            "feature_flag_manager": feature_flag_manager,
+            "degraded_mode_manager": degraded_mode_manager,
+            "slo_manager": slo_manager,
+            "project_policy_manager": project_policy_manager,
+        }
+        storage_status: dict[str, bool] = {}
+        for label, instance in storage_managers.items():
+            if instance is None:
+                continue
+            state_path = getattr(instance, "state_path", None)
+            state_store = getattr(instance, "state_store", None)
+            if state_path is None and state_store is None:
+                continue
+            key_provider = getattr(state_store, "key_provider", None)
+            context = getattr(state_store, "context", None)
+            ready = (
+                callable(getattr(state_store, "read", None))
+                and callable(getattr(state_store, "write", None))
+                and callable(key_provider)
+                and isinstance(context, str)
+                and bool(context)
+            )
+            storage_status[label] = ready
+            if require_encrypted_state and not ready:
+                raise ValueError(f"{label} must use deployment-key-encrypted persistent state")
         self.connection_manager = connection_manager
         self.routing_manager = routing_manager
         self.health_manager = health_manager
@@ -121,6 +165,25 @@ class ProviderService:
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
+        self.require_encrypted_state = require_encrypted_state
+        self._privacy_storage_status = storage_status
+
+    def get_privacy_storage_status(self) -> dict[str, Any]:
+        """Report encryption readiness without exposing file paths or key material."""
+        configured = dict(self._privacy_storage_status)
+        all_ready = all(configured.values())
+        status = (
+            "ENCRYPTED_STORAGE_READY" if all_ready and configured
+            else "ENCRYPTED_STORAGE_NOT_REQUIRED" if not self.require_encrypted_state
+            else "ENCRYPTED_STORAGE_NOT_VERIFIED"
+        )
+        return {
+            "status": status,
+            "required": self.require_encrypted_state,
+            "configured_persistent_managers": len(configured),
+            "encrypted_persistent_managers": sum(1 for ready in configured.values() if ready),
+            "managers": configured,
+        }
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
