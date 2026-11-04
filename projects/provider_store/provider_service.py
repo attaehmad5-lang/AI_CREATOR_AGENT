@@ -939,6 +939,29 @@ class ProviderService:
         safe_result["job"] = safe_job
         return safe_result
 
+    def _sensitive_input_rejection(self, payload: Any) -> dict[str, Any] | None:
+        """Return a safe rejection before untrusted metadata reaches a router or store."""
+        if self.sensitive_data_policy is None:
+            return None
+        try:
+            scan = self.sensitive_data_policy.inspect(payload)
+        except Exception as exc:
+            return {
+                "status": "SENSITIVE_DATA_SCAN_FAILED",
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(scan, dict) or scan.get("allowed") is not True:
+            return {
+                "status": "SENSITIVE_DATA_BLOCKED",
+                "sensitive_data_scan": scan if isinstance(scan, dict) else {
+                    "allowed": False,
+                    "status": "INVALID_SENSITIVE_DATA_SCAN_RESPONSE",
+                    "findings": [],
+                    "blocked_categories": [],
+                },
+            }
+        return None
+
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
@@ -954,6 +977,18 @@ class ProviderService:
         )
         if tenant_error is not None:
             return {"status": tenant_error["status"], "accepted": False}
+        rejection = self._sensitive_input_rejection({
+            "job_submission": {
+                "job_id": job_id,
+                "project_id": project_id,
+                "provider_id": provider_id,
+                "payload_ref": payload_ref,
+                "priority": priority,
+                "tenant_id": tenant_id,
+            },
+        })
+        if rejection is not None:
+            return {"accepted": False, **rejection}
         try:
             submit_args = {
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
@@ -1014,6 +1049,9 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
+        rejection = self._sensitive_input_rejection({"worker_id": worker_id})
+        if rejection is not None:
+            return {"job": None, **rejection}
         try:
             result = self.job_manager.claim_next(worker_id=worker_id)
         except Exception as exc:
@@ -1045,6 +1083,17 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
+        rejection = self._sensitive_input_rejection({
+            "job_completion": {
+                "job_id": job_id,
+                "worker_id": worker_id,
+                "success": success,
+                "result_ref": result_ref,
+                "error_code": error_code,
+            },
+        })
+        if rejection is not None:
+            return {"saved": False, **rejection}
         try:
             result = self.job_manager.complete(
                 job_id=job_id, worker_id=worker_id, lease_token=lease_token, success=success,
@@ -1136,27 +1185,9 @@ class ProviderService:
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
-        if self.sensitive_data_policy is not None:
-            try:
-                scan = self.sensitive_data_policy.inspect({"route_options": route_options})
-            except Exception as exc:
-                return {
-                    "allowed": False,
-                    "status": "SENSITIVE_DATA_SCAN_FAILED",
-                    "error_type": type(exc).__name__,
-                }
-            if not isinstance(scan, dict) or scan.get("allowed") is not True:
-                safe_scan = scan if isinstance(scan, dict) else {
-                    "allowed": False,
-                    "status": "INVALID_SENSITIVE_DATA_SCAN_RESPONSE",
-                    "findings": [],
-                    "blocked_categories": [],
-                }
-                return {
-                    "allowed": False,
-                    "status": "SENSITIVE_DATA_BLOCKED",
-                    "sensitive_data_scan": safe_scan,
-                }
+        rejection = self._sensitive_input_rejection({"route_options": route_options})
+        if rejection is not None:
+            return {"allowed": False, **rejection}
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
