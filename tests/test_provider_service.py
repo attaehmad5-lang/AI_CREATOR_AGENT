@@ -1516,6 +1516,44 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn(lease_token, repr(cancelled))
 
 
+
+    def test_sensitive_stored_job_record_is_blocked_before_read_response(self):
+        secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+
+        class SensitiveJobManager:
+            def poll(self, *, job_id):
+                return {
+                    "status": "JOB_STATUS",
+                    "job": {
+                        "job_id": job_id,
+                        "provider_id": "image",
+                        "project_id": "film",
+                        "payload_ref": "payload:safe-reference",
+                        "notes": "Authorization: Bearer " + secret,
+                    },
+                }
+
+        authorization = ProviderAuthorizationManager(self.root / "job-read-privacy-auth.json")
+        authorization.assign_role("privacy-viewer", "viewer")
+        service = ProviderService(
+            self.connections,
+            job_manager=SensitiveJobManager(),
+            authorization_manager=authorization,
+            sensitive_data_policy=SensitiveDataPolicy(),
+        )
+        result = service.poll_job(
+            job_id="sensitive-stored-job", principal_id="privacy-viewer",
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertIsNone(result["job"])
+        self.assertNotIn(secret, repr(result))
+        self.assertNotIn("Bearer", repr(result))
+        self.assertEqual(
+            result["sensitive_data_scan"]["blocked_categories"],
+            ["credential"],
+        )
+
+
     def test_execution_records_latency_queue_wait_and_failure_metrics(self):
         outer = self
 
