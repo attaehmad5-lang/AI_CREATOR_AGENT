@@ -109,7 +109,9 @@ class LogSafetyTests(unittest.TestCase):
         ):
             self.assertNotIn(secret, raw)
         self.assertEqual(payload["request_context"]["authorization"], "[REDACTED]")
-        self.assertIn("[REDACTED]", payload["exception"])
+        self.assertIn("RuntimeError", payload["exception"])
+        self.assertNotIn("test_log_safety.py", payload["exception"])
+        self.assertNotIn("raise RuntimeError", payload["exception"])
 
     def test_json_formatter_keeps_escaped_exception_json_valid(self):
         formatter = JsonLogFormatter()
