@@ -109,6 +109,38 @@ class EncryptedJSONStateStore:
             "context": self.context,
         }
 
+    def _validate_json_structure(self, value: Any) -> None:
+        """Bound JSON nesting and node count without recursive Python calls."""
+        max_depth = 64
+        max_nodes = 200_000
+        stack: list[tuple[bool, Any, int]] = [(False, value, 0)]
+        active: set[int] = set()
+        visited = 0
+        while stack:
+            exiting, node, depth = stack.pop()
+            if exiting:
+                active.discard(node)
+                continue
+            visited += 1
+            if visited > max_nodes or depth > max_depth:
+                raise EncryptedStateError("state JSON structure exceeds safe limits")
+            if isinstance(node, dict):
+                identity = id(node)
+                if identity in active:
+                    raise EncryptedStateError("state JSON contains a recursive reference")
+                active.add(identity)
+                stack.append((True, identity, depth))
+                for child in node.values():
+                    stack.append((False, child, depth + 1))
+            elif isinstance(node, (list, tuple)):
+                identity = id(node)
+                if identity in active:
+                    raise EncryptedStateError("state JSON contains a recursive reference")
+                active.add(identity)
+                stack.append((True, identity, depth))
+                for child in node:
+                    stack.append((False, child, depth + 1))
+
     def _key(self) -> bytes:
         try:
             key = self.key_provider(self.context)
@@ -134,6 +166,7 @@ class EncryptedJSONStateStore:
             if len(raw) != size:
                 raise EncryptedStateError("state file changed while being read")
             document = json.loads(raw.decode("utf-8"))
+            self._validate_json_structure(document)
         except EncryptedStateError:
             raise
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
@@ -161,7 +194,10 @@ class EncryptedJSONStateStore:
                 raise EncryptedStateError("decrypted state exceeds configured size limit")
             try:
                 value = json.loads(plaintext.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                self._validate_json_structure(value)
+            except EncryptedStateError:
+                raise
+            except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
                 raise EncryptedStateError("decrypted state payload is invalid") from exc
             return value
 
@@ -172,6 +208,7 @@ class EncryptedJSONStateStore:
 
     def write(self, value: Any) -> None:
         """Encrypt and atomically persist JSON state without exposing key material."""
+        self._validate_json_structure(value)
         try:
             plaintext = json.dumps(
                 value,
