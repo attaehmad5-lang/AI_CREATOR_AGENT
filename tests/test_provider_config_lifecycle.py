@@ -89,6 +89,42 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(manager.active_config, first)
         self.assertEqual(manager.generation, 3)
 
+    def test_config_migration_blocks_literal_credentials_before_migration_callback(self):
+        calls = []
+
+        def migration(config):
+            calls.append(True)
+            return migrate_v1_to_v2(config)
+
+        unsafe = {
+            "schema_version": "1",
+            "providers": {
+                "image": {"api_token": "provider-secret-value"},
+            },
+        }
+        result = self.manager.migrate(
+            unsafe, target_version="2", migrations={"1": migration}
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(calls, [])
+        self.assertNotIn("provider-secret-value", repr(result))
+
+    def test_hot_reload_blocks_literal_credentials_before_validator_or_activation(self):
+        unsafe = {
+            "schema_version": "1",
+            "providers": {
+                "video": {"authorization": "Bearer " + ("t" * 40)},
+            },
+        }
+        result = self.manager.reload(unsafe)
+
+        self.assertEqual(result["status"], "HOT_RELOAD_REJECTED")
+        self.assertEqual(result["reason"], "SENSITIVE_DATA_BLOCKED")
+        self.assertIsNone(self.manager.active_config)
+        self.assertNotIn("Bearer ", repr(result))
+
     def test_file_migration_creates_backup_and_writes_atomically(self):
         path = self.root / "provider-config.json"
         original = {"schema_version": "1", "providers": {"image": {}}}
