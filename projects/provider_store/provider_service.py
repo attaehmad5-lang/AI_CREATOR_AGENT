@@ -185,6 +185,8 @@ class ProviderService:
             return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
         if not isinstance(result, dict):
             result = {"allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"}
+        if self._sensitive_input_rejection({"authorization_manager_response": result}) is not None:
+            return {"allowed": False, "status": "SENSITIVE_DATA_OUTPUT_BLOCKED"}
         if result.get("allowed") is not True:
             return result
         return result if return_decision else None
