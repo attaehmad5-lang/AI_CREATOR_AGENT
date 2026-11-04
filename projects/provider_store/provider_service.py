@@ -123,9 +123,16 @@ class ProviderService:
         for label, instance in storage_managers.items():
             if instance is None:
                 continue
-            state_path = getattr(instance, "state_path", None)
+            persistence_path = next(
+                (
+                    getattr(instance, attribute, None)
+                    for attribute in ("state_path", "ledger_path", "path")
+                    if getattr(instance, attribute, None) is not None
+                ),
+                None,
+            )
             state_store = getattr(instance, "state_store", None)
-            if state_path is None and state_store is None:
+            if persistence_path is None and state_store is None:
                 continue
             key_provider = getattr(state_store, "key_provider", None)
             context = getattr(state_store, "context", None)
