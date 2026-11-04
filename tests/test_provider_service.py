@@ -86,6 +86,22 @@ class ProviderServiceTests(unittest.TestCase):
                 require_encrypted_state=True,
             )
 
+    def test_production_mode_rejects_unavailable_or_invalid_kms_key(self):
+        encrypted_state_path = self.root / "unavailable-kms-connections.json"
+        def unavailable_key_provider(context):
+            raise TimeoutError("KMS endpoint details must not escape")
+
+        connections = ConnectionManager(
+            self.catalog_path,
+            encrypted_state_path,
+            state_encryption_key_provider=unavailable_key_provider,
+        )
+
+        with self.assertRaisesRegex(ValueError, "connection_manager must use deployment-key-encrypted"):
+            ProviderService(connections, require_encrypted_state=True)
+
+        self.assertFalse(encrypted_state_path.exists())
+
     def test_production_mode_rejects_duck_typed_non_encrypted_state_store(self):
         class LookalikeStateStore:
             key_provider = staticmethod(lambda context: b"0123456789abcdef0123456789abcdef")
