@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 import re
 
+from .encrypted_state_store import EncryptedJSONStateStore
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 
@@ -28,7 +29,12 @@ class ProviderQuotaManager:
         max_records: int = 100_000,
         tenant_limits: dict[str, dict[str, dict[str, int]]] | None = None,
         max_tenants: int = 10_000,
+        state_encryption_key_provider: Any = None,
+        state_encryption_context: str = "provider-quota-state-v1",
+        migrate_legacy_plaintext_state: bool = False,
     ) -> None:
+        if state_encryption_key_provider is None and migrate_legacy_plaintext_state:
+            raise ValueError("legacy state migration requires an encryption key provider")
         if not isinstance(limits, dict):
             raise ValueError("limits must be a provider-to-limit mapping")
         normalized: dict[str, dict[str, int]] = {}
@@ -49,6 +55,15 @@ class ProviderQuotaManager:
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.state_path = Path(state_path)
+        self.state_store = (
+            EncryptedJSONStateStore(
+                self.state_path,
+                key_provider=state_encryption_key_provider,
+                context=state_encryption_context,
+                migrate_legacy_plaintext=migrate_legacy_plaintext_state,
+            )
+            if state_encryption_key_provider is not None else None
+        )
         self.limits = normalized
         self.max_records = max_records
         self.max_tenants = max_tenants
@@ -56,7 +71,11 @@ class ProviderQuotaManager:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "requests": {}}
-        self._reload_state()
+        lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+        with interprocess_file_lock(lock_path):
+            self._reload_state()
+            if self.state_store is not None and self.state_store.migration_required:
+                self._save()
 
     def _normalize_tenant_limits(
         self, configuration: dict[str, dict[str, dict[str, int]]]
@@ -93,14 +112,21 @@ class ProviderQuotaManager:
 
     def _reload_state(self) -> None:
         """Reload the latest atomically written state while holding the process lock."""
-        if not self.state_path.exists():
-            self.data = {"version": "1.0", "requests": {}}
-            return
-        try:
-            with self.state_path.open("r", encoding="utf-8") as stream:
-                loaded = json.load(stream)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise ValueError("invalid quota state JSON") from exc
+        default = {"version": "1.0", "requests": {}}
+        if self.state_store is not None:
+            loaded = self.state_store.read(default)
+            if not self.state_path.exists():
+                self.data = loaded
+                return
+        else:
+            if not self.state_path.exists():
+                self.data = default
+                return
+            try:
+                with self.state_path.open("r", encoding="utf-8") as stream:
+                    loaded = json.load(stream)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ValueError("invalid quota state JSON") from exc
         if not isinstance(loaded, dict) or not isinstance(loaded.get("requests"), dict):
             raise ValueError("invalid quota state schema")
         if len(loaded["requests"]) > self.max_records:
@@ -374,6 +400,9 @@ class ProviderQuotaManager:
         return count
 
     def _save(self) -> None:
+        if self.state_store is not None:
+            self.state_store.write(self.data)
+            return
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{self.state_path.name}.", suffix=".tmp",
