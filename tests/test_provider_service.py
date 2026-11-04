@@ -1721,6 +1721,9 @@ class ProviderServiceTests(unittest.TestCase):
         calls = []
 
         class HealthStub:
+            def record_result(self, *args, **kwargs):
+                return {"saved": True}
+
             def is_eligible(self, *args, **kwargs):
                 calls.append(args)
                 return {"eligible": True}
