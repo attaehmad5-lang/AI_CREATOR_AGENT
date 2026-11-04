@@ -112,6 +112,23 @@ class EncryptedJSONStateStoreTests(unittest.TestCase):
         self.assertTrue(self.path.exists())
         self.assertEqual(store.read({}), payload)
 
+    def test_crypto_erasure_key_destroyer_exception_preserves_ciphertext(self):
+        store = self.store()
+        payload = {"private": "preserve-on-kms-error"}
+        store.write(payload)
+
+        result = store.erase(
+            {},
+            key_destroyer=lambda context: (_ for _ in ()).throw(TimeoutError()),
+            confirmed=True,
+        )
+
+        self.assertEqual(result["status"], "STATE_KEY_DESTRUCTION_FAILED")
+        self.assertEqual(result["error_type"], "TimeoutError")
+        self.assertFalse(result["erased"])
+        self.assertTrue(self.path.exists())
+        self.assertEqual(store.read({}), payload)
+
     def test_crypto_erasure_rejects_missing_state_without_destroying_key(self):
         calls = []
         result = self.store().erase(
