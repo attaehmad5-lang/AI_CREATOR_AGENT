@@ -78,10 +78,28 @@ class SensitiveDataPolicyTests(unittest.TestCase):
         self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
         self.assertEqual(
             {item["path"] for item in result["findings"]},
-            {"$.providerConfig.api_key", "$.providerConfig.client_secret", "$.providerConfig.refresh_token"},
+            {"$.providerConfig.api_key", "$.providerConfig.clientSecret", "$.providerConfig.refresh_token"},
         )
         self.assertNotIn("opaque-value", repr(result))
         self.assertNotIn("PROVIDER_TOKEN", repr(result))
+
+    def test_additional_token_forms_basic_auth_private_key_and_url_credentials(self):
+        jwt_value = "eyJ" + ("a" * 12) + "." + ("b" * 12) + "." + ("c" * 16)
+        private_key = "-----BEGIN " + "PRIVATE KEY" + "-----\n" + "synthetic-data" + "\n-----END " + "PRIVATE KEY" + "-----"
+        samples = (
+            "Authorization: Basic " + ("a" * 24),
+            "access_token=" + jwt_value,
+            "endpoint=https://user:password@example.invalid/resource",
+            private_key,
+            "service " + "xoxb-" + ("1" * 8) + "-" + ("a" * 8),
+            "cloud " + "AIza" + ("a" * 24),
+        )
+        for sample in samples:
+            with self.subTest(sample_type=type(sample).__name__):
+                result = SensitiveDataPolicy().inspect({"nested": [sample]})
+                self.assertFalse(result["allowed"])
+                self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+                self.assertNotIn(sample, repr(result))
 
     def test_payment_card_luhn_detection_is_configurable(self):
         digits = str(6011) + ("0" * 11)
