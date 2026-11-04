@@ -12,7 +12,7 @@ from typing import Any
 
 _PATTERNS = (
     ("credential", re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}")),
-    ("credential", re.compile(r'''(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|password|passwd|credential|authorization|proxy[_-]?authorization|cookie|session(?:[_-]?token)?|private[_-]?key|signing[_-]?key)\b["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;&}\]]+)''')),
+    ("credential", re.compile(r'''(?i)\b(?:api[_-]?(?:key|token)|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|password|passwd|credential|authorization|proxy[_-]?authorization|cookie|session(?:[_-]?token)?|private[_-]?key|signing[_-]?key)\b["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;&}\]]+)''')),
     ("credential", re.compile(r"(?i)\b(?:sk-(?:proj-|svcacct-|ant-)?[A-Za-z0-9_-]{12,}|hf_[A-Za-z0-9]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{12,}|xox[baprs]-[A-Za-z0-9-]{8,}|AIza[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})\b")),
     ("credential", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
     ("credential", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----", re.DOTALL)),
