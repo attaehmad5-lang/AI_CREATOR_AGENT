@@ -200,7 +200,7 @@ class ProviderConfigLifecycleManager:
         try:
             with config_path.open("r", encoding="utf-8") as stream:
                 original = json.load(stream)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError, OSError) as exc:
             return {"status": "INVALID_CONFIG_FILE", "migrated": False, "error_type": type(exc).__name__}
         result = self.migrate(original, target_version=target_version, migrations=migrations)
         if result.get("migrated") is not True:
