@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import shutil
@@ -211,7 +212,8 @@ class ProviderConfigLifecycleManager:
             raise ValueError("encrypted config backup key provider is unavailable")
         # A path-derived context prevents ciphertext from being transplanted
         # between independently configured provider configuration files.
-        context = f"{self.backup_encryption_context}:{backup_path.name}"
+        path_digest = hashlib.sha256(str(backup_path.resolve()).encode("utf-8")).hexdigest()[:24]
+        context = f"{self.backup_encryption_context}:{path_digest}"
         if len(context) > 128:
             raise ValueError("encrypted config backup context exceeds safe limits")
         return EncryptedJSONStateStore(
@@ -290,13 +292,6 @@ class ProviderConfigLifecycleManager:
         reloaded = self.reload(result["config"])
         if reloaded.get("reloaded") is not True:
             try:
-                fd_restore, restore_name = tempfile.mkstemp(
-                    prefix=f".{config_path.name}.restore.", suffix=".tmp",
-                    dir=str(config_path.parent), text=True,
-                )
-                os.close(fd_restore)
-                os.close(fd_restore)
-                os.unlink(restore_name)
                 self._restore_backup(config_path, backup_path)
             except Exception:
                 return {
