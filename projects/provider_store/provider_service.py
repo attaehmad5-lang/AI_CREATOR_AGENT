@@ -10,6 +10,7 @@ from datetime import datetime
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
 from .secrets_manager import SecretManagerError
+from .encrypted_state_store import EncryptedJSONStateStore
 from .sensitive_data_policy import SensitiveDataPolicy
 
 
@@ -129,7 +130,8 @@ class ProviderService:
             key_provider = getattr(state_store, "key_provider", None)
             context = getattr(state_store, "context", None)
             ready = (
-                callable(getattr(state_store, "read", None))
+                isinstance(state_store, EncryptedJSONStateStore)
+                and callable(getattr(state_store, "read", None))
                 and callable(getattr(state_store, "write", None))
                 and callable(key_provider)
                 and isinstance(context, str)
