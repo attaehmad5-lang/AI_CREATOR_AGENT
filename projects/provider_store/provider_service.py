@@ -156,6 +156,16 @@ class ProviderService:
         provider_id: str | None = None,
         return_decision: bool = False,
     ) -> dict[str, Any] | None:
+        auth_context = {"operation": operation}
+        if provider_id is not None:
+            auth_context["provider_id"] = provider_id
+        if isinstance(principal_id, str):
+            auth_context["principal_id"] = principal_id
+        input_rejection = self._sensitive_input_rejection(
+            {"authorization_context": auth_context}
+        )
+        if input_rejection is not None:
+            return {"allowed": False, "status": input_rejection["status"]}
         if self.identity_authenticator is not None:
             try:
                 trusted_identity = self.identity_authenticator.is_authenticated_principal(principal_id)
@@ -391,6 +401,11 @@ class ProviderService:
             or len(tenant_id) > 128
         ):
             return {"status": "TENANT_CONTEXT_REQUIRED"}
+        tenant_context = {"tenant_id": tenant_id, "project_id": project_id}
+        if isinstance(principal_id, str):
+            tenant_context["principal_id"] = principal_id
+        if self._sensitive_input_rejection({"tenant_context": tenant_context}) is not None:
+            return {"status": "SENSITIVE_DATA_BLOCKED"}
         try:
             result = self.tenant_isolation_manager.authorize_project(
                 tenant_id, project_id, principal_id
@@ -1103,6 +1118,11 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
+        input_rejection = self._sensitive_input_rejection({
+            "job_poll_context": {"job_id": job_id, "tenant_id": tenant_id},
+        })
+        if input_rejection is not None:
+            return {"job": None, **input_rejection}
         authorization = self._authorize_operation(
             principal_id, "provider.read", provider_id="*", return_decision=True
         )
@@ -1177,6 +1197,11 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "renewed": False}
+        input_rejection = self._sensitive_input_rejection({
+            "job_lease_context": {"job_id": job_id, "worker_id": worker_id},
+        })
+        if input_rejection is not None:
+            return {"renewed": False, **input_rejection}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "renewed": False, "authorization": authorization}
@@ -1227,6 +1252,11 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
+        input_rejection = self._sensitive_input_rejection({
+            "job_cancel_context": {"job_id": job_id, "tenant_id": tenant_id},
+        })
+        if input_rejection is not None:
+            return {"saved": False, **input_rejection}
         authorization = self._authorize_operation(
             principal_id, "provider.generate", provider_id="*", return_decision=True
         )
@@ -1421,6 +1451,23 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+
+        request_context = {
+            "category": category,
+            "project_id": project_id,
+            "request_id": request_id,
+            "modality": modality,
+            "data_categories": data_categories,
+        }
+        if isinstance(principal_id, str):
+            request_context["principal_id"] = principal_id
+        if isinstance(tenant_id, str):
+            request_context["tenant_id"] = tenant_id
+        request_rejection = self._sensitive_input_rejection(
+            {"generation_request_context": request_context}
+        )
+        if request_rejection is not None:
+            return {"status": request_rejection["status"], "executed": False}
 
         degraded_mode_state = None
         if self.degraded_mode_manager is not None:
