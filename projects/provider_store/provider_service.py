@@ -819,7 +819,7 @@ class ProviderService:
             **({"version_id": result["version_id"]} if isinstance(result.get("version_id"), str) else {}),
             **({"rotated_at": result["rotated_at"]} if isinstance(result.get("rotated_at"), str) else {}),
         }
-        if self._sensitive_input_rejection({"secret_rotation_response": response}) is not None:
+        if self._sensitive_input_rejection({"rotation_metadata": response}) is not None:
             return {"status": "PROVIDER_SECRET_ROTATED", "rotated": True, "provider_id": provider_id}
         return response
 
