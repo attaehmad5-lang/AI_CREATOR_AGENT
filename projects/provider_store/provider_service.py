@@ -130,7 +130,7 @@ class ProviderService:
             return {"status": "IDENTITY_AUTHENTICATOR_UNAVAILABLE", "authenticated": False}
         if not isinstance(authorization_header, str) or len(authorization_header) > 65_543:
             return {"status": "OIDC_TOKEN_INVALID", "authenticated": False}
-        match = re.fullmatch(r"(?i:Bearer) ([A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)", authorization_header)
+        match = re.fullmatch(r"(?i:Bearer) ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)", authorization_header)
         if match is None:
             return {"status": "OIDC_TOKEN_INVALID", "authenticated": False}
         try:
