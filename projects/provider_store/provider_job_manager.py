@@ -1,6 +1,7 @@
 """Persistent asynchronous provider job queue with bounded backpressure."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -18,6 +19,11 @@ _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
 _REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\Z")
 _ERROR_RE = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
 _TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED"}
+
+
+def _lease_token_digest(token: str) -> str:
+    """Hash high-entropy worker lease tokens before persistent storage."""
+    return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
 class ProviderJobManager:
@@ -96,7 +102,14 @@ class ProviderJobManager:
         ):
             raise ValueError("invalid provider job scheduler state")
         loaded["scheduler"] = scheduler
+        migrated_legacy_tokens = False
         for job_id, job in loaded["jobs"].items():
+            if isinstance(job, dict) and "lease_token" in job and "lease_token_hash" not in job:
+                legacy_token = job.pop("lease_token")
+                job["lease_token_hash"] = (
+                    _lease_token_digest(legacy_token) if isinstance(legacy_token, str) else None
+                )
+                migrated_legacy_tokens = True
             if (
                 not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
                 or not isinstance(job, dict)
@@ -110,18 +123,41 @@ class ProviderJobManager:
                     job.get("worker_id") is not None
                     and not _ID_RE.fullmatch(job["worker_id"])
                 )
-                or not isinstance(job.get("lease_token"), (str, type(None)))
+                or ("lease_token" in job and "lease_token_hash" in job)
                 or (
-                    job.get("lease_token") is not None
+                    "lease_token" in job
+                    and job.get("lease_token") is not None
+                    and not isinstance(job.get("lease_token"), str)
+                )
+                or (
+                    "lease_token" in job
+                    and job.get("lease_token") is not None
                     and not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", job["lease_token"])
                 )
                 or (
+                    "lease_token_hash" in job
+                    and job.get("lease_token_hash") is not None
+                    and (
+                        not isinstance(job.get("lease_token_hash"), str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", job["lease_token_hash"])
+                    )
+                )
+                or (
                     job.get("status") == "RUNNING"
-                    and (job.get("worker_id") is None or job.get("lease_token") is None)
+                    and (
+                        job.get("worker_id") is None
+                        or (
+                            job.get("lease_token") is None
+                            and job.get("lease_token_hash") is None
+                        )
+                    )
                 )
                 or (
                     job.get("status") != "RUNNING"
-                    and job.get("lease_token") is not None
+                    and (
+                        job.get("lease_token") is not None
+                        or job.get("lease_token_hash") is not None
+                    )
                 )
                 or (
                     job.get("tenant_id") is not None
@@ -137,13 +173,26 @@ class ProviderJobManager:
             ):
                 raise ValueError("invalid provider job record")
         self.data = loaded
+        return migrated_legacy_tokens
+
+    @staticmethod
+    def _public_job(job: dict[str, Any], *, lease_token: str | None = None) -> dict[str, Any]:
+        """Hide persisted token verifiers; reveal a token only in the worker claim response."""
+        public_job = dict(job)
+        public_job.pop("lease_token_hash", None)
+        public_job.pop("lease_token", None)
+        if lease_token is not None:
+            public_job["lease_token"] = lease_token
+        return public_job
 
     @contextmanager
     def _transaction(self) -> Iterator[None]:
         with self._lock:
             lock_path = self.state_path.with_name(self.state_path.name + ".lock")
             with interprocess_file_lock(lock_path):
-                self._reload()
+                migrated = self._reload()
+                if migrated:
+                    self._save()
                 yield
 
     def _save(self) -> None:
@@ -200,7 +249,7 @@ class ProviderJobManager:
                 return {
                     "status": "ALREADY_SUBMITTED" if same else "REQUEST_ID_CONFLICT",
                     "accepted": same,
-                    "job": dict(existing),
+                    "job": self._public_job(existing),
                 }
             if len(self.data["jobs"]) >= self.max_job_records:
                 return {"status": "JOB_HISTORY_CAPACITY_REACHED", "accepted": False}
@@ -224,7 +273,7 @@ class ProviderJobManager:
                 job["tenant_id"] = tenant_id
             self.data["jobs"][job_id] = job
             self._save()
-            return {"status": "JOB_QUEUED", "accepted": True, "job": dict(job)}
+            return {"status": "JOB_QUEUED", "accepted": True, "job": self._public_job(job)}
 
     def _reap_expired_locked(self, now: datetime) -> bool:
         changed = False
@@ -247,7 +296,7 @@ class ProviderJobManager:
                 continue
             job["updated_at"] = now.isoformat()
             job["worker_id"] = None
-            job["lease_token"] = None
+            job["lease_token_hash"] = None
             job["lease_until"] = None
             if job.get("cancel_requested") is True:
                 job["status"] = "CANCELLED"
@@ -313,13 +362,15 @@ class ProviderJobManager:
                 self.data["scheduler"]["last_project_id"] = selected_project
             job["status"] = "RUNNING"
             job["worker_id"] = worker_id
-            job["lease_token"] = secrets.token_urlsafe(32)
+            lease_token = secrets.token_urlsafe(32)
+            job["lease_token_hash"] = _lease_token_digest(lease_token)
+            job.pop("lease_token", None)
             job["attempts"] += 1
             job["started_at"] = job.get("started_at") or now.isoformat()
             job["updated_at"] = now.isoformat()
             job["lease_until"] = (now + timedelta(seconds=self.lease_seconds)).isoformat()
             self._save()
-            return {"status": "JOB_CLAIMED", "job": dict(job)}
+            return {"status": "JOB_CLAIMED", "job": self._public_job(job, lease_token=lease_token)}
 
     def renew_lease(
         self, *, job_id: str, worker_id: str, lease_token: str
@@ -341,7 +392,7 @@ class ProviderJobManager:
             if (
                 job.get("status") != "RUNNING"
                 or job.get("worker_id") != worker_id
-                or not secrets.compare_digest(str(job.get("lease_token", "")), lease_token)
+                or not secrets.compare_digest(str(job.get("lease_token_hash", "")), _lease_token_digest(lease_token))
             ):
                 if changed:
                     self._save()
@@ -355,7 +406,7 @@ class ProviderJobManager:
                 "status": "JOB_LEASE_RENEWED",
                 "renewed": True,
                 "lease_until": job["lease_until"],
-                "job": dict(job),
+                "job": self._public_job(job),
             }
 
     def complete(
@@ -413,7 +464,7 @@ class ProviderJobManager:
             job["lease_token"] = None
             job["worker_id"] = None
             self._save()
-            return {"status": "JOB_COMPLETED", "saved": True, "job": dict(job)}
+            return {"status": "JOB_COMPLETED", "saved": True, "job": self._public_job(job)}
 
     def cancel(
         self, *, job_id: str, tenant_id: str | None = None
@@ -440,7 +491,7 @@ class ProviderJobManager:
                 return {"status": "JOB_TERMINAL", "saved": False}
             job["updated_at"] = now
             self._save()
-            return {"status": "CANCEL_REQUESTED" if job["status"] == "RUNNING" else "JOB_CANCELLED", "saved": True, "job": dict(job)}
+            return {"status": "CANCEL_REQUESTED" if job["status"] == "RUNNING" else "JOB_CANCELLED", "saved": True, "job": self._public_job(job)}
 
     def poll(
         self, *, job_id: str, tenant_id: str | None = None
@@ -457,4 +508,4 @@ class ProviderJobManager:
                 return {"status": "JOB_NOT_FOUND", "job": None}
             if job.get("tenant_id") != tenant_id:
                 return {"status": "TENANT_ISOLATION_DENIED", "job": None}
-            return {"status": "JOB_STATUS", "job": dict(job)}
+            return {"status": "JOB_STATUS", "job": self._public_job(job)}
