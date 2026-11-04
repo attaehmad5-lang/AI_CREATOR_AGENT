@@ -1426,6 +1426,9 @@ class ProviderServiceTests(unittest.TestCase):
                 self.poll_calls = []
                 self.cancel_calls = []
 
+            def submit(self, **kwargs):
+                return {"status": "SUBMITTED", "accepted": True}
+
             def poll(self, **kwargs):
                 self.poll_calls.append(kwargs)
                 return {"status": "JOB_FOUND", "job": {"job_id": "safe-id"}}
