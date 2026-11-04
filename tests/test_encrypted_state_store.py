@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from projects.provider_store.encrypted_state_store import (
     EncryptedJSONStateStore,
@@ -98,6 +99,18 @@ class EncryptedJSONStateStoreTests(unittest.TestCase):
                 {},
                 new_key_provider=lambda context: b"invalid-new-key",
             )
+        self.assertEqual(self.path.read_bytes(), original_bytes)
+        self.assertEqual(store.read({}), payload)
+
+        with patch(
+            "projects.provider_store.encrypted_state_store.atomic_replace_with_retry",
+            side_effect=OSError("simulated atomic replacement failure"),
+        ):
+            with self.assertRaises(EncryptedStateError):
+                store.rotate_key(
+                    {},
+                    new_key_provider=lambda context: b"n" * 32,
+                )
 
         self.assertEqual(self.path.read_bytes(), original_bytes)
         self.assertEqual(store.read({}), payload)
