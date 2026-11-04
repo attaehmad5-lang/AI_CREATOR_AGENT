@@ -1303,6 +1303,38 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn(secret, repr(result))
         self.assertNotIn("Bearer", repr(result))
 
+    def test_sensitive_metadata_in_routing_options_is_blocked_before_route(self):
+        calls = {"route": 0, "adapter": 0}
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls["route"] += 1
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            sensitive_data_policy=SensitiveDataPolicy(),
+        )
+
+        def adapter(**kwargs):
+            calls["adapter"] += 1
+            return {"started": False, "success": False}
+
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="sensitive-routing-options",
+            estimated_cost=0.0,
+            modality="image",
+            adapter=adapter,
+            provider_metadata={"clientSecret": "opaque-value-not-for-logs"},
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, {"route": 0, "adapter": 0})
+        self.assertNotIn("opaque-value-not-for-logs", repr(result))
+
     def test_unknown_provider_data_policy_blocks_adapter_execution(self):
         calls = []
 
