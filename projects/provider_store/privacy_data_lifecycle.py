@@ -12,8 +12,8 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
-_COMPONENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\\Z")
-_REFERENCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\\Z")
+_COMPONENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+_REFERENCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _DELETE_STATUSES = frozenset({"DELETED", "ALREADY_ABSENT", "PENDING", "FAILED"})
 _RETENTION_STATUSES = frozenset({"PURGED", "ALREADY_EMPTY", "PENDING", "FAILED"})
 
