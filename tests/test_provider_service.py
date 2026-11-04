@@ -1,6 +1,7 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
+from datetime import datetime, timedelta, timezone
 import unittest
 from pathlib import Path
 
@@ -2356,6 +2357,86 @@ class ProviderServiceTests(unittest.TestCase):
             "SUCCEEDED",
         )
 
+
+    def test_job_retention_purge_requires_confirmation_and_admin_authorization(self):
+        jobs = ProviderJobManager(self.root / "job-retention-auth.json")
+        jobs.submit(
+            job_id="old-retention-job", project_id="film", provider_id="image",
+            payload_ref="payload:old-retention-job",
+        )
+        claimed = jobs.claim_next(worker_id="worker-retention")
+        jobs.complete(
+            job_id="old-retention-job", worker_id="worker-retention",
+            lease_token=claimed["job"]["lease_token"], success=True,
+            result_ref="asset:old-retention-result",
+        )
+        authorization = ProviderAuthorizationManager(self.root / "job-retention-auth-state.json")
+        authorization.assign_role("retention-admin", "admin")
+        authorization.assign_role("retention-creator", "creator")
+        service = ProviderService(
+            self.connections, job_manager=jobs,
+            authorization_manager=authorization,
+        )
+        cutoff = datetime.now(timezone.utc) + timedelta(days=1)
+
+        unconfirmed = service.purge_expired_job_records(
+            project_id="film", cutoff=cutoff, principal_id="retention-admin",
+        )
+        self.assertEqual(unconfirmed["status"], "JOB_RETENTION_CONFIRMATION_REQUIRED")
+        self.assertEqual(jobs.poll(job_id="old-retention-job")["status"], "JOB_STATUS")
+
+        denied = service.purge_expired_job_records(
+            project_id="film", cutoff=cutoff, principal_id="retention-creator",
+            confirmed=True,
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(jobs.poll(job_id="old-retention-job")["status"], "JOB_STATUS")
+
+        purged = service.purge_expired_job_records(
+            project_id="film", cutoff=cutoff, principal_id="retention-admin",
+            confirmed=True,
+        )
+        self.assertEqual(purged["status"], "JOB_RETENTION_PURGED")
+        self.assertEqual(purged["purged_count"], 1)
+        self.assertEqual(jobs.poll(job_id="old-retention-job")["status"], "JOB_NOT_FOUND")
+
+    def test_job_retention_purge_enforces_tenant_project_binding(self):
+        jobs = ProviderJobManager(self.root / "job-retention-tenant.json")
+        jobs.submit(
+            job_id="tenant-old-job", project_id="tenant-film", provider_id="image",
+            payload_ref="payload:tenant-old-job", tenant_id="tenant-01",
+        )
+        claimed = jobs.claim_next(worker_id="tenant-worker")
+        jobs.complete(
+            job_id="tenant-old-job", worker_id="tenant-worker",
+            lease_token=claimed["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+        tenant_manager = ProviderTenantIsolationManager(self.root / "job-retention-tenants.json")
+        self.assertTrue(tenant_manager.register_tenant("tenant-01")["saved"])
+        self.assertTrue(tenant_manager.bind_principal("tenant-01", "tenant-retention-admin")["saved"])
+        self.assertTrue(tenant_manager.bind_project("tenant-01", "tenant-film")["saved"])
+        authorization = ProviderAuthorizationManager(self.root / "job-retention-tenant-auth.json")
+        authorization.assign_role("tenant-retention-admin", "admin")
+        service = ProviderService(
+            self.connections, job_manager=jobs,
+            authorization_manager=authorization,
+            tenant_isolation_manager=tenant_manager,
+        )
+
+        denied = service.purge_expired_job_records(
+            project_id="tenant-film", cutoff=datetime.now(timezone.utc) + timedelta(days=1),
+            principal_id="tenant-retention-admin", tenant_id="tenant-other", confirmed=True,
+        )
+        self.assertEqual(denied["status"], "TENANT_ISOLATION_DENIED")
+        self.assertEqual(jobs.poll(job_id="tenant-old-job", tenant_id="tenant-01")["status"], "JOB_STATUS")
+
+        purged = service.purge_expired_job_records(
+            project_id="tenant-film", cutoff=datetime.now(timezone.utc) + timedelta(days=1),
+            principal_id="tenant-retention-admin", tenant_id="tenant-01", confirmed=True,
+        )
+        self.assertEqual(purged["status"], "JOB_RETENTION_PURGED")
+        self.assertEqual(purged["purged_count"], 1)
 
     def test_job_submission_blocks_credentialed_payload_reference_before_persisting(self):
         jobs = ProviderJobManager(self.root / "sensitive-submit-jobs.json")
