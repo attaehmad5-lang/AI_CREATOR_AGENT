@@ -60,6 +60,16 @@ class PrivacyDataLifecycleManager:
         return {"status": "PRIVACY_STORE_REGISTERED", "registered": True}
 
     @staticmethod
+    def _valid_subject_ref(value: Any) -> bool:
+        # A subject handle must be pseudonymous and non-numeric; raw phone
+        # numbers and email addresses are not accepted as lookup identifiers.
+        return (
+            isinstance(value, str)
+            and _REFERENCE_ID.fullmatch(value) is not None
+            and any(char.isalpha() for char in value)
+        )
+
+    @staticmethod
     def _valid_scope(project_id: Any, tenant_id: Any, request_id: Any) -> bool:
         return (
             isinstance(project_id, str)
@@ -165,8 +175,7 @@ class PrivacyDataLifecycleManager:
                 "deleted_count": 0, "stores": {},
             }
         if (
-            not isinstance(subject_ref, str)
-            or _REFERENCE_ID.fullmatch(subject_ref) is None
+            not self._valid_subject_ref(subject_ref)
             or not self._valid_scope(project_id, tenant_id, request_id)
         ):
             return {
