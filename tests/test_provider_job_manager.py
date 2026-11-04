@@ -372,6 +372,66 @@ class ProviderJobManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "scheduler state"):
             ProviderJobManager(self.path)
 
+    def test_retention_purge_removes_only_expired_terminal_jobs_in_selected_project(self):
+        self.submit("old-job")
+        old_claim = self.manager.claim_next(worker_id="worker-1")
+        self.manager.complete(
+            job_id="old-job", worker_id="worker-1",
+            lease_token=old_claim["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+        self.now[0] += timedelta(days=10)
+        self.manager.submit(
+            job_id="new-job", project_id="film", provider_id="image",
+            payload_ref="payload:new-job",
+        )
+        self.manager.submit(
+            job_id="other-project", project_id="other-film", provider_id="image",
+            payload_ref="payload:other-project",
+        )
+        self.manager.cancel(job_id="other-project")
+        self.manager.data["jobs"]["old-job"]["completed_at"] = (
+            self.now[0] - timedelta(days=9)
+        ).isoformat()
+        self.manager._save()
+
+        result = self.manager.purge_terminal_jobs_before(
+            project_id="film", cutoff=self.now[0] - timedelta(days=5)
+        )
+
+        self.assertEqual(result["status"], "JOB_RETENTION_PURGED")
+        self.assertEqual(result["purged_count"], 1)
+        self.assertEqual(self.manager.poll(job_id="old-job")["status"], "JOB_NOT_FOUND")
+        self.assertEqual(self.manager.poll(job_id="new-job")["status"], "JOB_STATUS")
+        self.assertEqual(self.manager.poll(job_id="other-project")["status"], "JOB_STATUS")
+
+    def test_retention_purge_preserves_running_jobs_and_invalid_completion_timestamps(self):
+        self.submit("running-job")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.submit("bad-terminal")
+        self.manager.cancel(job_id="bad-terminal")
+        self.manager.data["jobs"]["bad-terminal"]["completed_at"] = "not-a-timestamp"
+        self.manager._save()
+
+        result = self.manager.purge_terminal_jobs_before(
+            project_id="film", cutoff=self.now[0] + timedelta(days=1)
+        )
+
+        self.assertEqual(result["purged_count"], 0)
+        self.assertEqual(result["skipped_invalid_timestamps"], 1)
+        self.assertEqual(self.manager.poll(job_id="running-job")["job"]["status"], "RUNNING")
+        self.assertEqual(self.manager.poll(job_id="bad-terminal")["job"]["status"], "CANCELLED")
+
+    def test_retention_purge_requires_timezone_aware_cutoff_and_valid_scope(self):
+        bad_cutoff = self.manager.purge_terminal_jobs_before(
+            project_id="film", cutoff=datetime(2026, 10, 16, 12)
+        )
+        self.assertEqual(bad_cutoff["status"], "INVALID_RETENTION_CUTOFF")
+        bad_project = self.manager.purge_terminal_jobs_before(
+            project_id="../film", cutoff=self.now[0]
+        )
+        self.assertEqual(bad_project["status"], "INVALID_PROJECT_ID")
+
     def test_job_lifecycle_poll_and_result_reference(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
