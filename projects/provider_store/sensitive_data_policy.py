@@ -95,6 +95,97 @@ class SensitiveDataPolicy:
             return False
         return bool(_SENSITIVE_FIELD.search(normalized))
 
+    def inspect_file(
+        self,
+        path: Any,
+        *,
+        max_file_bytes: int = 1_048_576,
+    ) -> dict[str, Any]:
+        """Inspect a bounded UTF-8 text file without returning its contents.
+
+        The file must be a regular non-symlink file. File identity, size and
+        modification metadata are checked across the read to reject replacement
+        or concurrent mutation. Binary/non-UTF-8 content fails closed.
+        """
+        import os
+        import stat
+
+        if isinstance(max_file_bytes, bool) or not isinstance(max_file_bytes, int) or not 1 <= max_file_bytes <= 4_194_304:
+            return {
+                "allowed": False,
+                "status": "SENSITIVE_DATA_FILE_LIMIT_INVALID",
+                "findings": [],
+                "blocked_categories": [],
+            }
+        if not isinstance(path, (str, os.PathLike)):
+            return {
+                "allowed": False,
+                "status": "SENSITIVE_DATA_FILE_PATH_INVALID",
+                "findings": [],
+                "blocked_categories": [],
+            }
+        descriptor = None
+        try:
+            file_path = os.fspath(path)
+            before = os.lstat(file_path)
+            if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+                raise OSError("unsafe file type")
+            if before.st_size < 0 or before.st_size > max_file_bytes:
+                return {
+                    "allowed": False,
+                    "status": "SENSITIVE_DATA_FILE_TOO_LARGE",
+                    "findings": [],
+                    "blocked_categories": [],
+                }
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(file_path, flags)
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)
+            ):
+                raise OSError("file identity changed")
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = None
+                raw = stream.read(max_file_bytes + 1)
+                after = os.fstat(stream.fileno())
+            if len(raw) > max_file_bytes:
+                return {
+                    "allowed": False,
+                    "status": "SENSITIVE_DATA_FILE_TOO_LARGE",
+                    "findings": [],
+                    "blocked_categories": [],
+                }
+            if (
+                (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                or after.st_size != len(raw)
+            ):
+                raise OSError("file changed during inspection")
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                return {
+                    "allowed": False,
+                    "status": "SENSITIVE_DATA_FILE_ENCODING_INVALID",
+                    "findings": [],
+                    "blocked_categories": [],
+                }
+        except Exception:
+            return {
+                "allowed": False,
+                "status": "SENSITIVE_DATA_FILE_UNAVAILABLE",
+                "findings": [],
+                "blocked_categories": [],
+            }
+        finally:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        return self.inspect(text)
+
     def inspect(self, payload: Any) -> dict[str, Any]:
         findings: list[dict[str, str]] = []
         seen_findings: set[tuple[str, str]] = set()
