@@ -1,4 +1,5 @@
 """Queue capacity, idempotency, async lifecycle, and backpressure tests."""
+import hashlib
 import json
 import tempfile
 import unittest
@@ -33,6 +34,7 @@ class ProviderJobManagerTests(unittest.TestCase):
         claimed = self.manager.claim_next(worker_id="worker-1")
         self.assertEqual(claimed["status"], "JOB_CLAIMED")
         persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["jobs"]["job-1"].pop("lease_token_hash", None)
         persisted["jobs"]["job-1"]["lease_token"] = "bad-token"
         self.path.write_text(json.dumps(persisted), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "provider job record"):
@@ -42,6 +44,7 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.submit("job-1")
         self.manager.claim_next(worker_id="worker-1")
         persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["jobs"]["job-1"].pop("lease_token_hash", None)
         persisted["jobs"]["job-1"]["lease_token"] = None
         self.path.write_text(json.dumps(persisted), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "provider job record"):
@@ -61,9 +64,10 @@ class ProviderJobManagerTests(unittest.TestCase):
         claimed = self.manager.claim_next(worker_id="worker-1")
         reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
         self.assertEqual(reloaded.data["jobs"]["job-1"]["worker_id"], "worker-1")
+        self.assertNotIn("lease_token", reloaded.data["jobs"]["job-1"])
         self.assertEqual(
-            reloaded.data["jobs"]["job-1"]["lease_token"],
-            claimed["job"]["lease_token"],
+            reloaded.data["jobs"]["job-1"]["lease_token_hash"],
+            hashlib.sha256(claimed["job"]["lease_token"].encode("ascii")).hexdigest(),
         )
 
     def test_completed_job_clears_worker_lease_identity(self):
@@ -76,7 +80,8 @@ class ProviderJobManagerTests(unittest.TestCase):
         )
         self.assertEqual(completed["status"], "JOB_COMPLETED")
         self.assertIsNone(completed["job"]["worker_id"])
-        self.assertIsNone(completed["job"]["lease_token"])
+        self.assertIsNone(completed["job"].get("lease_token"))
+        self.assertIsNone(completed["job"].get("lease_token_hash"))
         reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
         self.assertEqual(reloaded.data["jobs"]["job-1"]["status"], "FAILED")
 
@@ -93,13 +98,83 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.path.write_text(json.dumps(persisted), encoding="utf-8")
         reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
         self.assertEqual(reloaded.data["jobs"]["job-1"]["worker_id"], "worker-1")
-        self.assertIsNone(reloaded.data["jobs"]["job-1"]["lease_token"])
+        self.assertIsNone(reloaded.data["jobs"]["job-1"].get("lease_token"))
+        self.assertIsNone(reloaded.data["jobs"]["job-1"].get("lease_token_hash"))
 
     def test_persisted_queued_job_accepts_null_lease_token(self):
         self.submit("job-1")
         reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
         self.assertIsNone(reloaded.data["jobs"]["job-1"].get("lease_token"))
+        self.assertIsNone(reloaded.data["jobs"]["job-1"].get("lease_token_hash"))
         self.assertIsNone(reloaded.data["jobs"]["job-1"].get("worker_id"))
+
+
+    def test_running_lease_token_is_hashed_at_rest_and_hidden_from_job_reads(self):
+        self.submit("job-1")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        token = claimed["job"]["lease_token"]
+        self.assertTrue(token)
+        persisted_text = self.path.read_text(encoding="utf-8")
+        persisted_job = json.loads(persisted_text)["jobs"]["job-1"]
+        self.assertNotIn(token, persisted_text)
+        self.assertNotIn("lease_token", persisted_job)
+        self.assertEqual(
+            persisted_job["lease_token_hash"],
+            hashlib.sha256(token.encode("ascii")).hexdigest(),
+        )
+
+        polled = self.manager.poll(job_id="job-1")
+        self.assertEqual(polled["job"]["status"], "RUNNING")
+        self.assertNotIn("lease_token", polled["job"])
+        self.assertNotIn("lease_token_hash", polled["job"])
+        renewed = self.manager.renew_lease(
+            job_id="job-1", worker_id="worker-1", lease_token=token,
+        )
+        self.assertEqual(renewed["status"], "JOB_LEASE_RENEWED")
+        self.assertNotIn("lease_token_hash", renewed["job"])
+        finished = self.manager.complete(
+            job_id="job-1", worker_id="worker-1", lease_token=token,
+            success=False, error_code="TEST_DONE",
+        )
+        self.assertEqual(finished["status"], "JOB_COMPLETED")
+        persisted_after = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertIsNone(persisted_after["jobs"]["job-1"]["lease_token_hash"])
+
+    def test_legacy_plaintext_running_lease_migrates_without_invalidating_worker(self):
+        self.submit("job-1")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        token = claimed["job"]["lease_token"]
+        legacy = json.loads(self.path.read_text(encoding="utf-8"))
+        legacy_job = legacy["jobs"]["job-1"]
+        legacy_job.pop("lease_token_hash", None)
+        legacy_job["lease_token"] = token
+        self.path.write_text(json.dumps(legacy), encoding="utf-8")
+
+        reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        in_memory_job = reloaded.data["jobs"]["job-1"]
+        self.assertNotIn("lease_token", in_memory_job)
+        self.assertEqual(
+            in_memory_job["lease_token_hash"],
+            hashlib.sha256(token.encode("ascii")).hexdigest(),
+        )
+        renewed = reloaded.renew_lease(
+            job_id="job-1", worker_id="worker-1", lease_token=token,
+        )
+        self.assertEqual(renewed["status"], "JOB_LEASE_RENEWED")
+        migrated_text = self.path.read_text(encoding="utf-8")
+        migrated_job = json.loads(migrated_text)["jobs"]["job-1"]
+        self.assertNotIn(token, migrated_text)
+        self.assertNotIn("lease_token", migrated_job)
+        self.assertEqual(
+            migrated_job["lease_token_hash"],
+            hashlib.sha256(token.encode("ascii")).hexdigest(),
+        )
+        completed = reloaded.complete(
+            job_id="job-1", worker_id="worker-1", lease_token=token,
+            success=True, result_ref="asset:migrated",
+        )
+        self.assertEqual(completed["status"], "JOB_COMPLETED")
+
 
     def test_job_history_capacity_preserves_terminal_idempotency_records(self):
         limited = ProviderJobManager(
