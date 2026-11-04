@@ -144,7 +144,40 @@ class OIDCIdentityAuthenticatorTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     OIDCJWKSResolver(uri, allowed_hosts=hosts)
 
-    def test_jwks_resolver_rejects_bad_key_usage_and_duplicate_ids(self):
+
+    def test_jwks_resolver_converts_only_matching_signature_key(self):
+        import json
+
+        jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(self.public_key))
+        jwk.update({"kid": "key-1", "alg": "RS256", "use": "sig", "key_ops": ["verify"]})
+
+        class Response:
+            def __init__(self, body):
+                self.body = body
+                self.closed = False
+            def getcode(self):
+                return 200
+            def read(self, size):
+                return self.body[:size]
+            def close(self):
+                self.closed = True
+
+        class Opener:
+            def open(self, request, timeout):
+                return Response(json.dumps({"keys": [jwk]}).encode("utf-8"))
+
+        resolver = OIDCJWKSResolver(
+            "https://identity.example.test/.well-known/jwks.json",
+            allowed_hosts={"identity.example.test"},
+            opener=Opener(),
+        )
+        resolved = resolver("unused", {"kid": "key-1", "alg": "RS256"})
+        self.assertEqual(
+            resolved.public_numbers(), self.public_key.public_numbers()
+        )
+        with self.assertRaisesRegex(OIDCAuthenticationError, "OIDC_SIGNING_KEY_NOT_FOUND"):
+            resolver("unused", {"kid": "unknown", "alg": "RS256"})
+\n    def test_jwks_resolver_rejects_bad_key_usage_and_duplicate_ids(self):
         class Response:
             def __init__(self, body):
                 self.body = body
