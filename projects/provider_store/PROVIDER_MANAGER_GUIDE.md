@@ -128,3 +128,29 @@ Each manager accepts `state_encryption_key_provider`, plus an optional `state_en
 
 
 Provider data-handling policy checks enforce the provider's declared allowed categories, maximum retention and training-use consent before execution. They do not, by themselves, delete records or prove downstream provider deletion. Automated retention/deletion workflows and deployment-wide key provisioning/rotation, backup expiry and restore verification require explicit operational configuration and remain separate deployment obligations. The connection catalog rejects literal credential values; provider connection state may be encrypted through the same external key-provider contract, while secret values remain in the injected secret backend rather than these JSON files.
+
+
+## Cross-store subject deletion and retention orchestration
+
+Use PrivacyDataLifecycleManager to register every internal database, object store, and downstream provider adapter that owns project/tenant data. Each adapter must implement both delete_subject_data(subject_ref, project_id, tenant_id, request_id) and purge_expired_data(cutoff, project_id, tenant_id, request_id), and return a mapping containing confirmed (bool), status, and deleted_count (non-negative integer). Delete statuses are DELETED, ALREADY_ABSENT, PENDING, or FAILED; purge statuses are PURGED, ALREADY_EMPTY, PENDING, or FAILED. Only an explicit confirmed success from every registered adapter produces a completed result. One pending, malformed, or failed response produces PARTIAL and does not get silently counted as deleted.
+
+Example wiring:
+
+    from projects.provider_store.privacy_data_lifecycle import PrivacyDataLifecycleManager
+    from projects.provider_store.provider_service import ProviderService
+
+    privacy_lifecycle = PrivacyDataLifecycleManager({
+        "application-db": application_database_adapter,
+        "object-store": generated_asset_adapter,
+        "image-provider": image_provider_deletion_adapter,
+    })
+    service = ProviderService(
+        connection_manager,
+        authorization_manager=authorization_manager,
+        tenant_isolation_manager=tenant_isolation_manager,
+        privacy_lifecycle_manager=privacy_lifecycle,
+    )
+
+Call ProviderService.delete_subject_data(..., confirmed=True) or ProviderService.purge_expired_privacy_data(..., confirmed=True); both require provider.access.manage and enforce tenant/project/principal binding whenever tenant isolation is enabled. Subject references must be opaque pseudonymous identifiers, not email addresses or phone numbers. The request_id is passed unchanged to every adapter as an idempotency key; each adapter must persistently deduplicate that key across process restarts. Adapter responses and exceptions are reduced to safe status/count metadata.
+
+The coordinator is intentionally not a substitute for deployment integration. An adapter must verify its own database/object-store/provider API result and report confirmed=False for asynchronous, ambiguous, or failed deletion. Register every replica, backup, snapshot, cache and provider-side copy that is in scope; unregistered stores cannot be erased by the coordinator. Configure an actual scheduler to invoke retention purges. This PR adds the orchestration and tests but does not create production adapter credentials, provision KMS, register real external stores, or prove downstream deletion.
