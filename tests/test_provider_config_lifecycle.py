@@ -425,11 +425,11 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         manager = ProviderConfigLifecycleManager(
             valid_config,
             config_encryption_key_provider=lambda context: key,
-            migrate_legacy_plaintext_config=True,
         )
 
         result = manager.migrate_file(
-            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+            path, target_version="2", migrations={"1": migrate_v1_to_v2},
+            allow_legacy_plaintext=True,
         )
 
         self.assertEqual(result["status"], "CONFIG_MIGRATION_APPLIED")
@@ -479,11 +479,11 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         manager = ProviderConfigLifecycleManager(
             valid_config,
             config_encryption_key_provider=lambda context: key,
-            migrate_legacy_plaintext_config=True,
         )
         with patch.object(manager, "reload", return_value={"reloaded": False}):
             result = manager.migrate_file(
-                path, target_version="2", migrations={"1": migrate_v1_to_v2}
+                path, target_version="2", migrations={"1": migrate_v1_to_v2},
+                allow_legacy_plaintext=True,
             )
 
         self.assertEqual(result["status"], "CONFIG_MIGRATION_ROLLED_BACK")
