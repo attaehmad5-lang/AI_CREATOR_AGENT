@@ -26,6 +26,7 @@ from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.provider_tenant_isolation import ProviderTenantIsolationManager
+from projects.provider_store.privacy_data_lifecycle import PrivacyDataLifecycleManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 from projects.generation.providers.pollinations_provider import PollinationsProviderError
@@ -3357,6 +3358,133 @@ class ProviderServiceTests(unittest.TestCase):
         service = ProviderService(self.connections)
         self.assertEqual(service.route_request(category="image", project_id="film")["status"], "ROUTING_MANAGER_UNAVAILABLE")
         self.assertEqual(service.validate_output("missing.png", modality="image")["status"], "OUTPUT_VALIDATOR_UNAVAILABLE")
+
+
+    def test_subject_deletion_is_confirmation_and_admin_gated(self):
+        class Store:
+            def __init__(self):
+                self.calls = []
+
+            def delete_subject_data(self, **kwargs):
+                self.calls.append(("delete", kwargs))
+                return {"confirmed": True, "status": "DELETED", "deleted_count": 2}
+
+            def purge_expired_data(self, **kwargs):
+                self.calls.append(("purge", kwargs))
+                return {"confirmed": True, "status": "PURGED", "deleted_count": 1}
+
+        store = Store()
+        lifecycle = PrivacyDataLifecycleManager({"database": store})
+        authorization = ProviderAuthorizationManager(self.root / "privacy-delete-auth.json")
+        authorization.assign_role("privacy-admin", "admin")
+        authorization.assign_role("privacy-creator", "creator")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            privacy_lifecycle_manager=lifecycle,
+        )
+
+        unconfirmed = service.delete_subject_data(
+            subject_ref="subject-31", project_id="film", request_id="delete-031",
+            principal_id="privacy-admin",
+        )
+        self.assertEqual(unconfirmed["status"], "SUBJECT_DELETION_CONFIRMATION_REQUIRED")
+        self.assertEqual(store.calls, [])
+
+        denied = service.delete_subject_data(
+            subject_ref="subject-31", project_id="film", request_id="delete-032",
+            principal_id="privacy-creator", confirmed=True,
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(store.calls, [])
+
+        deleted = service.delete_subject_data(
+            subject_ref="subject-31", project_id="film", request_id="delete-033",
+            principal_id="privacy-admin", confirmed=True,
+        )
+        self.assertEqual(deleted["status"], "SUBJECT_DATA_DELETED")
+        self.assertTrue(deleted["confirmed"])
+        self.assertEqual(deleted["deleted_count"], 2)
+        self.assertNotIn("subject-31", repr(deleted))
+        self.assertEqual(len(store.calls), 1)
+
+    def test_subject_deletion_enforces_tenant_project_principal_binding(self):
+        class Store:
+            def __init__(self):
+                self.calls = []
+
+            def delete_subject_data(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"confirmed": True, "status": "DELETED", "deleted_count": 1}
+
+            def purge_expired_data(self, **kwargs):
+                return {"confirmed": True, "status": "PURGED", "deleted_count": 0}
+
+        store = Store()
+        tenant_manager = ProviderTenantIsolationManager(self.root / "privacy-delete-tenants.json")
+        self.assertTrue(tenant_manager.register_tenant("tenant-31")["saved"])
+        self.assertTrue(tenant_manager.bind_principal("tenant-31", "privacy-tenant-admin")["saved"])
+        self.assertTrue(tenant_manager.bind_project("tenant-31", "film-31")["saved"])
+        authorization = ProviderAuthorizationManager(self.root / "privacy-delete-tenant-auth.json")
+        authorization.assign_role("privacy-tenant-admin", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            tenant_isolation_manager=tenant_manager,
+            privacy_lifecycle_manager=PrivacyDataLifecycleManager({"database": store}),
+        )
+
+        denied = service.delete_subject_data(
+            subject_ref="subject-32", project_id="film-31", tenant_id="tenant-other",
+            request_id="delete-034", principal_id="privacy-tenant-admin", confirmed=True,
+        )
+        self.assertEqual(denied["status"], "TENANT_ISOLATION_DENIED")
+        self.assertEqual(store.calls, [])
+
+        deleted = service.delete_subject_data(
+            subject_ref="subject-32", project_id="film-31", tenant_id="tenant-31",
+            request_id="delete-035", principal_id="privacy-tenant-admin", confirmed=True,
+        )
+        self.assertEqual(deleted["status"], "SUBJECT_DATA_DELETED")
+        self.assertEqual(store.calls[0]["tenant_id"], "tenant-31")
+
+    def test_privacy_retention_purge_is_admin_gated_and_uses_aware_cutoff(self):
+        class Store:
+            def __init__(self):
+                self.calls = []
+
+            def delete_subject_data(self, **kwargs):
+                return {"confirmed": True, "status": "DELETED", "deleted_count": 0}
+
+            def purge_expired_data(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"confirmed": True, "status": "PURGED", "deleted_count": 4}
+
+        store = Store()
+        authorization = ProviderAuthorizationManager(self.root / "privacy-retention-auth.json")
+        authorization.assign_role("privacy-admin", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            privacy_lifecycle_manager=PrivacyDataLifecycleManager({"database": store}),
+        )
+
+        invalid = service.purge_expired_privacy_data(
+            cutoff=datetime(2026, 1, 1), project_id="film", request_id="purge-031",
+            principal_id="privacy-admin", confirmed=True,
+        )
+        self.assertEqual(invalid["status"], "INVALID_RETENTION_PURGE_SCOPE")
+        self.assertEqual(store.calls, [])
+
+        purged = service.purge_expired_privacy_data(
+            cutoff=datetime(2026, 1, 1, tzinfo=timezone.utc), project_id="film",
+            request_id="purge-032", principal_id="privacy-admin", confirmed=True,
+        )
+        self.assertEqual(purged["status"], "RETENTION_PURGE_CONFIRMED")
+        self.assertTrue(purged["confirmed"])
+        self.assertEqual(purged["deleted_count"], 4)
+        self.assertEqual(len(store.calls), 1)
+
 
 
 if __name__ == "__main__":
