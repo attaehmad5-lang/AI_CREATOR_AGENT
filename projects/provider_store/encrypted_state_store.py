@@ -70,6 +70,8 @@ class EncryptedJSONStateStore:
         self.context = context
         self.migrate_legacy_plaintext = migrate_legacy_plaintext
         self.max_state_bytes = max_state_bytes
+        self.migration_required = False
+
     def rotate_key(
         self,
         default: Any,
@@ -106,8 +108,6 @@ class EncryptedJSONStateStore:
             "rotated": True,
             "context": self.context,
         }
-
-        self.migration_required = False
 
     def _key(self) -> bytes:
         try:
