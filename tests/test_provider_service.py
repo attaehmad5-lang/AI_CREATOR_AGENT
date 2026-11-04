@@ -1444,6 +1444,52 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn(secret, repr(result))
 
 
+    def test_manual_provider_connection_response_is_scanned_before_return(self):
+        secret = "Bearer " + ("m" * 40)
+
+        class ConnectionStub:
+            def verify_manual_connection(self, *args, **kwargs):
+                return {
+                    "status": "CONNECTED",
+                    "verified": True,
+                    "metadata": {"authorization": secret},
+                }
+
+        service = ProviderService(ConnectionStub())
+        result = service.verify_manual_provider(
+            "image", manual_session=object(), probe=lambda *_args, **_kwargs: True
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+    def test_slo_manager_response_is_scanned_before_return(self):
+        secret = "sk-" + ("s" * 40)
+        authorization = ProviderAuthorizationManager(self.root / "privacy-slo-auth.json")
+        authorization.assign_role("privacy-admin", "admin")
+
+        class SLOStub:
+            def evaluate(self, slo_id):
+                return {
+                    "status": "SLO_EVALUATED",
+                    "evaluation": {"api_key": secret},
+                }
+
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            slo_manager=SLOStub(),
+        )
+        result = service.evaluate_service_level_objective(
+            "privacy-slo", principal_id="privacy-admin"
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertIsNone(result["evaluation"])
+        self.assertNotIn(secret, repr(result))
+
+
     def test_sensitive_credentials_are_blocked_before_routing_and_adapter(self):
         calls = {"route": 0, "adapter": 0}
 
