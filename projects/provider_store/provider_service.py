@@ -691,6 +691,16 @@ class ProviderService:
                 )
             except Exception as exc:
                 health = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
+        rejection = self._sensitive_input_rejection({
+            "provider_connection_response": connection,
+            "provider_health_response": health,
+        })
+        if rejection is not None:
+            return {
+                "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                "provider": provider_id,
+                "verified": False,
+            }
         return {
             "status": connection.get("status", "UNKNOWN"),
             "provider": provider_id,
@@ -1271,9 +1281,14 @@ class ProviderService:
             result = self.output_validator.validate_file(path, modality=modality)
         except Exception as exc:
             return {"valid": False, "status": "OUTPUT_VALIDATION_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "valid": False, "status": "INVALID_OUTPUT_VALIDATION_RESPONSE"
-        }
+        if not isinstance(result, dict):
+            return {"valid": False, "status": "INVALID_OUTPUT_VALIDATION_RESPONSE"}
+        rejection = self._sensitive_input_rejection(
+            {"output_validation_response": result}
+        )
+        if rejection is not None:
+            return {"valid": False, **rejection}
+        return result
 
     @staticmethod
     def _safe_error_code(value: Any, default: str) -> str:
