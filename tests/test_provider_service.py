@@ -1591,6 +1591,107 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(auth.calls, [])
         self.assertEqual(tenant.calls, [])
 
+    def test_failed_degraded_mode_configuration_response_is_scanned_before_return(self):
+        class DegradedStub:
+            def configure(self, *args, **kwargs):
+                return {
+                    "status": "CONFIGURATION_REJECTED",
+                    "saved": False,
+                    "diagnostics": "Bearer " + ("q" * 40),
+                }
+
+            def evaluate(self, *args, **kwargs):
+                return {"status": "NOT_EVALUATED", "evaluated": False}
+
+            def get_state(self, *args, **kwargs):
+                return {"status": "OK", "state": {"mode": "NORMAL"}}
+
+        authorization = ProviderAuthorizationManager(self.root / "degraded-output-auth.json")
+        authorization.assign_role("degraded-admin", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            degraded_mode_manager=DegradedStub(),
+        )
+
+        result = service.configure_category_degraded_mode(
+            "image", principal_id="degraded-admin"
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["saved"])
+        self.assertNotIn("Bearer", repr(result))
+        self.assertNotIn("q" * 40, repr(result))
+
+    def test_failed_degraded_mode_evaluation_response_is_scanned_before_return(self):
+        secret = "sk-" + ("d" * 40)
+
+        class DegradedStub:
+            def configure(self, *args, **kwargs):
+                return {"status": "CONFIGURED", "saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                return {
+                    "status": "EVALUATION_FAILED",
+                    "evaluated": False,
+                    "diagnostics": secret,
+                }
+
+            def get_state(self, *args, **kwargs):
+                return {"status": "OK", "state": {"mode": "NORMAL"}}
+
+        authorization = ProviderAuthorizationManager(self.root / "degraded-eval-auth.json")
+        authorization.assign_role("degraded-admin", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            health_manager=self.health,
+            degraded_mode_manager=DegradedStub(),
+        )
+
+        result = service.evaluate_category_degraded_mode(
+            "image", ["image"], principal_id="degraded-admin"
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["evaluated"])
+        self.assertNotIn(secret, repr(result))
+
+    def test_failed_slo_configuration_response_is_scanned_before_return(self):
+        secret = "ghp_" + ("z" * 40)
+
+        class SLOStub:
+            def configure(self, *args, **kwargs):
+                return {
+                    "status": "CONFIGURATION_REJECTED",
+                    "saved": False,
+                    "metadata": {"token": secret},
+                }
+
+            def evaluate(self, *args, **kwargs):
+                return {"status": "NOT_EVALUATED"}
+
+            def record(self, *args, **kwargs):
+                return {"saved": True}
+
+        authorization = ProviderAuthorizationManager(self.root / "slo-output-auth.json")
+        authorization.assign_role("slo-admin", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            slo_manager=SLOStub(),
+        )
+
+        result = service.configure_service_level_objective(
+            "film-slo", provider_id="image", category="image",
+            availability_target=0.99, max_p95_latency_ms=1000,
+            principal_id="slo-admin",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["saved"])
+        self.assertNotIn(secret, repr(result))
+
     def test_sensitive_data_policy_is_enabled_by_default_for_direct_routing(self):
         calls = []
 
