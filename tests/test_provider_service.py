@@ -345,6 +345,50 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
         self.assertNotIn(secret, repr(result))
 
+    def test_retry_policy_input_with_credentials_is_blocked_before_decision(self):
+        token = "Bearer " + ("q" * 40)
+
+        class RetryStub:
+            def __init__(self):
+                self.calls = 0
+
+            def decide(self, **failure):
+                self.calls += 1
+                return type("Decision", (), {
+                    "retry": True, "attempt": 1,
+                    "delay_seconds": 1.0, "reason": "RETRY_ALLOWED",
+                })()
+
+        retry = RetryStub()
+        service = ProviderService(self.connections, retry_policy=retry)
+        result = service.retry_decision(error=token)
+
+        self.assertFalse(result["retry"])
+        self.assertEqual(result["reason"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(retry.calls, 0)
+        self.assertNotIn(token, repr(result))
+
+    def test_retry_policy_response_credentials_are_withheld_without_losing_retry_decision(self):
+        token = "Bearer " + ("s" * 40)
+
+        class RetryStub:
+            def decide(self, **failure):
+                return type("Decision", (), {
+                    "retry": True, "attempt": 2,
+                    "delay_seconds": 0.5, "reason": token,
+                })()
+
+        service = ProviderService(
+            self.connections, retry_policy=RetryStub()
+        )
+        result = service.retry_decision(error="HTTP_503")
+
+        self.assertTrue(result["retry"])
+        self.assertEqual(result["reason"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertEqual(result["attempt"], 2)
+        self.assertEqual(result["delay_seconds"], 0.5)
+        self.assertNotIn(token, repr(result))
+
     def test_output_validation_and_retry_decision_are_delegated(self):
         path = self.root / "script.txt"
         path.write_text("script", encoding="utf-8")
