@@ -86,6 +86,30 @@ class ProviderServiceTests(unittest.TestCase):
                 require_encrypted_state=True,
             )
 
+    def test_production_mode_rejects_duck_typed_non_encrypted_state_store(self):
+        class LookalikeStateStore:
+            key_provider = staticmethod(lambda context: b"0123456789abcdef0123456789abcdef")
+            context = "pretend-encrypted"
+
+            def read(self, default):
+                return default
+
+            def write(self, value):
+                return None
+
+        class LookalikeConnectionManager:
+            state_path = self.root / "lookalike-state.json"
+            state_store = LookalikeStateStore()
+
+            def verify_connectivity(self, *args, **kwargs):
+                return {"verified": True}
+
+        with self.assertRaisesRegex(ValueError, "connection_manager must use deployment-key-encrypted"):
+            ProviderService(
+                LookalikeConnectionManager(),
+                require_encrypted_state=True,
+            )
+
     def test_production_mode_accepts_deployment_key_encrypted_connection_state(self):
         encrypted_state_path = self.root / "encrypted-connections.json"
         encrypted_connections = ConnectionManager(
