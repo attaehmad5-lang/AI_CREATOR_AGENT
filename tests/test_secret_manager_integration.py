@@ -65,7 +65,11 @@ class FakeOpener:
 
 
 class StubRoutingManager:
+    def __init__(self):
+        self.calls = []
+
     def route(self, **kwargs):
+        self.calls.append(dict(kwargs))
         return {"allowed": True, "provider": "managed-image", "billing_mode": "FREE"}
 
 
@@ -300,6 +304,7 @@ class ProviderSecretsIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED")
         self.assertEqual(calls, [])
+        self.assertEqual(service.routing_manager.calls, [])
         self.assertNotIn("attacker-value", repr(result))
 
     def test_rotation_requires_admin_and_explicit_confirmation_at_service_boundary(self):
