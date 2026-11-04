@@ -136,6 +136,10 @@ class ProviderService:
                 and callable(key_provider)
                 and isinstance(context, str)
                 and bool(context)
+                and (
+                    not require_encrypted_state
+                    or state_store.verify_key() is True
+                )
             )
             storage_status[label] = ready
             if require_encrypted_state and not ready:
