@@ -74,6 +74,44 @@ class EncryptedJSONStateStoreTests(unittest.TestCase):
         self.assertNotIn(b"legacy@example.com", self.path.read_bytes())
         self.assertEqual(self.store().read({}), legacy)
 
+    def test_key_rotation_reencrypts_existing_state_with_new_context_key(self):
+        payload = {"private": "rotation-state", "generation": 7}
+        self.store().write(payload)
+        new_provider = lambda context: b"n" * 32
+
+        result = self.store().rotate_key({}, new_key_provider=new_provider)
+
+        self.assertEqual(result["status"], "STATE_KEY_ROTATED")
+        self.assertTrue(result["rotated"])
+        self.assertEqual(self.store(key_provider=new_provider).read({}), payload)
+        with self.assertRaises(EncryptedStateError):
+            self.store().read({})
+
+    def test_failed_key_rotation_keeps_original_ciphertext_and_key_provider(self):
+        payload = {"private": "must-remain-readable"}
+        store = self.store()
+        store.write(payload)
+        original_bytes = self.path.read_bytes()
+
+        with self.assertRaises(EncryptedStateError):
+            store.rotate_key(
+                {},
+                new_key_provider=lambda context: b"invalid-new-key",
+            )
+
+        self.assertEqual(self.path.read_bytes(), original_bytes)
+        self.assertEqual(store.read({}), payload)
+
+    def test_key_rotation_rejects_plaintext_even_when_migration_is_enabled(self):
+        legacy = {"version": "1.0", "safe": True}
+        self.path.write_text(json.dumps(legacy), encoding="utf-8")
+        migrating = self.store(migrate=True)
+
+        with self.assertRaises(EncryptedStateError):
+            migrating.rotate_key({}, new_key_provider=lambda context: b"n" * 32)
+
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), legacy)
+
     def test_invalid_key_size_and_oversized_state_are_rejected(self):
         invalid = self.store(key_provider=lambda context: b"short")
         with self.assertRaises(EncryptedStateError):
