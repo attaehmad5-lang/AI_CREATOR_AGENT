@@ -106,7 +106,7 @@ class OIDCIdentityAuthenticatorTests(unittest.TestCase):
         with self.assertRaisesRegex(OIDCAuthenticationError, "OIDC_TOKEN_INVALID"):
             self.authenticator.authenticate("x" * 20_000)
         invalid_mapping = OIDCIdentityAuthenticator(
-            issuer="https://identity.example.test",
+            issuer="https://identity.example.test/",
             audience="ai-creator-agent-api",
             key_resolver=lambda token, header: self.public_key,
             principal_mapper=lambda claims: "bad principal",
@@ -116,7 +116,7 @@ class OIDCIdentityAuthenticatorTests(unittest.TestCase):
 
     def test_mfa_is_enforced_using_amr_or_acr(self):
         strict = OIDCIdentityAuthenticator(
-            issuer="https://identity.example.test",
+            issuer="https://identity.example.test/",
             audience="ai-creator-agent-api",
             key_resolver=lambda token, header: self.public_key,
             require_mfa=True,
@@ -130,7 +130,7 @@ class OIDCIdentityAuthenticatorTests(unittest.TestCase):
 
     def test_future_issued_and_stale_tokens_are_rejected(self):
         strict = OIDCIdentityAuthenticator(
-            issuer="https://identity.example.test",
+            issuer="https://identity.example.test/",
             audience="ai-creator-agent-api",
             key_resolver=lambda token, header: self.public_key,
             max_token_age_seconds=300,
