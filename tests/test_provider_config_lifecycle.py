@@ -111,6 +111,30 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertNotIn("provider-secret-value", repr(result))
 
+    def test_migration_fails_closed_when_injected_privacy_scanner_raises(self):
+        class BrokenScanner:
+            def inspect(self, payload):
+                raise RuntimeError("scanner unavailable")
+
+        manager = ProviderConfigLifecycleManager(
+            valid_config, sensitive_data_policy=BrokenScanner()
+        )
+        calls = []
+
+        def migration(config):
+            calls.append(True)
+            return migrate_v1_to_v2(config)
+
+        result = manager.migrate(
+            {"schema_version": "1", "providers": {}},
+            target_version="2",
+            migrations={"1": migration},
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_SCAN_FAILED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(calls, [])
+
     def test_hot_reload_blocks_literal_credentials_before_validator_or_activation(self):
         unsafe = {
             "schema_version": "1",
