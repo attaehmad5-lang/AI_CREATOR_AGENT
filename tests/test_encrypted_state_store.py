@@ -62,6 +62,66 @@ class EncryptedJSONStateStoreTests(unittest.TestCase):
         with self.assertRaises(EncryptedStateError):
             self.store().read({})
 
+    def test_crypto_erasure_requires_explicit_confirmation(self):
+        self.store().write({"private": "erase-me"})
+        calls = []
+
+        result = self.store().erase(
+            {}, key_destroyer=lambda context: calls.append(context) or True,
+            confirmed=False,
+        )
+
+        self.assertEqual(result["status"], "STATE_ERASURE_CONFIRMATION_REQUIRED")
+        self.assertFalse(result["erased"])
+        self.assertEqual(calls, [])
+        self.assertEqual(self.store().read({}), {"private": "erase-me"})
+
+    def test_crypto_erasure_destroys_dedicated_key_and_removes_ciphertext(self):
+        keyring = {"test-state-v1": KEY}
+        key_provider = lambda context: keyring[context]
+        store = self.store(key_provider=key_provider)
+        store.write({"private": "erase-me"})
+        calls = []
+
+        def destroy_key(context):
+            calls.append(context)
+            return keyring.pop(context, None) is not None
+
+        result = store.erase({}, key_destroyer=destroy_key, confirmed=True)
+
+        self.assertEqual(result["status"], "STATE_CRYPTOGRAPHICALLY_ERASED")
+        self.assertTrue(result["erased"])
+        self.assertEqual(calls, ["test-state-v1"])
+        self.assertFalse(self.path.exists())
+        with self.assertRaises(EncryptedStateError):
+            store.read({})
+        with self.assertRaises(EncryptedStateError):
+            store.write({"private": "must-not-return"})
+
+    def test_crypto_erasure_key_failure_preserves_readable_ciphertext(self):
+        store = self.store()
+        payload = {"private": "preserve-on-key-failure"}
+        store.write(payload)
+
+        result = store.erase(
+            {}, key_destroyer=lambda context: False, confirmed=True
+        )
+
+        self.assertEqual(result["status"], "STATE_KEY_DESTRUCTION_NOT_CONFIRMED")
+        self.assertFalse(result["erased"])
+        self.assertTrue(self.path.exists())
+        self.assertEqual(store.read({}), payload)
+
+    def test_crypto_erasure_rejects_missing_state_without_destroying_key(self):
+        calls = []
+        result = self.store().erase(
+            {}, key_destroyer=lambda context: calls.append(context) or True,
+            confirmed=True,
+        )
+        self.assertEqual(result["status"], "STATE_FILE_NOT_FOUND")
+        self.assertFalse(result["erased"])
+        self.assertEqual(calls, [])
+
     def test_plaintext_state_requires_explicit_migration_and_is_reencrypted(self):
         legacy = {"version": "1.0", "principals": {"legacy@example.com": {"role": "creator"}}}
         self.path.write_text(json.dumps(legacy), encoding="utf-8")
