@@ -1692,6 +1692,109 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertFalse(result["saved"])
         self.assertNotIn(secret, repr(result))
 
+    def test_degraded_mode_configuration_scans_category_before_manager_call(self):
+        calls = []
+
+        class DegradedStub:
+            def configure(self, *args, **kwargs):
+                calls.append(kwargs)
+                return {"saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                return {"evaluated": True}
+
+            def get_state(self, *args, **kwargs):
+                return {"status": "OK", "state": {"mode": "NORMAL"}}
+
+        service = ProviderService(
+            self.connections, degraded_mode_manager=DegradedStub()
+        )
+        result = service.configure_category_degraded_mode(
+            "Bearer " + ("i" * 40)
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(calls, [])
+
+    def test_degraded_mode_evaluation_scans_provider_ids_before_health_calls(self):
+        calls = []
+
+        class HealthStub:
+            def is_eligible(self, *args, **kwargs):
+                calls.append(args)
+                return {"eligible": True}
+
+        class DegradedStub:
+            def configure(self, *args, **kwargs):
+                return {"saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                return {"evaluated": True}
+
+            def get_state(self, *args, **kwargs):
+                return {"status": "OK", "state": {"mode": "NORMAL"}}
+
+        service = ProviderService(
+            self.connections,
+            health_manager=HealthStub(),
+            degraded_mode_manager=DegradedStub(),
+        )
+        result = service.evaluate_category_degraded_mode(
+            "image", ["sk-" + ("i" * 40)]
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["evaluated"])
+        self.assertEqual(calls, [])
+
+    def test_slo_configuration_scans_slo_id_before_authorization_or_manager_call(self):
+        calls = []
+
+        class SLOStub:
+            def configure(self, *args, **kwargs):
+                calls.append(kwargs)
+                return {"saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                return {"status": "OK"}
+
+            def record(self, *args, **kwargs):
+                return {"saved": True}
+
+        service = ProviderService(self.connections, slo_manager=SLOStub())
+        result = service.configure_service_level_objective(
+            "ghp_" + ("i" * 40), provider_id="image", category="image",
+            availability_target=0.99, max_p95_latency_ms=1000,
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(calls, [])
+
+    def test_slo_evaluation_scans_slo_id_before_authorization_or_manager_call(self):
+        calls = []
+
+        class SLOStub:
+            def configure(self, *args, **kwargs):
+                return {"saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                calls.append(args)
+                return {"status": "OK"}
+
+            def record(self, *args, **kwargs):
+                return {"saved": True}
+
+        service = ProviderService(self.connections, slo_manager=SLOStub())
+        result = service.evaluate_service_level_objective(
+            "Bearer " + ("i" * 40)
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertIsNone(result["evaluation"])
+        self.assertEqual(calls, [])
+
     def test_sensitive_data_policy_is_enabled_by_default_for_direct_routing(self):
         calls = []
 
