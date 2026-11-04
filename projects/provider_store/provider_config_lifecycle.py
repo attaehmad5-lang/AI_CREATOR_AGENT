@@ -255,6 +255,75 @@ class ProviderConfigLifecycleManager:
                 pass
             raise
 
+    def erase_encrypted_backup(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        key_destroyer: Callable[[str], bool],
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Cryptographically erase this config's encrypted migration backup.
+
+        This requires the deployment callback to destroy the unique DEK for
+        the path-bound backup context. A legacy plaintext .bak is never
+        silently treated as covered by encrypted-backup erasure.
+        """
+        if self.backup_encryption_key_provider is None:
+            return {
+                "status": "CONFIG_BACKUP_ENCRYPTION_REQUIRED",
+                "erased": False,
+            }
+        if not callable(key_destroyer):
+            return {
+                "status": "CONFIG_BACKUP_KEY_DESTROYER_UNAVAILABLE",
+                "erased": False,
+            }
+        if confirmed is not True:
+            return {
+                "status": "CONFIG_BACKUP_ERASURE_CONFIRMATION_REQUIRED",
+                "erased": False,
+            }
+        try:
+            config_path = Path(path)
+            backup_path = self._backup_path(config_path)
+            legacy_plaintext_backup = config_path.with_name(config_path.name + ".bak")
+            lock_path = config_path.with_name(config_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                if legacy_plaintext_backup.exists():
+                    return {
+                        "status": "CONFIG_PLAINTEXT_BACKUP_REQUIRES_MANUAL_CLEANUP",
+                        "erased": False,
+                    }
+                result = self._backup_store(backup_path).erase(
+                    {},
+                    key_destroyer=key_destroyer,
+                    confirmed=True,
+                )
+        except Exception as exc:
+            return {
+                "status": "CONFIG_BACKUP_ERASURE_FAILED",
+                "erased": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {
+                "status": "INVALID_CONFIG_BACKUP_ERASURE_RESPONSE",
+                "erased": False,
+            }
+        if result.get("status") == "STATE_CRYPTOGRAPHICALLY_ERASED":
+            return {
+                "status": "CONFIG_BACKUP_CRYPTOGRAPHICALLY_ERASED",
+                "erased": True,
+            }
+        return {
+            "status": result.get("status", "CONFIG_BACKUP_ERASURE_FAILED"),
+            "erased": result.get("erased") is True,
+            **(
+                {"error_type": result["error_type"]}
+                if isinstance(result.get("error_type"), str) else {}
+            ),
+        }
+
     def _migrate_file_locked(
         self,
         config_path: Path,
