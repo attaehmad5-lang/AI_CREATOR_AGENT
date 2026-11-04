@@ -11,6 +11,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Callable
 
+from .encrypted_state_store import EncryptedJSONStateStore
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .sensitive_data_policy import SensitiveDataPolicy
 
@@ -22,6 +23,8 @@ class ProviderConfigLifecycleManager:
         *,
         max_history: int = 5,
         sensitive_data_policy: SensitiveDataPolicy | None = None,
+        backup_encryption_key_provider: Any = None,
+        backup_encryption_context: str = "provider-config-backup-v1",
     ) -> None:
         if not callable(validator):
             raise ValueError("validator must be callable")
@@ -29,8 +32,19 @@ class ProviderConfigLifecycleManager:
             raise ValueError("max_history is outside safe limits")
         if sensitive_data_policy is not None and not callable(getattr(sensitive_data_policy, "inspect", None)):
             raise ValueError("sensitive_data_policy must support inspect")
+        if backup_encryption_key_provider is not None and not callable(backup_encryption_key_provider):
+            raise ValueError("backup_encryption_key_provider must be callable")
+        if (
+            not isinstance(backup_encryption_context, str)
+            or not backup_encryption_context
+            or len(backup_encryption_context) > 96
+            or any(ord(char) < 33 or ord(char) > 126 for char in backup_encryption_context)
+        ):
+            raise ValueError("backup_encryption_context is invalid")
         self.validator = validator
         self.sensitive_data_policy = sensitive_data_policy or SensitiveDataPolicy()
+        self.backup_encryption_key_provider = backup_encryption_key_provider
+        self.backup_encryption_context = backup_encryption_context
         self.max_history = max_history
         self._lock = threading.RLock()
         self.active_config: dict[str, Any] | None = None
@@ -188,6 +202,55 @@ class ProviderConfigLifecycleManager:
                 config_path, target_version=target_version, migrations=migrations
             )
 
+    def _backup_path(self, config_path: Path) -> Path:
+        suffix = ".bak.enc" if self.backup_encryption_key_provider is not None else ".bak"
+        return config_path.with_name(config_path.name + suffix)
+
+    def _backup_store(self, backup_path: Path) -> EncryptedJSONStateStore:
+        if self.backup_encryption_key_provider is None:
+            raise ValueError("encrypted config backup key provider is unavailable")
+        # A path-derived context prevents ciphertext from being transplanted
+        # between independently configured provider configuration files.
+        context = f"{self.backup_encryption_context}:{backup_path.name}"
+        if len(context) > 128:
+            raise ValueError("encrypted config backup context exceeds safe limits")
+        return EncryptedJSONStateStore(
+            backup_path,
+            key_provider=self.backup_encryption_key_provider,
+            context=context,
+        )
+
+    def _write_backup(self, config_path: Path, backup_path: Path, original: dict[str, Any]) -> None:
+        if self.backup_encryption_key_provider is not None:
+            self._backup_store(backup_path).write(original)
+            return
+        shutil.copy2(config_path, backup_path)
+
+    def _restore_backup(self, config_path: Path, backup_path: Path) -> None:
+        if self.backup_encryption_key_provider is None:
+            shutil.copy2(backup_path, config_path)
+            return
+        original = self._backup_store(backup_path).read({})
+        if not isinstance(original, dict):
+            raise ValueError("encrypted config backup payload is invalid")
+        fd_restore, restore_name = tempfile.mkstemp(
+            prefix=f".{config_path.name}.restore.", suffix=".tmp",
+            dir=str(config_path.parent), text=True,
+        )
+        try:
+            with os.fdopen(fd_restore, "w", encoding="utf-8") as stream:
+                json.dump(original, stream, indent=2, ensure_ascii=False, allow_nan=False)
+                stream.write("\\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            atomic_replace_with_retry(restore_name, config_path)
+        except Exception:
+            try:
+                os.unlink(restore_name)
+            except FileNotFoundError:
+                pass
+            raise
+
     def _migrate_file_locked(
         self,
         config_path: Path,
@@ -205,13 +268,13 @@ class ProviderConfigLifecycleManager:
         result = self.migrate(original, target_version=target_version, migrations=migrations)
         if result.get("migrated") is not True:
             return result
-        backup_path = config_path.with_name(config_path.name + ".bak")
+        backup_path = self._backup_path(config_path)
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{config_path.name}.", suffix=".tmp",
             dir=str(config_path.parent), text=True,
         )
         try:
-            shutil.copy2(config_path, backup_path)
+            self._write_backup(config_path, backup_path, original)
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 json.dump(result["config"], stream, indent=2, ensure_ascii=False, allow_nan=False)
                 stream.write("\n")
@@ -232,8 +295,9 @@ class ProviderConfigLifecycleManager:
                     dir=str(config_path.parent), text=True,
                 )
                 os.close(fd_restore)
-                shutil.copy2(backup_path, restore_name)
-                atomic_replace_with_retry(restore_name, config_path)
+                os.close(fd_restore)
+                os.unlink(restore_name)
+                self._restore_backup(config_path, backup_path)
             except Exception:
                 return {
                     "status": "CONFIG_MIGRATION_ROLLBACK_FAILED",
