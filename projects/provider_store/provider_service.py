@@ -2195,17 +2195,29 @@ class ProviderService:
             decision = self.retry_policy.decide(**failure)
         except Exception as exc:
             return {"retry": False, "reason": "RETRY_POLICY_FAILED", "error_type": type(exc).__name__}
+        raw_attempt = getattr(decision, "attempt", 0)
+        attempt = (
+            raw_attempt
+            if isinstance(raw_attempt, int) and not isinstance(raw_attempt, bool)
+            and 0 <= raw_attempt <= 1_000_000
+            else 0
+        )
+        delay = finite_number(
+            getattr(decision, "delay_seconds", 0.0),
+            minimum=0,
+            maximum=86_400,
+        )
         response = {
             "retry": bool(getattr(decision, "retry", False)),
-            "attempt": getattr(decision, "attempt", 0),
-            "delay_seconds": getattr(decision, "delay_seconds", 0.0),
+            "attempt": attempt,
+            "delay_seconds": 0.0 if delay is None else delay,
             "reason": getattr(decision, "reason", "INVALID_RETRY_RESPONSE"),
         }
         if self._sensitive_input_rejection({"retry_policy_response": response}) is not None:
             return {
                 "retry": response["retry"],
-                "attempt": response["attempt"],
-                "delay_seconds": response["delay_seconds"],
+                "attempt": attempt,
+                "delay_seconds": 0.0 if delay is None else delay,
                 "reason": "SENSITIVE_DATA_OUTPUT_BLOCKED",
             }
         return response
