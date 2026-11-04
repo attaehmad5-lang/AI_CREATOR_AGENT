@@ -135,6 +135,22 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertFalse(result["migrated"])
         self.assertEqual(calls, [])
 
+    def test_hot_reload_fails_closed_when_privacy_scanner_raises(self):
+        class BrokenScanner:
+            def inspect(self, payload):
+                raise RuntimeError("scanner unavailable")
+
+        manager = ProviderConfigLifecycleManager(
+            valid_config, sensitive_data_policy=BrokenScanner()
+        )
+        result = manager.reload({"schema_version": "1", "providers": {}})
+
+        self.assertEqual(result["status"], "HOT_RELOAD_REJECTED")
+        self.assertEqual(result["reason"], "SENSITIVE_DATA_SCAN_FAILED")
+        self.assertFalse(result["reloaded"])
+        self.assertIsNone(manager.active_config)
+        self.assertEqual(manager.generation, 0)
+
     def test_hot_reload_blocks_literal_credentials_before_validator_or_activation(self):
         unsafe = {
             "schema_version": "1",
