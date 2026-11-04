@@ -2026,6 +2026,30 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertNotIn(token, repr(result))
 
+    def test_oversized_webhook_payload_is_rejected_before_decode_or_verifier(self):
+        calls = []
+
+        class WebhookStub:
+            max_payload_bytes = 8
+
+            def verify(self, **kwargs):
+                calls.append(kwargs)
+                return {"verified": True, "status": "WEBHOOK_VERIFIED"}
+
+        service = ProviderService(self.connections, webhook_verifier=WebhookStub())
+        result = service.verify_webhook(
+            provider_id="video",
+            payload=b"x" * 9,
+            signature="sha256=" + "c" * 64,
+            timestamp="1792152000",
+            event_id="oversized-event",
+            secret="webhook-test-secret-value",
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "WEBHOOK_PAYLOAD_TOO_LARGE")
+        self.assertEqual(calls, [])
+
     def test_inbound_webhook_payload_rejects_non_utf8_bytes_before_verifier(self):
         calls = []
 
