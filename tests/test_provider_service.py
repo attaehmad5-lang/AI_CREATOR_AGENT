@@ -25,6 +25,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.provider_tenant_isolation import ProviderTenantIsolationManager
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 from projects.generation.providers.pollinations_provider import PollinationsProviderError
