@@ -199,14 +199,20 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
 
     def test_deeply_nested_config_file_is_rejected_without_crashing_or_rewriting(self):
         path = self.root / "deep-config.json"
-        content = "[" * 2000 + "0" + "]" * 2000
+        deep_value = "safe"
+        for _ in range(20):
+            deep_value = {"nested": deep_value}
+        config = {"schema_version": "1", "providers": deep_value}
+        content = json.dumps(config)
         path.write_text(content, encoding="utf-8")
 
         result = self.manager.migrate_file(
-            path, target_version="2", migrations={}
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
         )
 
-        self.assertEqual(result["status"], "INVALID_CONFIG_FILE")
+        self.assertEqual(result["status"], "SENSITIVE_DATA_SCAN_LIMIT_EXCEEDED")
+        self.assertFalse(result["migrated"])
+        self.assertFalse(path.with_name(path.name + ".bak").exists())
         self.assertEqual(path.read_text(encoding="utf-8"), content)
 
     def test_invalid_config_file_is_not_overwritten(self):
