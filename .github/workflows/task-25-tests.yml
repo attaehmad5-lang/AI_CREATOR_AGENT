@@ -5,6 +5,7 @@ on:
     branches:
       - task-25-provider-connection-manager
       - pollinations-current-api-20261030
+      - task25-feature69-encrypted-state-store
   pull_request:
     branches:
       - main
