@@ -914,6 +914,7 @@ class ProviderService:
 
         safe_job = dict(job)
         safe_job.pop("lease_token", None)
+        safe_job.pop("lease_token_hash", None)
         if sensitive_data_policy is not None:
             try:
                 scan = sensitive_data_policy.inspect(safe_job)
