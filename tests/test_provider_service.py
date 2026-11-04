@@ -1391,6 +1391,100 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(missing_identity["authorization"]["status"], "INVALID_PRINCIPAL_ID")
         self.assertEqual(called, [])
 
+    def test_sensitive_request_identifier_is_blocked_before_provider_routing(self):
+        token = "Bearer " + ("i" * 40)
+
+        class RoutingStub:
+            def __init__(self):
+                self.calls = []
+
+            def route(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        router = RoutingStub()
+        service = ProviderService(self.connections, routing_manager=router)
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id=token,
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: {"started": False},
+            modality="image",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(router.calls, [])
+        self.assertNotIn(token, repr(result))
+
+    def test_sensitive_job_id_is_blocked_before_poll_and_cancel_managers(self):
+        token = "ghp_" + ("p" * 36)
+
+        class JobStub:
+            def __init__(self):
+                self.poll_calls = []
+                self.cancel_calls = []
+
+            def poll(self, **kwargs):
+                self.poll_calls.append(kwargs)
+                return {"status": "JOB_FOUND", "job": {"job_id": "safe-id"}}
+
+            def cancel(self, **kwargs):
+                self.cancel_calls.append(kwargs)
+                return {"status": "JOB_CANCELLED", "saved": True}
+
+        jobs = JobStub()
+        service = ProviderService(self.connections, job_manager=jobs)
+
+        polled = service.poll_job(job_id=token)
+        cancelled = service.cancel_job(job_id=token)
+
+        self.assertEqual(polled["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(cancelled["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(jobs.poll_calls, [])
+        self.assertEqual(jobs.cancel_calls, [])
+        self.assertNotIn(token, repr(polled))
+        self.assertNotIn(token, repr(cancelled))
+
+    def test_sensitive_principal_and_tenant_contexts_are_blocked_before_authority_managers(self):
+        token = "Bearer " + ("j" * 40)
+
+        class AuthorizationStub:
+            def __init__(self):
+                self.calls = []
+
+            def authorize(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                return {"allowed": True, "status": "AUTHORIZED"}
+
+        class TenantStub:
+            def __init__(self):
+                self.calls = []
+
+            def authorize_project(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                return {"allowed": True, "status": "TENANT_AUTHORIZED"}
+
+        auth = AuthorizationStub()
+        tenant = TenantStub()
+        service = ProviderService(
+            self.connections, authorization_manager=auth,
+            tenant_isolation_manager=tenant,
+        )
+
+        principal_result = service._authorize_operation(
+            token, "provider.read", provider_id="image"
+        )
+        tenant_result = service._authorize_tenant_project(
+            tenant_id=token, project_id="film", principal_id="principal-1"
+        )
+
+        self.assertEqual(principal_result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(tenant_result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(auth.calls, [])
+        self.assertEqual(tenant.calls, [])
+
     def test_sensitive_data_policy_is_enabled_by_default_for_direct_routing(self):
         calls = []
 
