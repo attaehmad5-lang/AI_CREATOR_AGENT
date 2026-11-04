@@ -1,6 +1,8 @@
 """OIDC/JWT identity verification and fail-closed integration tests."""
+import tempfile
 import time
 import unittest
+from pathlib import Path
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -22,12 +24,17 @@ class OIDCIdentityAuthenticatorTests(unittest.TestCase):
         cls.public_key = cls.private_key.public_key()
 
     def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp_dir.name) / "authorization.json"
         self.now = int(time.time())
         self.authenticator = OIDCIdentityAuthenticator(
             issuer="https://identity.example.test/",
             audience="ai-creator-agent-api",
             key_resolver=lambda token, header: self.public_key,
         )
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
 
     def token(self, **overrides):
         claims = {
