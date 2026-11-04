@@ -22,7 +22,7 @@ _PATTERNS = (
 )
 _CARD_CANDIDATE = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)")
 _SAFE_KEY = re.compile(r"[A-Za-z0-9_.-]{1,64}\Z")
-_SENSITIVE_FIELD = re.compile(r"(?i)(?:^|[_-])(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|password|passwd|credential|authorization|proxy[_-]?authorization|cookie|session(?:[_-]?token)?|private[_-]?key|signing[_-]?key)(?:$|[_-])")
+_SENSITIVE_FIELD = re.compile(r"(?i)(?:^|[_-])(?:api[_-]?(?:key|token)|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|password|passwd|credential|authorization|proxy[_-]?authorization|cookie|session(?:[_-]?token)?|private[_-]?key|signing[_-]?key)(?:$|[_-])")
 _REFERENCE_SUFFIXES = ("_env", "_ref", "_reference", "_configured", "_present", "_name")
 
 
