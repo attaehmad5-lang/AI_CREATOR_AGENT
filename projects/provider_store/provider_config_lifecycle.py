@@ -12,7 +12,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Callable
 
-from .encrypted_state_store import EncryptedJSONStateStore
+from .encrypted_state_store import EncryptedJSONStateStore, EncryptedStateError
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .sensitive_data_policy import SensitiveDataPolicy
 
@@ -26,6 +26,9 @@ class ProviderConfigLifecycleManager:
         sensitive_data_policy: SensitiveDataPolicy | None = None,
         backup_encryption_key_provider: Any = None,
         backup_encryption_context: str = "provider-config-backup-v1",
+        config_encryption_key_provider: Any = None,
+        config_encryption_context: str = "provider-active-config-v1",
+        migrate_legacy_plaintext_config: bool = False,
     ) -> None:
         if not callable(validator):
             raise ValueError("validator must be callable")
@@ -35,18 +38,37 @@ class ProviderConfigLifecycleManager:
             raise ValueError("sensitive_data_policy must support inspect")
         if backup_encryption_key_provider is not None and not callable(backup_encryption_key_provider):
             raise ValueError("backup_encryption_key_provider must be callable")
-        if (
-            not isinstance(backup_encryption_context, str)
-            or not backup_encryption_context
-            or len(backup_encryption_context) > 96
-            or any(ord(char) < 33 or ord(char) > 126 for char in backup_encryption_context)
+        if config_encryption_key_provider is not None and not callable(config_encryption_key_provider):
+            raise ValueError("config_encryption_key_provider must be callable")
+        if not isinstance(migrate_legacy_plaintext_config, bool):
+            raise ValueError("migrate_legacy_plaintext_config must be boolean")
+        if migrate_legacy_plaintext_config and config_encryption_key_provider is None:
+            raise ValueError("legacy config migration requires config encryption")
+        for context, label in (
+            (backup_encryption_context, "backup_encryption_context"),
+            (config_encryption_context, "config_encryption_context"),
         ):
-            raise ValueError("backup_encryption_context is invalid")
+            if (
+                not isinstance(context, str)
+                or not context
+                or len(context) > 96
+                or any(ord(char) < 33 or ord(char) > 126 for char in context)
+            ):
+                raise ValueError(f"{label} is invalid")
         self.validator = validator
         self.sensitive_data_policy = sensitive_data_policy or SensitiveDataPolicy(
             blocked_categories=("credential", "payment_card")
         )
-        self.backup_encryption_key_provider = backup_encryption_key_provider
+        self.config_encryption_key_provider = config_encryption_key_provider
+        self.config_encryption_context = config_encryption_context
+        self.migrate_legacy_plaintext_config = migrate_legacy_plaintext_config
+        # Reuse the deployment KMS callback by default, with a separate context,
+        # so enabling active-config encryption cannot silently create plaintext backups.
+        self.backup_encryption_key_provider = (
+            backup_encryption_key_provider
+            if backup_encryption_key_provider is not None
+            else config_encryption_key_provider
+        )
         self.backup_encryption_context = backup_encryption_context
         self.max_history = max_history
         self._lock = threading.RLock()
@@ -205,6 +227,20 @@ class ProviderConfigLifecycleManager:
                 config_path, target_version=target_version, migrations=migrations
             )
 
+    def _config_store(self, config_path: Path) -> EncryptedJSONStateStore:
+        if self.config_encryption_key_provider is None:
+            raise ValueError("active config encryption key provider is unavailable")
+        path_digest = hashlib.sha256(str(config_path.resolve()).encode("utf-8")).hexdigest()[:24]
+        context = f"{self.config_encryption_context}:{path_digest}"
+        if len(context) > 128:
+            raise ValueError("active config encryption context exceeds safe limits")
+        return EncryptedJSONStateStore(
+            config_path,
+            key_provider=self.config_encryption_key_provider,
+            context=context,
+            migrate_legacy_plaintext=self.migrate_legacy_plaintext_config,
+        )
+
     def _backup_path(self, config_path: Path) -> Path:
         suffix = ".bak.enc" if self.backup_encryption_key_provider is not None else ".bak"
         return config_path.with_name(config_path.name + suffix)
@@ -237,6 +273,9 @@ class ProviderConfigLifecycleManager:
         original = self._backup_store(backup_path).read({})
         if not isinstance(original, dict):
             raise ValueError("encrypted config backup payload is invalid")
+        if self.config_encryption_key_provider is not None:
+            self._config_store(config_path).write(original)
+            return
         fd_restore, restore_name = tempfile.mkstemp(
             prefix=f".{config_path.name}.restore.", suffix=".tmp",
             dir=str(config_path.parent), text=True,
@@ -331,12 +370,17 @@ class ProviderConfigLifecycleManager:
         target_version: str,
         migrations: dict[str, Callable[[dict[str, Any]], dict[str, Any]]],
     ) -> dict[str, Any]:
+        if config_path.is_symlink():
+            return {"status": "CONFIG_FILE_SYMLINK_REJECTED", "migrated": False}
         if not config_path.is_file():
             return {"status": "CONFIG_FILE_NOT_FOUND", "migrated": False}
         try:
-            with config_path.open("r", encoding="utf-8") as stream:
-                original = json.load(stream)
-        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError, OSError) as exc:
+            if self.config_encryption_key_provider is not None:
+                original = self._config_store(config_path).read({})
+            else:
+                with config_path.open("r", encoding="utf-8") as stream:
+                    original = json.load(stream)
+        except (EncryptedStateError, json.JSONDecodeError, UnicodeDecodeError, RecursionError, OSError) as exc:
             return {"status": "INVALID_CONFIG_FILE", "migrated": False, "error_type": type(exc).__name__}
         result = self.migrate(original, target_version=target_version, migrations=migrations)
         if result.get("migrated") is not True:
@@ -353,19 +397,23 @@ class ProviderConfigLifecycleManager:
             }
         temp_name = None
         try:
-            # Complete and durably verify the backup before allocating the new
-            # configuration temp file; a failed KMS call cannot leak a file handle.
+            # Complete and durably verify the backup before replacing active
+            # config. With active encryption enabled, the backup callback is
+            # also configured by default and uses its own authenticated context.
             self._write_backup(config_path, backup_path, original)
-            fd, temp_name = tempfile.mkstemp(
-                prefix=f".{config_path.name}.", suffix=".tmp",
-                dir=str(config_path.parent), text=True,
-            )
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(result["config"], stream, indent=2, ensure_ascii=False, allow_nan=False)
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-            atomic_replace_with_retry(temp_name, config_path)
+            if self.config_encryption_key_provider is not None:
+                self._config_store(config_path).write(result["config"])
+            else:
+                fd, temp_name = tempfile.mkstemp(
+                    prefix=f".{config_path.name}.", suffix=".tmp",
+                    dir=str(config_path.parent), text=True,
+                )
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    json.dump(result["config"], stream, indent=2, ensure_ascii=False, allow_nan=False)
+                    stream.write("\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                atomic_replace_with_retry(temp_name, config_path)
         except Exception as exc:
             if temp_name is not None:
                 try:
