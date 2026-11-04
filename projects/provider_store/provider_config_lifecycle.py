@@ -42,12 +42,18 @@ class ProviderConfigLifecycleManager:
             return False, "CONFIG_NOT_A_MAPPING"
         try:
             json.dumps(config, allow_nan=False)
+        except Exception as exc:
+            return False, f"CONFIG_VALIDATION_FAILED:{type(exc).__name__}"
+        try:
             scan = self.sensitive_data_policy.inspect(config)
-            if not isinstance(scan, dict) or scan.get("allowed") is not True:
-                return False, (
-                    scan.get("status", "SENSITIVE_DATA_SCAN_FAILED")
-                    if isinstance(scan, dict) else "SENSITIVE_DATA_SCAN_FAILED"
-                )
+        except Exception:
+            return False, "SENSITIVE_DATA_SCAN_FAILED"
+        if not isinstance(scan, dict) or scan.get("allowed") is not True:
+            return False, (
+                scan.get("status", "SENSITIVE_DATA_SCAN_FAILED")
+                if isinstance(scan, dict) else "SENSITIVE_DATA_SCAN_FAILED"
+            )
+        try:
             result = self.validator(copy.deepcopy(config))
         except Exception as exc:
             return False, f"CONFIG_VALIDATION_FAILED:{type(exc).__name__}"
