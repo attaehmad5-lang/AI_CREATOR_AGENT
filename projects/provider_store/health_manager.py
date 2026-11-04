@@ -60,12 +60,22 @@ class ProviderHealthManager:
         self._load_initial_state()
 
     def _load_initial_state(self) -> None:
-        """Read existing state under the same interprocess lock used by writers."""
+        """Load state without creating directories for a new, empty store."""
+        if not self.state_path.exists():
+            self.data = {"version": "1.0", "providers": {}}
+            return
         lock_path = self.state_path.with_name(self.state_path.name + ".lock")
-        with interprocess_file_lock(lock_path):
+        try:
+            with interprocess_file_lock(lock_path):
+                self._reload_state()
+                if self.state_store is not None and self.state_store.migration_required:
+                    self._save()
+        except OSError:
+            # Preserve the read-only compatibility path for legacy plaintext
+            # deployments. Encrypted legacy migration must not happen unlocked.
+            if self.state_store is not None:
+                raise
             self._reload_state()
-            if self.state_store is not None and self.state_store.migration_required:
-                self._save()
 
     @staticmethod
     def _parse_timestamp(value: Any) -> datetime:
