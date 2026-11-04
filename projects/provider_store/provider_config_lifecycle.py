@@ -68,7 +68,10 @@ class ProviderConfigLifecycleManager:
             return {"status": "INVALID_TARGET_VERSION", "migrated": False}
         if not isinstance(migrations, dict):
             return {"status": "INVALID_MIGRATION_MAP", "migrated": False}
-        initial_scan = self.sensitive_data_policy.inspect(config)
+        try:
+            initial_scan = self.sensitive_data_policy.inspect(config)
+        except Exception:
+            initial_scan = None
         if not isinstance(initial_scan, dict) or initial_scan.get("allowed") is not True:
             return {
                 "status": (
