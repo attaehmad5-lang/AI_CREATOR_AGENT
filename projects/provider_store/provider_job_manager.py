@@ -72,7 +72,7 @@ class ProviderJobManager:
         }
         self._reload()
 
-    def _reload(self) -> None:
+    def _reload(self) -> bool:
         if not self.state_path.exists():
             self.data = {"version": "1.0", "jobs": {}}
             return
@@ -447,7 +447,7 @@ class ProviderJobManager:
             if (
                 job.get("status") != "RUNNING"
                 or job.get("worker_id") != worker_id
-                or not secrets.compare_digest(str(job.get("lease_token", "")), lease_token)
+                or not secrets.compare_digest(str(job.get("lease_token_hash", "")), _lease_token_digest(lease_token))
             ):
                 return {"status": "JOB_LEASE_NOT_OWNED", "saved": False}
             if job.get("cancel_requested") is True:
@@ -461,7 +461,7 @@ class ProviderJobManager:
             job["completed_at"] = now
             job["updated_at"] = now
             job["lease_until"] = None
-            job["lease_token"] = None
+            job["lease_token_hash"] = None
             job["worker_id"] = None
             self._save()
             return {"status": "JOB_COMPLETED", "saved": True, "job": self._public_job(job)}
