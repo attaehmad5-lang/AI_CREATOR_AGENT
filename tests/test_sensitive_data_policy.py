@@ -103,7 +103,7 @@ class SensitiveDataPolicyTests(unittest.TestCase):
 
     def test_payment_card_luhn_detection_is_configurable(self):
         digits = str(6011) + ("0" * 11)
-        parity = len(digits) % 2
+        parity = (len(digits) + 1) % 2
         total = 0
         for index, char in enumerate(digits):
             value = int(char)
