@@ -1,5 +1,6 @@
 """Tests for bounded, value-safe sensitive-data inspection."""
 import unittest
+from collections import UserDict
 
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 
@@ -59,6 +60,67 @@ class SensitiveDataPolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             SensitiveDataPolicy(max_nodes=0)
 
+
+
+    def test_sensitive_field_names_are_scanned_and_reference_metadata_is_ignored(self):
+        payload = {
+            "providerConfig": UserDict({
+                "api_key": "opaque-value-one",
+                "clientSecret": "opaque-value-two",
+                "refresh_token": "opaque-value-three",
+                "token_env": "PROVIDER_TOKEN",
+                "secret_ref": "vault://provider/token",
+                "api_key_configured": True,
+            })
+        }
+        result = SensitiveDataPolicy().inspect(payload)
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(
+            {item["path"] for item in result["findings"]},
+            {"$.providerConfig.api_key", "$.providerConfig.client_secret", "$.providerConfig.refresh_token"},
+        )
+        self.assertNotIn("opaque-value", repr(result))
+        self.assertNotIn("PROVIDER_TOKEN", repr(result))
+
+    def test_payment_card_luhn_detection_is_configurable(self):
+        digits = str(6011) + ("0" * 11)
+        parity = len(digits) % 2
+        total = 0
+        for index, char in enumerate(digits):
+            value = int(char)
+            if index % 2 == parity:
+                value *= 2
+                if value > 9:
+                    value -= 9
+            total += value
+        number = digits + str((-total) % 10)
+        report = SensitiveDataPolicy().inspect({"billing": number})
+        self.assertTrue(report["allowed"])
+        self.assertIn({"category": "payment_card", "path": "$.billing"}, report["findings"])
+        blocked = SensitiveDataPolicy(
+            blocked_categories=("credential", "payment_card")
+        ).inspect({"billing": number})
+        self.assertFalse(blocked["allowed"])
+        self.assertEqual(blocked["blocked_categories"], ["payment_card"])
+        self.assertNotIn(number, repr(blocked))
+
+    def test_custom_mapping_errors_and_cycles_fail_closed(self):
+        class BrokenMapping(UserDict):
+            def items(self):
+                raise RuntimeError("do not reflect internal payload")
+
+        failed = SensitiveDataPolicy().inspect(BrokenMapping({"ordinary": "value"}))
+        self.assertFalse(failed["allowed"])
+        self.assertEqual(failed["status"], "SENSITIVE_DATA_SCAN_FAILED")
+        self.assertNotIn("internal payload", repr(failed))
+
+        cycle = {}
+        cycle["self"] = cycle
+        limited = SensitiveDataPolicy().inspect(cycle)
+        self.assertFalse(limited["allowed"])
+        self.assertEqual(limited["status"], "SENSITIVE_DATA_SCAN_LIMIT_EXCEEDED")
+        self.assertEqual(limited["findings"], [])
 
 if __name__ == "__main__":
     unittest.main()
