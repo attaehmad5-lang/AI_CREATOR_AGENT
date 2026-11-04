@@ -5,6 +5,7 @@ from typing import Any
 import inspect
 import re
 import time
+from datetime import datetime
 
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
@@ -1360,6 +1361,62 @@ class ProviderService:
         except Exception as exc:
             return {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
         return self._sanitize_job_response(result, self.sensitive_data_policy) if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+
+    def purge_expired_job_records(
+        self,
+        *,
+        project_id: str,
+        cutoff: datetime,
+        principal_id: str | None = None,
+        tenant_id: str | None = None,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Admin-gated local retention purge for old terminal jobs in one project."""
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "purged": False, "purged_count": 0}
+        if confirmed is not True:
+            return {"status": "JOB_RETENTION_CONFIRMATION_REQUIRED", "purged": False, "purged_count": 0}
+        if not isinstance(cutoff, datetime) or cutoff.tzinfo is None or cutoff.utcoffset() is None:
+            return {"status": "INVALID_RETENTION_CUTOFF", "purged": False, "purged_count": 0}
+        if not callable(getattr(self.job_manager, "purge_terminal_jobs_before", None)):
+            return {"status": "JOB_RETENTION_UNAVAILABLE", "purged": False, "purged_count": 0}
+        input_rejection = self._sensitive_input_rejection({
+            "job_retention_request": {
+                "project_id": project_id,
+                "tenant_id": tenant_id,
+                "cutoff": cutoff.isoformat(),
+            },
+        })
+        if input_rejection is not None:
+            return {"purged": False, "purged_count": 0, **input_rejection}
+        authorization = self._authorize_operation(principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "purged": False, "purged_count": 0}
+        tenant_error = self._authorize_tenant_project(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            principal_id=principal_id,
+        )
+        if tenant_error is not None:
+            return {"status": tenant_error["status"], "purged": False, "purged_count": 0}
+        try:
+            result = self.job_manager.purge_terminal_jobs_before(
+                project_id=project_id,
+                cutoff=cutoff,
+                tenant_id=tenant_id,
+            )
+        except Exception as exc:
+            return {
+                "status": "JOB_RETENTION_PURGE_FAILED",
+                "purged": False,
+                "purged_count": 0,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_RETENTION_RESPONSE", "purged": False, "purged_count": 0}
+        if self._sensitive_input_rejection({"job_retention_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "purged": False, "purged_count": 0}
+        return result
 
     def verify_webhook(
         self,
