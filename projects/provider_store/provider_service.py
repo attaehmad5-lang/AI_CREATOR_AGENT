@@ -1672,14 +1672,114 @@ class ProviderService:
         quality_error = None
         final_success = reported_success
         output_error = None
+        sensitive_output_scan = None
+        sensitive_output_blocked = False
+        if self.sensitive_data_policy is not None:
+            try:
+                adapter_result_scan = self.sensitive_data_policy.inspect(adapter_result)
+            except Exception:
+                adapter_result_scan = {
+                    "allowed": False,
+                    "status": "SENSITIVE_DATA_SCAN_FAILED",
+                    "findings": [],
+                    "blocked_categories": [],
+                }
+            if not isinstance(adapter_result_scan, dict) or adapter_result_scan.get("allowed") is not True:
+                scan_status = (
+                    adapter_result_scan.get("status")
+                    if isinstance(adapter_result_scan, dict) else None
+                )
+                if scan_status != "SENSITIVE_DATA_BLOCKED":
+                    scan_status = "SENSITIVE_DATA_SCAN_FAILED"
+                sensitive_output_scan = {
+                    "allowed": False,
+                    "status": scan_status,
+                    "adapter_result": adapter_result_scan if isinstance(adapter_result_scan, dict) else {
+                        "allowed": False, "status": "INVALID_SENSITIVE_DATA_SCAN_RESPONSE",
+                        "findings": [], "blocked_categories": [],
+                    },
+                }
+                sensitive_output_blocked = True
+                output_error = (
+                    "SENSITIVE_OUTPUT_BLOCKED"
+                    if scan_status == "SENSITIVE_DATA_BLOCKED"
+                    else "SENSITIVE_OUTPUT_SCAN_FAILED"
+                )
+            else:
+                sensitive_output_scan = {
+                    "allowed": True,
+                    "status": adapter_result_scan.get("status", "SENSITIVE_DATA_CLEAR"),
+                    "adapter_result": adapter_result_scan,
+                }
+
         if reported_success:
             final_path = adapter_result.get("output_path", output_path)
-            if final_path is None:
+            text_modalities = {
+                "text", "language_model", "script_story", "transcription",
+                "advanced_transcription", "translation", "subtitle", "captions",
+            }
+            if (
+                not sensitive_output_blocked
+                and self.sensitive_data_policy is not None
+                and final_path is not None
+                and modality in text_modalities
+            ):
+                inspect_file = getattr(self.sensitive_data_policy, "inspect_file", None)
+                if callable(inspect_file):
+                    try:
+                        output_file_scan = inspect_file(final_path)
+                    except Exception:
+                        output_file_scan = {
+                            "allowed": False,
+                            "status": "SENSITIVE_DATA_SCAN_FAILED",
+                            "findings": [],
+                            "blocked_categories": [],
+                        }
+                else:
+                    output_file_scan = {
+                        "allowed": False,
+                        "status": "SENSITIVE_DATA_SCAN_FAILED",
+                        "findings": [],
+                        "blocked_categories": [],
+                    }
+                sensitive_output_scan["output_file"] = output_file_scan
+                if not isinstance(output_file_scan, dict) or output_file_scan.get("allowed") is not True:
+                    scan_status = (
+                        output_file_scan.get("status")
+                        if isinstance(output_file_scan, dict) else None
+                    )
+                    if scan_status != "SENSITIVE_DATA_BLOCKED":
+                        scan_status = "SENSITIVE_DATA_SCAN_FAILED"
+                    sensitive_output_scan["allowed"] = False
+                    sensitive_output_scan["status"] = scan_status
+                    sensitive_output_blocked = True
+                    output_error = (
+                        "SENSITIVE_OUTPUT_BLOCKED"
+                        if scan_status == "SENSITIVE_DATA_BLOCKED"
+                        else "SENSITIVE_OUTPUT_SCAN_FAILED"
+                    )
+                elif (
+                    output_file_scan.get("findings")
+                    and sensitive_output_scan.get("status") == "SENSITIVE_DATA_CLEAR"
+                ):
+                    sensitive_output_scan["status"] = "SENSITIVE_DATA_DETECTED"
+
+            if sensitive_output_blocked:
+                final_success = False
+                output_validation = {
+                    "valid": False,
+                    "status": (
+                        sensitive_output_scan.get("status")
+                        if isinstance(sensitive_output_scan, dict) else "SENSITIVE_DATA_SCAN_FAILED"
+                    ),
+                }
+            elif final_path is None:
                 output_validation = {"valid": False, "status": "OUTPUT_PATH_REQUIRED"}
             else:
                 output_validation = self.validate_output(final_path, modality=modality)
             if (
-                isinstance(output_validation, dict)
+                not sensitive_output_blocked
+                and isinstance(output_validation, dict)
                 and output_validation.get("valid") is True
                 and modality in {"audio", "video"}
                 and self.media_integrity_validator is not None
@@ -1698,10 +1798,12 @@ class ProviderService:
                         "valid": False,
                         "status": "MEDIA_INTEGRITY_VALIDATION_FAILED",
                     }
-            if not isinstance(output_validation, dict) or output_validation.get("valid") is not True:
+            if not sensitive_output_blocked and (
+                not isinstance(output_validation, dict) or output_validation.get("valid") is not True
+            ):
                 final_success = False
                 output_error = "OUTPUT_VALIDATION_FAILED"
-            elif self.quality_policy is not None:
+            elif not sensitive_output_blocked and self.quality_policy is not None and output_validation.get("valid") is True:
                 try:
                     quality_result = self.quality_policy.evaluate(
                         final_path, modality=modality, category=category
@@ -1718,6 +1820,7 @@ class ProviderService:
                         if isinstance(quality_result, dict)
                         else "INVALID_QUALITY_POLICY_RESPONSE"
                     )
+
 
         error_code = self._safe_error_code(
             adapter_result.get("error_code"),
@@ -1874,6 +1977,10 @@ class ProviderService:
             status = "EXECUTION_ACCOUNTING_REQUIRED"
         elif quality_error is not None:
             status = "OUTPUT_QUALITY_FAILED"
+        elif output_error == "SENSITIVE_OUTPUT_BLOCKED":
+            status = "SENSITIVE_OUTPUT_BLOCKED"
+        elif output_error == "SENSITIVE_OUTPUT_SCAN_FAILED":
+            status = "SENSITIVE_OUTPUT_SCAN_FAILED"
         elif output_error is not None:
             status = "OUTPUT_VALIDATION_FAILED"
         elif not final_success:
@@ -1902,6 +2009,7 @@ class ProviderService:
             "authorization": authorization,
             "feature_flag": feature_flag_result,
             "sensitive_data_scan": sensitive_data_scan,
+            "sensitive_output_scan": sensitive_output_scan,
             "data_policy": data_policy_result,
             "retry_decision": retry,
         }
