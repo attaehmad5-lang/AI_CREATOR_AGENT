@@ -66,6 +66,44 @@ class ProviderServiceTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_privacy_storage_status_reports_unencrypted_state_without_exposing_paths(self):
+        service = ProviderService(self.connections, health_manager=self.health)
+
+        result = service.get_privacy_storage_status()
+
+        self.assertEqual(result["status"], "ENCRYPTED_STORAGE_NOT_REQUIRED")
+        self.assertFalse(result["managers"]["connection_manager"])
+        self.assertFalse(result["managers"]["health_manager"])
+        self.assertNotIn(str(self.state_path), repr(result))
+
+    def test_production_mode_rejects_unencrypted_persistent_provider_managers(self):
+        with self.assertRaisesRegex(ValueError, "connection_manager must use deployment-key-encrypted"):
+            ProviderService(
+                self.connections,
+                health_manager=self.health,
+                require_encrypted_state=True,
+            )
+
+    def test_production_mode_accepts_deployment_key_encrypted_connection_state(self):
+        encrypted_state_path = self.root / "encrypted-connections.json"
+        encrypted_connections = ConnectionManager(
+            self.catalog_path,
+            encrypted_state_path,
+            state_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
+
+        service = ProviderService(
+            encrypted_connections,
+            require_encrypted_state=True,
+        )
+        result = service.get_privacy_storage_status()
+
+        self.assertEqual(result["status"], "ENCRYPTED_STORAGE_READY")
+        self.assertTrue(result["required"])
+        self.assertEqual(result["configured_persistent_managers"], 1)
+        self.assertEqual(result["encrypted_persistent_managers"], 1)
+        self.assertTrue(result["managers"]["connection_manager"])
+
     def test_project_policy_simulation_requires_admin_and_never_persists_candidate(self):
         policy_path = self.root / "project-policies.json"
         policy_manager = ProviderProjectPolicyManager(policy_path)
