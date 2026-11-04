@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from .encrypted_state_store import EncryptedJSONStateStore
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 ROLE_PERMISSIONS = {
@@ -43,31 +44,58 @@ class ProviderAuthorizationManager:
     def __init__(
         self, state_path: str | os.PathLike[str], *, clock: Any = None,
         max_principals: int = 10_000,
+        state_encryption_key_provider: Any = None,
+        state_encryption_context: str = "provider-authorization-v1",
+        migrate_legacy_plaintext_state: bool = False,
     ) -> None:
         if isinstance(max_principals, bool) or not isinstance(max_principals, int) or not 1 <= max_principals <= 100_000:
             raise ValueError("max_principals must be within 1..100000")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
+        if state_encryption_key_provider is None and migrate_legacy_plaintext_state:
+            raise ValueError("legacy state migration requires an encryption key provider")
         self.max_principals = max_principals
         self.state_path = Path(state_path)
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
+        self.state_store = (
+            EncryptedJSONStateStore(
+                self.state_path,
+                key_provider=state_encryption_key_provider,
+                context=state_encryption_context,
+                migrate_legacy_plaintext=migrate_legacy_plaintext_state,
+            )
+            if state_encryption_key_provider is not None else None
+        )
         self.data: dict[str, Any] = {"version": "1.0", "principals": {}}
-        self._reload()
+        if self.state_store is not None and self.state_path.exists():
+            lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                self._reload()
+                if self.state_store.migration_required:
+                    self._save()
+        else:
+            self._reload()
 
     @staticmethod
     def _valid_principal(value: Any) -> bool:
         return isinstance(value, str) and _PRINCIPAL_RE.fullmatch(value) is not None
 
     def _reload(self) -> None:
-        if not self.state_path.exists():
-            self.data = {"version": "1.0", "principals": {}}
-            return
-        try:
-            with self.state_path.open("r", encoding="utf-8") as stream:
-                loaded = json.load(stream)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise ValueError("invalid authorization state JSON") from exc
+        if self.state_store is not None:
+            loaded = self.state_store.read({"version": "1.0", "principals": {}})
+            if not self.state_path.exists():
+                self.data = loaded
+                return
+        else:
+            if not self.state_path.exists():
+                self.data = {"version": "1.0", "principals": {}}
+                return
+            try:
+                with self.state_path.open("r", encoding="utf-8") as stream:
+                    loaded = json.load(stream)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ValueError("invalid authorization state JSON") from exc
         principals = loaded.get("principals") if isinstance(loaded, dict) else None
         if (
             not isinstance(loaded, dict)
@@ -115,9 +143,14 @@ class ProviderAuthorizationManager:
             lock_path = self.state_path.with_name(self.state_path.name + ".lock")
             with interprocess_file_lock(lock_path):
                 self._reload()
+                if self.state_store is not None and self.state_store.migration_required:
+                    self._save()
                 yield
 
     def _save(self) -> None:
+        if self.state_store is not None:
+            self.state_store.write(self.data)
+            return
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{self.state_path.name}.", suffix=".tmp",
