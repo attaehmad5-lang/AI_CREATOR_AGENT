@@ -27,7 +27,7 @@ def _lease_token_digest(token: str) -> str:
 
 
 class ProviderJobManager:
-    """Queue job references only; never persist raw prompts, credentials, or output bodies."""
+    """Queue references only; hash worker leases and never persist raw payloads."""
 
     def __init__(
         self,
