@@ -307,6 +307,44 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn("private endpoint and token", repr(result))
         self.assertEqual(self.health.data["providers"]["image"]["status"], "DEGRADED")
 
+    def test_output_validator_response_with_credentials_is_not_returned(self):
+        secret = "Bearer " + ("o" * 40)
+
+        class OutputValidator:
+            def validate_file(self, path, *, modality):
+                return {
+                    "valid": True,
+                    "status": "OUTPUT_VALID",
+                    "metadata": {"authorization": secret},
+                }
+
+        service = ProviderService(
+            self.connections, output_validator=OutputValidator()
+        )
+        result = service.validate_output("output.png", modality="image")
+
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+    def test_provider_connection_response_with_credentials_is_not_returned(self):
+        secret = "ghp_" + ("x" * 36)
+
+        class ConnectionStub:
+            def verify_connectivity(self, provider_id, probe, **kwargs):
+                return {
+                    "status": "CONNECTED",
+                    "verified": True,
+                    "debug": {"api_key": secret},
+                }
+
+        service = ProviderService(ConnectionStub())
+        result = service.verify_provider("image", lambda *_args, **_kwargs: True)
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
     def test_output_validation_and_retry_decision_are_delegated(self):
         path = self.root / "script.txt"
         path.write_text("script", encoding="utf-8")
