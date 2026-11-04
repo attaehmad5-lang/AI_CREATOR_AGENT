@@ -552,3 +552,62 @@ class ProviderJobManager:
             if job.get("tenant_id") != tenant_id:
                 return {"status": "TENANT_ISOLATION_DENIED", "job": None}
             return {"status": "JOB_STATUS", "job": self._public_job(job)}
+
+
+    def purge_terminal_jobs_before(
+        self,
+        *,
+        project_id: str,
+        cutoff: datetime,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete completed job metadata older than a timezone-aware cutoff.
+
+        Active/queued jobs and terminal records without a valid completion
+        timestamp are retained. Project and optional tenant filters are
+        mandatory safeguards against broad accidental deletion.
+        """
+        if not isinstance(project_id, str) or not _ID_RE.fullmatch(project_id):
+            return {"status": "INVALID_PROJECT_ID", "purged": False, "purged_count": 0}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "purged": False, "purged_count": 0}
+        if (
+            not isinstance(cutoff, datetime)
+            or cutoff.tzinfo is None
+            or cutoff.utcoffset() is None
+        ):
+            return {"status": "INVALID_RETENTION_CUTOFF", "purged": False, "purged_count": 0}
+        cutoff_utc = cutoff.astimezone(timezone.utc)
+        purged_count = 0
+        skipped_invalid_timestamps = 0
+        with self._transaction():
+            for job_id, job in list(self.data["jobs"].items()):
+                if (
+                    not isinstance(job, dict)
+                    or job.get("project_id") != project_id
+                    or job.get("status") not in _TERMINAL
+                    or (tenant_id is not None and job.get("tenant_id") != tenant_id)
+                ):
+                    continue
+                completed_at = job.get("completed_at")
+                try:
+                    parsed = datetime.fromisoformat(completed_at) if isinstance(completed_at, str) else None
+                    if parsed is None or parsed.tzinfo is None or parsed.utcoffset() is None:
+                        skipped_invalid_timestamps += 1
+                        continue
+                    if parsed.astimezone(timezone.utc) <= cutoff_utc:
+                        del self.data["jobs"][job_id]
+                        purged_count += 1
+                except (ValueError, TypeError, OverflowError):
+                    skipped_invalid_timestamps += 1
+            if purged_count:
+                self._save()
+        return {
+            "status": "JOB_RETENTION_PURGED" if purged_count else "NO_EXPIRED_TERMINAL_JOBS",
+            "purged": purged_count > 0,
+            "purged_count": purged_count,
+            "skipped_invalid_timestamps": skipped_invalid_timestamps,
+        }
+
