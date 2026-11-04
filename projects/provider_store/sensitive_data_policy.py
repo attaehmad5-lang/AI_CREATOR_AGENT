@@ -1,7 +1,7 @@
-"""Bounded, fail-closed sensitive-data inspection for provider-bound payloads.
+"""Bounded sensitive-data inspection for provider-bound payloads.
 
-Findings contain only safe categories and structural paths. Matched values and
-arbitrary object representations are never returned or logged.
+Only safe categories and structural paths are returned; matched values and
+arbitrary object representations are never exposed.
 """
 from __future__ import annotations
 
@@ -11,41 +11,18 @@ from typing import Any
 
 
 _PATTERNS = (
-    ("credential", re.compile(r"(?i)\\b(?:bearer|basic)\\s+[A-Za-z0-9._~+/=-]{8,}")),
-    ("credential", re.compile(
-        r"""(?i)\\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|"
-        r"client[_-]?secret|secret(?:[_-]?key)?|password|passwd|credential|"
-        r"authorization|proxy[_-]?authorization|cookie|session(?:[_-]?token)?|"
-        r"private[_-]?key|signing[_-]?key)\\b["']?\\s*[:=]\\s*(?:"[^"]*"|'[^']*'|[^\\s,;&}\\]]+)"""
-    )),
-    ("credential", re.compile(
-        r"(?i)\\b(?:sk-(?:proj-|svcacct-|ant-)?[A-Za-z0-9_-]{12,}|"
-        r"hf_[A-Za-z0-9]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|"
-        r"github_pat_[A-Za-z0-9_]{12,}|xox[baprs]-[A-Za-z0-9-]{8,}|"
-        r"AIza[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})\\b"
-    )),
-    ("credential", re.compile(
-        r"\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b"
-    )),
-    ("credential", re.compile(
-        r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
-        re.DOTALL,
-    )),
-    ("credential", re.compile(r"(?i)\\bhttps?://[^/@:\\s]+:[^/@\\s]+@")),
-    ("email", re.compile(r"\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b", re.IGNORECASE)),
-    ("phone", re.compile(
-        r"(?<![\\w/-])(?:\\+\\d{1,3}[ .-]?)?(?:\\(\\d{2,4}\\)|\\d{2,4})"
-        r"[ .-]?\\d{3,4}[ .-]?\\d{3,4}(?![\\w/-])"
-    )),
+    ("credential", re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}")),
+    ("credential", re.compile(r'''(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|password|passwd|credential|authorization|proxy[_-]?authorization|cookie|session(?:[_-]?token)?|private[_-]?key|signing[_-]?key)\b["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;&}\]]+)''')),
+    ("credential", re.compile(r"(?i)\b(?:sk-(?:proj-|svcacct-|ant-)?[A-Za-z0-9_-]{12,}|hf_[A-Za-z0-9]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{12,}|xox[baprs]-[A-Za-z0-9-]{8,}|AIza[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})\b")),
+    ("credential", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
+    ("credential", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----", re.DOTALL)),
+    ("credential", re.compile(r"(?i)\bhttps?://[^/@:\s]+:[^/@\s]+@")),
+    ("email", re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)),
+    ("phone", re.compile(r"(?<![\w/-])(?:\+\d{1,3}[ .-]?)?(?:\(\d{2,4}\)|\d{2,4})[ .-]?\d{3,4}[ .-]?\d{3,4}(?![\w/-])")),
 )
-_CARD_CANDIDATE = re.compile(r"(?<!\\d)(?:\\d[ -]?){13,19}(?!\\d)")
-_SAFE_KEY = re.compile(r"[A-Za-z0-9_.-]{1,64}\\Z")
-_SENSITIVE_FIELD = re.compile(
-    r"(?i)(?:^|[_-])(?:api[_-]?key|access[_-]?token|refresh[_-]?token|"
-    r"id[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|password|passwd|"
-    r"credential|authorization|proxy[_-]?authorization|cookie|"
-    r"session(?:[_-]?token)?|private[_-]?key|signing[_-]?key)(?:$|[_-])"
-)
+_CARD_CANDIDATE = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)")
+_SAFE_KEY = re.compile(r"[A-Za-z0-9_.-]{1,64}\Z")
+_SENSITIVE_FIELD = re.compile(r"(?i)(?:^|[_-])(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|password|passwd|credential|authorization|proxy[_-]?authorization|cookie|session(?:[_-]?token)?|private[_-]?key|signing[_-]?key)(?:$|[_-])")
 _REFERENCE_SUFFIXES = ("_env", "_ref", "_reference", "_configured", "_present", "_name")
 
 
@@ -83,9 +60,7 @@ class SensitiveDataPolicy:
         max_text_chars: int = 20000,
         max_findings: int = 100,
     ) -> None:
-        if not isinstance(blocked_categories, tuple) or any(
-            value not in self.CATEGORIES for value in blocked_categories
-        ):
+        if not isinstance(blocked_categories, tuple) or any(value not in self.CATEGORIES for value in blocked_categories):
             raise ValueError("unsupported sensitive-data category")
         if len(set(blocked_categories)) != len(blocked_categories):
             raise ValueError("blocked categories must be unique")
@@ -198,28 +173,14 @@ class SensitiveDataPolicy:
         try:
             walk(payload, "$", 0)
         except Exception:
-            # Custom Mapping implementations and hostile values may raise while
-            # being traversed. Never continue with a partially inspected payload.
-            return {
-                "allowed": False,
-                "status": "SENSITIVE_DATA_SCAN_FAILED",
-                "findings": [],
-                "blocked_categories": [],
-            }
+            return {"allowed": False, "status": "SENSITIVE_DATA_SCAN_FAILED", "findings": [], "blocked_categories": []}
 
         if exceeded:
-            return {
-                "allowed": False,
-                "status": "SENSITIVE_DATA_SCAN_LIMIT_EXCEEDED",
-                "findings": [],
-                "blocked_categories": [],
-            }
+            return {"allowed": False, "status": "SENSITIVE_DATA_SCAN_LIMIT_EXCEEDED", "findings": [], "blocked_categories": []}
         blocked = [item for item in findings if item["category"] in self.blocked_categories]
         return {
             "allowed": not bool(blocked),
-            "status": "SENSITIVE_DATA_BLOCKED" if blocked else (
-                "SENSITIVE_DATA_DETECTED" if findings else "SENSITIVE_DATA_CLEAR"
-            ),
+            "status": "SENSITIVE_DATA_BLOCKED" if blocked else ("SENSITIVE_DATA_DETECTED" if findings else "SENSITIVE_DATA_CLEAR"),
             "findings": findings,
             "blocked_categories": sorted({item["category"] for item in blocked}),
         }
