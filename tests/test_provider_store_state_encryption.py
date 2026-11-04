@@ -12,7 +12,7 @@ from projects.provider_store.provider_incident_manager import ProviderIncidentMa
 from projects.provider_store.provider_webhook_verifier import ProviderWebhookVerifier
 from projects.provider_store.quota_manager import ProviderQuotaManager
 
-_KEY = b"privacy-state-test-key-32-bytes!!"
+_KEY = b"privacy-state-test-key-32-bytes!"
 _FORMAT = "AI_CREATOR_AGENT_ENCRYPTED_JSON_STATE"
 
 
