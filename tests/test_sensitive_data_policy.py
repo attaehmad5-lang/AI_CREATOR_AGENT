@@ -123,6 +123,29 @@ class SensitiveDataPolicyTests(unittest.TestCase):
         self.assertEqual(blocked["blocked_categories"], ["payment_card"])
         self.assertNotIn(number, repr(blocked))
 
+    def test_inspect_file_scans_bounded_utf8_text_without_returning_content(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "generated.txt"
+            sample = "refresh_token=" + ("x" * 32)
+            path.write_text(sample, encoding="utf-8")
+            result = SensitiveDataPolicy().inspect_file(path)
+            self.assertFalse(result["allowed"])
+            self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+            self.assertNotIn(sample, repr(result))
+
+            path.write_bytes(b"\xff\xfe")
+            invalid = SensitiveDataPolicy().inspect_file(path)
+            self.assertFalse(invalid["allowed"])
+            self.assertEqual(invalid["status"], "SENSITIVE_DATA_FILE_ENCODING_INVALID")
+
+            path.write_text("too many bytes", encoding="utf-8")
+            large = SensitiveDataPolicy().inspect_file(path, max_file_bytes=4)
+            self.assertFalse(large["allowed"])
+            self.assertEqual(large["status"], "SENSITIVE_DATA_FILE_TOO_LARGE")
+
     def test_custom_mapping_errors_and_cycles_fail_closed(self):
         class BrokenMapping(UserDict):
             def items(self):
