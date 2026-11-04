@@ -102,6 +102,24 @@ class ProviderServiceTests(unittest.TestCase):
 
         self.assertFalse(encrypted_state_path.exists())
 
+    def test_production_mode_rejects_unencrypted_cost_ledger_and_project_policy_path(self):
+        with self.assertRaisesRegex(ValueError, "cost_policy must use deployment-key-encrypted"):
+            ProviderService(
+                self.connections,
+                cost_policy=self.cost,
+                require_encrypted_state=True,
+            )
+
+        project_policy = ProviderProjectPolicyManager(
+            self.root / "unencrypted-project-policies.json"
+        )
+        with self.assertRaisesRegex(ValueError, "project_policy_manager must use deployment-key-encrypted"):
+            ProviderService(
+                self.connections,
+                project_policy_manager=project_policy,
+                require_encrypted_state=True,
+            )
+
     def test_production_mode_rejects_duck_typed_non_encrypted_state_store(self):
         class LookalikeStateStore:
             key_provider = staticmethod(lambda context: b"0123456789abcdef0123456789abcdef")
