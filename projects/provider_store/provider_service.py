@@ -1287,6 +1287,16 @@ class ProviderService:
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
         if not isinstance(use_managed_credential, bool):
             return {"status": "INVALID_MANAGED_CREDENTIAL_POLICY", "executed": False}
+        # Preserve the managed-secret contract and reject caller injection before
+        # routing, reservation, or any external manager is invoked.
+        if use_managed_credential and isinstance(adapter_options, dict) and (
+            "provider_credential" in adapter_options
+            or "provider_credential_lease" in adapter_options
+        ):
+            return {
+                "status": "CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED",
+                "executed": False,
+            }
         if not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST_ID", "executed": False}
         if not isinstance(category, str) or not category.strip():
