@@ -1287,6 +1287,16 @@ class ProviderService:
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
         if not isinstance(use_managed_credential, bool):
             return {"status": "INVALID_MANAGED_CREDENTIAL_POLICY", "executed": False}
+        # Managed credentials must be supplied only by the server-side secret manager.
+        # Reject caller injection before routing can create any billable reservation.
+        if use_managed_credential and adapter_options and (
+            "provider_credential" in adapter_options
+            or "provider_credential_lease" in adapter_options
+        ):
+            return {
+                "status": "CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED",
+                "executed": False,
+            }
         # Preserve the managed-secret contract and reject caller injection before
         # routing, reservation, or any external manager is invoked.
         if use_managed_credential and isinstance(adapter_options, dict) and (
@@ -1618,17 +1628,6 @@ class ProviderService:
                 )
                 return {
                     "status": "SECRET_MANAGER_UNAVAILABLE",
-                    "executed": False,
-                    "provider": provider_id,
-                    "release": released,
-                }
-            if "provider_credential" in options or "provider_credential_lease" in options:
-                released = self.release_unstarted_request(
-                    project_id=project_id, provider_id=provider_id,
-                    request_id=request_id, tenant_id=tenant_id,
-                )
-                return {
-                    "status": "CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED",
                     "executed": False,
                     "provider": provider_id,
                     "release": released,
