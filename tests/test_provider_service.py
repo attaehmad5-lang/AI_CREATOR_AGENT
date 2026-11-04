@@ -1660,6 +1660,30 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn(secret, repr(result))
 
 
+    def test_authorization_manager_response_with_credential_is_not_exposed(self):
+        secret = "sk-" + ("z" * 40)
+
+        class AuthorizationStub:
+            def authorize(self, principal_id, operation):
+                return {
+                    "allowed": False,
+                    "status": "AUTHORIZATION_DENIED",
+                    "metadata": {"api_key": secret},
+                }
+
+        service = ProviderService(
+            self.connections,
+            authorization_manager=AuthorizationStub(),
+        )
+        result = service._authorize_operation(
+            "privacy-user", "provider.read", return_decision=True
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+
     def test_sensitive_credentials_are_blocked_before_routing_and_adapter(self):
         calls = {"route": 0, "adapter": 0}
 
