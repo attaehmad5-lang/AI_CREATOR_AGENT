@@ -112,6 +112,28 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertNotIn("provider-secret-value", repr(result))
 
+    def test_config_migration_blocks_payment_card_by_default(self):
+        calls = []
+
+        def migration(config):
+            calls.append(True)
+            return migrate_v1_to_v2(config)
+
+        unsafe = {
+            "schema_version": "1",
+            "providers": {
+                "image": {"billing_note": "4111 1111 1111 1111"},
+            },
+        }
+        result = self.manager.migrate(
+            unsafe, target_version="2", migrations={"1": migration}
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(calls, [])
+        self.assertNotIn("4111 1111 1111 1111", repr(result))
+
     def test_migration_fails_closed_when_injected_privacy_scanner_raises(self):
         class BrokenScanner:
             def inspect(self, payload):
