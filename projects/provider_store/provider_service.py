@@ -1283,6 +1283,17 @@ class ProviderService:
             return {"verified": False, "status": "WEBHOOK_VERIFIER_UNAVAILABLE"}
         if not isinstance(payload, bytes):
             return {"verified": False, "status": "INVALID_WEBHOOK_PAYLOAD"}
+        max_payload_bytes = getattr(
+            self.webhook_verifier, "max_payload_bytes", 1_000_000
+        )
+        if (
+            isinstance(max_payload_bytes, bool)
+            or not isinstance(max_payload_bytes, int)
+            or not 1 <= max_payload_bytes <= 10_000_000
+        ):
+            return {"verified": False, "status": "INVALID_WEBHOOK_PAYLOAD_LIMIT"}
+        if len(payload) > max_payload_bytes:
+            return {"verified": False, "status": "WEBHOOK_PAYLOAD_TOO_LARGE"}
         try:
             payload_text = payload.decode("utf-8")
         except UnicodeDecodeError:
