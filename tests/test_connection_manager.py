@@ -179,6 +179,63 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertEqual(len(loaded.list_providers()), 20)
         self.assertEqual(len({p["id"] for p in loaded.list_providers()}), 20)
 
+    def test_connection_state_supports_authenticated_encryption_and_wrong_key_rejection(self):
+        encrypted_path = self.root / "encrypted-connection-state.json"
+        key_provider = lambda context: b"k" * 32
+        encrypted = ConnectionManager(
+            self.catalog_path,
+            encrypted_path,
+            state_encryption_key_provider=key_provider,
+        )
+
+        saved = encrypted.set_state("public_image", "READY")
+        self.assertTrue(saved["saved"])
+        ciphertext = encrypted_path.read_bytes()
+        self.assertNotIn(b"public_image", ciphertext)
+        self.assertNotIn(b"USER_CONTROLLED", ciphertext)
+
+        reopened = ConnectionManager(
+            self.catalog_path,
+            encrypted_path,
+            state_encryption_key_provider=key_provider,
+        )
+        self.assertEqual(reopened.get_state("public_image")["status"], "READY")
+
+        with self.assertRaises(ValueError):
+            ConnectionManager(
+                self.catalog_path,
+                encrypted_path,
+                state_encryption_key_provider=lambda context: b"z" * 32,
+            )
+
+    def test_connection_state_explicitly_migrates_legacy_plaintext(self):
+        legacy_path = self.root / "legacy-connection-state.json"
+        legacy_path.write_text(
+            json.dumps({
+                "version": "1.0",
+                "policy": "USER_CONTROLLED",
+                "providers": {
+                    "public_image": {
+                        "status": "READY",
+                        "verified": False,
+                        "secret_ref": "vault/providers/public-image",
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        manager = ConnectionManager(
+            self.catalog_path,
+            legacy_path,
+            state_encryption_key_provider=lambda context: b"m" * 32,
+            migrate_legacy_plaintext_state=True,
+        )
+
+        persisted = legacy_path.read_bytes()
+        self.assertNotIn(b"vault/providers/public-image", persisted)
+        self.assertNotIn(b"public_image", persisted)
+        self.assertEqual(manager.get_state("public_image")["status"], "READY")
+
     def test_loads_catalog_and_unknown_state(self):
         self.assertTrue(self.manager.provider_exists("public_image"))
         self.assertEqual(self.manager.get_state("public_image")["status"], "UNKNOWN")
