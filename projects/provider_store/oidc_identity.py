@@ -107,7 +107,10 @@ class OIDCJWKSResolver:
                 body = response.read(self.max_response_bytes + 1)
                 if not isinstance(body, bytes) or len(body) > self.max_response_bytes:
                     raise OIDCAuthenticationError("OIDC_JWKS_RESPONSE_TOO_LARGE")
-                document = json.loads(body.decode("utf-8"))
+                try:
+                    document = json.loads(body.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    raise OIDCAuthenticationError("OIDC_JWKS_INVALID") from None
             except OIDCAuthenticationError:
                 raise
             except Exception as exc:
@@ -230,7 +233,13 @@ class OIDCIdentityAuthenticator:
         self._marker = object()
 
     def authenticate(self, token: str) -> AuthenticatedPrincipal:
-        if not isinstance(token, str) or not token or len(token.encode("utf-8")) > self.max_token_bytes:
+        if not isinstance(token, str) or not token:
+            raise OIDCAuthenticationError("OIDC_TOKEN_INVALID")
+        try:
+            token_size = len(token.encode("utf-8"))
+        except UnicodeError:
+            raise OIDCAuthenticationError("OIDC_TOKEN_INVALID") from None
+        if token_size > self.max_token_bytes:
             raise OIDCAuthenticationError("OIDC_TOKEN_INVALID")
         try:
             import jwt
@@ -273,6 +282,8 @@ class OIDCIdentityAuthenticator:
             } else "OIDC_TOKEN_INVALID"
             raise OIDCAuthenticationError(status) from None
 
+        if not isinstance(claims, dict):
+            raise OIDCAuthenticationError("OIDC_TOKEN_CLAIMS_INVALID")
         subject = claims.get("sub")
         if not isinstance(subject, str) or not subject or len(subject) > 255:
             raise OIDCAuthenticationError("OIDC_SUBJECT_INVALID")
