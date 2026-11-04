@@ -187,6 +187,10 @@ class ProviderService:
             result = {"allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"}
         if self._sensitive_input_rejection({"authorization_manager_response": result}) is not None:
             return {"allowed": False, "status": "SENSITIVE_DATA_OUTPUT_BLOCKED"}
+        if result.get("allowed") is not True or return_decision:
+            rejection = self._sensitive_input_rejection({"authz_decision": result})
+            if rejection is not None:
+                return {"allowed": False, "status": "SENSITIVE_DATA_OUTPUT_BLOCKED"}
         if result.get("allowed") is not True:
             return result
         return result if return_decision else None
