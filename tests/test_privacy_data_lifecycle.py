@@ -123,6 +123,14 @@ class PrivacyDataLifecycleManagerTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "INVALID_SUBJECT_DELETION_SCOPE")
 
+    def test_numeric_phone_like_subject_reference_is_rejected(self):
+        manager = PrivacyDataLifecycleManager({"database": StoreStub()})
+        result = manager.delete_subject_data(
+            subject_ref="14155550134", project_id="film", tenant_id=None,
+            request_id="delete-007", confirmed=True,
+        )
+        self.assertEqual(result["status"], "INVALID_SUBJECT_DELETION_SCOPE")
+
     def test_retention_purge_requires_aware_cutoff_and_confirms_every_store(self):
         store = StoreStub()
         manager = PrivacyDataLifecycleManager({"database": store})
