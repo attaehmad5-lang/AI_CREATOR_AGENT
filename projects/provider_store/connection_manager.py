@@ -16,6 +16,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from .encrypted_state_store import EncryptedJSONStateStore
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .safe_numbers import finite_number
 
@@ -89,15 +90,30 @@ class ConnectionManager:
         catalog_path: str | os.PathLike[str] | None = None,
         state_path: str | os.PathLike[str] | None = None,
         secret_manager: Any | None = None,
+        *,
+        state_encryption_key_provider: Any = None,
+        state_encryption_context: str = "provider-connection-state-v1",
+        migrate_legacy_plaintext_state: bool = False,
     ) -> None:
         if secret_manager is not None and (
             not callable(getattr(secret_manager, "inspect_reference", None))
             or not callable(getattr(secret_manager, "resolve_secret", None))
         ):
             raise ValueError("secret_manager must support reference inspection and secret resolution")
+        if state_encryption_key_provider is None and migrate_legacy_plaintext_state:
+            raise ValueError("legacy state migration requires an encryption key provider")
         self.secret_manager = secret_manager
         self.catalog_path = Path(catalog_path) if catalog_path else self._default_catalog()
         self.state_path = Path(state_path) if state_path else DEFAULT_STATE
+        self.state_store = (
+            EncryptedJSONStateStore(
+                self.state_path,
+                key_provider=state_encryption_key_provider,
+                context=state_encryption_context,
+                migrate_legacy_plaintext=migrate_legacy_plaintext_state,
+            )
+            if state_encryption_key_provider is not None else None
+        )
         # Constructor reads must use the same interprocess locks as writers. On
         # Windows, an unlocked read can race with atomic replacement and fail with
         # a transient sharing violation while another process registers a provider.
@@ -107,10 +123,9 @@ class ConnectionManager:
         self.validate_catalog_schema(self.catalog, raise_on_error=True)
         state_lock_path = self.state_path.with_name(self.state_path.name + ".lock")
         with interprocess_file_lock(state_lock_path):
-            self.state = self._load_json(
-                self.state_path,
-                default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}},
-            )
+            self._reload_state()
+            if self.state_store is not None and self.state_store.migration_required:
+                self._save()
         if not isinstance(self.state.get("providers"), dict):
             raise ValueError("Invalid connection state schema: providers must be an object")
         self._lock = threading.RLock()
@@ -211,6 +226,9 @@ class ConnectionManager:
             raise
 
     def _save(self) -> None:
+        if self.state_store is not None:
+            self.state_store.write(self.state)
+            return
         self._atomic_write_json(self.state_path, self.state)
 
     def _reload_catalog(self) -> None:
@@ -219,10 +237,14 @@ class ConnectionManager:
         self.catalog = catalog
 
     def _reload_state(self) -> None:
-        state = self._load_json(
-            self.state_path,
-            default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}},
-        )
+        default = {"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}
+        if self.state_store is not None:
+            state = self.state_store.read(default)
+            if not self.state_path.exists():
+                self.state = state
+                return
+        else:
+            state = self._load_json(self.state_path, default=default)
         if not isinstance(state.get("providers"), dict):
             raise ValueError("Invalid connection state schema: providers must be an object")
         self.state = state
