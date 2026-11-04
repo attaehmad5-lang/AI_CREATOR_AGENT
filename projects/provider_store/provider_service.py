@@ -27,6 +27,7 @@ class ProviderService:
         credit_manager: Any | None = None,
         budget_alert_manager: Any | None = None,
         authorization_manager: Any | None = None,
+        identity_authenticator: Any | None = None,
         sensitive_data_policy: Any | None = None,
         data_handling_policy: Any | None = None,
         webhook_verifier: Any | None = None,
@@ -47,6 +48,13 @@ class ProviderService:
             raise ValueError("connection_manager must support connectivity verification")
         if tenant_isolation_manager is not None and authorization_manager is None:
             raise ValueError("tenant isolation requires authorization_manager")
+        if identity_authenticator is not None and authorization_manager is None:
+            raise ValueError("identity authentication requires authorization_manager")
+        if identity_authenticator is not None and (
+            not callable(getattr(identity_authenticator, "authenticate", None))
+            or not callable(getattr(identity_authenticator, "is_authenticated_principal", None))
+        ):
+            raise ValueError("identity_authenticator must verify tokens and identify trusted principals")
         resolved_secret_manager = secret_manager or getattr(connection_manager, "secret_manager", None)
         if resolved_secret_manager is not None and (
             not callable(getattr(resolved_secret_manager, "resolve_secret", None))
@@ -94,6 +102,7 @@ class ProviderService:
         self.credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
         self.budget_alert_manager = budget_alert_manager
         self.authorization_manager = authorization_manager
+        self.identity_authenticator = identity_authenticator
         self.sensitive_data_policy = sensitive_data_policy
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
@@ -110,6 +119,32 @@ class ProviderService:
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
 
+    def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
+        """Verify an API bearer token and return an opaque in-process principal.
+
+        API middleware must keep principal_id server-side, never accept it from
+        request JSON, and pass this exact object to protected service methods.
+        Do not cast it to str or serialize it into a client response.
+        """
+        if self.identity_authenticator is None:
+            return {"status": "IDENTITY_AUTHENTICATOR_UNAVAILABLE", "authenticated": False}
+        if not isinstance(authorization_header, str) or len(authorization_header) > 65_543:
+            return {"status": "OIDC_TOKEN_INVALID", "authenticated": False}
+        match = re.fullmatch(r"(?i:Bearer) ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)", authorization_header)
+        if match is None:
+            return {"status": "OIDC_TOKEN_INVALID", "authenticated": False}
+        try:
+            principal = self.identity_authenticator.authenticate(match.group(1))
+            trusted = self.identity_authenticator.is_authenticated_principal(principal)
+        except Exception as exc:
+            status = getattr(exc, "status", None)
+            if not isinstance(status, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", status):
+                status = "OIDC_AUTHENTICATION_FAILED"
+            return {"status": status, "authenticated": False}
+        if not trusted or not isinstance(principal, str):
+            return {"status": "OIDC_AUTHENTICATION_FAILED", "authenticated": False}
+        return {"status": "AUTHENTICATED", "authenticated": True, "principal_id": principal}
+
     def _authorize_operation(
         self,
         principal_id: str | None,
@@ -118,6 +153,15 @@ class ProviderService:
         provider_id: str | None = None,
         return_decision: bool = False,
     ) -> dict[str, Any] | None:
+        if self.identity_authenticator is not None:
+            try:
+                trusted_identity = self.identity_authenticator.is_authenticated_principal(principal_id)
+            except Exception:
+                trusted_identity = False
+            if trusted_identity is not True:
+                return {"allowed": False, "status": "OIDC_AUTHENTICATION_REQUIRED"}
+            # Convert only after the in-process capability check succeeds.
+            principal_id = str(principal_id)
         if self.authorization_manager is None:
             if principal_id is not None:
                 return {"allowed": False, "status": "AUTHORIZATION_MANAGER_UNAVAILABLE"}
