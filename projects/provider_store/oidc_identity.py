@@ -216,7 +216,7 @@ class OIDCIdentityAuthenticator:
             raise ValueError("MFA claim allowlists contain invalid values")
         if principal_mapper is not None and not callable(principal_mapper):
             raise ValueError("principal_mapper must be callable")
-        self.issuer = issuer.rstrip("/")
+        self.issuer = issuer
         self.audiences = audiences
         self.key_resolver = key_resolver
         self.allowed_algorithms = allowed_algorithms
