@@ -94,3 +94,25 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+## Feature 69 — Sensitive-data boundaries and encrypted persistence
+
+`ProviderService` creates a `SensitiveDataPolicy` by default when a deployment does not inject a custom policy. The bounded scanner returns categories and structural paths only; it never returns matched values. Credentials are blocked by default. Email, phone and Luhn-valid payment-card values are detected and reported; deployments may add those categories to `blocked_categories` when their content-handling rules require it. Scan errors, invalid scanner responses, cycles and traversal-limit exhaustion fail closed.
+
+The service checks caller-controlled routing/adapter options before routing, and scans routing-manager, webhook-verifier, adapter and downstream manager result values before exposing those results. If an adapter response is blocked after the provider may already have started work, the service marks the outcome unknown and retains reservations; it must not infer that a potentially billable call was free. Job submission/claim/completion metadata is checked before persistence, and public job responses remove worker-only lease verifiers.
+
+`EncryptedJSONStateStore` can also encrypt these persistent manager state files when a deployment supplies a KMS/secret-manager-backed key callback:
+
+- `ProviderAuthorizationManager` — `provider-authorization-v1`
+- `ProviderTenantIsolationManager` — `provider-tenant-isolation-v1`
+- `ProviderJobManager` — `provider-job-state-v1`
+- `ProviderCostPolicy` — `provider-cost-ledger-v1`
+- `ProviderQuotaManager` — `provider-quota-state-v1`
+- `ProviderCreditManager` — `provider-credit-state-v1`
+- `BudgetAlertManager` — `provider-budget-alerts-v1`
+- `ProviderWebhookVerifier` — `provider-webhook-replay-v1`
+- `ProviderIncidentManager` — `provider-incident-state-v1`
+
+Each manager accepts `state_encryption_key_provider`, plus an optional `state_encryption_context` override. The callback must return the 32-byte key for the supplied context from deployment-managed key storage. Never hard-code keys, store them beside state files, or commit them. To migrate an existing plaintext state file, set `migrate_legacy_plaintext_state=True` for the controlled migration startup; the read and rewrite occur under the manager's interprocess lock. The manager rejects plaintext by default once encryption is enabled. After successful migration, disable the migration flag for normal operation.
+
+**Deployment limitation:** encryption remains opt-in to preserve existing deployments that have not provisioned a key service. Files for other provider-store components, the provider catalog/configuration, external databases, backups and generated user assets are not automatically encrypted by this feature. The deployment must explicitly configure each supported manager, protect backups/disks, provide key recovery/rotation, and test restoration. This work does not yet implement a deployment-wide retention schedule or a verified deletion workflow across provider-side copies; do not represent those controls as complete.
