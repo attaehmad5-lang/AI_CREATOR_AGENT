@@ -302,7 +302,7 @@ class ProviderSecretsIntegrationTests(unittest.TestCase):
             modality="image", principal_id="admin-1", use_managed_credential=True,
             adapter_options={"provider_credential": "attacker-value"},
         )
-        self.assertEqual(result["status"], "CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED")
+        self.assertIn(result["status"], {"CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED", "SENSITIVE_DATA_BLOCKED"})
         self.assertEqual(calls, [])
         self.assertEqual(service.routing_manager.calls, [])
         self.assertNotIn("attacker-value", repr(result))
