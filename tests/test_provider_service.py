@@ -1490,6 +1490,54 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertNotIn(secret, repr(result))
 
 
+    def test_usage_finalization_response_with_credentials_is_not_returned(self):
+        secret = "ghp_" + ("f" * 36)
+
+        class CostPolicyStub:
+            def finalize_usage(self, **kwargs):
+                return {
+                    "status": "FINALIZED",
+                    "saved": True,
+                    "metadata": {"api_key": secret},
+                }
+
+        service = ProviderService(self.connections, cost_policy=CostPolicyStub())
+        result = service.finalize_started_request(
+            project_id="film",
+            provider_id="image",
+            request_id="privacy-finalize-response",
+            estimated_cost=0.0,
+            actual_cost=0.0,
+            success=True,
+            charge_outcome="not_incurred",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertTrue(result["finalized"])
+        self.assertNotIn(secret, repr(result))
+
+    def test_reservation_release_response_with_credentials_is_not_returned(self):
+        secret = "Bearer " + ("r" * 40)
+
+        class CostPolicyStub:
+            def release_reservation(self, **kwargs):
+                return {
+                    "status": "RESERVATION_RELEASED",
+                    "metadata": {"authorization": secret},
+                }
+
+        service = ProviderService(self.connections, cost_policy=CostPolicyStub())
+        result = service.release_unstarted_request(
+            project_id="film",
+            provider_id="image",
+            request_id="privacy-release-response",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertTrue(result["released"])
+        self.assertNotIn(secret, repr(result))
+
+
     def test_sensitive_credentials_are_blocked_before_routing_and_adapter(self):
         calls = {"route": 0, "adapter": 0}
 
