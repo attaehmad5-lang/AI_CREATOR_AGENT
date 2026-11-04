@@ -1291,7 +1291,10 @@ class ProviderService:
         sensitive_data_scan = None
         if self.sensitive_data_policy is not None:
             try:
-                sensitive_data_scan = self.sensitive_data_policy.inspect(adapter_options or {})
+                sensitive_data_scan = self.sensitive_data_policy.inspect({
+                    "adapter_options": adapter_options or {},
+                    "routing_options": route_options,
+                })
             except Exception as exc:
                 return {"status": "SENSITIVE_DATA_SCAN_FAILED", "executed": False, "error_type": type(exc).__name__}
             if not isinstance(sensitive_data_scan, dict) or sensitive_data_scan.get("allowed") is not True:
