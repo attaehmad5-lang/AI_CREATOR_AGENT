@@ -11,6 +11,7 @@ from projects.provider_store.oidc_identity import (
     OIDCJWKSResolver,
 )
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
+from projects.provider_store.provider_service import ProviderService
 
 
 class OIDCIdentityAuthenticatorTests(unittest.TestCase):
@@ -43,7 +44,7 @@ class OIDCIdentityAuthenticatorTests(unittest.TestCase):
         principal = self.authenticator.authenticate(self.token())
         self.assertEqual(str(principal), "user-123")
         self.assertEqual(principal.subject, "user-123")
-        self.assertEqual(principal.issuer, "https://identity.example.test")
+        self.assertEqual(principal.issuer, "https://identity.example.test/")
         self.assertTrue(self.authenticator.is_authenticated_principal(principal))
         self.assertFalse(self.authenticator.is_authenticated_principal("user-123"))
 
