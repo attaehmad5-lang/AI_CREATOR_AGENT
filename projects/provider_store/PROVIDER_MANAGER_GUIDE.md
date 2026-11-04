@@ -113,10 +113,15 @@ The service checks caller-controlled routing/adapter options before routing, and
 - `BudgetAlertManager` — `provider-budget-alerts-v1`
 - `ProviderWebhookVerifier` — `provider-webhook-replay-v1`
 - `ProviderIncidentManager` — `provider-incident-state-v1`
+- `ProviderHealthManager` — `provider-health-history-v1`
+- `ProviderFeatureFlagManager` — `provider-feature-flags-v1`
+- `ProviderDegradedModeManager` — `provider-degraded-mode-v1`
+- `ProviderSLOManager` — `provider-slo-observations-v1`
+- `ProviderProjectPolicyManager` — `provider-project-policy-v1`
 
 Each manager accepts `state_encryption_key_provider`, plus an optional `state_encryption_context` override. The callback must return the 32-byte key for the supplied context from deployment-managed key storage. Never hard-code keys, store them beside state files, or commit them. To migrate an existing plaintext state file, set `migrate_legacy_plaintext_state=True` for the controlled migration startup; the read and rewrite occur under the manager's interprocess lock. The manager rejects plaintext by default once encryption is enabled. After successful migration, disable the migration flag for normal operation.
 
-**Deployment limitation:** encryption remains opt-in to preserve existing deployments that have not provisioned a key service. Files for other provider-store components, the provider catalog/configuration, external databases, backups and generated user assets are not automatically encrypted by this feature. The deployment must explicitly configure each supported manager, protect backups/disks, provide key recovery/rotation, and test restoration. This work does not yet implement a deployment-wide retention schedule or a verified deletion workflow across provider-side copies; do not represent those controls as complete.
+**Deployment limitation:** encryption remains opt-in to preserve existing deployments that have not provisioned a key service. Other provider-store files (including versioned config-migration backups), the provider catalog/configuration, external databases, backups and generated user assets are not automatically encrypted by this feature. The deployment must explicitly configure each supported manager, protect backups/disks, provide key recovery/rotation, and test restoration. This work does not yet implement a deployment-wide retention schedule or a verified deletion workflow across provider-side copies; do not represent those controls as complete.
 
 ## Privacy lifecycle and deployment limits
 
