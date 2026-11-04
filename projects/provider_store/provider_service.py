@@ -899,6 +899,45 @@ class ProviderService:
             "health": health,
         }
 
+    @staticmethod
+    def _sanitize_job_response(result: dict[str, Any], sensitive_data_policy: Any | None = None) -> dict[str, Any]:
+        """Redact worker-only lease tokens and fail closed on sensitive stored job data.
+
+        Claim responses are intentionally excluded: only the worker claiming a job
+        receives its lease token. Status, completion, submission and cancellation
+        responses must never disclose that capability to ordinary API callers.
+        """
+        safe_result = dict(result)
+        job = safe_result.get("job")
+        if not isinstance(job, dict):
+            return safe_result
+
+        safe_job = dict(job)
+        safe_job.pop("lease_token", None)
+        if sensitive_data_policy is not None:
+            try:
+                scan = sensitive_data_policy.inspect(safe_job)
+            except Exception:
+                scan = {
+                    "allowed": False,
+                    "status": "SENSITIVE_DATA_SCAN_FAILED",
+                    "findings": [],
+                    "blocked_categories": [],
+                }
+            if not isinstance(scan, dict) or scan.get("allowed") is not True:
+                return {
+                    "status": "SENSITIVE_DATA_BLOCKED",
+                    "job": None,
+                    "sensitive_data_scan": scan if isinstance(scan, dict) else {
+                        "allowed": False,
+                        "status": "INVALID_SENSITIVE_DATA_SCAN_RESPONSE",
+                        "findings": [],
+                        "blocked_categories": [],
+                    },
+                }
+        safe_result["job"] = safe_job
+        return safe_result
+
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
@@ -924,7 +963,7 @@ class ProviderService:
             result = self.job_manager.submit(**submit_args)
         except Exception as exc:
             return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
+        return self._sanitize_job_response(result, self.sensitive_data_policy) if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
 
     def poll_job(
         self, *, job_id: str, principal_id: str | None = None,
@@ -966,7 +1005,7 @@ class ProviderService:
             )
             if tenant_error is not None:
                 return {"status": tenant_error["status"], "job": None}
-        return result
+        return self._sanitize_job_response(result, self.sensitive_data_policy)
 
     def claim_next_job(self, *, worker_id: str, principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
@@ -1012,7 +1051,7 @@ class ProviderService:
             )
         except Exception as exc:
             return {"status": "JOB_COMPLETION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        return self._sanitize_job_response(result, self.sensitive_data_policy) if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
 
     def cancel_job(
         self, *, job_id: str, principal_id: str | None = None,
@@ -1059,7 +1098,7 @@ class ProviderService:
                 result = self.job_manager.cancel(job_id=job_id)
         except Exception as exc:
             return {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        return self._sanitize_job_response(result, self.sensitive_data_policy) if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
 
     def verify_webhook(
         self,
