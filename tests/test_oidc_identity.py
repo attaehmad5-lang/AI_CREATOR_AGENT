@@ -177,7 +177,8 @@ class OIDCIdentityAuthenticatorTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(OIDCAuthenticationError, "OIDC_SIGNING_KEY_NOT_FOUND"):
             resolver("unused", {"kid": "unknown", "alg": "RS256"})
-\n    def test_jwks_resolver_rejects_bad_key_usage_and_duplicate_ids(self):
+
+    def test_jwks_resolver_rejects_bad_key_usage_and_duplicate_ids(self):
         class Response:
             def __init__(self, body):
                 self.body = body
@@ -214,6 +215,61 @@ class OIDCIdentityAuthenticatorTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(OIDCAuthenticationError, "OIDC_JWKS_INVALID"):
             duplicate("not-used", {"kid": "same", "alg": "RS256"})
+
+
+
+    def test_provider_service_requires_opaque_verified_principal_when_oidc_is_enabled(self):
+        authorization = ProviderAuthorizationManager(self.path)
+        authorization.assign_role("user-123", "creator")
+        connection_stub = type(
+            "ConnectionStub", (),
+            {"verify_connectivity": lambda self, *args, **kwargs: {}},
+        )()
+        service = ProviderService(
+            connection_stub,
+            authorization_manager=authorization,
+            identity_authenticator=self.authenticator,
+        )
+
+        denied = service._authorize_operation("user-123", "provider.generate")
+        self.assertEqual(denied["status"], "OIDC_AUTHENTICATION_REQUIRED")
+        self.assertEqual(
+            service._authorize_operation(None, "provider.generate")["status"],
+            "OIDC_AUTHENTICATION_REQUIRED",
+        )
+
+        verified = service.authenticate_bearer_token("Bearer " + self.token())
+        self.assertTrue(verified["authenticated"])
+        self.assertEqual(verified["status"], "AUTHENTICATED")
+        principal = verified["principal_id"]
+        self.assertIsNone(service._authorize_operation(principal, "provider.generate"))
+        self.assertEqual(
+            service._authorize_operation(principal, "billing.approve")["status"],
+            "ACCESS_DENIED",
+        )
+
+        other = OIDCIdentityAuthenticator(
+            issuer="https://identity.example.test/",
+            audience="ai-creator-agent-api",
+            key_resolver=lambda token, header: self.public_key,
+        )
+        foreign_principal = other.authenticate(self.token())
+        self.assertEqual(
+            service._authorize_operation(foreign_principal, "provider.generate")["status"],
+            "OIDC_AUTHENTICATION_REQUIRED",
+        )
+
+    def test_provider_service_does_not_expose_invalid_bearer_token(self):
+        authorization = ProviderAuthorizationManager(self.path)
+        service = ProviderService(
+            type("ConnectionStub", (), {"verify_connectivity": lambda self, *args, **kwargs: {}})(),
+            authorization_manager=authorization,
+            identity_authenticator=self.authenticator,
+        )
+        result = service.authenticate_bearer_token("Bearer not-a-jwt")
+        self.assertFalse(result["authenticated"])
+        self.assertEqual(result["status"], "OIDC_TOKEN_INVALID")
+        self.assertNotIn("not-a-jwt", repr(result))
 
 
 if __name__ == "__main__":
