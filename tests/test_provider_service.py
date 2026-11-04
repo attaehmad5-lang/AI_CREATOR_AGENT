@@ -1269,6 +1269,43 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(missing_identity["authorization"]["status"], "INVALID_PRINCIPAL_ID")
         self.assertEqual(called, [])
 
+    def test_sensitive_data_policy_is_enabled_by_default_for_direct_routing(self):
+        calls = []
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        secret = "Bearer " + ("x" * 40)
+        result = service.route_request(category="image", project_id="film", authorization=secret)
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(calls, [])
+        self.assertNotIn(secret, repr(result))
+
+    def test_sensitive_data_policy_is_enabled_by_default_before_adapter(self):
+        calls = []
+        service = ProviderService(self.connections, routing_manager=type(
+            "RoutingStub", (), {"route": lambda self, **kwargs: {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}}
+        )())
+
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="default-sensitive-policy",
+            estimated_cost=0.0,
+            modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            adapter_options={"headers": {"Authorization": "Bearer " + ("z" * 40)}},
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
     def test_sensitive_credentials_are_blocked_before_routing_and_adapter(self):
         calls = {"route": 0, "adapter": 0}
 
