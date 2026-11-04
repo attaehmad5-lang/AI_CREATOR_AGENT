@@ -6,6 +6,7 @@ key material is generated, stored, logged, or committed by this module.
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import os
 import tempfile
@@ -109,7 +110,7 @@ class EncryptedJSONStateStore:
             try:
                 nonce = base64.b64decode(document["nonce"], validate=True)
                 ciphertext = base64.b64decode(document["ciphertext"], validate=True)
-            except (ValueError, TypeError) as exc:
+            except (binascii.Error, ValueError, TypeError) as exc:
                 raise EncryptedStateError("encrypted state envelope encoding is invalid") from exc
             if len(nonce) != _NONCE_BYTES or len(ciphertext) < 16 or len(ciphertext) > self.max_state_bytes:
                 raise EncryptedStateError("encrypted state envelope size is invalid")
