@@ -218,9 +218,11 @@ class ProviderService:
             result = setter(target_principal_id, provider_scopes)
         except Exception as exc:
             return {"status": "PROVIDER_SCOPE_UPDATE_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False
-        }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        if self._sensitive_input_rejection({"provider_scope_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
+        return result
 
     def configure_provider(
         self,
@@ -254,13 +256,18 @@ class ProviderService:
         if not callable(configure):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
         try:
-            return configure(
+            result = configure(
                 provider_id, model=model, endpoint=endpoint,
                 probe_endpoint=probe_endpoint,
                 authentication_required=authentication_required,
             )
         except Exception as exc:
             return {"status": "PROVIDER_CONFIGURATION_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_CONNECTION_MANAGER_RESPONSE", "provider": provider_id, "saved": False}
+        if self._sensitive_input_rejection({"provider_configuration_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "provider": provider_id, "saved": False}
+        return result
 
     def set_provider_enabled(
         self,
@@ -284,9 +291,14 @@ class ProviderService:
         if not callable(setter):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
         try:
-            return setter(provider_id, enabled)
+            result = setter(provider_id, enabled)
         except Exception as exc:
             return {"status": "PROVIDER_ENABLEMENT_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_CONNECTION_MANAGER_RESPONSE", "provider": provider_id, "saved": False}
+        if self._sensitive_input_rejection({"provider_enablement_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "provider": provider_id, "saved": False}
+        return result
 
     def assign_provider_role(
         self,
@@ -322,6 +334,8 @@ class ProviderService:
             return {"status": "ROLE_ASSIGNMENT_FAILED", "saved": False, "error_type": type(exc).__name__}
         if not isinstance(result, dict):
             return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        if self._sensitive_input_rejection({"provider_role_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
         return result
 
     def disable_provider_principal(
@@ -352,6 +366,8 @@ class ProviderService:
             return {"status": "PRINCIPAL_DISABLE_FAILED", "saved": False, "error_type": type(exc).__name__}
         if not isinstance(result, dict):
             return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        if self._sensitive_input_rejection({"principal_disable_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
         return result
 
     def _authorize_tenant_project(
@@ -412,6 +428,8 @@ class ProviderService:
             return result if isinstance(result, dict) else {
                 "status": "INVALID_DEGRADED_MODE_CONFIGURATION_RESPONSE", "saved": False,
             }
+        if self._sensitive_input_rejection({"degraded_mode_configuration_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
         return result
 
     def evaluate_category_degraded_mode(
@@ -460,6 +478,8 @@ class ProviderService:
             return result if isinstance(result, dict) else {
                 "status": "INVALID_DEGRADED_MODE_RESPONSE", "evaluated": False,
             }
+        if self._sensitive_input_rejection({"degraded_mode_evaluation_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "evaluated": False}
         return result
 
     def configure_service_level_objective(
@@ -496,6 +516,8 @@ class ProviderService:
             return result if isinstance(result, dict) else {
                 "status": "INVALID_SLO_CONFIGURATION_RESPONSE", "saved": False,
             }
+        if self._sensitive_input_rejection({"slo_configuration_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
         return result
 
     def evaluate_service_level_objective(
@@ -518,6 +540,8 @@ class ProviderService:
             return {"status": "SLO_EVALUATION_FAILED", "evaluation": None, "error_type": type(exc).__name__}
         if not isinstance(result, dict) or not isinstance(result.get("status"), str):
             return {"status": "INVALID_SLO_EVALUATION_RESPONSE", "evaluation": None}
+        if self._sensitive_input_rejection({"slo_evaluation_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "evaluation": None}
         return result
 
     def simulate_project_provider_policy(
@@ -572,6 +596,12 @@ class ProviderService:
         ):
             return {
                 "status": "INVALID_POLICY_SIMULATION_RESPONSE",
+                "project_id": project_id,
+                "persisted": False,
+            }
+        if self._sensitive_input_rejection({"policy_simulation_response": result}) is not None:
+            return {
+                "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
                 "project_id": project_id,
                 "persisted": False,
             }
@@ -936,6 +966,11 @@ class ProviderService:
                     "status": "HEALTH_RECORD_FAILED", "saved": False,
                     "error_type": type(exc).__name__,
                 }
+        if self._sensitive_input_rejection({
+            "manual_connection_response": connection,
+            "manual_health_response": health,
+        }) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "provider": provider_id, "verified": False}
         return {
             "status": connection.get("status", "UNKNOWN"),
             "provider": provider_id,
