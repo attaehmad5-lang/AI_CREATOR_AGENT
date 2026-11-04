@@ -2207,11 +2207,17 @@ class ProviderService:
             minimum=0,
             maximum=86_400,
         )
+        raw_reason = getattr(decision, "reason", "INVALID_RETRY_RESPONSE")
+        reason = (
+            raw_reason
+            if isinstance(raw_reason, str) and len(raw_reason) <= 256
+            else "INVALID_RETRY_RESPONSE"
+        )
         response = {
             "retry": bool(getattr(decision, "retry", False)),
             "attempt": attempt,
             "delay_seconds": 0.0 if delay is None else delay,
-            "reason": getattr(decision, "reason", "INVALID_RETRY_RESPONSE"),
+            "reason": reason,
         }
         if self._sensitive_input_rejection({"retry_policy_response": response}) is not None:
             return {
