@@ -136,7 +136,7 @@ class EncryptedJSONStateStore:
             document = json.loads(raw.decode("utf-8"))
         except EncryptedStateError:
             raise
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
             raise EncryptedStateError("state file is unreadable") from exc
 
         if isinstance(document, dict) and document.get("format") == _FORMAT:
@@ -179,7 +179,7 @@ class EncryptedJSONStateStore:
                 allow_nan=False,
                 separators=(",", ":"),
             ).encode("utf-8")
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, RecursionError) as exc:
             raise EncryptedStateError("state payload is not valid JSON data") from exc
         if len(plaintext) > self.max_state_bytes:
             raise EncryptedStateError("state payload exceeds configured size limit")
