@@ -119,7 +119,7 @@ class ProviderService:
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
 
-    def authenticate_bearer_token(self, token: str) -> dict[str, Any]:
+    def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
 
         API middleware must keep principal_id server-side, never accept it from
@@ -128,8 +128,13 @@ class ProviderService:
         """
         if self.identity_authenticator is None:
             return {"status": "IDENTITY_AUTHENTICATOR_UNAVAILABLE", "authenticated": False}
+        if not isinstance(authorization_header, str) or len(authorization_header) > 65_543:
+            return {"status": "OIDC_TOKEN_INVALID", "authenticated": False}
+        match = re.fullmatch(r"(?i:Bearer) ([A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)", authorization_header)
+        if match is None:
+            return {"status": "OIDC_TOKEN_INVALID", "authenticated": False}
         try:
-            principal = self.identity_authenticator.authenticate(token)
+            principal = self.identity_authenticator.authenticate(match.group(1))
             trusted = self.identity_authenticator.is_authenticated_principal(principal)
         except Exception as exc:
             status = getattr(exc, "status", None)
