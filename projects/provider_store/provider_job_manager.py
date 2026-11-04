@@ -70,12 +70,18 @@ class ProviderJobManager:
             "version": "1.0", "jobs": {},
             "scheduler": {"last_project_id": None},
         }
-        self._reload()
+        if self.state_path.exists():
+            lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                if self._reload():
+                    self._save()
+        else:
+            self._reload()
 
     def _reload(self) -> bool:
         if not self.state_path.exists():
             self.data = {"version": "1.0", "jobs": {}}
-            return
+            return False
         try:
             with self.state_path.open("r", encoding="utf-8") as stream:
                 loaded = json.load(stream)
@@ -106,8 +112,13 @@ class ProviderJobManager:
         for job_id, job in loaded["jobs"].items():
             if isinstance(job, dict) and "lease_token" in job and "lease_token_hash" not in job:
                 legacy_token = job.pop("lease_token")
+                if legacy_token is not None and (
+                    not isinstance(legacy_token, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", legacy_token)
+                ):
+                    raise ValueError("invalid provider job record")
                 job["lease_token_hash"] = (
-                    _lease_token_digest(legacy_token) if isinstance(legacy_token, str) else None
+                    _lease_token_digest(legacy_token) if legacy_token is not None else None
                 )
                 migrated_legacy_tokens = True
             if (
