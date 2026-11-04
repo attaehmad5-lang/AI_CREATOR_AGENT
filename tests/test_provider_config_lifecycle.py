@@ -245,6 +245,46 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         with self.assertRaises(EncryptedStateError):
             manager._backup_store(transplanted).read({})
 
+    def test_failed_backup_encryption_leaves_config_unchanged(self):
+        path = self.root / "provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        original_text = json.dumps(original)
+        path.write_text(original_text, encoding="utf-8")
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            backup_encryption_key_provider=lambda context: b"invalid-key",
+        )
+
+        result = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_WRITE_FAILED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(path.read_text(encoding="utf-8"), original_text)
+        self.assertFalse(path.with_name(path.name + ".bak.enc").exists())
+
+    def test_encrypted_backup_mode_refuses_to_leave_legacy_plaintext_backup_untouched(self):
+        path = self.root / "provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        original_text = json.dumps(original)
+        path.write_text(original_text, encoding="utf-8")
+        legacy_backup = path.with_name(path.name + ".bak")
+        legacy_backup.write_text(json.dumps({"private": "legacy-backup"}), encoding="utf-8")
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            backup_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
+
+        result = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        self.assertEqual(result["status"], "CONFIG_PLAINTEXT_BACKUP_REQUIRES_MANUAL_CLEANUP")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(path.read_text(encoding="utf-8"), original_text)
+        self.assertEqual(legacy_backup.read_text(encoding="utf-8"), json.dumps({"private": "legacy-backup"}))
+
     def test_file_migration_runs_inside_interprocess_lock(self):
         path = self.root / "provider-config.json"
         path.write_text(
