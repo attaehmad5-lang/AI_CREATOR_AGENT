@@ -1155,17 +1155,21 @@ class ProviderService:
         if not isinstance(result, dict):
             return {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
         safe_result = dict(result)
+        scan_result = dict(result)
         if isinstance(safe_result.get("job"), dict):
             safe_job = dict(safe_result["job"])
-            # A freshly claimed lease token is the sole intentionally exposed
-            # capability; exclude only these two worker-only fields from scanning.
-            safe_job.pop("lease_token", None)
+            scan_job = dict(safe_job)
+            # Only the freshly issued lease token is intentionally returned to
+            # the claiming worker. The verifier hash is never a public field.
+            scan_job.pop("lease_token", None)
+            scan_job.pop("lease_token_hash", None)
             safe_job.pop("lease_token_hash", None)
             safe_result["job"] = safe_job
-        rejection = self._sensitive_input_rejection({"job_claim_response": safe_result})
+            scan_result["job"] = scan_job
+        rejection = self._sensitive_input_rejection({"job_claim_response": scan_result})
         if rejection is not None:
             return {"status": rejection["status"], "job": None}
-        return result
+        return safe_result
 
     def renew_job_lease(
         self, *, job_id: str, worker_id: str, lease_token: str,
