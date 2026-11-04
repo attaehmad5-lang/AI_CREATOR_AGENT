@@ -2178,16 +2178,27 @@ class ProviderService:
     def retry_decision(self, **failure: Any) -> dict[str, Any]:
         if self.retry_policy is None:
             return {"retry": False, "reason": "RETRY_POLICY_UNAVAILABLE"}
+        input_rejection = self._sensitive_input_rejection({"retry_failure": failure})
+        if input_rejection is not None:
+            return {"retry": False, "reason": "SENSITIVE_DATA_BLOCKED"}
         try:
             decision = self.retry_policy.decide(**failure)
         except Exception as exc:
             return {"retry": False, "reason": "RETRY_POLICY_FAILED", "error_type": type(exc).__name__}
-        return {
+        response = {
             "retry": bool(getattr(decision, "retry", False)),
             "attempt": getattr(decision, "attempt", 0),
             "delay_seconds": getattr(decision, "delay_seconds", 0.0),
             "reason": getattr(decision, "reason", "INVALID_RETRY_RESPONSE"),
         }
+        if self._sensitive_input_rejection({"retry_policy_response": response}) is not None:
+            return {
+                "retry": response["retry"],
+                "attempt": response["attempt"],
+                "delay_seconds": response["delay_seconds"],
+                "reason": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+            }
+        return response
 
     @staticmethod
     def _valid_amount(value: Any) -> bool:
