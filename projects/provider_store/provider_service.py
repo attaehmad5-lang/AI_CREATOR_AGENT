@@ -2414,7 +2414,7 @@ class ProviderService:
             and (credit_result is None or credit_result.get("saved") is True)
             and (health_result is None or health_result.get("saved") is True)
         )
-        return {
+        response = {
             "status": "FINALIZED" if finalized else "FINALIZATION_PARTIAL",
             "finalized": finalized,
             "cost": cost_result,
@@ -2422,6 +2422,12 @@ class ProviderService:
             "credits": credit_result,
             "health": health_result,
         }
+        if self._sensitive_input_rejection({"usage_finalization_response": response}) is not None:
+            return {
+                "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                "finalized": finalized,
+            }
+        return response
 
     def release_unstarted_request(
         self, *, project_id: str, provider_id: str, request_id: str,
@@ -2471,4 +2477,7 @@ class ProviderService:
             item.get("status") in {"RESERVATION_RELEASED", "RELEASED", "RESERVATION_NOT_FOUND"}
             for item in results.values()
         )
-        return {"status": "RELEASED" if released else "RELEASE_PARTIAL", "released": released, **results}
+        response = {"status": "RELEASED" if released else "RELEASE_PARTIAL", "released": released, **results}
+        if self._sensitive_input_rejection({"reservation_release_response": response}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "released": released}
+        return response
