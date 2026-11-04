@@ -12,6 +12,7 @@ from .provider_error_policy import classify_provider_error
 from .secrets_manager import SecretManagerError
 from .encrypted_state_store import EncryptedJSONStateStore
 from .sensitive_data_policy import SensitiveDataPolicy
+from .privacy_data_lifecycle import PrivacyDataLifecycleManager
 
 
 class ProviderService:
@@ -45,11 +46,16 @@ class ProviderService:
         slo_manager: Any | None = None,
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
+        privacy_lifecycle_manager: PrivacyDataLifecycleManager | None = None,
         secret_manager: Any | None = None,
         require_encrypted_state: bool = False,
     ) -> None:
         if not isinstance(require_encrypted_state, bool):
             raise ValueError("require_encrypted_state must be boolean")
+        if privacy_lifecycle_manager is not None and not isinstance(
+            privacy_lifecycle_manager, PrivacyDataLifecycleManager
+        ):
+            raise ValueError("privacy_lifecycle_manager must use PrivacyDataLifecycleManager")
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
         if tenant_isolation_manager is not None and authorization_manager is None:
@@ -180,6 +186,7 @@ class ProviderService:
         self.slo_manager = slo_manager
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
+        self.privacy_lifecycle_manager = privacy_lifecycle_manager
         self.secret_manager = resolved_secret_manager
         self.require_encrypted_state = require_encrypted_state
         self._privacy_storage_status = storage_status
@@ -1474,6 +1481,120 @@ class ProviderService:
             return {"status": "INVALID_JOB_RETENTION_RESPONSE", "purged": False, "purged_count": 0}
         if self._sensitive_input_rejection({"job_retention_response": result}) is not None:
             return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "purged": False, "purged_count": 0}
+        return result
+
+    def delete_subject_data(
+        self,
+        *,
+        subject_ref: str,
+        project_id: str,
+        request_id: str,
+        principal_id: str | None,
+        tenant_id: str | None = None,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Admin-gated subject deletion across every registered privacy store."""
+        if self.privacy_lifecycle_manager is None:
+            return {"status": "PRIVACY_LIFECYCLE_MANAGER_UNAVAILABLE", "confirmed": False, "completed": False}
+        if confirmed is not True:
+            return {"status": "SUBJECT_DELETION_CONFIRMATION_REQUIRED", "confirmed": False, "completed": False}
+        rejection = self._sensitive_input_rejection({
+            "subject_deletion_request": {
+                "subject_ref": subject_ref,
+                "project_id": project_id,
+                "tenant_id": tenant_id,
+                "request_id": request_id,
+            },
+        })
+        if rejection is not None:
+            return {"confirmed": False, "completed": False, **rejection}
+        authorization = self._authorize_operation(principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "confirmed": False, "completed": False}
+        tenant_error = self._authorize_tenant_project(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            principal_id=principal_id,
+        )
+        if tenant_error is not None:
+            return {"status": tenant_error["status"], "confirmed": False, "completed": False}
+        try:
+            result = self.privacy_lifecycle_manager.delete_subject_data(
+                subject_ref=subject_ref,
+                project_id=project_id,
+                tenant_id=tenant_id,
+                request_id=request_id,
+                confirmed=True,
+            )
+        except Exception as exc:
+            return {
+                "status": "SUBJECT_DATA_DELETION_FAILED",
+                "confirmed": False,
+                "completed": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_PRIVACY_LIFECYCLE_RESPONSE", "confirmed": False, "completed": False}
+        if self._sensitive_input_rejection({"subject_deletion_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "confirmed": False, "completed": False}
+        return result
+
+    def purge_expired_privacy_data(
+        self,
+        *,
+        cutoff: datetime,
+        project_id: str,
+        request_id: str,
+        principal_id: str | None,
+        tenant_id: str | None = None,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Admin-gated retention purge across every registered privacy store."""
+        if self.privacy_lifecycle_manager is None:
+            return {"status": "PRIVACY_LIFECYCLE_MANAGER_UNAVAILABLE", "confirmed": False, "completed": False}
+        if confirmed is not True:
+            return {"status": "RETENTION_PURGE_CONFIRMATION_REQUIRED", "confirmed": False, "completed": False}
+        if not isinstance(cutoff, datetime) or cutoff.tzinfo is None or cutoff.utcoffset() is None:
+            return {"status": "INVALID_RETENTION_PURGE_SCOPE", "confirmed": False, "completed": False}
+        rejection = self._sensitive_input_rejection({
+            "privacy_retention_request": {
+                "project_id": project_id,
+                "tenant_id": tenant_id,
+                "request_id": request_id,
+                "cutoff": cutoff.isoformat(),
+            },
+        })
+        if rejection is not None:
+            return {"confirmed": False, "completed": False, **rejection}
+        authorization = self._authorize_operation(principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "confirmed": False, "completed": False}
+        tenant_error = self._authorize_tenant_project(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            principal_id=principal_id,
+        )
+        if tenant_error is not None:
+            return {"status": tenant_error["status"], "confirmed": False, "completed": False}
+        try:
+            result = self.privacy_lifecycle_manager.purge_expired_data(
+                cutoff=cutoff,
+                project_id=project_id,
+                tenant_id=tenant_id,
+                request_id=request_id,
+                confirmed=True,
+            )
+        except Exception as exc:
+            return {
+                "status": "RETENTION_PURGE_FAILED",
+                "confirmed": False,
+                "completed": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_PRIVACY_LIFECYCLE_RESPONSE", "confirmed": False, "completed": False}
+        if self._sensitive_input_rejection({"privacy_retention_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "confirmed": False, "completed": False}
         return result
 
     def verify_webhook(
