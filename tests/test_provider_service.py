@@ -1626,6 +1626,9 @@ class ProviderServiceTests(unittest.TestCase):
         secret = "Bearer " + ("m" * 40)
 
         class ConnectionStub:
+            def verify_connectivity(self, *args, **kwargs):
+                return {"status": "CONNECTED", "verified": True}
+
             def verify_manual_connection(self, *args, **kwargs):
                 return {
                     "status": "CONNECTED",
@@ -1648,6 +1651,12 @@ class ProviderServiceTests(unittest.TestCase):
         authorization.assign_role("privacy-admin", "admin")
 
         class SLOStub:
+            def record(self, **kwargs):
+                return {"status": "RECORDED"}
+
+            def configure(self, **kwargs):
+                return {"status": "CONFIGURED"}
+
             def evaluate(self, slo_id):
                 return {
                     "status": "SLO_EVALUATED",
@@ -1672,6 +1681,9 @@ class ProviderServiceTests(unittest.TestCase):
         secret = "ghp_" + ("f" * 36)
 
         class CostPolicyStub:
+            def reconcile_usage(self, **kwargs):
+                return {"status": "RECONCILED"}
+
             def finalize_usage(self, **kwargs):
                 return {
                     "status": "FINALIZED",
@@ -1698,6 +1710,9 @@ class ProviderServiceTests(unittest.TestCase):
         secret = "Bearer " + ("r" * 40)
 
         class CostPolicyStub:
+            def reconcile_usage(self, **kwargs):
+                return {"status": "RECONCILED"}
+
             def release_reservation(self, **kwargs):
                 return {
                     "status": "RESERVATION_RELEASED",
@@ -1803,6 +1818,9 @@ class ProviderServiceTests(unittest.TestCase):
         lease_hash = "private-lease-verifier-hash"
 
         class JobManagerStub:
+            def submit(self, **kwargs):
+                return {"status": "SUBMITTED", "accepted": True}
+
             def claim_next(self, *, worker_id):
                 return {
                     "status": "CLAIMED",
