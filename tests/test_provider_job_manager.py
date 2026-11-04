@@ -405,6 +405,26 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.poll(job_id="new-job")["status"], "JOB_STATUS")
         self.assertEqual(self.manager.poll(job_id="other-project")["status"], "JOB_STATUS")
 
+    def test_unscoped_retention_purge_never_deletes_tenant_owned_jobs(self):
+        self.manager.submit(
+            job_id="tenant-job", project_id="film", provider_id="image",
+            payload_ref="payload:tenant-job", tenant_id="tenant-01",
+        )
+        claimed = self.manager.claim_next(worker_id="worker-tenant")
+        self.manager.complete(
+            job_id="tenant-job", worker_id="worker-tenant",
+            lease_token=claimed["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+        result = self.manager.purge_terminal_jobs_before(
+            project_id="film", cutoff=self.now[0] + timedelta(days=1)
+        )
+        self.assertEqual(result["purged_count"], 0)
+        self.assertEqual(
+            self.manager.poll(job_id="tenant-job", tenant_id="tenant-01")["status"],
+            "JOB_STATUS",
+        )
+
     def test_retention_purge_preserves_running_jobs_and_invalid_completion_timestamps(self):
         self.submit("running-job")
         claimed = self.manager.claim_next(worker_id="worker-1")
