@@ -409,6 +409,26 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["delay_seconds"], 0.0)
         self.assertNotIn(token, repr(result))
 
+    def test_retry_policy_non_string_reason_is_not_returned(self):
+        secret = "Bearer " + ("x" * 40)
+
+        class RetryStub:
+            def decide(self, **failure):
+                return type("Decision", (), {
+                    "retry": True,
+                    "attempt": 1,
+                    "delay_seconds": 0.25,
+                    "reason": {"api_key": secret},
+                })()
+
+        service = ProviderService(self.connections, retry_policy=RetryStub())
+        result = service.retry_decision(error="HTTP_503")
+
+        self.assertTrue(result["retry"])
+        self.assertEqual(result["reason"], "INVALID_RETRY_RESPONSE")
+        self.assertNotIn(secret, repr(result))
+
+
     def test_output_validation_and_retry_decision_are_delegated(self):
         path = self.root / "script.txt"
         path.write_text("script", encoding="utf-8")
