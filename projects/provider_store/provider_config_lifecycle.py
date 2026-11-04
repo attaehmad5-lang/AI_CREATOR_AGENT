@@ -248,6 +248,8 @@ class ProviderConfigLifecycleManager:
     def _backup_store(self, backup_path: Path) -> EncryptedJSONStateStore:
         if self.backup_encryption_key_provider is None:
             raise ValueError("encrypted config backup key provider is unavailable")
+        if backup_path.is_symlink():
+            raise ValueError("encrypted config backup path must not be a symlink")
         # A path-derived context prevents ciphertext from being transplanted
         # between independently configured provider configuration files.
         path_digest = hashlib.sha256(str(backup_path.resolve()).encode("utf-8")).hexdigest()[:24]
