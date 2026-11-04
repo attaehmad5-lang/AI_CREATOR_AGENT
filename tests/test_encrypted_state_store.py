@@ -125,6 +125,23 @@ class EncryptedJSONStateStoreTests(unittest.TestCase):
 
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), legacy)
 
+    def test_recursively_nested_payloads_fail_with_controlled_state_error(self):
+        self.path.write_text("[" * 2000 + "0" + "]" * 2000, encoding="utf-8")
+        with self.assertRaises(EncryptedStateError):
+            self.store().read({})
+
+        self.path.unlink()
+        deeply_nested = []
+        current = deeply_nested
+        for _ in range(2000):
+            child = []
+            current.append(child)
+            current = child
+
+        with self.assertRaises(EncryptedStateError):
+            self.store().write(deeply_nested)
+
+
     def test_invalid_key_size_and_oversized_state_are_rejected(self):
         invalid = self.store(key_provider=lambda context: b"short")
         with self.assertRaises(EncryptedStateError):
