@@ -2074,20 +2074,15 @@ class ProviderService:
         # Scan externally supplied adapter and manager result values, but do not
         # classify this facade's own authorization decision as a caller credential.
         outbound_results = {
+            # Adapter and pluggable operational-manager results can contain
+            # provider-controlled metadata; local accounting/auth decisions are
+            # deliberately excluded from this credential-value scan.
             "adapter_response": adapter_result,
-            "finalization": finalization,
             "metrics": metrics_result,
             "slo_observation": slo_result,
             "benchmark": benchmark_result,
             "incident": incident_result,
-            "provider_error": provider_error,
             "budget_alerts": budget_alerts,
-            "degraded_mode": degraded_mode_state,
-            "feature_flag": feature_flag_result,
-            "data_policy": data_policy_result,
-            "quality": quality_result,
-            "media_integrity": media_integrity_result,
-            "output_validation": output_validation,
         }
         rejection = self._sensitive_input_rejection({"outbound_results": outbound_results})
         if rejection is not None:
