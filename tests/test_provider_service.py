@@ -103,9 +103,14 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertFalse(encrypted_state_path.exists())
 
     def test_production_mode_rejects_unencrypted_cost_ledger_and_project_policy_path(self):
+        encrypted_connections = ConnectionManager(
+            self.catalog_path,
+            self.root / "strict-encrypted-connection-state.json",
+            state_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
         with self.assertRaisesRegex(ValueError, "cost_policy must use deployment-key-encrypted"):
             ProviderService(
-                self.connections,
+                encrypted_connections,
                 cost_policy=self.cost,
                 require_encrypted_state=True,
             )
@@ -115,7 +120,7 @@ class ProviderServiceTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "project_policy_manager must use deployment-key-encrypted"):
             ProviderService(
-                self.connections,
+                encrypted_connections,
                 project_policy_manager=project_policy,
                 require_encrypted_state=True,
             )
