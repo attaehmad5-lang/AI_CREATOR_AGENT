@@ -413,6 +413,79 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
             manager._backup_store(backup_path).read({}), original
         )
 
+    def test_active_config_encryption_migrates_legacy_plaintext_with_encrypted_backup(self):
+        path = self.root / "active-encrypted-provider-config.json"
+        original = {
+            "schema_version": "1",
+            "providers": {"image": {}},
+            "owner_contact": "owner.private@example.com",
+        }
+        path.write_text(json.dumps(original), encoding="utf-8")
+        key = b"0123456789abcdef0123456789abcdef"
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            config_encryption_key_provider=lambda context: key,
+            migrate_legacy_plaintext_config=True,
+        )
+
+        result = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_APPLIED")
+        self.assertTrue(result["migrated"])
+        self.assertNotIn("owner.private@example.com", path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            manager._config_store(path).read({}),
+            {"schema_version": "2", "providers": {"image": {}}},
+        )
+        backup_path = Path(result["backup_path"])
+        self.assertTrue(backup_path.name.endswith(".bak.enc"))
+        self.assertNotIn(b"owner.private@example.com", backup_path.read_bytes())
+        self.assertEqual(manager._backup_store(backup_path).read({}), original)
+
+    def test_active_config_encryption_rejects_plaintext_without_explicit_migration(self):
+        path = self.root / "no-implicit-plaintext-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        original_text = json.dumps(original)
+        path.write_text(original_text, encoding="utf-8")
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            config_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
+
+        result = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        self.assertEqual(result["status"], "INVALID_CONFIG_FILE")
+        self.assertEqual(path.read_text(encoding="utf-8"), original_text)
+        self.assertFalse(path.with_name(path.name + ".bak.enc").exists())
+
+    def test_active_encrypted_config_rolls_back_to_encrypted_original(self):
+        path = self.root / "active-encrypted-rollback-config.json"
+        original = {
+            "schema_version": "1",
+            "providers": {"image": {}},
+            "owner_contact": "rollback.owner@example.com",
+        }
+        path.write_text(json.dumps(original), encoding="utf-8")
+        key = b"0123456789abcdef0123456789abcdef"
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            config_encryption_key_provider=lambda context: key,
+            migrate_legacy_plaintext_config=True,
+        )
+        with patch.object(manager, "reload", return_value={"reloaded": False}):
+            result = manager.migrate_file(
+                path, target_version="2", migrations={"1": migrate_v1_to_v2}
+            )
+
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_ROLLED_BACK")
+        self.assertNotIn("rollback.owner@example.com", path.read_text(encoding="utf-8"))
+        self.assertEqual(manager._config_store(path).read({}), original)
+        self.assertTrue(Path(result["backup_path"]).exists())
+
     def test_file_migration_runs_inside_interprocess_lock(self):
         path = self.root / "provider-config.json"
         path.write_text(
