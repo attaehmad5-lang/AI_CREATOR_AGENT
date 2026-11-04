@@ -1521,6 +1521,9 @@ class ProviderServiceTests(unittest.TestCase):
         secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
 
         class SensitiveJobManager:
+            def submit(self, **kwargs):
+                return {"status": "JOB_QUEUED", "accepted": True}
+
             def poll(self, *, job_id):
                 return {
                     "status": "JOB_STATUS",
