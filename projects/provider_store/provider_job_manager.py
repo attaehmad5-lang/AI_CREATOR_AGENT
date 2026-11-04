@@ -588,7 +588,7 @@ class ProviderJobManager:
                     not isinstance(job, dict)
                     or job.get("project_id") != project_id
                     or job.get("status") not in _TERMINAL
-                    or (tenant_id is not None and job.get("tenant_id") != tenant_id)
+                    or job.get("tenant_id") != tenant_id
                 ):
                     continue
                 completed_at = job.get("completed_at")
