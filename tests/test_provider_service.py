@@ -1306,6 +1306,106 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.assertEqual(calls, [])
 
+    def test_sensitive_data_policy_blocks_credentials_in_routing_response(self):
+        secret = "sk-" + ("r" * 40)
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "provider": "image",
+                    "diagnostics": {"api_key": secret},
+                }
+
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        result = service.route_request(category="image", project_id="film")
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["allowed"])
+        self.assertNotIn(secret, repr(result))
+
+    def test_sensitive_data_policy_checks_entire_job_response_not_only_job_payload(self):
+        secret = "ghp_" + ("a" * 40)
+        result = ProviderService._sanitize_job_response(
+            {
+                "status": "JOB_COMPLETED",
+                "job": {"job_id": "job-1", "status": "completed"},
+                "diagnostics": {"access_token": secret},
+            },
+            SensitiveDataPolicy(),
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertIsNone(result["job"])
+        self.assertNotIn(secret, repr(result))
+
+    def test_webhook_verifier_response_is_scanned_before_return(self):
+        secret = "Bearer " + ("w" * 40)
+
+        class WebhookStub:
+            def verify(self, **kwargs):
+                return {
+                    "verified": True,
+                    "status": "WEBHOOK_VERIFIED",
+                    "metadata": {"authorization": secret},
+                }
+
+        service = ProviderService(self.connections, webhook_verifier=WebhookStub())
+        result = service.verify_webhook(
+            provider_id="image",
+            payload=b'{"event":"complete"}',
+            signature="sha256=" + ("0" * 64),
+            timestamp=1,
+            event_id="event-1",
+            secret="s" * 32,
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+    def test_execute_response_is_blocked_when_manager_returns_credential(self):
+        secret = "hf_" + ("q" * 40)
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "provider": "image",
+                    "billing_mode": "ZERO_COST",
+                }
+
+        class MetricsStub:
+            def record(self, **kwargs):
+                return {"status": "RECORDED", "metadata": {"access_token": secret}}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            metrics_manager=MetricsStub(),
+        )
+        service.finalize_started_request = lambda **kwargs: {"finalized": True}
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="outbound-sensitive-response",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: {
+                "started": True,
+                "success": False,
+                "actual_cost": 0.0,
+                "charge_outcome": "not_incurred",
+                "credit_outcome": "not_used",
+            },
+            modality="image",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertTrue(result["executed"])
+        self.assertTrue(result["accounting_finalized"])
+        self.assertNotIn(secret, repr(result))
+
+
     def test_sensitive_credentials_are_blocked_before_routing_and_adapter(self):
         calls = {"route": 0, "adapter": 0}
 
