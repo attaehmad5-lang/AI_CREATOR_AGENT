@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from .encrypted_state_store import EncryptedJSONStateStore
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .safe_numbers import finite_number
 
@@ -40,7 +41,12 @@ class BudgetAlertManager:
         retry_base_seconds: float = 30.0,
         retry_max_seconds: float = 900.0,
         dispatch_lease_seconds: int = 120,
+        state_encryption_key_provider: Any = None,
+        state_encryption_context: str = "provider-budget-alerts-v1",
+        migrate_legacy_plaintext_state: bool = False,
     ) -> None:
+        if state_encryption_key_provider is None and migrate_legacy_plaintext_state:
+            raise ValueError("legacy state migration requires an encryption key provider")
         if not isinstance(thresholds, tuple) or not thresholds:
             raise ValueError("thresholds must be a non-empty tuple")
         normalized = []
@@ -73,6 +79,15 @@ class BudgetAlertManager:
             raise ValueError("dispatch_lease_seconds must be within 5..3600")
 
         self.state_path = Path(state_path)
+        self.state_store = (
+            EncryptedJSONStateStore(
+                self.state_path,
+                key_provider=state_encryption_key_provider,
+                context=state_encryption_context,
+                migrate_legacy_plaintext=migrate_legacy_plaintext_state,
+            )
+            if state_encryption_key_provider is not None else None
+        )
         self.thresholds = tuple(normalized)
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.max_delivery_attempts = max_delivery_attempts
@@ -82,7 +97,11 @@ class BudgetAlertManager:
         self.dispatch_lease_seconds = dispatch_lease_seconds
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "events": {}}
-        self._reload()
+        lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+        with interprocess_file_lock(lock_path):
+            self._reload()
+            if self.state_store is not None and self.state_store.migration_required:
+                self._save()
 
     def _now(self) -> datetime:
         value = self.clock()
@@ -115,14 +134,21 @@ class BudgetAlertManager:
         return public
 
     def _reload(self) -> None:
-        if not self.state_path.exists():
-            self.data = {"version": "1.0", "events": {}}
-            return
-        try:
-            with self.state_path.open("r", encoding="utf-8") as stream:
-                loaded = json.load(stream)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise ValueError("invalid budget alert state JSON") from exc
+        default = {"version": "1.0", "events": {}}
+        if self.state_store is not None:
+            loaded = self.state_store.read(default)
+            if not self.state_path.exists():
+                self.data = loaded
+                return
+        else:
+            if not self.state_path.exists():
+                self.data = default
+                return
+            try:
+                with self.state_path.open("r", encoding="utf-8") as stream:
+                    loaded = json.load(stream)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ValueError("invalid budget alert state JSON") from exc
         if (
             not isinstance(loaded, dict)
             or loaded.get("version", "1.0") != "1.0"
@@ -202,6 +228,9 @@ class BudgetAlertManager:
                 yield
 
     def _save(self) -> None:
+        if self.state_store is not None:
+            self.state_store.write(self.data)
+            return
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{self.state_path.name}.", suffix=".tmp",
