@@ -71,6 +71,7 @@ class EncryptedJSONStateStore:
         self.migrate_legacy_plaintext = migrate_legacy_plaintext
         self.max_state_bytes = max_state_bytes
         self.migration_required = False
+        self._erased = False
 
     def rotate_key(
         self,
@@ -142,6 +143,8 @@ class EncryptedJSONStateStore:
                     stack.append((False, child, depth + 1))
 
     def _key(self) -> bytes:
+        if self._erased:
+            raise EncryptedStateError("encrypted state key has been destroyed")
         try:
             key = self.key_provider(self.context)
         except Exception as exc:
@@ -155,6 +158,8 @@ class EncryptedJSONStateStore:
 
     def read(self, default: Any) -> Any:
         """Read JSON state or perform an explicitly enabled legacy plaintext read."""
+        if self._erased:
+            raise EncryptedStateError("encrypted state key has been destroyed")
         self.migration_required = False
         if not self.path.exists():
             return json.loads(json.dumps(default, ensure_ascii=False))
@@ -208,6 +213,8 @@ class EncryptedJSONStateStore:
 
     def write(self, value: Any) -> None:
         """Encrypt and atomically persist JSON state without exposing key material."""
+        if self._erased:
+            raise EncryptedStateError("encrypted state key has been destroyed")
         self._validate_json_structure(value)
         try:
             plaintext = json.dumps(
@@ -261,3 +268,70 @@ class EncryptedJSONStateStore:
                 pass
             raise EncryptedStateError("encrypted state persistence failed") from exc
         self.migration_required = False
+
+    def erase(
+        self,
+        default: Any,
+        *,
+        key_destroyer: Callable[[str], bool],
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Cryptographically erase one store by destroying its dedicated DEK.
+
+        The deployment callback must permanently destroy the unique data-
+        encryption key for this context in its KMS/secret manager. A shared
+        master key must not be passed to this method as a destroyable key.
+        """
+        if confirmed is not True:
+            return {"status": "STATE_ERASURE_CONFIRMATION_REQUIRED", "erased": False}
+        if not callable(key_destroyer):
+            return {"status": "STATE_KEY_DESTROYER_UNAVAILABLE", "erased": False}
+        if self.path.is_symlink():
+            return {"status": "STATE_FILE_SYMLINK_REJECTED", "erased": False}
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        with interprocess_file_lock(lock_path):
+            if not self.path.is_file():
+                return {"status": "STATE_FILE_NOT_FOUND", "erased": False}
+            # Authenticate and parse the ciphertext before destroying its key.
+            # This prevents a wrong context or corrupt file from triggering an
+            # irreversible KMS key deletion based on an invalid state object.
+            self.read(default)
+            if self.migration_required:
+                return {"status": "PLAINTEXT_STATE_MIGRATION_REQUIRED", "erased": False}
+            try:
+                destroyed = key_destroyer(self.context)
+            except Exception as exc:
+                return {
+                    "status": "STATE_KEY_DESTRUCTION_FAILED",
+                    "erased": False,
+                    "error_type": type(exc).__name__,
+                }
+            if destroyed is not True:
+                return {"status": "STATE_KEY_DESTRUCTION_NOT_CONFIRMED", "erased": False}
+            # Prevent this process-local store object from being reused even if
+            # an incorrectly implemented external callback leaves its key alive.
+            self._erased = True
+            try:
+                self.path.unlink()
+            except OSError:
+                return {
+                    "status": "STATE_KEY_DESTROYED_FILE_CLEANUP_PENDING",
+                    "erased": True,
+                }
+            if os.name == "posix":
+                try:
+                    directory_fd = os.open(self.path.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory_fd)
+                    finally:
+                        os.close(directory_fd)
+                except OSError:
+                    # The key has already been destroyed and the file unlinked;
+                    # directory fsync is durability hardening, not a rollback.
+                    pass
+        return {
+            "status": "STATE_CRYPTOGRAPHICALLY_ERASED",
+            "erased": True,
+            "context": self.context,
+        }
+
