@@ -1544,6 +1544,118 @@ class ProviderServiceTests(unittest.TestCase):
         )
 
 
+    def test_job_submission_blocks_credentialed_payload_reference_before_persisting(self):
+        jobs = ProviderJobManager(self.root / "sensitive-submit-jobs.json")
+        authorization = ProviderAuthorizationManager(self.root / "sensitive-submit-auth.json")
+        authorization.assign_role("job-creator", "creator")
+        service = ProviderService(
+            self.connections,
+            job_manager=jobs,
+            authorization_manager=authorization,
+            sensitive_data_policy=SensitiveDataPolicy(),
+        )
+        secret = "payload-reference-password"
+        result = service.submit_job(
+            job_id="sensitive-submit",
+            project_id="film",
+            provider_id="image",
+            payload_ref=f"https://user:{secret}@storage.example/payload",
+            principal_id="job-creator",
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["accepted"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(jobs.poll(job_id="sensitive-submit")["status"], "JOB_NOT_FOUND")
+        if jobs.state_path.exists():
+            self.assertNotIn(secret, jobs.state_path.read_text(encoding="utf-8"))
+
+    def test_job_claim_blocks_credential_shaped_worker_identity_before_persisting(self):
+        jobs = ProviderJobManager(self.root / "sensitive-claim-jobs.json")
+        authorization = ProviderAuthorizationManager(self.root / "sensitive-claim-auth.json")
+        authorization.assign_role("job-creator", "creator")
+        service = ProviderService(
+            self.connections,
+            job_manager=jobs,
+            authorization_manager=authorization,
+            sensitive_data_policy=SensitiveDataPolicy(),
+        )
+        accepted = service.submit_job(
+            job_id="sensitive-claim",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:sensitive-claim",
+            principal_id="job-creator",
+        )
+        self.assertTrue(accepted["accepted"])
+        secret_worker_id = "Bearer " + ("x" * 40)
+        rejected = service.claim_next_job(
+            worker_id=secret_worker_id,
+            principal_id="job-creator",
+        )
+        self.assertEqual(rejected["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertIsNone(rejected["job"])
+        self.assertNotIn(secret_worker_id, repr(rejected))
+        self.assertEqual(jobs.poll(job_id="sensitive-claim")["job"]["status"], "QUEUED")
+        claimed = service.claim_next_job(
+            worker_id="worker-safe",
+            principal_id="job-creator",
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.assertEqual(claimed["job"]["worker_id"], "worker-safe")
+
+    def test_job_completion_blocks_credentialed_result_reference_before_persisting(self):
+        jobs = ProviderJobManager(self.root / "sensitive-complete-jobs.json")
+        authorization = ProviderAuthorizationManager(self.root / "sensitive-complete-auth.json")
+        authorization.assign_role("job-creator", "creator")
+        service = ProviderService(
+            self.connections,
+            job_manager=jobs,
+            authorization_manager=authorization,
+            sensitive_data_policy=SensitiveDataPolicy(),
+        )
+        accepted = service.submit_job(
+            job_id="sensitive-complete",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:sensitive-complete",
+            principal_id="job-creator",
+        )
+        self.assertTrue(accepted["accepted"])
+        claimed = service.claim_next_job(
+            worker_id="worker-safe",
+            principal_id="job-creator",
+        )
+        lease_token = claimed["job"]["lease_token"]
+        secret = "result-reference-password"
+        rejected = service.complete_job(
+            job_id="sensitive-complete",
+            worker_id="worker-safe",
+            lease_token=lease_token,
+            success=True,
+            result_ref=f"https://user:{secret}@storage.example/result",
+            principal_id="job-creator",
+        )
+        self.assertEqual(rejected["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(rejected["saved"])
+        self.assertNotIn(secret, repr(rejected))
+        running = service.poll_job(
+            job_id="sensitive-complete",
+            principal_id="job-creator",
+        )
+        self.assertEqual(running["job"]["status"], "RUNNING")
+        self.assertNotIn("lease_token", running["job"])
+        completed = service.complete_job(
+            job_id="sensitive-complete",
+            worker_id="worker-safe",
+            lease_token=lease_token,
+            success=True,
+            result_ref="asset:clean-result",
+            principal_id="job-creator",
+        )
+        self.assertEqual(completed["status"], "JOB_COMPLETED")
+        self.assertEqual(completed["job"]["result_ref"], "asset:clean-result")
+
+
     def test_job_response_sanitizer_removes_raw_and_hashed_lease_verifiers(self):
         secret = "A" * 43
         digest = "b" * 64
