@@ -1677,6 +1677,49 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "WEBHOOK_VERIFIED")
         self.assertNotIn(secret, repr(result))
 
+    def test_inbound_webhook_payload_credentials_are_blocked_before_verifier(self):
+        calls = []
+
+        class WebhookStub:
+            def verify(self, **kwargs):
+                calls.append(kwargs)
+                return {"verified": True, "status": "WEBHOOK_VERIFIED"}
+
+        service = ProviderService(self.connections, webhook_verifier=WebhookStub())
+        token = "Bearer " + ("w" * 40)
+        result = service.verify_webhook(
+            provider_id="video",
+            payload=("{\"event\":\"done\",\"authorization\":\""+token+"\"}").encode("utf-8"),
+            signature="sha256=" + "a" * 64,
+            timestamp="1792152000",
+            event_id="event-credential-payload",
+            secret="webhook-test-secret-value",
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(calls, [])
+        self.assertNotIn(token, repr(result))
+
+    def test_inbound_webhook_payload_rejects_non_utf8_bytes_before_verifier(self):
+        calls = []
+
+        class WebhookStub:
+            def verify(self, **kwargs):
+                calls.append(kwargs)
+                return {"verified": True, "status": "WEBHOOK_VERIFIED"}
+
+        service = ProviderService(self.connections, webhook_verifier=WebhookStub())
+        result = service.verify_webhook(
+            provider_id="video", payload=b"\xff\xfe",
+            signature="sha256=" + "b" * 64, timestamp="1792152000",
+            event_id="event-binary-payload", secret="webhook-test-secret-value",
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "INVALID_WEBHOOK_PAYLOAD_ENCODING")
+        self.assertEqual(calls, [])
+
     def test_job_lease_renewal_facade_requires_authorized_principal(self):
         jobs = ProviderJobManager(self.root / "lease-renewal-jobs.json")
         authorization = ProviderAuthorizationManager(self.root / "lease-renewal-auth.json")
