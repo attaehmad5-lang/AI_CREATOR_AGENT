@@ -1484,6 +1484,72 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(allowed["verified"])
         self.assertEqual(calls, ["image"])
 
+    def test_routing_manager_response_is_scanned_before_service_return(self):
+        secret = "Bearer " + ("r" * 40)
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "provider": "image",
+                    "debug": {"access_token": secret},
+                }
+
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        result = service.route_request(category="image", project_id="film")
+
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+    def test_webhook_verifier_response_is_scanned_before_service_return(self):
+        secret = "Bearer " + ("w" * 40)
+
+        class WebhookStub:
+            def verify(self, **kwargs):
+                return {
+                    "verified": True,
+                    "status": "WEBHOOK_VERIFIED",
+                    "metadata": {"access_token": secret},
+                }
+
+        service = ProviderService(self.connections, webhook_verifier=WebhookStub())
+        result = service.verify_webhook(
+            provider_id="video", payload=b'{"event":"done"}',
+            signature="sha256=" + "a" * 64, timestamp="1792152000",
+            event_id="event-sensitive", secret="webhook-test-secret-value",
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+    def test_adapter_response_with_sensitive_data_is_blocked_without_releasing_reservations(self):
+        secret = "Bearer " + ("a" * 40)
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True, "provider": "image",
+                    "billing_mode": "ZERO_COST",
+                }
+
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-adapter-response",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: {
+                "started": True, "success": False,
+                "actual_cost": 0.0, "charge_outcome": "not_incurred",
+                "provider_metadata": {"access_token": secret},
+            },
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(result["execution_outcome"], "UNKNOWN")
+        self.assertTrue(result["reservations_retained"])
+        self.assertNotIn(secret, repr(result))
+
     def test_webhook_verification_is_delegated_without_echoing_secret(self):
         class WebhookStub:
             def verify(self, **kwargs):
