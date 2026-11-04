@@ -508,6 +508,16 @@ class ProviderService:
         principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Configure outage/degraded thresholds using admin-only permission."""
+        rejection = self._sensitive_input_rejection({
+            "degraded_mode_configuration_request": {
+                "category": category,
+                "normal_min_healthy_providers": normal_min_healthy_providers,
+                "degraded_min_healthy_providers": degraded_min_healthy_providers,
+                "recovery_success_samples": recovery_success_samples,
+            },
+        })
+        if rejection is not None:
+            return {"saved": False, **rejection}
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
         authorization = self._authorize_operation(principal_id, "provider.configure")
@@ -545,6 +555,14 @@ class ProviderService:
         principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Evaluate configured mode from current health evidence, fail-closed on missing probes."""
+        rejection = self._sensitive_input_rejection({
+            "degraded_mode_evaluation_request": {
+                "category": category,
+                "provider_ids": provider_ids,
+            },
+        })
+        if rejection is not None:
+            return {"evaluated": False, **rejection}
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "evaluated": False}
         authorization = self._authorize_operation(principal_id, "provider.verify")
@@ -601,6 +619,19 @@ class ProviderService:
         principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Configure an SLO using administrator-only provider configuration permission."""
+        rejection = self._sensitive_input_rejection({
+            "slo_configuration_request": {
+                "slo_id": slo_id,
+                "provider_id": provider_id,
+                "category": category,
+                "availability_target": availability_target,
+                "max_p95_latency_ms": max_p95_latency_ms,
+                "window_seconds": window_seconds,
+                "minimum_samples": minimum_samples,
+            },
+        })
+        if rejection is not None:
+            return {"saved": False, **rejection}
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
         authorization = self._authorize_operation(principal_id, "provider.configure", provider_id=provider_id)
@@ -636,6 +667,9 @@ class ProviderService:
         principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Read a rolling SLO evaluation after provider.read authorization."""
+        rejection = self._sensitive_input_rejection({"slo_evaluation_request": {"slo_id": slo_id}})
+        if rejection is not None:
+            return {"evaluation": None, **rejection}
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "evaluation": None}
         authorization = self._authorize_operation(principal_id, "provider.read")
