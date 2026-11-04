@@ -573,6 +573,15 @@ class ProviderService:
                 "project_id": project_id,
                 "persisted": False,
             }
+        rejection = self._sensitive_input_rejection({
+            "project_policy_simulation": {
+                "project_id": project_id,
+                "candidate_policy": candidate_policy,
+                "scenarios": scenarios,
+            },
+        })
+        if rejection is not None:
+            return {"status": rejection["status"], "project_id": project_id, "persisted": False}
         try:
             result = self.project_policy_manager.simulate_policy(
                 project_id, candidate_policy, scenarios
@@ -802,7 +811,7 @@ class ProviderService:
                 else "INVALID_ROTATION_RESPONSE"
             )
             return {"status": safe_status, "rotated": False}
-        return {
+        response = {
             "status": "PROVIDER_SECRET_ROTATED",
             "rotated": True,
             "provider_id": provider_id,
@@ -810,6 +819,9 @@ class ProviderService:
             **({"version_id": result["version_id"]} if isinstance(result.get("version_id"), str) else {}),
             **({"rotated_at": result["rotated_at"]} if isinstance(result.get("rotated_at"), str) else {}),
         }
+        if self._sensitive_input_rejection({"secret_rotation_response": response}) is not None:
+            return {"status": "PROVIDER_SECRET_ROTATED", "rotated": True, "provider_id": provider_id}
+        return response
 
     def verify_http_provider(
         self,
@@ -2135,15 +2147,22 @@ class ProviderService:
         # Scan externally supplied adapter and manager result values, but do not
         # classify this facade's own authorization decision as a caller credential.
         outbound_results = {
-            # Adapter and pluggable operational-manager results can contain
-            # provider-controlled metadata; local accounting/auth decisions are
-            # deliberately excluded from this credential-value scan.
+            # Inspect provider-controlled adapter data and manager results. The
+            # facade's own authorization decision is deliberately excluded.
             "adapter_response": adapter_result,
+            "finalization": finalization,
             "metrics": metrics_result,
             "slo_observation": slo_result,
             "benchmark": benchmark_result,
             "incident": incident_result,
+            "provider_error": provider_error,
             "budget_alerts": budget_alerts,
+            "degraded_mode": degraded_mode_state,
+            "feature_flag": feature_flag_result,
+            "data_policy": data_policy_result,
+            "quality": quality_result,
+            "media_integrity": media_integrity_result,
+            "output_validation": output_validation,
         }
         rejection = self._sensitive_input_rejection({"outbound_results": outbound_results})
         if rejection is not None:
