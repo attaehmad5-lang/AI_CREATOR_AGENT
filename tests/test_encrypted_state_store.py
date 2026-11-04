@@ -125,7 +125,7 @@ class EncryptedJSONStateStoreTests(unittest.TestCase):
         )
         self.assertIn(
             "private.person@example.com",
-            reloaded.tenant_summary("tenant-01")["principal_ids"],
+            reloaded.data["tenants"]["tenant-01"]["principal_ids"],
         )
 
     def test_job_manager_encrypts_payload_and_result_references(self):
