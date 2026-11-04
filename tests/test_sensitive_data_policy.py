@@ -66,6 +66,7 @@ class SensitiveDataPolicyTests(unittest.TestCase):
         payload = {
             "providerConfig": UserDict({
                 "api_key": "opaque-value-one",
+                "api_token": "opaque-api-token-value",
                 "clientSecret": "opaque-value-two",
                 "refresh_token": "opaque-value-three",
                 "token_env": "PROVIDER_TOKEN",
@@ -78,9 +79,10 @@ class SensitiveDataPolicyTests(unittest.TestCase):
         self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
         self.assertEqual(
             {item["path"] for item in result["findings"]},
-            {"$.providerConfig.api_key", "$.providerConfig.clientSecret", "$.providerConfig.refresh_token"},
+            {"$.providerConfig.api_key", "$.providerConfig.api_token", "$.providerConfig.clientSecret", "$.providerConfig.refresh_token"},
         )
         self.assertNotIn("opaque-value", repr(result))
+        self.assertNotIn("opaque-api-token-value", repr(result))
         self.assertNotIn("PROVIDER_TOKEN", repr(result))
 
     def test_additional_token_forms_basic_auth_private_key_and_url_credentials(self):
