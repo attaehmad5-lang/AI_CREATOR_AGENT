@@ -637,5 +637,109 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         self.assertEqual(opener.calls, [])
 
 
+
+
+    def test_dns_private_address_is_rejected_before_credentials_or_network(self):
+        opener = _Opener()
+        secret = "must-not-be-read"
+        resolver = lambda host, port: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "",
+             ("127.0.0.1", port))
+        ]
+        probe = ProviderHTTPConnectivityProbe(
+            environ={"HF_TOKEN": secret}, opener=opener, resolver=resolver
+        )
+        with self.assertRaisesRegex(PermissionError, "PROVIDER_DNS_NON_PUBLIC_ADDRESS_REJECTED"):
+            probe({
+                "id": "huggingface", "auth_type": "API_TOKEN",
+                "allowed_hosts": ["api.example.com"], "token_env": "HF_TOKEN",
+                "configuration": {
+                    "endpoint": "https://api.example.com/health",
+                    "authentication_required": True,
+                },
+            })
+        self.assertEqual(opener.calls, [])
+
+    def test_dns_mixed_public_and_private_answers_fail_closed(self):
+        opener = _Opener()
+        resolver = lambda host, port: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "",
+             ("93.184.216.34", port)),
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "",
+             ("10.0.0.7", port)),
+        ]
+        probe = ProviderHTTPConnectivityProbe(opener=opener, resolver=resolver)
+        with self.assertRaisesRegex(PermissionError, "PROVIDER_DNS_NON_PUBLIC_ADDRESS_REJECTED"):
+            probe({
+                "id": "public_provider", "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertEqual(opener.calls, [])
+
+    def test_dns_empty_malformed_and_oversized_answers_fail_closed(self):
+        bad_resolvers = [
+            lambda host, port: [],
+            lambda host, port: [("malformed",)],
+            lambda host, port: [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "",
+                 (f"93.184.216.{index + 1}", port))
+                for index in range(33)
+            ],
+        ]
+        for resolver in bad_resolvers:
+            with self.subTest(resolver=resolver):
+                opener = _Opener()
+                probe = ProviderHTTPConnectivityProbe(opener=opener, resolver=resolver)
+                with self.assertRaises(ConnectionError):
+                    probe({
+                        "id": "public_provider", "auth_type": "NONE",
+                        "allowed_hosts": ["api.example.com"],
+                        "configuration": {"endpoint": "https://api.example.com/health"},
+                    })
+                self.assertEqual(opener.calls, [])
+
+    def test_pinned_https_connection_uses_checked_ip_and_original_tls_hostname(self):
+        from unittest.mock import patch
+        from projects.provider_store.http_probe import _PinnedHTTPSConnection
+
+        class FakeSocket:
+            def close(self):
+                pass
+
+        class FakeTLSContext:
+            check_hostname = True
+
+            def __init__(self):
+                self.server_hostname = None
+                self.socket = None
+
+            def wrap_socket(self, sock, *, server_hostname):
+                self.socket = sock
+                self.server_hostname = server_hostname
+                return sock
+
+        raw_socket = FakeSocket()
+        context = FakeTLSContext()
+        connection = _PinnedHTTPSConnection(
+            "api.example.com",
+            connect_ip="93.184.216.34",
+            port=443,
+            timeout=2.0,
+            context=context,
+        )
+        with patch(
+            "projects.provider_store.http_probe.socket.create_connection",
+            return_value=raw_socket,
+        ) as create_connection:
+            connection.connect()
+        create_connection.assert_called_once_with(
+            ("93.184.216.34", 443), 2.0, None
+        )
+        self.assertIs(context.socket, raw_socket)
+        self.assertEqual(context.server_hostname, "api.example.com")
+        connection.close()
+
+
 if __name__ == "__main__":
     unittest.main()
