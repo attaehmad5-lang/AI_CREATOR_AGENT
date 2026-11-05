@@ -206,6 +206,7 @@ class ProviderService:
         provider_id: str | None = None,
         request_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        trace_context: TraceContext | None = None,
     ) -> dict[str, Any] | None:
         """Append a sanitized audit event; None means auditing is not configured or saved."""
         if self.audit_log_manager is None:
@@ -218,6 +219,16 @@ class ProviderService:
             ).strip("_")[:80]
             if re.fullmatch(r"[A-Z][A-Z0-9_]{1,79}", safe_audit_status) is None:
                 safe_audit_status = "PROVIDER_ACTION_RECORDED"
+        safe_metadata = dict(metadata or {})
+        if trace_context is not None:
+            if not isinstance(trace_context, TraceContext):
+                return {"status": "INVALID_TRACE_CONTEXT"}
+            safe_metadata.update({
+                "trace_id": trace_context.trace_id,
+                "span_id": trace_context.span_id,
+                "parent_span_id": trace_context.parent_span_id,
+                "trace_flags": trace_context.trace_flags,
+            })
         try:
             result = self.audit_log_manager.record_event(
                 event_type,
@@ -228,7 +239,7 @@ class ProviderService:
                 project_id=project_id,
                 provider_id=provider_id,
                 request_id=request_id,
-                metadata=metadata,
+                metadata=safe_metadata,
             )
         except Exception as exc:
             return {"status": "AUDIT_LOG_WRITE_FAILED", "error_type": type(exc).__name__}
@@ -1521,8 +1532,26 @@ class ProviderService:
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         audit_actor = route_options.pop("_audit_actor_principal_id", None)
+        trace_context = route_options.pop("_trace_context", None)
+        if trace_context is None:
+            try:
+                trace_context = TraceContext.create(
+                    route_options.get("request_id"),
+                    trace_id=route_options.pop("trace_id", None),
+                    traceparent=route_options.pop("traceparent", None),
+                )
+            except TraceContextError:
+                return {"allowed": False, "status": "INVALID_TRACE_CONTEXT"}
+        elif not isinstance(trace_context, TraceContext):
+            return {"allowed": False, "status": "INVALID_TRACE_CONTEXT"}
+        route_options["request_id"] = trace_context.request_id
+        trace_fields = {
+            "request_id": trace_context.request_id,
+            "trace_id": trace_context.trace_id,
+            "traceparent": trace_context.traceparent,
+        }
         if self.routing_manager is None:
-            return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
+            return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE", **trace_fields}
         direct_paid_approvals = route_options.get("paid_approved_providers")
         if direct_paid_approvals and self.authorization_manager is not None:
             approval_authorization = self._authorize_operation(
@@ -1568,6 +1597,7 @@ class ProviderService:
             project_id=project_id if isinstance(project_id, str) else None,
             request_id=request_id if isinstance(request_id, str) else None,
             metadata=requested_metadata,
+            trace_context=trace_context,
         )
         if audit_error is not None:
             return {"allowed": False, "status": "AUDIT_LOG_WRITE_FAILED", "audit": audit_error}
@@ -1599,6 +1629,7 @@ class ProviderService:
             provider_id=provider_id if isinstance(provider_id, str) else None,
             request_id=request_id if isinstance(request_id, str) else None,
             metadata=final_metadata,
+            trace_context=trace_context,
         )
         if audit_error is not None:
             release = None
@@ -1638,6 +1669,7 @@ class ProviderService:
                     "approval_granted": granted,
                     "approval_operation": "billing.approve",
                 },
+                trace_context=trace_context,
             )
             if audit_error is not None:
                 release = None
@@ -1656,6 +1688,8 @@ class ProviderService:
                     "status": "AUDIT_LOG_FINALIZATION_FAILED",
                     "reservation_release": release,
                 }
+        result = dict(result)
+        result.update(trace_fields)
         return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
