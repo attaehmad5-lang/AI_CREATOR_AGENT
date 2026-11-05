@@ -634,18 +634,19 @@ class ProviderJobManagerTests(unittest.TestCase):
             lease_seconds=10, max_attempts=2,
             clock=lambda: self.now[0],
         )
-        manager.submit(
+        self.assertTrue(manager.submit(
             job_id="target-job", project_id="film", provider_id="image",
             payload_ref="payload:target", tenant_id="tenant-a", subject_ref="subject-ref-123",
-        )
-        manager.submit(
+        )["accepted"])
+        self.assertTrue(manager.submit(
             job_id="other-subject", project_id="film", provider_id="image",
             payload_ref="payload:other", tenant_id="tenant-a", subject_ref="subject-ref-other",
-        )
-        manager.submit(
+        )["accepted"])
+        self.assertTrue(manager.submit(
             job_id="other-tenant", project_id="film", provider_id="image",
             payload_ref="payload:tenant", tenant_id="tenant-b", subject_ref="subject-ref-123",
-        )
+        )["accepted"])
+        self.assertEqual(manager.poll(job_id="other-tenant", tenant_id="tenant-b")["status"], "JOB_STATUS")
         deleted = manager.delete_subject_jobs(
             subject_ref="subject-ref-123", project_id="film", tenant_id="tenant-a"
         )
