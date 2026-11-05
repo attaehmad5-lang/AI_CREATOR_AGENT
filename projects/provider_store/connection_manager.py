@@ -5,6 +5,7 @@ unless a separate provider-specific probe has actually succeeded.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -94,6 +95,9 @@ class ConnectionManager:
         state_encryption_key_provider: Any = None,
         state_encryption_context: str = "provider-connection-state-v1",
         migrate_legacy_plaintext_state: bool = False,
+        catalog_encryption_key_provider: Any = None,
+        catalog_encryption_context: str = "provider-catalog-v1",
+        migrate_legacy_plaintext_catalog: bool = False,
     ) -> None:
         if secret_manager is not None and (
             not callable(getattr(secret_manager, "inspect_reference", None))
@@ -102,9 +106,26 @@ class ConnectionManager:
             raise ValueError("secret_manager must support reference inspection and secret resolution")
         if state_encryption_key_provider is None and migrate_legacy_plaintext_state:
             raise ValueError("legacy state migration requires an encryption key provider")
+        if not isinstance(migrate_legacy_plaintext_catalog, bool):
+            raise ValueError("migrate_legacy_plaintext_catalog must be boolean")
+        if catalog_encryption_key_provider is None and migrate_legacy_plaintext_catalog:
+            raise ValueError("legacy catalog migration requires an encryption key provider")
         self.secret_manager = secret_manager
         self.catalog_path = Path(catalog_path) if catalog_path else self._default_catalog()
         self.state_path = Path(state_path) if state_path else DEFAULT_STATE
+        catalog_path_digest = hashlib.sha256(
+            str(self.catalog_path.resolve()).encode("utf-8")
+        ).hexdigest()[:24]
+        self.catalog_encryption_context = f"{catalog_encryption_context}:{catalog_path_digest}"
+        self.catalog_store = (
+            EncryptedJSONStateStore(
+                self.catalog_path,
+                key_provider=catalog_encryption_key_provider,
+                context=self.catalog_encryption_context,
+                migrate_legacy_plaintext=migrate_legacy_plaintext_catalog,
+            )
+            if catalog_encryption_key_provider is not None else None
+        )
         self.state_store = (
             EncryptedJSONStateStore(
                 self.state_path,
@@ -119,8 +140,10 @@ class ConnectionManager:
         # a transient sharing violation while another process registers a provider.
         catalog_lock_path = self.catalog_path.with_name(self.catalog_path.name + ".lock")
         with interprocess_file_lock(catalog_lock_path):
-            self.catalog = self._load_json(self.catalog_path)
-        self.validate_catalog_schema(self.catalog, raise_on_error=True)
+            self.catalog = self._load_catalog()
+            self.validate_catalog_schema(self.catalog, raise_on_error=True)
+            if self.catalog_store is not None and self.catalog_store.migration_required:
+                self._save_catalog(self.catalog)
         state_lock_path = self.state_path.with_name(self.state_path.name + ".lock")
         with interprocess_file_lock(state_lock_path):
             self._reload_state()
@@ -225,6 +248,20 @@ class ConnectionManager:
                 pass
             raise
 
+    def _load_catalog(self) -> dict[str, Any]:
+        if self.catalog_store is not None:
+            catalog = self.catalog_store.read({})
+            if not isinstance(catalog, dict):
+                raise ValueError("Invalid provider catalog: expected an object")
+            return catalog
+        return self._load_json(self.catalog_path)
+
+    def _save_catalog(self, catalog: dict[str, Any]) -> None:
+        if self.catalog_store is not None:
+            self.catalog_store.write(catalog)
+            return
+        self._atomic_write_json(self.catalog_path, catalog)
+
     def _save(self) -> None:
         if self.state_store is not None:
             self.state_store.write(self.state)
@@ -232,7 +269,7 @@ class ConnectionManager:
         self._atomic_write_json(self.state_path, self.state)
 
     def _reload_catalog(self) -> None:
-        catalog = self._load_json(self.catalog_path)
+        catalog = self._load_catalog()
         self.validate_catalog_schema(catalog, raise_on_error=True)
         self.catalog = catalog
 
@@ -643,7 +680,7 @@ class ConnectionManager:
                     "saved": False,
                     "errors": validation.get("errors", []),
                 }
-            self._atomic_write_json(self.catalog_path, new_catalog)
+            self._save_catalog(new_catalog)
             self.catalog = new_catalog
             if not enabled:
                 # Revoke stale live/connecting state immediately. Preserve UNKNOWN
@@ -938,7 +975,7 @@ class ConnectionManager:
                     "saved": False,
                     "errors": validation.get("errors", []),
                 }
-            self._atomic_write_json(self.catalog_path, new_catalog)
+            self._save_catalog(new_catalog)
             self.catalog = new_catalog
             return {
                 "status": "REGISTERED",
