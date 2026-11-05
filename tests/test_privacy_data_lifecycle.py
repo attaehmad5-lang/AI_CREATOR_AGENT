@@ -179,22 +179,28 @@ class PrivacyDataLifecycleManagerTests(unittest.TestCase):
         registration_errors = []
 
         class ConcurrentRegisteringStore(StoreStub):
+            def __init__(self):
+                super().__init__()
+                self.registration_started = False
+
             def delete_subject_data(self, **kwargs):
                 self.calls.append(("delete", kwargs))
+                if not self.registration_started:
+                    self.registration_started = True
 
-                def register_late_store():
-                    try:
-                        manager.register_store("late-store", late_store)
-                    except Exception as exc:
-                        registration_errors.append(exc)
+                    def register_late_store():
+                        try:
+                            manager.register_store("late-store", late_store)
+                        except Exception as exc:
+                            registration_errors.append(exc)
 
-                worker = threading.Thread(target=register_late_store)
-                worker.start()
-                worker.join(timeout=3)
-                if worker.is_alive():
-                    raise RuntimeError("concurrent store registration did not finish")
-                if registration_errors:
-                    raise registration_errors[0]
+                    worker = threading.Thread(target=register_late_store)
+                    worker.start()
+                    worker.join(timeout=3)
+                    if worker.is_alive():
+                        raise RuntimeError("concurrent store registration did not finish")
+                    if registration_errors:
+                        raise registration_errors[0]
                 return {"confirmed": True, "status": "DELETED", "deleted_count": 1}
 
         manager.register_store("initial-store", ConcurrentRegisteringStore())
