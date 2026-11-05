@@ -3,7 +3,10 @@ import threading
 import unittest
 from datetime import datetime, timezone
 
-from projects.provider_store.privacy_data_lifecycle import PrivacyDataLifecycleManager
+from projects.provider_store.privacy_data_lifecycle import (
+    DURABLE_PRIVACY_ADAPTER_CAPABILITY,
+    PrivacyDataLifecycleManager,
+)
 
 
 class StoreStub:
@@ -25,6 +28,10 @@ class StoreStub:
         return self.purge_result
 
 
+class DurableStoreStub(StoreStub):
+    _privacy_durable_idempotency_capability = DURABLE_PRIVACY_ADAPTER_CAPABILITY
+
+
 class PrivacyDataLifecycleManagerTests(unittest.TestCase):
     def test_registration_rejects_invalid_duplicate_and_unsupported_stores(self):
         manager = PrivacyDataLifecycleManager(max_stores=1)
@@ -38,6 +45,21 @@ class PrivacyDataLifecycleManagerTests(unittest.TestCase):
             manager.register_store("second", StoreStub())
         with self.assertRaises(ValueError):
             PrivacyDataLifecycleManager({"bad": object()})
+
+    def test_strict_mode_requires_durable_idempotency_for_initial_and_late_stores(self):
+        with self.assertRaisesRegex(ValueError, "durable idempotency"):
+            PrivacyDataLifecycleManager(
+                {"raw-store": StoreStub()}, require_durable_idempotency=True
+            )
+
+        manager = PrivacyDataLifecycleManager(
+            {"wrapped-store": DurableStoreStub()}, require_durable_idempotency=True
+        )
+        self.assertTrue(manager.durable_idempotency_ready)
+        with self.assertRaisesRegex(ValueError, "durable idempotency"):
+            manager.register_store("late-raw-store", StoreStub())
+        manager.register_store("late-wrapped-store", DurableStoreStub())
+        self.assertTrue(manager.durable_idempotency_ready)
 
     def test_subject_deletion_requires_confirmation_and_uses_scoped_request(self):
         store = StoreStub()
