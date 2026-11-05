@@ -20,6 +20,16 @@ _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
 _REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\Z")
 _ERROR_RE = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
 _TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED"}
+_SUBJECT_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\\Z")
+
+
+def _valid_subject_ref(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and _SUBJECT_REF_RE.fullmatch(value) is not None
+        and any(char.isalpha() for char in value)
+        and "@" not in value
+    )
 
 
 def _lease_token_digest(token: str) -> str:
@@ -156,6 +166,7 @@ class ProviderJobManager:
                 or not isinstance(job.get("project_id"), str)
                 or not isinstance(job.get("provider_id"), str)
                 or not isinstance(job.get("payload_ref"), str)
+                or ("subject_ref" in job and not _valid_subject_ref(job.get("subject_ref")))
                 or not isinstance(job.get("worker_id"), (str, type(None)))
                 or (
                     job.get("worker_id") is not None
@@ -267,6 +278,7 @@ class ProviderJobManager:
         payload_ref: str,
         priority: int = 50,
         tenant_id: str | None = None,
+        subject_ref: str | None = None,
     ) -> dict[str, Any]:
         for value, name in ((job_id, "job_id"), (project_id, "project_id"), (provider_id, "provider_id")):
             if not isinstance(value, str) or not _ID_RE.fullmatch(value):
@@ -277,6 +289,8 @@ class ProviderJobManager:
             not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
         ):
             return {"status": "INVALID_TENANT_ID", "accepted": False}
+        if subject_ref is not None and not _valid_subject_ref(subject_ref):
+            return {"status": "INVALID_SUBJECT_REFERENCE", "accepted": False}
         if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
             return {"status": "INVALID_PRIORITY", "accepted": False}
         now = self.clock().astimezone(timezone.utc).isoformat()
@@ -288,6 +302,7 @@ class ProviderJobManager:
                 same = all(existing.get(key) == value for key, value in {
                     "project_id": project_id, "provider_id": provider_id,
                     "payload_ref": payload_ref, "priority": priority,
+                    "subject_ref": subject_ref,
                 }.items())
                 return {
                     "status": "ALREADY_SUBMITTED" if same else "REQUEST_ID_CONFLICT",
@@ -314,6 +329,8 @@ class ProviderJobManager:
             }
             if tenant_id is not None:
                 job["tenant_id"] = tenant_id
+            if subject_ref is not None:
+                job["subject_ref"] = subject_ref
             self.data["jobs"][job_id] = job
             self._save()
             return {"status": "JOB_QUEUED", "accepted": True, "job": self._public_job(job)}
@@ -553,6 +570,56 @@ class ProviderJobManager:
                 return {"status": "TENANT_ISOLATION_DENIED", "job": None}
             return {"status": "JOB_STATUS", "job": self._public_job(job)}
 
+
+    def delete_subject_jobs(
+        self,
+        *,
+        subject_ref: str,
+        project_id: str,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete pseudonymous subject job records after active work is cancelled.
+
+        Running jobs are marked cancel_requested and remain PENDING until the
+        worker completes or its lease expires. Queued and terminal records are
+        removed only after no matching job remains active.
+        """
+        if not _valid_subject_ref(subject_ref):
+            return {"confirmed": False, "status": "FAILED", "deleted_count": 0}
+        if not isinstance(project_id, str) or not _ID_RE.fullmatch(project_id):
+            return {"confirmed": False, "status": "FAILED", "deleted_count": 0}
+        if tenant_id is not None and (not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)):
+            return {"confirmed": False, "status": "FAILED", "deleted_count": 0}
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        with self._transaction():
+            matches = {
+                job_id: job
+                for job_id, job in self.data["jobs"].items()
+                if isinstance(job, dict)
+                and job.get("subject_ref") == subject_ref
+                and job.get("project_id") == project_id
+                and job.get("tenant_id") == tenant_id
+            }
+            if not matches:
+                return {"confirmed": True, "status": "ALREADY_ABSENT", "deleted_count": 0}
+            running = [job for job in matches.values() if job.get("status") == "RUNNING"]
+            if running:
+                changed = False
+                for job in running:
+                    if job.get("cancel_requested") is not True:
+                        job["cancel_requested"] = True
+                        job["updated_at"] = now
+                        changed = True
+                if changed:
+                    self._save()
+                return {"confirmed": False, "status": "PENDING", "deleted_count": 0}
+            deleted = 0
+            for job_id in matches:
+                self.data["jobs"].pop(job_id, None)
+                deleted += 1
+            if deleted:
+                self._save()
+        return {"confirmed": True, "status": "DELETED", "deleted_count": deleted}
 
     def purge_terminal_jobs_before(
         self,
