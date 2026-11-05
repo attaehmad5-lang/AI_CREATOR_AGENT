@@ -45,7 +45,7 @@ class PrivacyDataLifecycleManager:
     @property
     def registered_store_count(self) -> int:
         with self._stores_lock:
-            return self.registered_store_count
+            return len(self._stores)
 
     def register_store(self, store_id: str, adapter: Any) -> dict[str, Any]:
         """Register one explicit adapter; ambiguous or duplicate names are rejected."""
@@ -60,7 +60,7 @@ class PrivacyDataLifecycleManager:
         with self._stores_lock:
             if store_id in self._stores:
                 raise ValueError("privacy store is already registered")
-            if self.registered_store_count >= self.max_stores:
+            if len(self._stores) >= self.max_stores:
                 raise ValueError("privacy store capacity reached")
             self._stores[store_id] = adapter
         return {"status": "PRIVACY_STORE_REGISTERED", "registered": True}
