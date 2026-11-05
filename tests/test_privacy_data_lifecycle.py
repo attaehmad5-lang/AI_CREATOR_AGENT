@@ -151,6 +151,26 @@ class PrivacyDataLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(result["deleted_count"], 3)
         self.assertEqual(store.calls[0][0], "purge")
 
+    def test_registration_during_operation_is_deferred_to_next_run(self):
+        manager = PrivacyDataLifecycleManager()
+
+        class RegisteringStore(StoreStub):
+            def delete_subject_data(self, **kwargs):
+                self.calls.append(("delete", kwargs))
+                manager.register_store("late-store", late_store)
+                return {"confirmed": True, "status": "DELETED", "deleted_count": 1}
+
+        late_store = StoreStub()
+        manager.register_store("initial-store", RegisteringStore())
+        result = manager.delete_subject_data(
+            subject_ref="subject-22", project_id="film", tenant_id=None,
+            request_id="delete-008", confirmed=True,
+        )
+        self.assertEqual(result["status"], "SUBJECT_DATA_DELETED")
+        self.assertEqual(result["store_count"], 1)
+        self.assertEqual(set(result["stores"]), {"initial-store"})
+        self.assertEqual(late_store.calls, [])
+
     def test_missing_store_configuration_never_reports_success(self):
         manager = PrivacyDataLifecycleManager()
         result = manager.delete_subject_data(
