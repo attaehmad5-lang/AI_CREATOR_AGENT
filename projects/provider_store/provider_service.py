@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+import hashlib
 import inspect
 import re
 import time
@@ -314,13 +315,41 @@ class ProviderService:
         setter = getattr(self.authorization_manager, "set_provider_scopes", None)
         if not callable(setter):
             return {"status": "AUTHORIZATION_SCOPE_MANAGER_UNAVAILABLE", "saved": False}
+        target_hash = hashlib.sha256(target_principal_id.encode("utf-8")).hexdigest()[:32] if isinstance(target_principal_id, str) else None
+        scope_count = (
+            sum(len(items) for items in provider_scopes.values() if isinstance(items, list))
+            if isinstance(provider_scopes, dict) else 0
+        )
+        audit_error = self._append_provider_audit_event(
+            "PROVIDER_ACCESS_CHANGE", outcome="REQUESTED",
+            status_code="PROVIDER_SCOPES_UPDATE_REQUESTED",
+            actor_principal_id=actor_principal_id,
+            metadata={"target_principal_hash": target_hash, "scope_count": scope_count},
+        )
+        if audit_error is not None:
+            return {"status": "AUDIT_LOG_WRITE_FAILED", "saved": False}
         try:
             result = setter(target_principal_id, provider_scopes)
         except Exception as exc:
-            return {"status": "PROVIDER_SCOPE_UPDATE_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False
-        }
+            audit_error = self._append_provider_audit_event(
+                "PROVIDER_ACCESS_CHANGE", outcome="FAILED",
+                status_code="PROVIDER_SCOPES_UPDATE_FAILED",
+                actor_principal_id=actor_principal_id,
+                metadata={"target_principal_hash": target_hash, "scope_count": scope_count, "error_type": type(exc).__name__},
+            )
+            return {"status": "AUDIT_LOG_FINALIZATION_FAILED" if audit_error is not None else "PROVIDER_SCOPE_UPDATE_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        audit_error = self._append_provider_audit_event(
+            "PROVIDER_ACCESS_CHANGE",
+            outcome="SUCCEEDED" if result.get("saved") is True else "FAILED",
+            status_code=self._safe_error_code(result.get("status"), "PROVIDER_SCOPES_UPDATE_RECORDED"),
+            actor_principal_id=actor_principal_id,
+            metadata={"target_principal_hash": target_hash, "scope_count": scope_count},
+        )
+        if audit_error is not None:
+            return {"status": "AUDIT_LOG_FINALIZATION_FAILED", "saved": result.get("saved") is True}
+        return result
 
     def configure_provider(
         self,
@@ -353,14 +382,53 @@ class ProviderService:
         configure = getattr(self.connection_manager, "configure_provider", None)
         if not callable(configure):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
+        audit_error = self._append_provider_audit_event(
+            "PROVIDER_CONFIGURATION", outcome="REQUESTED",
+            status_code="PROVIDER_CONFIGURATION_REQUESTED",
+            actor_principal_id=principal_id,
+            provider_id=provider_id,
+            metadata={
+                "model": model if isinstance(model, str) else None,
+                "authentication_method": "PROVIDER_CONFIGURATION",
+                "credential_present": authentication_required,
+            },
+        )
+        if audit_error is not None:
+            return {"status": "AUDIT_LOG_WRITE_FAILED", "provider": provider_id, "saved": False}
         try:
-            return configure(
+            result = configure(
                 provider_id, model=model, endpoint=endpoint,
                 probe_endpoint=probe_endpoint,
                 authentication_required=authentication_required,
             )
         except Exception as exc:
-            return {"status": "PROVIDER_CONFIGURATION_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
+            audit_error = self._append_provider_audit_event(
+                "PROVIDER_CONFIGURATION", outcome="FAILED",
+                status_code="PROVIDER_CONFIGURATION_FAILED",
+                actor_principal_id=principal_id,
+                provider_id=provider_id,
+                metadata={"error_type": type(exc).__name__},
+            )
+            return {"status": "AUDIT_LOG_FINALIZATION_FAILED" if audit_error is not None else "PROVIDER_CONFIGURATION_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
+        saved = isinstance(result, dict) and result.get("saved") is True
+        audit_error = self._append_provider_audit_event(
+            "PROVIDER_CONFIGURATION",
+            outcome="SUCCEEDED" if saved else "FAILED",
+            status_code=self._safe_error_code(
+                result.get("status") if isinstance(result, dict) else None,
+                "PROVIDER_CONFIGURATION_RECORDED",
+            ),
+            actor_principal_id=principal_id,
+            provider_id=provider_id,
+            metadata={
+                "model": model if isinstance(model, str) else None,
+                "authentication_method": "PROVIDER_CONFIGURATION",
+                "credential_present": authentication_required,
+            },
+        )
+        if audit_error is not None:
+            return {"status": "AUDIT_LOG_FINALIZATION_FAILED", "provider": provider_id, "saved": saved}
+        return result if isinstance(result, dict) else {"status": "INVALID_CONNECTION_MANAGER_RESPONSE", "saved": False}
 
     def set_provider_enabled(
         self,
@@ -383,10 +451,35 @@ class ProviderService:
         setter = getattr(self.connection_manager, "set_provider_enabled", None)
         if not callable(setter):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
+        audit_error = self._append_provider_audit_event(
+            "PROVIDER_CONFIGURATION", outcome="REQUESTED",
+            status_code="PROVIDER_ENABLEMENT_REQUESTED",
+            actor_principal_id=principal_id, provider_id=provider_id,
+            metadata={"enabled": enabled},
+        )
+        if audit_error is not None:
+            return {"status": "AUDIT_LOG_WRITE_FAILED", "provider": provider_id, "saved": False}
         try:
-            return setter(provider_id, enabled)
+            result = setter(provider_id, enabled)
         except Exception as exc:
-            return {"status": "PROVIDER_ENABLEMENT_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
+            audit_error = self._append_provider_audit_event(
+                "PROVIDER_CONFIGURATION", outcome="FAILED",
+                status_code="PROVIDER_ENABLEMENT_FAILED",
+                actor_principal_id=principal_id, provider_id=provider_id,
+                metadata={"enabled": enabled, "error_type": type(exc).__name__},
+            )
+            return {"status": "AUDIT_LOG_FINALIZATION_FAILED" if audit_error is not None else "PROVIDER_ENABLEMENT_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
+        saved = isinstance(result, dict) and result.get("saved") is True
+        audit_error = self._append_provider_audit_event(
+            "PROVIDER_CONFIGURATION",
+            outcome="SUCCEEDED" if saved else "FAILED",
+            status_code=self._safe_error_code(result.get("status") if isinstance(result, dict) else None, "PROVIDER_ENABLEMENT_RECORDED"),
+            actor_principal_id=principal_id, provider_id=provider_id,
+            metadata={"enabled": enabled},
+        )
+        if audit_error is not None:
+            return {"status": "AUDIT_LOG_FINALIZATION_FAILED", "provider": provider_id, "saved": saved}
+        return result if isinstance(result, dict) else {"status": "INVALID_CONNECTION_MANAGER_RESPONSE", "saved": False}
 
     def assign_provider_role(
         self,
