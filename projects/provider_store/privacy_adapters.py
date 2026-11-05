@@ -14,6 +14,7 @@ import math
 import os
 import re
 import sqlite3
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -667,7 +668,6 @@ class HTTPSPrivacyProviderAdapter:
         authorization_header: Callable[[], str],
         timeout: float = 5.0,
         max_response_bytes: int = 65_536,
-        opener: Any = None,
     ) -> None:
         if not callable(authorization_header):
             raise PrivacyAdapterConfigurationError("authorization_header must be callable")
@@ -675,7 +675,7 @@ class HTTPSPrivacyProviderAdapter:
             raise PrivacyAdapterConfigurationError("allowed_hosts must be a non-empty exact-host allowlist")
         hosts = set()
         for host in allowed_hosts:
-            if not isinstance(host, str) or _HOST_RE.fullmatch(host) is None:
+            if not isinstance(host, str) or len(host) > 253 or _HOST_RE.fullmatch(host) is None:
                 raise PrivacyAdapterConfigurationError("allowed host is invalid")
             hosts.add(host.casefold())
         self.delete_url = self._validate_url(delete_url, hosts)
@@ -687,7 +687,10 @@ class HTTPSPrivacyProviderAdapter:
         self.authorization_header = authorization_header
         self.timeout = float(timeout)
         self.max_response_bytes = max_response_bytes
-        self.opener = opener or urllib.request.build_opener(_RejectRedirects())
+        self._opener = urllib.request.build_opener(
+            _RejectRedirects(),
+            urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+        )
 
     @staticmethod
     def _validate_url(value: Any, allowed_hosts: set[str]) -> str:
@@ -739,7 +742,7 @@ class HTTPSPrivacyProviderAdapter:
                 },
                 method="POST",
             )
-            response = self.opener.open(request, timeout=self.timeout)
+            response = self._opener.open(request, timeout=self.timeout)
             try:
                 status_code = response.getcode()
                 raw = response.read(self.max_response_bytes + 1)
