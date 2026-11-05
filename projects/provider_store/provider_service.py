@@ -30,6 +30,7 @@ class ProviderService:
         identity_authenticator: Any | None = None,
         sensitive_data_policy: Any | None = None,
         data_handling_policy: Any | None = None,
+        data_retention_manager: Any | None = None,
         webhook_verifier: Any | None = None,
         job_manager: Any | None = None,
         metrics_manager: Any | None = None,
@@ -73,6 +74,11 @@ class ProviderService:
             (authorization_manager, "authorize", "authorization_manager"),
             (sensitive_data_policy, "inspect", "sensitive_data_policy"),
             (data_handling_policy, "evaluate", "data_handling_policy"),
+            (data_retention_manager, "register_asset", "data_retention_manager"),
+            (data_retention_manager, "claim_due_deletions", "data_retention_manager"),
+            (data_retention_manager, "complete_deletion", "data_retention_manager"),
+            (data_retention_manager, "fail_deletion", "data_retention_manager"),
+            (data_retention_manager, "requeue_failed", "data_retention_manager"),
             (webhook_verifier, "verify", "webhook_verifier"),
             (job_manager, "submit", "job_manager"),
             (metrics_manager, "record", "metrics_manager"),
@@ -105,6 +111,7 @@ class ProviderService:
         self.identity_authenticator = identity_authenticator
         self.sensitive_data_policy = sensitive_data_policy
         self.data_handling_policy = data_handling_policy
+        self.data_retention_manager = data_retention_manager
         self.webhook_verifier = webhook_verifier
         self.job_manager = job_manager
         self.metrics_manager = metrics_manager
@@ -2327,3 +2334,219 @@ class ProviderService:
             for item in results.values()
         )
         return {"status": "RELEASED" if released else "RELEASE_PARTIAL", "released": released, **results}
+
+
+    def record_provider_data_asset(
+        self,
+        *,
+        record_id: str,
+        provider_id: str,
+        project_id: str,
+        asset_ref: str,
+        data_categories: list[str] | tuple[str, ...],
+        retention_days: int,
+        principal_id: str | None,
+        tenant_id: str | None = None,
+        provider_training_use: bool = False,
+        user_training_consent: bool = False,
+    ) -> dict[str, Any]:
+        """Register an opaque provider-side data reference under an admin policy gate."""
+        if self.data_retention_manager is None:
+            return {"status": "DATA_RETENTION_MANAGER_UNAVAILABLE", "saved": False}
+        authorization = self._authorize_operation(
+            principal_id, "provider.data.manage", provider_id=provider_id
+        )
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "saved": False,
+                "authorization": authorization,
+            }
+        if self.tenant_isolation_manager is not None:
+            if tenant_id is None:
+                return {"status": "TENANT_CONTEXT_REQUIRED", "saved": False}
+            try:
+                tenant_check = self.tenant_isolation_manager.authorize_project(
+                    tenant_id, project_id, principal_id
+                )
+            except Exception as exc:
+                return {
+                    "status": "TENANT_AUTHORIZATION_FAILED", "saved": False,
+                    "error_type": type(exc).__name__,
+                }
+            if not isinstance(tenant_check, dict) or tenant_check.get("allowed") is not True:
+                return {
+                    "status": "TENANT_ISOLATION_DENIED", "saved": False,
+                    "authorization": tenant_check if isinstance(tenant_check, dict) else {
+                        "status": "INVALID_TENANT_AUTHORIZATION_RESPONSE"
+                    },
+                }
+        rejection = self._sensitive_input_rejection({
+            "provider_data_asset": {
+                "record_id": record_id,
+                "provider_id": provider_id,
+                "project_id": project_id,
+                "tenant_id": tenant_id,
+                "asset_ref": asset_ref,
+                "data_categories": data_categories,
+            }
+        })
+        if rejection is not None:
+            return {"saved": False, **rejection}
+        try:
+            result = self.data_retention_manager.register_asset(
+                record_id,
+                provider_id=provider_id,
+                project_id=project_id,
+                tenant_id=tenant_id,
+                asset_ref=asset_ref,
+                data_categories=data_categories,
+                retention_days=retention_days,
+                provider_training_use=provider_training_use,
+                user_training_consent=user_training_consent,
+            )
+        except Exception as exc:
+            return {
+                "status": "DATA_RETENTION_REGISTRATION_FAILED", "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_DATA_RETENTION_RESPONSE", "saved": False
+        }
+
+    def run_provider_data_retention_deletions(
+        self,
+        *,
+        worker_id: str,
+        deleter: Any,
+        principal_id: str | None,
+        limit: int = 10,
+        lease_seconds: int = 300,
+        timeout_seconds: float = 10.0,
+    ) -> dict[str, Any]:
+        """Execute due remote deletions through an idempotent provider adapter.
+
+        The adapter must accept provider_id, asset_ref, project_id, tenant_id,
+        data_categories, record_id, idempotency_key and timeout_seconds. It must
+        return {"deleted": True, "confirmed": True} only after provider confirmation.
+        """
+        if self.data_retention_manager is None:
+            return {"status": "DATA_RETENTION_MANAGER_UNAVAILABLE", "processed": 0, "items": []}
+        authorization = self._authorize_operation(principal_id, "provider.data.delete")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "processed": 0,
+                "items": [], "authorization": authorization,
+            }
+        timeout = finite_number(timeout_seconds, minimum=0)
+        if timeout is None or timeout <= 0 or timeout > 60:
+            return {"status": "INVALID_DELETE_TIMEOUT", "processed": 0, "items": []}
+        if not callable(deleter):
+            return {"status": "INVALID_DELETE_ADAPTER", "processed": 0, "items": []}
+        try:
+            parameters = inspect.signature(deleter).parameters.values()
+            names = {parameter.name for parameter in parameters}
+            accepts_kwargs = any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters
+            )
+        except (TypeError, ValueError):
+            return {
+                "status": "DELETE_ADAPTER_CONTRACT_UNVERIFIABLE",
+                "processed": 0, "items": [],
+            }
+        required = {
+            "provider_id", "asset_ref", "project_id", "tenant_id",
+            "data_categories", "record_id", "idempotency_key", "timeout_seconds",
+        }
+        if not accepts_kwargs and not required.issubset(names):
+            return {
+                "status": "DELETE_ADAPTER_CONTRACT_UNSUPPORTED",
+                "processed": 0, "items": [],
+            }
+        try:
+            claims = self.data_retention_manager.claim_due_deletions(
+                worker_id, limit=limit, lease_seconds=lease_seconds
+            )
+        except Exception as exc:
+            return {
+                "status": "DATA_RETENTION_CLAIM_FAILED", "processed": 0,
+                "items": [], "error_type": type(exc).__name__,
+            }
+        if not isinstance(claims, dict) or claims.get("status") != "DELETION_CLAIMS_ISSUED" or not isinstance(claims.get("items"), list):
+            return {"status": "INVALID_DATA_RETENTION_CLAIM_RESPONSE", "processed": 0, "items": []}
+        outcomes = []
+        for item in claims["items"]:
+            if not isinstance(item, dict):
+                continue
+            record_id = item.get("record_id")
+            token = item.get("lease_token")
+            try:
+                response = deleter(
+                    provider_id=item["provider_id"],
+                    asset_ref=item["asset_ref"],
+                    project_id=item["project_id"],
+                    tenant_id=item.get("tenant_id"),
+                    data_categories=list(item["data_categories"]),
+                    record_id=record_id,
+                    idempotency_key=record_id,
+                    timeout_seconds=timeout,
+                )
+                confirmed = (
+                    isinstance(response, dict)
+                    and response.get("deleted") is True
+                    and response.get("confirmed") is True
+                )
+            except Exception:
+                confirmed = False
+            try:
+                if confirmed:
+                    final = self.data_retention_manager.complete_deletion(
+                        record_id, worker_id, token
+                    )
+                else:
+                    final = self.data_retention_manager.fail_deletion(
+                        record_id, worker_id, token,
+                        error_code="PROVIDER_DELETE_UNCONFIRMED",
+                    )
+            except Exception as exc:
+                final = {
+                    "status": "DATA_RETENTION_FINALIZATION_FAILED",
+                    "completed": False,
+                    "error_type": type(exc).__name__,
+                }
+            outcomes.append({
+                "record_id": record_id if isinstance(record_id, str) else None,
+                "status": final.get("status", "INVALID_FINALIZATION_RESPONSE")
+                if isinstance(final, dict) else "INVALID_FINALIZATION_RESPONSE",
+                "completed": final.get("completed") is True
+                if isinstance(final, dict) else False,
+            })
+        return {
+            "status": "DATA_RETENTION_BATCH_PROCESSED",
+            "processed": len(outcomes),
+            "completed": sum(1 for item in outcomes if item["completed"]),
+            "items": outcomes,
+        }
+
+    def requeue_failed_provider_data_deletion(
+        self, record_id: str, *, principal_id: str | None
+    ) -> dict[str, Any]:
+        """Manually requeue a terminal deletion failure after admin review."""
+        if self.data_retention_manager is None:
+            return {"status": "DATA_RETENTION_MANAGER_UNAVAILABLE", "requeued": False}
+        authorization = self._authorize_operation(principal_id, "provider.data.delete")
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "requeued": False,
+                "authorization": authorization,
+            }
+        try:
+            result = self.data_retention_manager.requeue_failed(record_id)
+        except Exception as exc:
+            return {
+                "status": "DATA_RETENTION_REQUEUE_FAILED", "requeued": False,
+                "error_type": type(exc).__name__,
+            }
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_DATA_RETENTION_RESPONSE", "requeued": False
+        }

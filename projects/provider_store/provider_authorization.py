@@ -22,6 +22,7 @@ ROLE_PERMISSIONS = {
         "provider.read", "provider.verify", "provider.generate",
         "provider.configure", "provider.enable", "provider.disable",
         "provider.credentials.rotate", "provider.policy.simulate", "provider.access.manage",
+        "provider.data.manage", "provider.data.delete",
         "billing.approve",
     }),
 }
@@ -29,7 +30,7 @@ KNOWN_OPERATIONS = frozenset().union(*ROLE_PERMISSIONS.values())
 PROVIDER_SCOPED_OPERATIONS = frozenset({
     "provider.read", "provider.verify", "provider.generate",
     "provider.configure", "provider.enable", "provider.disable",
-    "provider.credentials.rotate",
+    "provider.credentials.rotate", "provider.data.manage", "provider.data.delete",
 })
 _PROVIDER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}")
 _PRINCIPAL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}")
