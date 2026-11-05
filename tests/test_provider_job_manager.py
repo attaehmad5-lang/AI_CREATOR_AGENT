@@ -608,5 +608,77 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.poll(job_id="missing")["status"], "JOB_NOT_FOUND")
 
 
+
+
+    def test_subject_reference_is_validated_and_stored_without_raw_identity(self):
+        result = self.manager.submit(
+            job_id="job-subject", project_id="film", provider_id="image",
+            payload_ref="payload:subject", subject_ref="subject-ref-123",
+        )
+        self.assertTrue(result["accepted"])
+        persisted = self.path.read_text(encoding="utf-8")
+        self.assertIn("subject-ref-123", persisted)
+        self.assertNotIn("person@example.test", persisted)
+        invalid = self.manager.submit(
+            job_id="job-email", project_id="film", provider_id="image",
+            payload_ref="payload:email", subject_ref="person@example.test",
+        )
+        self.assertEqual(invalid["status"], "INVALID_SUBJECT_REFERENCE")
+
+
+    def test_subject_job_deletion_removes_only_exact_project_tenant_scope(self):
+        self.manager.submit(
+            job_id="target-job", project_id="film", provider_id="image",
+            payload_ref="payload:target", tenant_id="tenant-a", subject_ref="subject-ref-123",
+        )
+        self.manager.submit(
+            job_id="other-subject", project_id="film", provider_id="image",
+            payload_ref="payload:other", tenant_id="tenant-a", subject_ref="subject-ref-other",
+        )
+        self.manager.submit(
+            job_id="other-tenant", project_id="film", provider_id="image",
+            payload_ref="payload:tenant", tenant_id="tenant-b", subject_ref="subject-ref-123",
+        )
+        deleted = self.manager.delete_subject_jobs(
+            subject_ref="subject-ref-123", project_id="film", tenant_id="tenant-a"
+        )
+        self.assertEqual(deleted, {"confirmed": True, "status": "DELETED", "deleted_count": 1})
+        self.assertEqual(self.manager.poll(job_id="target-job", tenant_id="tenant-a")["status"], "JOB_NOT_FOUND")
+        self.assertEqual(self.manager.poll(job_id="other-subject", tenant_id="tenant-a")["status"], "JOB_STATUS")
+        self.assertEqual(self.manager.poll(job_id="other-tenant", tenant_id="tenant-b")["status"], "JOB_STATUS")
+
+
+    def test_subject_job_deletion_waits_for_running_worker_cancellation(self):
+        self.manager.submit(
+            job_id="running-subject", project_id="film", provider_id="image",
+            payload_ref="payload:running", tenant_id="tenant-a", subject_ref="subject-ref-123",
+        )
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        pending = self.manager.delete_subject_jobs(
+            subject_ref="subject-ref-123", project_id="film", tenant_id="tenant-a"
+        )
+        self.assertEqual(pending, {"confirmed": False, "status": "PENDING", "deleted_count": 0})
+        self.assertTrue(self.manager.data["jobs"]["running-subject"]["cancel_requested"])
+        completed = self.manager.complete(
+            job_id="running-subject", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"], success=True, result_ref="asset:discarded",
+        )
+        self.assertEqual(completed["job"]["status"], "CANCELLED")
+        retry = self.manager.delete_subject_jobs(
+            subject_ref="subject-ref-123", project_id="film", tenant_id="tenant-a"
+        )
+        self.assertEqual(retry, {"confirmed": True, "status": "DELETED", "deleted_count": 1})
+
+
+    def test_subject_job_deletion_rejects_invalid_or_email_identifiers(self):
+        for invalid in ("person@example.test", "123456789", "bad id"):
+            result = self.manager.delete_subject_jobs(
+                subject_ref=invalid, project_id="film", tenant_id=None
+            )
+            self.assertFalse(result["confirmed"])
+            self.assertEqual(result["status"], "FAILED")
+
+
 if __name__ == "__main__":
     unittest.main()
