@@ -8,6 +8,7 @@ import inspect
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
@@ -159,7 +160,7 @@ class ProviderService:
                 if value is None:
                     continue
                 try:
-                    required_paths.add(str(__import__("pathlib").Path(value).resolve()))
+                    required_paths.add(str(Path(value).resolve()))
                 except (TypeError, ValueError, OSError):
                     invalid_path = True
 
@@ -193,7 +194,7 @@ class ProviderService:
                     all_stores_ready = False
                     continue
                 try:
-                    verified_store_paths.add(str(__import__("pathlib").Path(store_path).resolve()))
+                    verified_store_paths.add(str(Path(store_path).resolve()))
                 except (TypeError, ValueError, OSError):
                     all_stores_ready = False
 
