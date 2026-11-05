@@ -131,8 +131,9 @@ Adapters must implement both delete_subject_data(subject_ref, project_id, tenant
 ### Generated-media asset store integration
 
 The repository has a concrete local-filesystem adapter for the generation pipeline. It coordinates
-`projects/generation/asset_manifest.json`, `projects/generation/generation_state.json`, and the
-configured generated-media roots. Add it to the same lifecycle coordinator:
+`projects/generation/asset_manifest.json`, `projects/generation/generation_state.json`, and
+`projects/generation/execution_report.json` under one lock, with one encrypted metadata context
+per document and one coordinated deletion/retention operation. Add it to the same lifecycle coordinator:
 
 ~~~python
 from projects.generation.privacy_asset_adapter import GenerationAssetPrivacyAdapter
@@ -144,6 +145,7 @@ def generation_metadata_dek(context: str) -> bytes:
 generation_asset_privacy = GenerationAssetPrivacyAdapter(
     "projects/generation/asset_manifest.json",
     state_paths=["projects/generation/generation_state.json"],
+    execution_report_paths=["projects/generation/execution_report.json"],
     asset_roots={
         "output/images": "/srv/ai-creator/output/images",
         "output/videos": "/srv/ai-creator/output/videos",
@@ -190,6 +192,7 @@ if asset_audit["retention_missing_expiry_count"] != 0:
 generation_asset_privacy = GenerationAssetPrivacyAdapter(
     "projects/generation/asset_manifest.json",
     state_paths=["projects/generation/generation_state.json"],
+    execution_report_paths=["projects/generation/execution_report.json"],
     asset_roots={
         "output/images": "/srv/ai-creator/output/images",
         "output/videos": "/srv/ai-creator/output/videos",
@@ -214,12 +217,16 @@ privacy_lifecycle = create_privacy_lifecycle_manager(
 ~~~
 
 The adapter uses an OS-level interprocess lock and atomic JSON replacements. It deletes only
-actual `file_path` / `output_file` entries under the exact configured root prefixes; planned
-output paths are never deleted. Shared paths referenced by a non-target subject block deletion.
-Every row must carry a pseudonymous `subject_ref`, `project_id`, and an explicit `tenant_id`
-(`None` means the no-tenant scope). The generation manifest/state builders propagate and validate
-these fields from their source execution report. A partial or sensitive scope is rejected rather
-than guessed.
+actual manifest `file_path`, generation-state `output_file`, and execution-report `output`
+entries under the exact configured root prefixes; planned output paths are never deleted.
+Shared paths referenced by a non-target subject block deletion.
+Every row in the manifest, generation state, and execution report must carry a
+pseudonymous `subject_ref`, `project_id`, and an explicit `tenant_id` (`None` means the
+no-tenant scope). The generation manifest/state builders propagate and validate these fields
+from their source execution report. A partial or sensitive scope is rejected rather than guessed.
+The execution-report `output` field is now treated as an actual deletion candidate, so the
+corresponding generated-media root must be explicitly registered. Do not register the entire source
+tree as an asset root; migrate legacy output files into dedicated generated-media directories first.
 
 **Legacy migration gate:** the currently committed sample generation manifest/state files predate
 these fields. They are intentionally not backfilled with invented owners. Until legacy records are
