@@ -535,8 +535,8 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
             scope_resolver=resolver, confirmed=True
         )
         self.assertEqual(migrated["status"], "GENERATION_SCOPE_METADATA_MIGRATED")
-        self.assertEqual(migrated["migrated_record_count"], 3)
-        report_lookup = next(x for x in seen if x.get("type") == "IMAGE")
+        self.assertEqual(migrated["migrated_record_count"], 1)
+        report_lookup = next(x for x in seen if x.get("media_type") == "IMAGE")
         self.assertEqual(report_lookup["media_type"], "IMAGE")
         self.assertEqual(report_lookup["project"], "documentary-project")
         self.assertEqual(adapter.audit()["unscoped_count"], 0)
