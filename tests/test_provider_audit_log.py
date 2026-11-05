@@ -184,6 +184,20 @@ class ProviderAuditLogTests(unittest.TestCase):
         self.assertTrue(report["valid"])
         self.assertEqual(report["event_count"], 12)
 
+    def test_new_nested_log_path_creates_directories_safely(self):
+        nested_path = Path(self.temp.name) / "audit" / "events" / "provider.ndjson"
+        manager = ProviderAuditLogManager(nested_path)
+        result = manager.record_event(
+            "ROUTING_DECISION",
+            outcome="ALLOWED",
+            status_code="ROUTE_SELECTED",
+            project_id="project-1",
+        )
+        self.assertTrue(result["saved"])
+        self.assertTrue(nested_path.is_file())
+        self.assertTrue(manager.verify_integrity()["valid"])
+        self.assertTrue(manager.read_events()["verified"])
+
     def test_log_contains_only_explicit_audit_fields_not_provider_payloads(self):
         self.append(metadata={"category": "image", "model": "safe-model"})
         raw = self.path.read_text(encoding="utf-8")
