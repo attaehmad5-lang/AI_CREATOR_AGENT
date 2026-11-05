@@ -150,7 +150,8 @@ class ProviderAuditLogManager:
             or not _safe_identifier(event.get("project_id"))
             or not _safe_identifier(event.get("provider_id"))
             or not _safe_identifier(event.get("request_id"))
-            or event.get("outcome") not in _OUTCOMES
+            or not isinstance(event.get("outcome"), str)
+            or event["outcome"] not in _OUTCOMES
             or (
                 event.get("status_code") is not None
                 and (
@@ -190,7 +191,7 @@ class ProviderAuditLogManager:
         events: list[dict[str, Any]] = []
         previous = _ZERO_HASH
         for index, line in enumerate(raw[:-1].split(b"\n"), start=1):
-            if not line or b"\\r" in line or len(line) > 64 * 1024:
+            if not line or b"\r" in line or len(line) > 64 * 1024:
                 raise ValueError("AUDIT_LOG_RECORD_INVALID")
             try:
                 event = json.loads(line.decode("utf-8"))
