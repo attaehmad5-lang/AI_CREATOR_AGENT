@@ -25,7 +25,8 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 
-_REFERENCE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z")
+_REFERENCE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_REQUEST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z")
 _COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 _HOST_RE = re.compile(r"[A-Za-z0-9.-]{1,253}\Z")
 _DELETE_SUCCESS = frozenset({"DELETED", "ALREADY_ABSENT"})
@@ -39,6 +40,14 @@ class PrivacyAdapterConfigurationError(ValueError):
 
 def _valid_reference(value: Any) -> bool:
     return isinstance(value, str) and _REFERENCE_RE.fullmatch(value) is not None
+
+
+def _valid_request_id(value: Any) -> bool:
+    return isinstance(value, str) and _REQUEST_RE.fullmatch(value) is not None
+
+
+def _valid_subject_ref(value: Any) -> bool:
+    return _valid_reference(value) and any(char.isalpha() for char in value)
 
 
 def _normalise_adapter_result(value: Any, *, operation: str) -> dict[str, Any]:
@@ -294,7 +303,7 @@ class PersistentPrivacyAdapter:
                 connection.close()
 
     def _run(self, *, operation: str, request_id: str, scope: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
-        if not _valid_reference(request_id):
+        if not _valid_request_id(request_id):
             return dict(_FAILURE)
         try:
             digest_key = self._digest_key()
@@ -505,7 +514,7 @@ class SQLitePrivacyDataAdapter:
             connection.close()
 
     def _run(self, *, operation: str, request_id: str, scope: dict[str, Any], where_sql: str, parameters: tuple[Any, ...]) -> dict[str, Any]:
-        if not _valid_reference(request_id):
+        if not _valid_request_id(request_id):
             return dict(_FAILURE)
         try:
             digest_key = self._current_digest_key()
@@ -581,7 +590,7 @@ class SQLitePrivacyDataAdapter:
         )
 
     def delete_subject_data(self, *, subject_ref: str, project_id: str, tenant_id: str | None, request_id: str) -> dict[str, Any]:
-        if not _valid_reference(subject_ref) or not self._scope_valid(project_id, tenant_id):
+        if not _valid_subject_ref(subject_ref) or not self._scope_valid(project_id, tenant_id):
             return dict(_FAILURE)
         if tenant_id is None:
             where = "subject_ref=? AND project_id=? AND tenant_id IS NULL"
@@ -689,7 +698,7 @@ class HTTPSPrivacyProviderAdapter:
         return value
 
     def _request(self, *, endpoint: str, payload: dict[str, Any], request_id: str, operation: str) -> dict[str, Any]:
-        if not _valid_reference(request_id):
+        if not _valid_request_id(request_id):
             return dict(_FAILURE)
         try:
             authorization = self.authorization_header()
@@ -732,7 +741,7 @@ class HTTPSPrivacyProviderAdapter:
             return dict(_FAILURE)
 
     def delete_subject_data(self, *, subject_ref: str, project_id: str, tenant_id: str | None, request_id: str) -> dict[str, Any]:
-        if not _valid_reference(subject_ref) or not _valid_reference(project_id) or (tenant_id is not None and not _valid_reference(tenant_id)):
+        if not _valid_subject_ref(subject_ref) or not _valid_reference(project_id) or (tenant_id is not None and not _valid_reference(tenant_id)):
             return dict(_FAILURE)
         return self._request(
             endpoint=self.delete_url,
@@ -841,7 +850,7 @@ class PrivacyRetentionJob:
                         + cutoff.isoformat(),
                     ).hex
                 )
-                if not _valid_reference(request_id):
+                if not _valid_request_id(request_id):
                     raise ValueError("invalid request ID")
                 raw = self.service.purge_expired_privacy_data(
                     cutoff=cutoff,
