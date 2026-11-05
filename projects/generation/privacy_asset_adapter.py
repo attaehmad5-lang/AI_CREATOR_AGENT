@@ -450,6 +450,7 @@ class GenerationAssetPrivacyAdapter:
         specs = [(self.manifest_path, "assets")] + [(path, "states") for path in self.state_paths]
         prepared: list[tuple[Path, dict[str, Any], int]] = []
         migrated_records = 0
+        written_records = 0
         try:
             with interprocess_file_lock(lock_path):
                 for path, collection in specs:
@@ -489,6 +490,7 @@ class GenerationAssetPrivacyAdapter:
                 for path, document, changed in prepared:
                     if changed:
                         self._atomic_write(path, document)
+                        written_records += changed
             return {
                 "status": "GENERATION_SCOPE_METADATA_MIGRATED" if migrated_records else "GENERATION_SCOPE_METADATA_ALREADY_VALID",
                 "migrated_record_count": migrated_records,
@@ -496,8 +498,8 @@ class GenerationAssetPrivacyAdapter:
             }
         except Exception:
             return {
-                "status": "GENERATION_SCOPE_MIGRATION_FAILED",
-                "migrated_record_count": 0,
+                "status": "GENERATION_SCOPE_MIGRATION_PARTIAL" if written_records else "GENERATION_SCOPE_MIGRATION_FAILED",
+                "migrated_record_count": written_records,
                 "document_count": len(specs),
             }
 
