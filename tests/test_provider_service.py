@@ -176,8 +176,8 @@ class ProviderServiceTests(unittest.TestCase):
         service = ProviderService(manager, health_manager=health)
         opener = Opener()
         result = service.verify_http_provider(
-            resolver=_public_resolver,
-            "huggingface", environ={"HF_TOKEN": "do-not-persist"},
+            "huggingface",
+            resolver=_public_resolver, environ={"HF_TOKEN": "do-not-persist"},
             opener=opener, timeout_seconds=1.5,
         )
         self.assertTrue(result["verified"])
