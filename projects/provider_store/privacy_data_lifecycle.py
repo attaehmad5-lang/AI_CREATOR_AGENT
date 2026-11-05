@@ -8,7 +8,7 @@ adapter responses.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from threading import RLock
 from typing import Any
@@ -39,6 +39,7 @@ class PrivacyDataLifecycleManager:
         *,
         max_stores: int = 64,
         require_durable_idempotency: bool = False,
+        required_store_ids: Sequence[str] | None = None,
     ) -> None:
         if isinstance(max_stores, bool) or not isinstance(max_stores, int) or not 1 <= max_stores <= 256:
             raise ValueError("max_stores must be within 1..256")
@@ -46,12 +47,45 @@ class PrivacyDataLifecycleManager:
             raise ValueError("require_durable_idempotency must be boolean")
         if stores is not None and not isinstance(stores, Mapping):
             raise ValueError("privacy stores must be a mapping")
+        expected_store_ids: frozenset[str] | None = None
+        if required_store_ids is not None:
+            if (
+                not isinstance(required_store_ids, Sequence)
+                or isinstance(required_store_ids, (str, bytes))
+                or not required_store_ids
+                or len(required_store_ids) > max_stores
+                or any(
+                    not isinstance(store_id, str)
+                    or _COMPONENT_ID.fullmatch(store_id) is None
+                    for store_id in required_store_ids
+                )
+                or len(set(required_store_ids)) != len(required_store_ids)
+            ):
+                raise ValueError("required privacy store inventory is invalid")
+            expected_store_ids = frozenset(required_store_ids)
+        self._required_store_ids = expected_store_ids
         self.max_stores = max_stores
         self.require_durable_idempotency = require_durable_idempotency
         self._stores_lock = RLock()
         self._stores: dict[str, Any] = {}
         for store_id, adapter in (stores or {}).items():
             self.register_store(store_id, adapter)
+        if self._required_store_ids is not None:
+            with self._stores_lock:
+                if frozenset(self._stores) != self._required_store_ids:
+                    raise ValueError("privacy store inventory does not match the declared required inventory")
+
+    @property
+    def inventory_verified(self) -> bool:
+        """True only when the declared complete inventory exactly matches registered stores."""
+        if self._required_store_ids is None:
+            return False
+        with self._stores_lock:
+            return frozenset(self._stores) == self._required_store_ids
+
+    @property
+    def required_store_count(self) -> int:
+        return len(self._required_store_ids or ())
 
     @property
     def registered_store_count(self) -> int:
@@ -74,6 +108,8 @@ class PrivacyDataLifecycleManager:
         """Register one explicit adapter; ambiguous or duplicate names are rejected."""
         if not isinstance(store_id, str) or _COMPONENT_ID.fullmatch(store_id) is None:
             raise ValueError("invalid privacy store identifier")
+        if self._required_store_ids is not None and store_id not in self._required_store_ids:
+            raise ValueError("privacy store is not in the declared required inventory")
         if not callable(getattr(adapter, "delete_subject_data", None)):
             raise ValueError("privacy store must support delete_subject_data")
         if not callable(getattr(adapter, "purge_expired_data", None)):
