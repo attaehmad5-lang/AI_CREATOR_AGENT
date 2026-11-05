@@ -11,6 +11,10 @@ Every finding was reviewed by exact commit, path, line and surrounding source co
 
 No finding from this reviewed set was in production runtime source, a deployment secret file, or provider configuration. This is a classification of these exact fingerprints only; it is not proof that no other credential was ever exposed outside the scanned reachable Git history.
 
+## Subsequent full-history verification — 5 November 2026
+
+The latest PR-head scan [#42078134969](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/42078134969) completed successfully on commit `23ac7c623e41292da1b156c6836cba009539055f`. It scanned 5,091 reachable commits and reported zero unreviewed findings. The 11 previously reviewed exact fingerprints remain the only suppressions; this is not a blanket allowlist. The same commit's regression workflow [#42078134930](https://github.com/attaehmad5-lang/AI_CREATOR_AGENT/actions/runs/42078134930) passed 970 unit/regression tests and 23 deployment privacy tests on both Ubuntu and Windows.
+
 ## Narrow suppression policy
 
 The root `.gitleaksignore` contains only the 11 exact fingerprints reviewed above. It does not suppress any directory, filename, rule family, token prefix, or future commit. A new fingerprint must fail CI and receive a fresh review. Do not add a broad path/rule allowlist.
