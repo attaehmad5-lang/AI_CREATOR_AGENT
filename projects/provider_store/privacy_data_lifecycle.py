@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from datetime import datetime
+from threading import RLock
 from typing import Any
 
 _COMPONENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
@@ -36,27 +37,32 @@ class PrivacyDataLifecycleManager:
         if stores is not None and not isinstance(stores, Mapping):
             raise ValueError("privacy stores must be a mapping")
         self.max_stores = max_stores
+        self._stores_lock = RLock()
         self._stores: dict[str, Any] = {}
         for store_id, adapter in (stores or {}).items():
             self.register_store(store_id, adapter)
 
     @property
     def registered_store_count(self) -> int:
-        return len(self._stores)
+        with self._stores_lock:
+            return self.registered_store_count
 
     def register_store(self, store_id: str, adapter: Any) -> dict[str, Any]:
         """Register one explicit adapter; ambiguous or duplicate names are rejected."""
         if not isinstance(store_id, str) or _COMPONENT_ID.fullmatch(store_id) is None:
             raise ValueError("invalid privacy store identifier")
-        if store_id in self._stores:
-            raise ValueError("privacy store is already registered")
-        if len(self._stores) >= self.max_stores:
-            raise ValueError("privacy store capacity reached")
         if not callable(getattr(adapter, "delete_subject_data", None)):
             raise ValueError("privacy store must support delete_subject_data")
         if not callable(getattr(adapter, "purge_expired_data", None)):
             raise ValueError("privacy store must support purge_expired_data")
-        self._stores[store_id] = adapter
+        # Registration and capacity checks are one atomic operation. This keeps
+        # concurrent plugin startup from exceeding the configured store limit.
+        with self._stores_lock:
+            if store_id in self._stores:
+                raise ValueError("privacy store is already registered")
+            if self.registered_store_count >= self.max_stores:
+                raise ValueError("privacy store capacity reached")
+            self._stores[store_id] = adapter
         return {"status": "PRIVACY_STORE_REGISTERED", "registered": True}
 
     @staticmethod
@@ -110,15 +116,15 @@ class PrivacyDataLifecycleManager:
         self, *, operation: str, project_id: str, tenant_id: str | None,
         request_id: str, subject_ref: str | None = None, cutoff: datetime | None = None,
     ) -> dict[str, Any]:
-        if not self._stores:
+        # Freeze the adapter set atomically. Adapters registered during this
+        # operation are intentionally deferred until the next lifecycle run.
+        with self._stores_lock:
+            registered_stores = tuple(self._stores.items())
+        if not registered_stores:
             return {
                 "status": "PRIVACY_STORES_NOT_CONFIGURED", "confirmed": False,
                 "completed": False, "store_count": 0, "deleted_count": 0, "stores": {},
             }
-        # Freeze the adapter set for this operation. A plugin may register a
-        # store while handling a callback; that new store belongs to the next
-        # lifecycle run, not the in-flight iteration.
-        registered_stores = tuple(self._stores.items())
         store_results: dict[str, dict[str, Any]] = {}
         total_deleted = 0
         all_confirmed = True
@@ -175,7 +181,7 @@ class PrivacyDataLifecycleManager:
         if confirmed is not True:
             return {
                 "status": "SUBJECT_DELETION_CONFIRMATION_REQUIRED", "confirmed": False,
-                "completed": False, "store_count": len(self._stores),
+                "completed": False, "store_count": self.registered_store_count,
                 "deleted_count": 0, "stores": {},
             }
         if (
@@ -184,7 +190,7 @@ class PrivacyDataLifecycleManager:
         ):
             return {
                 "status": "INVALID_SUBJECT_DELETION_SCOPE", "confirmed": False,
-                "completed": False, "store_count": len(self._stores),
+                "completed": False, "store_count": self.registered_store_count,
                 "deleted_count": 0, "stores": {},
             }
         return self._run(
@@ -200,7 +206,7 @@ class PrivacyDataLifecycleManager:
         if confirmed is not True:
             return {
                 "status": "RETENTION_PURGE_CONFIRMATION_REQUIRED", "confirmed": False,
-                "completed": False, "store_count": len(self._stores),
+                "completed": False, "store_count": self.registered_store_count,
                 "deleted_count": 0, "stores": {},
             }
         if (
@@ -211,7 +217,7 @@ class PrivacyDataLifecycleManager:
         ):
             return {
                 "status": "INVALID_RETENTION_PURGE_SCOPE", "confirmed": False,
-                "completed": False, "store_count": len(self._stores),
+                "completed": False, "store_count": self.registered_store_count,
                 "deleted_count": 0, "stores": {},
             }
         return self._run(
