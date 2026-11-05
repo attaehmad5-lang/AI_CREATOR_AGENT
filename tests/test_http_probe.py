@@ -2,10 +2,20 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+import socket
 from urllib.error import HTTPError
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.http_probe import ProviderHTTPConnectivityProbe
+
+
+def _public_resolver(hostname, port):
+    """Deterministic public DNS answer for tests; no external DNS is used."""
+    import socket
+    return [
+        (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "",
+         ("93.184.216.34", port))
+    ]
 
 
 class _Response:
@@ -57,7 +67,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             def open(self, request, timeout):
                 return Response()
 
-        probe = ProviderHTTPConnectivityProbe(
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, 
             environ={},
             opener=Opener(),
         )
@@ -73,7 +83,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_public_https_probe_uses_timeout_and_bounds_response_read(self):
         opener = _Opener(_Response(body=b"x" * 5000))
-        probe = ProviderHTTPConnectivityProbe(opener=opener, max_response_bytes=16)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=opener, max_response_bytes=16)
         result = probe(
             {
                 "id": "public_provider",
@@ -91,7 +101,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_credentialed_probe_requires_explicit_auth_protected_endpoint(self):
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, 
             environ={"HF_TOKEN": "private-token"}, opener=opener
         )
         with self.assertRaisesRegex(PermissionError, "documented endpoint"):
@@ -105,7 +115,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
     def test_token_is_read_from_environment_and_never_returned(self):
         secret = "do-not-return-this-token"
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, 
             environ={"HF_TOKEN": secret}, opener=opener
         )
         result = probe({
@@ -130,7 +140,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         for provider_id, env_name, expected_header, secret, expected_value in cases:
             with self.subTest(provider=provider_id):
                 opener = _Opener()
-                probe = ProviderHTTPConnectivityProbe(environ={env_name: secret}, opener=opener)
+                probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, environ={env_name: secret}, opener=opener)
                 result = probe({
                     "id": provider_id, "auth_type": "API_KEY",
                     "allowed_hosts": ["api.example.com"],
@@ -160,7 +170,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             )
             self.assertTrue(configured["saved"])
             response = _Response()
-            probe = ProviderHTTPConnectivityProbe(opener=_Opener(response))
+            probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=_Opener(response))
             result = manager.verify_connectivity("probe_provider", probe)
             self.assertEqual(result["status"], "CONNECTED")
             self.assertTrue(result["verified"])
@@ -192,7 +202,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             )
             result = manager.verify_connectivity(
                 "probe_provider",
-                ProviderHTTPConnectivityProbe(opener=_Opener(error=error)),
+                ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=_Opener(error=error)),
             )
             self.assertEqual(result["status"], "RATE_LIMITED")
             self.assertEqual(result["http_status"], 429)
@@ -232,7 +242,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             )
             result = manager.verify_connectivity(
                 "probe_provider",
-                ProviderHTTPConnectivityProbe(opener=_Opener(error=error)),
+                ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=_Opener(error=error)),
             )
             self.assertEqual(result["status"], "PROVIDER_UNAVAILABLE")
             self.assertEqual(result["http_status"], 503)
@@ -265,7 +275,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 )
                 result = manager.verify_connectivity(
                     "probe_provider",
-                    ProviderHTTPConnectivityProbe(opener=_Opener(error=error)),
+                    ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=_Opener(error=error)),
                 )
                 self.assertEqual(result["status"], "AUTHENTICATION_OR_PERMISSION_FAILED")
                 self.assertEqual(result["http_status"], status_code)
@@ -275,7 +285,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_missing_endpoint_and_unallowlisted_host_fail_before_network(self):
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=opener)
         with self.assertRaises(ValueError):
             probe({"id": "p", "auth_type": "NONE", "configuration": {}})
         with self.assertRaises(ValueError):
@@ -292,7 +302,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             "https://api.example.com/health", 401, "Unauthorized", {}, None
         )
         opener = _Opener(error=error)
-        probe = ProviderHTTPConnectivityProbe(
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, 
             environ={"HF_TOKEN": "secret"}, opener=opener
         )
         with self.assertRaises(PermissionError) as caught:
@@ -317,7 +327,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                     request.full_url, 401, "unauthorized", {}, None
                 )
 
-        probe = ProviderHTTPConnectivityProbe(
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, 
             environ={},
             opener=Opener(),
         )
@@ -338,7 +348,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             {"Location": "https://evil.example.com/redirect"}, None,
         )
         opener = _Opener(error=error)
-        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=opener)
         with self.assertRaises(ConnectionError):
             probe({
                 "id": "public_provider", "auth_type": "NONE",
@@ -350,7 +360,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
     def test_google_provider_uses_header_auth_and_known_environment_reference(self):
         secret = "google-key-private"
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(environ={"GOOGLE_API_KEY": secret}, opener=opener)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, environ={"GOOGLE_API_KEY": secret}, opener=opener)
         result = probe({
             "id": "google_image", "auth_type": "API_KEY",
             "allowed_hosts": ["api.example.com"],
@@ -363,7 +373,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_custom_auth_header_cannot_override_transport_headers(self):
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, 
             environ={"HF_TOKEN": "private"},
             opener=opener,
         )
@@ -378,7 +388,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_api_auth_fails_closed_for_unknown_or_malformed_environment_reference(self):
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(environ={"HF_TOKEN": "private"}, opener=opener)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, environ={"HF_TOKEN": "private"}, opener=opener)
         provider = {
             "id": "custom", "auth_type": "API_KEY", "token_env": "HF_TOKEN\\nEVIL",
             "allowed_hosts": ["api.example.com"],
@@ -391,7 +401,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
     def test_custom_credential_env_reference_is_supported(self):
         secret = "custom-provider-secret"
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, 
             environ={"CUSTOM_CREDENTIAL": secret}, opener=opener
         )
         result = probe({
@@ -407,7 +417,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_host_allowlist_is_required_even_for_public_https_hosts(self):
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=opener)
         with self.assertRaises(ValueError):
             probe({
                 "id": "public", "auth_type": "NONE",
@@ -431,7 +441,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         for provider in providers:
             with self.subTest(provider=provider["id"]):
                 opener = _Opener()
-                probe = ProviderHTTPConnectivityProbe(environ=environment, opener=opener)
+                probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, environ=environment, opener=opener)
                 metadata = dict(provider)
                 metadata["configuration"] = {
                     "endpoint": f"https://{provider['allowed_hosts'][0]}/health",
@@ -465,7 +475,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             opener = _Opener()
             result = manager.verify_connectivity(
                 "huggingface",
-                ProviderHTTPConnectivityProbe(environ={"HF_TOKEN": "private"}, opener=opener),
+                ProviderHTTPConnectivityProbe(resolver=_public_resolver, environ={"HF_TOKEN": "private"}, opener=opener),
                 environ={"HF_TOKEN": "private"},
             )
             self.assertEqual(result["status"], "AUTHENTICATION_VERIFICATION_REQUIRED")
@@ -493,7 +503,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
             )
             self.assertTrue(configured["saved"])
             opener = _Opener()
-            probe = ProviderHTTPConnectivityProbe(
+            probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, 
                 environ={"HF_TOKEN": "never-persist-this"}, opener=opener
             )
             result = manager.verify_connectivity(
@@ -508,7 +518,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_manual_account_auth_is_not_faked_by_http_probe(self):
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=opener)
         with self.assertRaises(PermissionError):
             probe({
                 "id": "music", "auth_type": "ACCOUNT",
@@ -524,7 +534,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 {}, None,
             )
             opener = _Opener(error=error)
-            probe = ProviderHTTPConnectivityProbe(opener=opener)
+            probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=opener)
             with self.assertRaises(ConnectionError) as caught:
                 probe({
                     "id": "public_provider", "auth_type": "NONE",
@@ -537,7 +547,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
     def test_timeout_is_reported_without_credentials_or_network_details(self):
         from urllib.error import URLError
         opener = _Opener(error=URLError(TimeoutError("private timeout detail")))
-        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=opener)
         with self.assertRaises(TimeoutError) as caught:
             probe({
                 "id": "public_provider", "auth_type": "NONE",
@@ -548,7 +558,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_basic_auth_is_rejected_until_a_real_basic_encoder_exists(self):
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, 
             environ={"CUSTOM_CREDENTIAL": "raw-token"}, opener=opener
         )
         with self.assertRaisesRegex(ValueError, "auth scheme is not permitted"):
@@ -565,12 +575,12 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_invalid_probe_configuration_is_rejected(self):
         with self.assertRaises(ValueError):
-            ProviderHTTPConnectivityProbe(max_response_bytes=-1)
+            ProviderHTTPConnectivityProbe(resolver=_public_resolver, max_response_bytes=-1)
         with self.assertRaises(ValueError):
-            ProviderHTTPConnectivityProbe(environ=[])
+            ProviderHTTPConnectivityProbe(resolver=_public_resolver, environ=[])
         with self.assertRaises(ValueError):
-            ProviderHTTPConnectivityProbe(opener=object())
-        probe = ProviderHTTPConnectivityProbe(opener=_Opener())
+            ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=object())
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=_Opener())
         provider = {
             "id": "p", "auth_type": "NONE", "allowed_hosts": ["api.example.com"],
             "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
@@ -582,7 +592,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_malformed_credential_header_value_is_rejected(self):
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, 
             environ={"HF_TOKEN": "private\r\nX-Evil: injected"}, opener=opener
         )
         with self.assertRaisesRegex(PermissionError, "credential format is invalid"):
@@ -595,7 +605,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_secret_cannot_be_sent_in_arbitrary_http_headers(self):
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(environ={"HF_TOKEN": "private"}, opener=opener)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, environ={"HF_TOKEN": "private"}, opener=opener)
         with self.assertRaisesRegex(ValueError, "header name is not permitted"):
             probe({
                 "id": "huggingface", "auth_type": "API_TOKEN",
@@ -607,7 +617,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_null_authentication_type_is_rejected(self):
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=opener)
         with self.assertRaisesRegex(ValueError, "INVALID_AUTH_TYPE"):
             probe({
                 "id": "p", "auth_type": None,
@@ -618,7 +628,7 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
     def test_missing_host_allowlist_is_rejected_before_network(self):
         opener = _Opener()
-        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=opener)
         with self.assertRaisesRegex(ValueError, "HOST_ALLOWLIST_REQUIRED"):
             probe({
                 "id": "p", "auth_type": "NONE",
