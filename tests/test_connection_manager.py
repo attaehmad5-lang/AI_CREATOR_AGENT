@@ -217,6 +217,39 @@ class ConnectionManagerTests(unittest.TestCase):
                 catalog_encryption_key_provider=lambda context: b"w" * 32,
             )
 
+    def test_encrypted_catalog_recovery_requires_key_and_preserves_encryption(self):
+        target = self.root / "recoverable-encrypted-catalog.json"
+        master = self.root / "validated-master-catalog.json"
+        master.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        key_provider = lambda context: b"r" * 32
+        from projects.provider_store.encrypted_state_store import EncryptedJSONStateStore
+        EncryptedJSONStateStore(
+            target,
+            key_provider=key_provider,
+            context="provider-catalog-recovery-test",
+        ).write({"invalid": "catalog"})
+
+        without_key = ConnectionManager.restore_catalog_from_master(target, master)
+        self.assertEqual(without_key["status"], "CATALOG_ENCRYPTION_KEY_REQUIRED")
+        self.assertFalse(without_key["restored"])
+
+        restored = ConnectionManager.restore_catalog_from_master(
+            target,
+            master,
+            catalog_encryption_key_provider=key_provider,
+            catalog_encryption_context="provider-catalog-recovery-test",
+        )
+        self.assertEqual(restored["status"], "RESTORED_FROM_MASTER")
+        raw = target.read_bytes()
+        self.assertNotIn(b'"providers"', raw)
+        reopened = ConnectionManager(
+            target,
+            self.state_path,
+            catalog_encryption_key_provider=key_provider,
+            catalog_encryption_context="provider-catalog-recovery-test",
+        )
+        self.assertEqual(reopened.list_providers(), self.manager.list_providers())
+
     def test_connection_state_supports_authenticated_encryption_and_wrong_key_rejection(self):
         encrypted_path = self.root / "encrypted-connection-state.json"
         key_provider = lambda context: b"k" * 32
