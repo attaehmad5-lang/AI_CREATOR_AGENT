@@ -28,7 +28,8 @@ from urllib.parse import urlsplit
 _REFERENCE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _REQUEST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z")
 _COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
-_HOST_RE = re.compile(r"[A-Za-z0-9.-]{1,253}\Z")
+_HOST_LABEL = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)"
+_HOST_RE = re.compile(_HOST_LABEL + r"(?:\." + _HOST_LABEL + r")*\Z")
 _DELETE_SUCCESS = frozenset({"DELETED", "ALREADY_ABSENT"})
 _PURGE_SUCCESS = frozenset({"PURGED", "ALREADY_EMPTY"})
 _FAILURE = {"confirmed": False, "status": "FAILED", "deleted_count": 0}
@@ -293,10 +294,11 @@ class PersistentPrivacyAdapter:
             connection.execute("COMMIT")
             return cursor.rowcount == 1
         except Exception:
-            try:
-                connection.execute("ROLLBACK")
-            except Exception:
-                pass
+            if connection is not None:
+                try:
+                    connection.execute("ROLLBACK")
+                except Exception:
+                    pass
             return False
         finally:
             if connection is not None:
@@ -696,15 +698,20 @@ class HTTPSPrivacyProviderAdapter:
             port = parsed.port
         except ValueError:
             raise PrivacyAdapterConfigurationError("privacy endpoint URL is invalid") from None
+        hostname = parsed.hostname.casefold() if parsed.hostname else ""
+        authority = parsed.netloc.casefold()
         if (
             parsed.scheme.casefold() != "https"
-            or not parsed.hostname
-            or parsed.hostname.casefold() not in allowed_hosts
+            or not hostname
+            or _HOST_RE.fullmatch(hostname) is None
+            or hostname not in allowed_hosts
             or parsed.username is not None
             or parsed.password is not None
             or parsed.query
             or parsed.fragment
             or port not in {None, 443}
+            or authority not in {hostname, hostname + ":443"}
+            or not parsed.path.startswith("/")
         ):
             raise PrivacyAdapterConfigurationError("privacy endpoint is outside the HTTPS host allowlist")
         return value
@@ -744,7 +751,9 @@ class HTTPSPrivacyProviderAdapter:
                 return dict(_FAILURE)
             document = json.loads(raw.decode("utf-8"))
             result = _normalise_adapter_result(document, operation=operation)
-            if status_code == 202 and result["status"] != "PENDING":
+            # HTTP 202 is the sole asynchronous/pending response. A 200 response
+            # must not silently downgrade a pending deletion into a terminal result.
+            if (status_code == 202) != (result["status"] == "PENDING"):
                 return dict(_FAILURE)
             return result
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError, TypeError, UnicodeDecodeError):
@@ -792,7 +801,7 @@ class PrivacyRetentionJob:
         self,
         service: Any,
         *,
-        principal_provider: Callable[[], str],
+        principal_provider: Callable[[], Any],
         scopes: Sequence[Mapping[str, Any]],
         retention_days: int,
         clock: Callable[[], datetime] | None = None,
@@ -837,7 +846,12 @@ class PrivacyRetentionJob:
             principal_id = self.principal_provider()
         except Exception:
             return {"status": "RETENTION_JOB_PRINCIPAL_UNAVAILABLE", "completed": False, "scope_count": len(self.scopes), "completed_count": 0, "results": []}
-        if not isinstance(principal_id, str) or not principal_id.strip():
+        # Preserve verifier-issued OIDC capability objects unchanged. The
+        # ProviderService is the authority that validates the principal; this
+        # worker must not stringify, reconstruct, or accept a caller-supplied ID.
+        if principal_id is None or isinstance(principal_id, bytes) or (
+            isinstance(principal_id, str) and not principal_id.strip()
+        ):
             return {"status": "RETENTION_JOB_PRINCIPAL_UNAVAILABLE", "completed": False, "scope_count": len(self.scopes), "completed_count": 0, "results": []}
         try:
             now = self.clock()
