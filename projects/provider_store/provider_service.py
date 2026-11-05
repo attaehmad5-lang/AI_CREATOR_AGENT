@@ -1508,6 +1508,10 @@ class ProviderService:
         })
         if rejection is not None:
             return {"confirmed": False, "completed": False, **rejection}
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "confirmed": False, "completed": False}
+        if not isinstance(principal_id, str) or not principal_id.strip():
+            return {"status": "AUTHENTICATED_PRINCIPAL_REQUIRED", "confirmed": False, "completed": False}
         authorization = self._authorize_operation(principal_id, "provider.access.manage")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "confirmed": False, "completed": False}
@@ -1574,6 +1578,10 @@ class ProviderService:
         })
         if rejection is not None:
             return {"confirmed": False, "completed": False, **rejection}
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "confirmed": False, "completed": False}
+        if not isinstance(principal_id, str) or not principal_id.strip():
+            return {"status": "AUTHENTICATED_PRINCIPAL_REQUIRED", "confirmed": False, "completed": False}
         authorization = self._authorize_operation(principal_id, "provider.access.manage")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "confirmed": False, "completed": False}
