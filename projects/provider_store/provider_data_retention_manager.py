@@ -430,7 +430,12 @@ class ProviderDataRetentionManager:
         if record["lease_worker_id"] != worker_id:
             return None, "DELETION_LEASE_OWNER_MISMATCH"
         digest = record.get("lease_token_digest")
-        if not isinstance(lease_token, str) or not lease_token or not isinstance(digest, str):
+        if (
+            not isinstance(lease_token, str)
+            or not 32 <= len(lease_token) <= 128
+            or re.fullmatch(r"[A-Za-z0-9_-]+", lease_token) is None
+            or not isinstance(digest, str)
+        ):
             return None, "DELETION_LEASE_INVALID"
         if not hmac.compare_digest(digest, _token_digest(lease_token)):
             return None, "DELETION_LEASE_INVALID"
