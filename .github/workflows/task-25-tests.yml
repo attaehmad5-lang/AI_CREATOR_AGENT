@@ -10,6 +10,7 @@ on:
   pull_request:
     branches:
       - main
+      - task-25-feature-72-audit-trail
 
 permissions:
   contents: read
