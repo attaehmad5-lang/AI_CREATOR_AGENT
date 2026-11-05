@@ -251,6 +251,7 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
         }])
         manager = create_privacy_lifecycle_manager(
             {"generation-assets": self.adapter},
+            required_store_ids=("generation-assets",),
             ledger_directory=self.root / "privacy-ledger",
             digest_key_provider=lambda _context: b"k" * 32,
         )
