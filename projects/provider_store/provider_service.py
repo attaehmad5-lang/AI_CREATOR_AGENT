@@ -1897,6 +1897,28 @@ class ProviderService:
                     "provider": provider_id,
                     "release": released,
                 }
+            credential_audit = self._append_provider_audit_event(
+                "CREDENTIAL_ACCESS",
+                outcome="REQUESTED",
+                status_code="CREDENTIAL_LEASE_REQUESTED",
+                actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                provider_id=provider_id,
+                request_id=request_id,
+                metadata={"authentication_method": "MANAGED_SECRET"},
+            )
+            if credential_audit is not None:
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "AUDIT_LOG_WRITE_FAILED",
+                    "executed": False,
+                    "provider": provider_id,
+                    "release": released,
+                }
             try:
                 provider_record = self.connection_manager.get_provider(provider_id)
                 secret_ref = provider_record.get("secret_ref") if isinstance(provider_record, dict) else None
@@ -1910,9 +1932,47 @@ class ProviderService:
                     principal_id=principal_id,
                 )
                 options["provider_credential_lease"] = secret_lease
+                credential_audit = self._append_provider_audit_event(
+                    "CREDENTIAL_ACCESS",
+                    outcome="SUCCEEDED",
+                    status_code="CREDENTIAL_LEASE_ISSUED",
+                    actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    provider_id=provider_id,
+                    request_id=request_id,
+                    metadata={"authentication_method": "MANAGED_SECRET", "credential_present": True},
+                )
+                if credential_audit is not None:
+                    secret_lease.close()
+                    secret_lease = None
+                    options.pop("provider_credential_lease", None)
+                    released = self.release_unstarted_request(
+                        project_id=project_id, provider_id=provider_id,
+                        request_id=request_id, tenant_id=tenant_id,
+                    )
+                    return {
+                        "status": "AUDIT_LOG_FINALIZATION_FAILED",
+                        "executed": False,
+                        "provider": provider_id,
+                        "release": released,
+                    }
             except Exception as exc:
                 if secret_lease is not None:
                     secret_lease.close()
+                    secret_lease = None
+                credential_audit = self._append_provider_audit_event(
+                    "CREDENTIAL_ACCESS",
+                    outcome="FAILED",
+                    status_code="CREDENTIAL_RESOLUTION_FAILED",
+                    actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                    tenant_id=tenant_id,
+                    project_id=project_id,
+                    provider_id=provider_id,
+                    request_id=request_id,
+                    metadata={"authentication_method": "MANAGED_SECRET", "error_type": type(exc).__name__},
+                )
+                options.pop("provider_credential_lease", None)
                 released = self.release_unstarted_request(
                     project_id=project_id, provider_id=provider_id,
                     request_id=request_id, tenant_id=tenant_id,
@@ -1921,11 +1981,41 @@ class ProviderService:
                 if not isinstance(safe_status, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", safe_status):
                     safe_status = "MANAGED_SECRET_RESOLUTION_FAILED"
                 return {
-                    "status": safe_status,
+                    "status": "AUDIT_LOG_FINALIZATION_FAILED" if credential_audit is not None else safe_status,
                     "executed": False,
                     "provider": provider_id,
                     "release": released,
                 }
+        execution_audit = self._append_provider_audit_event(
+            "ROUTED_EXECUTION",
+            outcome="REQUESTED",
+            status_code="PROVIDER_EXECUTION_REQUESTED",
+            actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            provider_id=provider_id,
+            request_id=request_id,
+            metadata={
+                "category": category,
+                "model": route.get("model") if isinstance(route.get("model"), str) else None,
+                "execution_started": False,
+            },
+        )
+        if execution_audit is not None:
+            if secret_lease is not None:
+                options.pop("provider_credential_lease", None)
+                secret_lease.close()
+                secret_lease = None
+            released = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id,
+                request_id=request_id, tenant_id=tenant_id,
+            )
+            return {
+                "status": "AUDIT_LOG_WRITE_FAILED",
+                "executed": False,
+                "provider": provider_id,
+                "release": released,
+            }
         started_at = time.monotonic()
         try:
             adapter_result = adapter(**options)
