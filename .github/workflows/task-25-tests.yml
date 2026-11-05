@@ -33,7 +33,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install runtime and JWT cryptography dependencies
-        run: python -m pip install requests pyjwt cryptography
+        run: python -m pip install requests pyjwt cryptography pytest
       - name: Compile provider modules and tests
         run: python -m compileall -q projects/provider_store projects/generation/providers tests
       - name: Validate provider JSON catalogs
@@ -43,3 +43,5 @@ jobs:
         run: python tests/test_secret_exclusions.py
       - name: Run unit and regression tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: Run deployment privacy adapter tests
+        run: python -m pytest -q tests/test_privacy_adapters_deployment.py
