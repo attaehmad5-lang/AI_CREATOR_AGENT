@@ -260,3 +260,24 @@ if __name__ == "__main__":
         self.assertEqual(result["expires_at"], row["expires_at"])
         with self.assertRaises(GenerationAssetPrivacyError):
             copy_generation_privacy_scope(document, {"expires_at": "2026-01-01T00:00:00"})
+
+    def test_privacy_audit_counts_scoped_and_retention_ready_records_without_paths(self):
+        self.write_documents([
+            {"asset_id": "one", "subject_ref": SUBJECT, "expires_at": "2026-12-01T00:00:00Z", "file_path": None},
+            {"asset_id": "two", "subject_ref": "subject-other", "expires_at": "2027-01-01T00:00:00+00:00", "file_path": None},
+        ])
+        result = self.adapter.audit()
+        self.assertEqual(result["status"], "ASSET_PRIVACY_READY")
+        self.assertEqual(result["record_count"], 4)
+        self.assertEqual(result["scoped_count"], 4)
+        self.assertEqual(result["unscoped_count"], 0)
+        self.assertEqual(result["retention_ready_count"], 4)
+        self.assertNotIn(str(self.root), repr(result))
+
+
+    def test_privacy_audit_marks_legacy_manifest_for_migration(self):
+        self.manifest.write_text(json.dumps({"assets": [{"asset_id": "legacy"}]}), encoding="utf-8")
+        self.state.write_text(json.dumps({"states": [{"asset_id": "legacy"}]}), encoding="utf-8")
+        result = self.adapter.audit()
+        self.assertEqual(result["status"], "ASSET_PRIVACY_MIGRATION_REQUIRED")
+        self.assertEqual(result["unscoped_count"], 2)
