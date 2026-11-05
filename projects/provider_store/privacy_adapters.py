@@ -328,6 +328,12 @@ class PersistentPrivacyAdapter:
         return result
 
     def delete_subject_data(self, *, subject_ref: str, project_id: str, tenant_id: str | None, request_id: str) -> dict[str, Any]:
+        if (
+            not _valid_subject_ref(subject_ref)
+            or not _valid_reference(project_id)
+            or (tenant_id is not None and not _valid_reference(tenant_id))
+        ):
+            return dict(_FAILURE)
         return self._run(
             operation="delete",
             request_id=request_id,
@@ -336,7 +342,13 @@ class PersistentPrivacyAdapter:
         )
 
     def purge_expired_data(self, *, cutoff: datetime, project_id: str, tenant_id: str | None, request_id: str) -> dict[str, Any]:
-        if not isinstance(cutoff, datetime) or cutoff.tzinfo is None or cutoff.utcoffset() is None:
+        if (
+            not isinstance(cutoff, datetime)
+            or cutoff.tzinfo is None
+            or cutoff.utcoffset() is None
+            or not _valid_reference(project_id)
+            or (tenant_id is not None and not _valid_reference(tenant_id))
+        ):
             return dict(_FAILURE)
         cutoff_utc = cutoff.astimezone(timezone.utc).isoformat()
         return self._run(
