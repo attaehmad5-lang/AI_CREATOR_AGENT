@@ -52,13 +52,21 @@ class ProviderService:
         privacy_lifecycle_manager: PrivacyDataLifecycleManager | None = None,
         secret_manager: Any | None = None,
         require_encrypted_state: bool = False,
+        require_privacy_lifecycle: bool = False,
     ) -> None:
         if not isinstance(require_encrypted_state, bool):
             raise ValueError("require_encrypted_state must be boolean")
+        if not isinstance(require_privacy_lifecycle, bool):
+            raise ValueError("require_privacy_lifecycle must be boolean")
         if privacy_lifecycle_manager is not None and not isinstance(
             privacy_lifecycle_manager, PrivacyDataLifecycleManager
         ):
             raise ValueError("privacy_lifecycle_manager must use PrivacyDataLifecycleManager")
+        if require_privacy_lifecycle and (
+            privacy_lifecycle_manager is None
+            or privacy_lifecycle_manager.registered_store_count < 1
+        ):
+            raise ValueError("privacy_lifecycle_manager must have at least one registered store")
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
         if tenant_isolation_manager is not None and authorization_manager is None:
@@ -202,6 +210,7 @@ class ProviderService:
         self.privacy_lifecycle_manager = privacy_lifecycle_manager
         self.secret_manager = resolved_secret_manager
         self.require_encrypted_state = require_encrypted_state
+        self.require_privacy_lifecycle = require_privacy_lifecycle
         self._privacy_storage_status = storage_status
 
     def get_privacy_storage_status(self) -> dict[str, Any]:
