@@ -153,13 +153,8 @@ class ProviderAuditLogManager:
             or not _safe_identifier(event.get("request_id"))
             or not isinstance(event.get("outcome"), str)
             or event["outcome"] not in _OUTCOMES
-            or (
-                event.get("status_code") is not None
-                and (
-                    not isinstance(event["status_code"], str)
-                    or _STATUS_RE.fullmatch(event["status_code"]) is None
-                )
-            )
+            or not isinstance(event.get("status_code"), str)
+            or _STATUS_RE.fullmatch(event["status_code"]) is None
             or _safe_metadata(event.get("metadata")) != event.get("metadata")
             or event.get("previous_hash") != expected_previous
             or not isinstance(event.get("event_hash"), str)
