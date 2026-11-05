@@ -1,6 +1,9 @@
 import json
 import os
+import json
 from datetime import datetime
+
+from projects.generation.providers.atomic_output import atomic_write_bytes
 
 INPUT_FILE = "projects/generation/execution_report.json"
 OUTPUT_FILE = "projects/generation/asset_manifest.json"
@@ -29,7 +32,7 @@ for job in data["jobs"]:
 
     asset_id = "ASSET_" + job["job_id"]
 
-    assets.append({
+    asset = {
         "asset_id": asset_id,
         "job_id": job["job_id"],
         "project": data["project"],
@@ -43,7 +46,15 @@ for job in data["jobs"]:
         "attempts": 0,
         "max_attempts": job["max_attempts"],
         "created_at": datetime.now().isoformat()
-    })
+    }
+    # Propagate only explicit pseudonymous privacy scope and retention metadata.
+    # Do not infer tenant or subject ownership from project names or job IDs.
+    for key in ("project_id", "tenant_id", "subject_ref", "expires_at"):
+        if key in job:
+            asset[key] = job[key]
+        elif key in data:
+            asset[key] = data[key]
+    assets.append(asset)
 
 output = {
     "project": data["project"],
@@ -63,10 +74,17 @@ output = {
     "created_at": datetime.now().isoformat()
 }
 
-os.makedirs("projects/generation", exist_ok=True)
+# Preserve explicit owner/scope values at document level for scoped adapter checks.
+for key in ("project_id", "tenant_id", "subject_ref", "expires_at"):
+    if key in data:
+        output[key] = data[key]
 
-with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-    json.dump(output, f, indent=4, ensure_ascii=False)
+os.makedirs("projects/generation", exist_ok=True)
+atomic_write_bytes(
+    OUTPUT_FILE,
+    json.dumps(output, indent=4, ensure_ascii=False, allow_nan=False).encode("utf-8"),
+    max_bytes=16 * 1024 * 1024,
+)
 
 print("===================================")
 print("      ADVANCED ASSET MANAGER")
