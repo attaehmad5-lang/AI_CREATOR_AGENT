@@ -296,6 +296,10 @@ def test_lifecycle_factory_wires_external_adapters_with_durable_idempotency(tmp_
     assert first["completed"] is True and replay["completed"] is True
     assert first["stores"]["provider-a"]["confirmed"] is True
     assert len(wrapped.calls) == 1
+    assert manager.require_durable_idempotency is True
+    assert manager.durable_idempotency_ready is True
+    with pytest.raises(ValueError, match="durable idempotency"):
+        manager.register_store("late-unwrapped", RecordingAdapter())
     ledger = tmp_path / "privacy-ledgers" / "provider-a.sqlite3"
     assert ledger.is_file()
 
@@ -311,6 +315,8 @@ def test_lifecycle_factory_keeps_transactional_sqlite_adapter_unwrapped(tmp_path
         {"app-db": adapter}, ledger_directory=tmp_path / "privacy-ledgers", digest_key_provider=key_provider
     )
     assert manager._stores["app-db"] is adapter
+    assert manager.require_durable_idempotency is True
+    assert manager.durable_idempotency_ready is True
 
 
 def test_lifecycle_factory_rejects_insecure_or_incomplete_configuration(tmp_path):
