@@ -778,6 +778,7 @@ class ProviderService:
         max_response_bytes: int = 4096,
         principal_id: str | None = None,
         tenant_id: str | None = None,
+        resolver: Any = None,
     ) -> dict[str, Any]:
         """Verify a configured allowlisted HTTPS endpoint using the built-in safe probe.
 
@@ -800,6 +801,7 @@ class ProviderService:
                 secret_manager=self.secret_manager,
                 tenant_id=tenant_id,
                 principal_id=principal_id,
+                resolver=resolver,
             )
         except Exception as exc:
             return {
@@ -826,6 +828,7 @@ class ProviderService:
         opener: Any = None,
         max_response_bytes: int = 4096,
         principal_id: str | None = None,
+        resolver: Any = None,
     ) -> dict[str, Any]:
         """Verify a provider using an access token held only by an OAuth manager in memory.
 
@@ -880,6 +883,7 @@ class ProviderService:
             opener=opener,
             max_response_bytes=max_response_bytes,
             principal_id=principal_id,
+            resolver=resolver,
         )
 
     def verify_manual_provider(
