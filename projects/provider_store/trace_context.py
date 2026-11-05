@@ -7,12 +7,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,200}\\Z")
-_TRACE_ID_RE = re.compile(r"[0-9a-f]{32}\\Z")
-_SPAN_ID_RE = re.compile(r"[0-9a-f]{16}\\Z")
+_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
+_TRACE_ID_RE = re.compile(r"[0-9a-f]{32}\Z")
+_SPAN_ID_RE = re.compile(r"[0-9a-f]{16}\Z")
 _TRACEPARENT_RE = re.compile(
     r"(?P<version>[0-9a-f]{2})-(?P<trace_id>[0-9a-f]{32})-"
-    r"(?P<span_id>[0-9a-f]{16})-(?P<flags>[0-9a-f]{2})\\Z"
+    r"(?P<span_id>[0-9a-f]{16})-(?P<flags>[0-9a-f]{2})\Z"
 )
 
 
