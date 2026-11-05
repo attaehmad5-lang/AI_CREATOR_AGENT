@@ -3487,5 +3487,53 @@ class ProviderServiceTests(unittest.TestCase):
 
 
 
+    def test_privacy_lifecycle_never_uses_trusted_internal_auth_bypass(self):
+        class Store:
+            def __init__(self):
+                self.calls = []
+
+            def delete_subject_data(self, **kwargs):
+                self.calls.append(("delete", kwargs))
+                return {"confirmed": True, "status": "DELETED", "deleted_count": 1}
+
+            def purge_expired_data(self, **kwargs):
+                self.calls.append(("purge", kwargs))
+                return {"confirmed": True, "status": "PURGED", "deleted_count": 1}
+
+        store = Store()
+        lifecycle = PrivacyDataLifecycleManager({"database": store})
+        service_without_auth = ProviderService(
+            self.connections,
+            privacy_lifecycle_manager=lifecycle,
+        )
+        delete_result = service_without_auth.delete_subject_data(
+            subject_ref="subject-41", project_id="film", request_id="delete-041",
+            principal_id=None, confirmed=True,
+        )
+        purge_result = service_without_auth.purge_expired_privacy_data(
+            cutoff=datetime(2026, 1, 1, tzinfo=timezone.utc), project_id="film",
+            request_id="purge-041", principal_id=None, confirmed=True,
+        )
+        self.assertEqual(delete_result["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertEqual(purge_result["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertEqual(store.calls, [])
+
+        authorization = ProviderAuthorizationManager(self.root / "privacy-missing-principal.json")
+        authorization.assign_role("privacy-admin", "admin")
+        service_with_auth = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            privacy_lifecycle_manager=lifecycle,
+        )
+        missing_principal = service_with_auth.delete_subject_data(
+            subject_ref="subject-42", project_id="film", request_id="delete-042",
+            principal_id=None, confirmed=True,
+        )
+        self.assertEqual(missing_principal["status"], "AUTHENTICATED_PRINCIPAL_REQUIRED")
+        self.assertEqual(store.calls, [])
+
+
+
+
 if __name__ == "__main__":
     unittest.main()
