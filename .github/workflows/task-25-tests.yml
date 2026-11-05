@@ -5,6 +5,7 @@ on:
     branches:
       - task-25-provider-connection-manager
       - pollinations-current-api-20261030
+      - task-25-feature-72-audit-trail
   pull_request:
     branches:
       - main
