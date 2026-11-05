@@ -182,13 +182,15 @@ class FakeOpener:
 
 
 def make_https(opener):
-    return HTTPSPrivacyProviderAdapter(
+    adapter = HTTPSPrivacyProviderAdapter(
         delete_url="https://privacy.example.test/v1/delete",
         purge_url="https://privacy.example.test/v1/purge",
         allowed_hosts=["privacy.example.test"],
         authorization_header=lambda: "Bearer test-secret",
-        opener=opener,
     )
+    # Test-only transport substitution; production constructor has no opener hook.
+    adapter._opener = opener
+    return adapter
 
 
 def test_https_adapter_sends_scoped_payload_and_idempotency_header():
@@ -353,3 +355,26 @@ def test_retention_job_preserves_opaque_oidc_principal_capability():
     result = job.run_once()
     assert result["completed"] is True
     assert service.calls[0]["principal_id"] is principal
+
+
+def test_sqlite_adapter_accepts_short_but_valid_scope_identifiers(tmp_path):
+    db = tmp_path / "app.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE records(subject_ref TEXT, project_id TEXT, tenant_id TEXT, expires_at TEXT)")
+    con.execute("INSERT INTO records VALUES (?, ?, ?, ?)", ("s1", "p1", "t1", None))
+    con.commit()
+    con.close()
+    adapter = SQLitePrivacyDataAdapter(db, table="records", digest_key_provider=key_provider)
+    result = adapter.delete_subject_data(subject_ref="s1", project_id="p1", tenant_id="t1", request_id="short-request-1")
+    assert result["confirmed"] is True and result["deleted_count"] == 1
+
+
+def test_https_adapter_does_not_allow_public_transport_override():
+    with pytest.raises(TypeError):
+        HTTPSPrivacyProviderAdapter(
+            delete_url="https://privacy.example.test/v1/delete",
+            purge_url="https://privacy.example.test/v1/purge",
+            allowed_hosts=["privacy.example.test"],
+            authorization_header=lambda: "Bearer test-secret",
+            opener=FakeOpener(),
+        )
