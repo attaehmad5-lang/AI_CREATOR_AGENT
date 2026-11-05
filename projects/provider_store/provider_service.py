@@ -209,11 +209,19 @@ class ProviderService:
         """Append a sanitized audit event; None means auditing is not configured or saved."""
         if self.audit_log_manager is None:
             return None
+        if not isinstance(status_code, str):
+            safe_audit_status = "PROVIDER_ACTION_RECORDED"
+        else:
+            safe_audit_status = re.sub(
+                r"[^A-Z0-9_]+", "_", status_code.upper()
+            ).strip("_")[:80]
+            if re.fullmatch(r"[A-Z][A-Z0-9_]{1,79}", safe_audit_status) is None:
+                safe_audit_status = "PROVIDER_ACTION_RECORDED"
         try:
             result = self.audit_log_manager.record_event(
                 event_type,
                 outcome=outcome,
-                status_code=status_code,
+                status_code=safe_audit_status,
                 actor_principal_id=actor_principal_id,
                 tenant_id=tenant_id,
                 project_id=project_id,
@@ -390,7 +398,7 @@ class ProviderService:
             metadata={
                 "model": model if isinstance(model, str) else None,
                 "authentication_method": "PROVIDER_CONFIGURATION",
-                "credential_present": authentication_required,
+                "authentication_required": authentication_required,
             },
         )
         if audit_error is not None:
