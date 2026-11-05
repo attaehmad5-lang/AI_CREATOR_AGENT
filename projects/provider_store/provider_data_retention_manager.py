@@ -21,10 +21,10 @@ from typing import Any, Iterator
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\\Z")
-_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\\Z")
-_DIGEST_RE = re.compile(r"[a-f0-9]{64}\\Z")
-_ERROR_RE = re.compile(r"[A-Z][A-Z0-9_]{1,79}\\Z")
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
+_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\Z")
+_DIGEST_RE = re.compile(r"[a-f0-9]{64}\Z")
+_ERROR_RE = re.compile(r"[A-Z][A-Z0-9_]{1,79}\Z")
 _CATEGORIES = frozenset({
     "public", "user_content", "personal", "credential",
     "financial", "health", "biometric", "confidential",
@@ -226,7 +226,7 @@ class ProviderDataRetentionManager:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 json.dump(self.data, stream, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)
-                stream.write("\\n")
+                stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             atomic_replace_with_retry(temp_name, self.state_path)
