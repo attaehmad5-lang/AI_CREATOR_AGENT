@@ -70,6 +70,8 @@ class ProviderService:
             raise ValueError("privacy_lifecycle_manager must have at least one registered store")
         if require_privacy_lifecycle and privacy_lifecycle_manager.durable_idempotency_ready is not True:
             raise ValueError("privacy_lifecycle_manager must enforce durable idempotency for every registered store")
+        if require_privacy_lifecycle and privacy_lifecycle_manager.inventory_verified is not True:
+            raise ValueError("privacy_lifecycle_manager must match a declared complete store inventory")
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
         if tenant_isolation_manager is not None and authorization_manager is None:
@@ -269,13 +271,26 @@ class ProviderService:
         durable_ready = bool(
             manager is not None and getattr(manager, "durable_idempotency_ready", False) is True
         )
-        lifecycle_ready = count > 0 and (not self.require_privacy_lifecycle or durable_ready)
+        inventory_verified = bool(
+            manager is not None and getattr(manager, "inventory_verified", False) is True
+        )
+        required_store_count = (
+            manager.required_store_count
+            if manager is not None and isinstance(manager.required_store_count, int)
+            else 0
+        )
+        lifecycle_ready = count > 0 and (
+            not self.require_privacy_lifecycle or (durable_ready and inventory_verified)
+        )
         return {
             "status": "PRIVACY_LIFECYCLE_READY" if lifecycle_ready else "PRIVACY_LIFECYCLE_NOT_CONFIGURED",
             "configured": count > 0,
             "registered_store_count": count,
             "durable_idempotency_required": self.require_privacy_lifecycle,
             "durable_idempotency_ready": durable_ready,
+            "store_inventory_required": self.require_privacy_lifecycle,
+            "store_inventory_verified": inventory_verified,
+            "required_store_count": required_store_count,
         }
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
