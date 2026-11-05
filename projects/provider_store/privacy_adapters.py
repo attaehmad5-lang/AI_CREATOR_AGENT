@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
+from .privacy_data_lifecycle import DURABLE_PRIVACY_ADAPTER_CAPABILITY
+
 
 _REFERENCE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _REQUEST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z")
@@ -89,6 +91,8 @@ class PersistentPrivacyAdapter:
     SQLite locking semantics are reliable; otherwise use a deployment-specific
     distributed ledger implementing the same claim/complete protocol.
     """
+
+    _privacy_durable_idempotency_capability = DURABLE_PRIVACY_ADAPTER_CAPABILITY
 
     def __init__(
         self,
@@ -398,6 +402,7 @@ class SQLitePrivacyDataAdapter:
     not external object keys referenced by those rows.
     """
 
+    _privacy_durable_idempotency_capability = DURABLE_PRIVACY_ADAPTER_CAPABILITY
     _LEDGER_TABLE = "aca_privacy_request_ledger"
 
     def __init__(
@@ -1044,4 +1049,8 @@ def create_privacy_lifecycle_manager(
 
     from .privacy_data_lifecycle import PrivacyDataLifecycleManager
 
-    return PrivacyDataLifecycleManager(stores=prepared, max_stores=max_stores)
+    return PrivacyDataLifecycleManager(
+        stores=prepared,
+        max_stores=max_stores,
+        require_durable_idempotency=True,
+    )
