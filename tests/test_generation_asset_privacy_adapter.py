@@ -49,19 +49,22 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
             **root_scope,
             "assets": assets,
         }
+        state_rows = []
+        for row in assets:
+            state_row = {
+                "asset_id": row["asset_id"],
+                "project_id": row.get("project_id", PROJECT),
+                "tenant_id": row.get("tenant_id", TENANT),
+                "subject_ref": row.get("subject_ref", SUBJECT),
+                "output_file": row.get("file_path"),
+            }
+            if "expires_at" in row:
+                state_row["expires_at"] = row["expires_at"]
+            state_rows.append(state_row)
         state = {
             **self.scope(),
             **root_scope,
-            "states": states if states is not None else [
-                {
-                    "asset_id": row["asset_id"],
-                    "project_id": row.get("project_id", PROJECT),
-                    "tenant_id": row.get("tenant_id", TENANT),
-                    "subject_ref": row.get("subject_ref", SUBJECT),
-                    "output_file": row.get("file_path"),
-                }
-                for row in assets
-            ],
+            "states": states if states is not None else state_rows,
         }
         self.manifest.write_text(json.dumps(manifest), encoding="utf-8")
         self.state.write_text(json.dumps(state), encoding="utf-8")
