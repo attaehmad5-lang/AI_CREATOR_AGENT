@@ -900,3 +900,68 @@ class PrivacyRetentionJob:
             "cutoff": cutoff.isoformat(),
             "results": results,
         }
+
+
+def create_privacy_lifecycle_manager(
+    stores: Mapping[str, Any],
+    *,
+    ledger_directory: str | os.PathLike[str],
+    digest_key_provider: Callable[[str], bytes],
+    max_stores: int = 64,
+) -> Any:
+    """Build the lifecycle coordinator with durable idempotency for external stores.
+
+    Concrete SQLitePrivacyDataAdapter instances already commit deletion receipts
+    in the same database transaction and are not wrapped twice. Existing
+    PersistentPrivacyAdapter instances also carry their own durable ledger.
+    Every other adapter is wrapped automatically with a per-store SQLite request
+    ledger. The ledger directory must be a dedicated, encrypted, durable local
+    volume; distributed deployments need a deployment-specific transactional
+    ledger rather than shared SQLite on unverified filesystems.
+    """
+    if not isinstance(stores, Mapping) or not stores:
+        raise PrivacyAdapterConfigurationError("at least one privacy store adapter is required")
+    if isinstance(max_stores, bool) or not isinstance(max_stores, int) or not 1 <= max_stores <= 256:
+        raise PrivacyAdapterConfigurationError("max_stores must be within 1..256")
+    if not callable(digest_key_provider):
+        raise PrivacyAdapterConfigurationError("digest_key_provider must be callable")
+
+    root = Path(ledger_directory)
+    if root.exists() and (root.is_symlink() or not root.is_dir()):
+        raise PrivacyAdapterConfigurationError("privacy ledger directory must be a real directory")
+    try:
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if root.is_symlink() or not root.is_dir():
+            raise PrivacyAdapterConfigurationError("privacy ledger directory is not safe")
+        if os.name == "posix":
+            os.chmod(root, 0o700)
+            if root.stat().st_mode & 0o077:
+                raise PrivacyAdapterConfigurationError("privacy ledger directory permissions must be 0700")
+    except PrivacyAdapterConfigurationError:
+        raise
+    except Exception as exc:
+        raise PrivacyAdapterConfigurationError("privacy ledger directory is unavailable") from exc
+
+    prepared: dict[str, Any] = {}
+    for store_id, adapter in stores.items():
+        if not isinstance(store_id, str) or _COMPONENT_RE.fullmatch(store_id) is None:
+            raise PrivacyAdapterConfigurationError("privacy store ID is invalid")
+        if store_id in prepared:
+            raise PrivacyAdapterConfigurationError("duplicate privacy store ID")
+        if not callable(getattr(adapter, "delete_subject_data", None)) or not callable(
+            getattr(adapter, "purge_expired_data", None)
+        ):
+            raise PrivacyAdapterConfigurationError("privacy adapter lacks the lifecycle contract")
+        if isinstance(adapter, (SQLitePrivacyDataAdapter, PersistentPrivacyAdapter)):
+            prepared[store_id] = adapter
+        else:
+            prepared[store_id] = PersistentPrivacyAdapter(
+                adapter,
+                ledger_path=root / (store_id + ".sqlite3"),
+                adapter_id=store_id,
+                digest_key_provider=digest_key_provider,
+            )
+
+    from .privacy_data_lifecycle import PrivacyDataLifecycleManager
+
+    return PrivacyDataLifecycleManager(stores=prepared, max_stores=max_stores)
