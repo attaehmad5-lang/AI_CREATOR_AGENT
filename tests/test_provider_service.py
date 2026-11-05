@@ -158,6 +158,8 @@ class ProviderServiceTests(unittest.TestCase):
             self.catalog_path,
             self.root / "strict-encrypted-connection-state.json",
             state_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+            catalog_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+            migrate_legacy_plaintext_catalog=True,
         )
         with self.assertRaisesRegex(ValueError, "cost_policy must use deployment-key-encrypted"):
             ProviderService(
@@ -200,12 +202,26 @@ class ProviderServiceTests(unittest.TestCase):
                 require_encrypted_state=True,
             )
 
+    def test_production_mode_rejects_plaintext_catalog_even_when_state_is_encrypted(self):
+        encrypted_state_only = ConnectionManager(
+            self.catalog_path,
+            self.root / "state-only-encrypted.json",
+            state_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
+        with self.assertRaisesRegex(ValueError, "connection_manager must use deployment-key-encrypted"):
+            ProviderService(
+                encrypted_state_only,
+                require_encrypted_state=True,
+            )
+
     def test_production_mode_accepts_deployment_key_encrypted_connection_state(self):
         encrypted_state_path = self.root / "encrypted-connections.json"
         encrypted_connections = ConnectionManager(
             self.catalog_path,
             encrypted_state_path,
             state_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+            catalog_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+            migrate_legacy_plaintext_catalog=True,
         )
 
         service = ProviderService(
