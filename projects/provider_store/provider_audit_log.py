@@ -324,14 +324,17 @@ class ProviderAuditLogManager:
         after_sequence: int = 0,
         limit: int = 100,
         tenant_id: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
-        """Read verified events only; tenant filtering is applied after full-chain validation."""
+        """Read verified events only; tenant/project filtering follows full-chain validation."""
         if isinstance(after_sequence, bool) or not isinstance(after_sequence, int) or after_sequence < 0:
             return {"status": "INVALID_AUDIT_CURSOR", "events": []}
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
             return {"status": "INVALID_AUDIT_LIMIT", "events": []}
         if not _safe_identifier(tenant_id):
             return {"status": "INVALID_AUDIT_TENANT_ID", "events": []}
+        if not _safe_identifier(project_id):
+            return {"status": "INVALID_AUDIT_PROJECT_ID", "events": []}
         try:
             lock_path = self.log_path.with_name(self.log_path.name + ".lock")
             with self._lock:
@@ -341,6 +344,7 @@ class ProviderAuditLogManager:
                 event for event in events
                 if event["sequence"] > after_sequence
                 and (tenant_id is None or event["tenant_id"] == tenant_id)
+                and (project_id is None or event["project_id"] == project_id)
             ]
             selected = filtered[:limit]
             return {
