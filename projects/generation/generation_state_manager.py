@@ -28,6 +28,7 @@ for asset in data["assets"]:
         "progress": 0,
         "error": None,
         "output_file": None,
+        "planned_output_path": asset.get("planned_output_path"),
         "state_history": [
             {
                 "state": "QUEUED",
