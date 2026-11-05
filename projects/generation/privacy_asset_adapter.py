@@ -29,6 +29,47 @@ class GenerationAssetPrivacyError(ValueError):
     """Raised internally when asset privacy metadata or paths are unsafe."""
 
 
+def copy_generation_privacy_scope(
+    document: Mapping[str, Any],
+    record: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return validated, explicit scope metadata for one manifest/state row.
+
+    Row values override document defaults. If any of project_id, tenant_id or
+    subject_ref is supplied, all three must be explicit (tenant_id may be None).
+    An entirely unscoped legacy row remains unmodified and is later rejected by
+    the deletion adapter; the helper never guesses an owner.
+    """
+    if not isinstance(document, Mapping) or (record is not None and not isinstance(record, Mapping)):
+        raise GenerationAssetPrivacyError("generation privacy scope source must be a mapping")
+    row = record or {}
+    names = ("project_id", "tenant_id", "subject_ref")
+    present = any(name in row or name in document for name in names)
+    if not present:
+        scope: dict[str, Any] = {}
+    else:
+        scope = {
+            name: row[name] if name in row else document.get(name, _MISSING)
+            for name in names
+        }
+        if any(value is _MISSING for value in scope.values()):
+            raise GenerationAssetPrivacyError("generation privacy scope must define project, tenant and subject")
+        if not isinstance(scope["project_id"], str) or _REFERENCE.fullmatch(scope["project_id"]) is None:
+            raise GenerationAssetPrivacyError("generation project ID is invalid")
+        if scope["tenant_id"] is not None and (
+            not isinstance(scope["tenant_id"], str) or _REFERENCE.fullmatch(scope["tenant_id"]) is None
+        ):
+            raise GenerationAssetPrivacyError("generation tenant ID is invalid")
+        if not GenerationAssetPrivacyAdapter._valid_subject(scope["subject_ref"]):
+            raise GenerationAssetPrivacyError("generation subject reference must be pseudonymous")
+
+    expiry = row["expires_at"] if "expires_at" in row else document.get("expires_at", _MISSING)
+    if expiry is not _MISSING:
+        GenerationAssetPrivacyAdapter._aware_utc(expiry)
+        scope["expires_at"] = expiry
+    return scope
+
+
 class GenerationAssetPrivacyAdapter:
     """Delete/purge generated asset records and files under explicit roots.
 
