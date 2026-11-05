@@ -80,7 +80,7 @@ Do not configure these URLs until they match the provider's official privacy doc
 
 ## 4. Durable idempotency for external adapters
 
-PersistentPrivacyAdapter wraps an adapter and stores HMAC-SHA-256 digests of request/scope identifiers, operation, state, attempt count, minimal status, and timestamps in a SQLite ledger. It does not store raw subject, project, tenant, request IDs, API credentials, or raw adapter responses. Its request lease prevents concurrent duplicate execution, and an attempt counter fences off stale workers after a lease expiry. Failed/PENDING operations can be retried with the same request ID after the lease window.
+PersistentPrivacyAdapter wraps an adapter and stores HMAC-SHA-256 digests of request/scope identifiers, operation, state, attempt count, minimal status, and timestamps in a SQLite ledger. The create_privacy_lifecycle_manager factory applies this wrapper automatically to external adapters; SQLitePrivacyDataAdapter and adapters already wrapped with PersistentPrivacyAdapter are kept as-is. It does not store raw subject, project, tenant, request IDs, API credentials, or raw adapter responses. Its request lease prevents concurrent duplicate execution, and an attempt counter fences off stale workers after a lease expiry. Failed/PENDING operations can be retried with the same request ID after the lease window.
 
 A crash can occur after a remote system deletes data but before this local ledger records completion. Therefore the remote adapter must also deduplicate the supplied request ID. Without remote idempotency, exactly-once deletion across a network boundary is impossible; retain an honest PARTIAL status and reconcile manually.
 
@@ -88,18 +88,22 @@ Use a durable, protected local volume for the ledger. Multiple workers may share
 
 ## 5. Register all deletion surfaces
 
-Build the lifecycle coordinator explicitly with every deployment adapter. Example:
+Build the lifecycle coordinator through the registration factory so every external provider/cache/object-store adapter receives a durable per-store idempotency ledger. SQLitePrivacyDataAdapter already commits its data deletion and receipt atomically and is not wrapped a second time.
 
 ~~~python
-from projects.provider_store.privacy_data_lifecycle import PrivacyDataLifecycleManager
+from projects.provider_store.privacy_adapters import create_privacy_lifecycle_manager
 
-privacy_lifecycle = PrivacyDataLifecycleManager(
+privacy_lifecycle = create_privacy_lifecycle_manager(
     stores={
-        "application-db": database_adapter,
-        "vendor-provider": vendor_privacy,
-        # Register additional cache, object-store, asset, backup and analytics adapters.
+        "application-db": database_adapter,  # SQLitePrivacyDataAdapter
+        "vendor-provider": provider_api,     # HTTPS / external adapter
+        # Add cache, object-store, asset, backup and analytics adapters.
     },
+    ledger_directory="/var/lib/ai-creator/privacy-ledgers",
+    digest_key_provider=privacy_hmac_key,
 )
+
+# Inject this manager into ProviderService(privacy_lifecycle_manager=privacy_lifecycle).
 ~~~
 
 Adapters must implement both delete_subject_data(subject_ref, project_id, tenant_id, request_id) and purge_expired_data(cutoff, project_id, tenant_id, request_id). If a system is not configured or a response is PENDING/FAILED/malformed, the coordinator returns PARTIAL. Do not register an adapter that returns success without performing and verifying the operation.
@@ -116,7 +120,7 @@ Use the same pseudonymous subject handle and exact project/tenant scope consiste
 
 ## 6. Scheduled retention
 
-PrivacyRetentionJob is a one-shot worker intended to be invoked by an external scheduler (Kubernetes CronJob, systemd timer, cloud scheduler, or cron). It pins project/tenant scopes at construction, obtains a deployment-controlled service principal, computes a UTC calendar-day cutoff, and reports PARTIAL if any scope is not confirmed.
+PrivacyRetentionJob is a one-shot worker intended to be invoked by an external scheduler (Kubernetes CronJob, systemd timer, cloud scheduler, or cron). It pins project/tenant scopes at construction, obtains a deployment-controlled service principal, computes a UTC calendar-day cutoff, and reports PARTIAL if any scope is not confirmed. When ProviderService has an OIDC identity_authenticator configured, principal_provider must return the exact verifier-issued authenticated principal capability object; the job preserves it unchanged. A caller-supplied identity string is not an acceptable substitute in OIDC mode. ProviderService performs the authoritative principal, permission and tenant/project checks.
 
 Example inside the deployment's existing application factory:
 
