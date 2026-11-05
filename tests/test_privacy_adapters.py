@@ -343,6 +343,24 @@ class SQLitePrivacyAdapterTests(unittest.TestCase):
         self.assertEqual(result["status"], "FAILED")
         self.assertEqual(len(self.rows()), 6)
 
+    def test_short_scope_identifiers_match_privacy_lifecycle_contract(self):
+        db = sqlite3.connect(self.path)
+        db.execute(
+            "INSERT INTO subjects(subject_ref,project_id,tenant_id,expires_at,payload) VALUES(?,?,?,?,?)",
+            ("s-1", "film", "tenant-1", "2026-12-01T00:00:00+00:00", "short-scope-private"),
+        )
+        db.commit()
+        db.close()
+        result = self.adapter().delete_subject_data(
+            subject_ref="s-1",
+            project_id="film",
+            tenant_id="tenant-1",
+            request_id="request-short-001",
+        )
+        self.assertTrue(result["confirmed"])
+        self.assertEqual(result["deleted_count"], 1)
+        self.assertEqual(len(self.rows()), 4)
+
     def test_missing_required_table_columns_fail_startup(self):
         db = sqlite3.connect(self.path)
         db.execute("CREATE TABLE incomplete (subject_ref TEXT)")
