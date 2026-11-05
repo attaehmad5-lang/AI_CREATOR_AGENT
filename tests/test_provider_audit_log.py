@@ -128,16 +128,28 @@ class ProviderAuditLogTests(unittest.TestCase):
         )
 
     def test_tenant_filter_and_pagination_are_applied_to_verified_chain(self):
-        self.append(request_id="req-1", tenant_id="tenant-1")
-        self.append(request_id="req-2", tenant_id="tenant-2")
-        self.append(request_id="req-3", tenant_id="tenant-1")
-        page = self.manager.read_events(after_sequence=0, limit=1, tenant_id="tenant-1")
+        self.append(request_id="req-1", tenant_id="tenant-1", project_id="project-1")
+        self.append(request_id="req-2", tenant_id="tenant-2", project_id="project-1")
+        self.append(request_id="req-3", tenant_id="tenant-1", project_id="project-1")
+        self.append(request_id="req-4", tenant_id="tenant-1", project_id="project-2")
+        page = self.manager.read_events(
+            after_sequence=0, limit=1, tenant_id="tenant-1", project_id="project-1"
+        )
         self.assertEqual([item["request_id"] for item in page["events"]], ["req-1"])
         self.assertTrue(page["has_more"])
         next_page = self.manager.read_events(
-            after_sequence=page["next_sequence"], limit=10, tenant_id="tenant-1"
+            after_sequence=page["next_sequence"], limit=10,
+            tenant_id="tenant-1", project_id="project-1",
         )
         self.assertEqual([item["request_id"] for item in next_page["events"]], ["req-3"])
+        project_two = self.manager.read_events(
+            after_sequence=0, limit=10, tenant_id="tenant-1", project_id="project-2"
+        )
+        self.assertEqual([item["request_id"] for item in project_two["events"]], ["req-4"])
+        self.assertEqual(
+            self.manager.read_events(limit=10, project_id="invalid project")["status"],
+            "INVALID_AUDIT_PROJECT_ID",
+        )
         self.assertEqual(self.manager.read_events(limit=0)["status"], "INVALID_AUDIT_LIMIT")
 
     def test_concurrent_threads_preserve_sequence_and_hash_links(self):
