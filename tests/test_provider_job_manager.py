@@ -627,25 +627,32 @@ class ProviderJobManagerTests(unittest.TestCase):
 
 
     def test_subject_job_deletion_removes_only_exact_project_tenant_scope(self):
-        self.manager.submit(
+        # Three distinct queued jobs are needed to prove cross-tenant isolation.
+        # The shared fixture intentionally has capacity two for backpressure tests.
+        manager = ProviderJobManager(
+            self.path, max_queue_size=3, max_concurrent=1,
+            lease_seconds=10, max_attempts=2,
+            clock=lambda: self.now[0],
+        )
+        manager.submit(
             job_id="target-job", project_id="film", provider_id="image",
             payload_ref="payload:target", tenant_id="tenant-a", subject_ref="subject-ref-123",
         )
-        self.manager.submit(
+        manager.submit(
             job_id="other-subject", project_id="film", provider_id="image",
             payload_ref="payload:other", tenant_id="tenant-a", subject_ref="subject-ref-other",
         )
-        self.manager.submit(
+        manager.submit(
             job_id="other-tenant", project_id="film", provider_id="image",
             payload_ref="payload:tenant", tenant_id="tenant-b", subject_ref="subject-ref-123",
         )
-        deleted = self.manager.delete_subject_jobs(
+        deleted = manager.delete_subject_jobs(
             subject_ref="subject-ref-123", project_id="film", tenant_id="tenant-a"
         )
         self.assertEqual(deleted, {"confirmed": True, "status": "DELETED", "deleted_count": 1})
-        self.assertEqual(self.manager.poll(job_id="target-job", tenant_id="tenant-a")["status"], "JOB_NOT_FOUND")
-        self.assertEqual(self.manager.poll(job_id="other-subject", tenant_id="tenant-a")["status"], "JOB_STATUS")
-        self.assertEqual(self.manager.poll(job_id="other-tenant", tenant_id="tenant-b")["status"], "JOB_STATUS")
+        self.assertEqual(manager.poll(job_id="target-job", tenant_id="tenant-a")["status"], "JOB_NOT_FOUND")
+        self.assertEqual(manager.poll(job_id="other-subject", tenant_id="tenant-a")["status"], "JOB_STATUS")
+        self.assertEqual(manager.poll(job_id="other-tenant", tenant_id="tenant-b")["status"], "JOB_STATUS")
 
 
     def test_subject_job_deletion_waits_for_running_worker_cancellation(self):
