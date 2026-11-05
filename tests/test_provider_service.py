@@ -3530,6 +3530,11 @@ class ProviderServiceTests(unittest.TestCase):
             principal_id=None, confirmed=True,
         )
         self.assertEqual(missing_principal["status"], "AUTHENTICATED_PRINCIPAL_REQUIRED")
+        missing_purge_principal = service_with_auth.purge_expired_privacy_data(
+            cutoff=datetime(2026, 1, 1, tzinfo=timezone.utc), project_id="film",
+            request_id="purge-042", principal_id=None, confirmed=True,
+        )
+        self.assertEqual(missing_purge_principal["status"], "AUTHENTICATED_PRINCIPAL_REQUIRED")
         self.assertEqual(store.calls, [])
 
 
