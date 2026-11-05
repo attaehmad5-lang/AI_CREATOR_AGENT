@@ -17,6 +17,8 @@ _COMPONENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 _REFERENCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _DELETE_STATUSES = frozenset({"DELETED", "ALREADY_ABSENT", "PENDING", "FAILED"})
 _RETENTION_STATUSES = frozenset({"PURGED", "ALREADY_EMPTY", "PENDING", "FAILED"})
+# Identity capability shared only by adapters that durably deduplicate requests.
+DURABLE_PRIVACY_ADAPTER_CAPABILITY = object()
 
 
 class PrivacyDataLifecycleManager:
@@ -31,12 +33,21 @@ class PrivacyDataLifecycleManager:
     adapters must persistently deduplicate it across restarts.
     """
 
-    def __init__(self, stores: Mapping[str, Any] | None = None, *, max_stores: int = 64) -> None:
+    def __init__(
+        self,
+        stores: Mapping[str, Any] | None = None,
+        *,
+        max_stores: int = 64,
+        require_durable_idempotency: bool = False,
+    ) -> None:
         if isinstance(max_stores, bool) or not isinstance(max_stores, int) or not 1 <= max_stores <= 256:
             raise ValueError("max_stores must be within 1..256")
+        if not isinstance(require_durable_idempotency, bool):
+            raise ValueError("require_durable_idempotency must be boolean")
         if stores is not None and not isinstance(stores, Mapping):
             raise ValueError("privacy stores must be a mapping")
         self.max_stores = max_stores
+        self.require_durable_idempotency = require_durable_idempotency
         self._stores_lock = RLock()
         self._stores: dict[str, Any] = {}
         for store_id, adapter in (stores or {}).items():
@@ -47,6 +58,18 @@ class PrivacyDataLifecycleManager:
         with self._stores_lock:
             return len(self._stores)
 
+    @property
+    def durable_idempotency_ready(self) -> bool:
+        """True only when strict mode protects every registered store."""
+        if not self.require_durable_idempotency:
+            return False
+        with self._stores_lock:
+            return bool(self._stores) and all(
+                getattr(adapter, "_privacy_durable_idempotency_capability", None)
+                is DURABLE_PRIVACY_ADAPTER_CAPABILITY
+                for adapter in self._stores.values()
+            )
+
     def register_store(self, store_id: str, adapter: Any) -> dict[str, Any]:
         """Register one explicit adapter; ambiguous or duplicate names are rejected."""
         if not isinstance(store_id, str) or _COMPONENT_ID.fullmatch(store_id) is None:
@@ -55,6 +78,11 @@ class PrivacyDataLifecycleManager:
             raise ValueError("privacy store must support delete_subject_data")
         if not callable(getattr(adapter, "purge_expired_data", None)):
             raise ValueError("privacy store must support purge_expired_data")
+        if self.require_durable_idempotency and (
+            getattr(adapter, "_privacy_durable_idempotency_capability", None)
+            is not DURABLE_PRIVACY_ADAPTER_CAPABILITY
+        ):
+            raise ValueError("privacy store must provide durable idempotency")
         # Registration and capacity checks are one atomic operation. This keeps
         # concurrent plugin startup from exceeding the configured store limit.
         with self._stores_lock:
