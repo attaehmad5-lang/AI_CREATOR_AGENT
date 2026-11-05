@@ -426,5 +426,147 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
         self.assertEqual(no_resolver["status"], "GENERATION_SCOPE_RESOLVER_UNAVAILABLE")
 
 
+
+    def test_execution_report_is_included_in_privacy_audit(self):
+        self.write_documents([])
+        report = self.root / "execution_report.json"
+        report.write_text(json.dumps({
+            "project": "documentary-project",
+            "jobs": [
+                {"job_id": "job-1", "type": "IMAGE", "status": "COMPLETED",
+                 "output": "output/images/job-1.png",
+                 "project_id": PROJECT, "tenant_id": TENANT, "subject_ref": SUBJECT},
+                {"job_id": "job-2", "type": "VOICE", "status": "WAITING_FOR_PROVIDER"},
+            ],
+        }), encoding="utf-8")
+        adapter = GenerationAssetPrivacyAdapter(
+            self.manifest, asset_roots={"output/images": self.images},
+            state_paths=[self.state], execution_report_paths=[report],
+        )
+        audit = adapter.audit()
+        self.assertEqual(audit["document_count"], 3)
+        self.assertEqual(audit["record_count"], 2)
+        self.assertEqual(audit["unscoped_count"], 1)
+        self.assertEqual(audit["status"], "ASSET_PRIVACY_MIGRATION_REQUIRED")
+
+    def test_execution_report_deletion_removes_report_row_and_output_across_all_documents(self):
+        output = self.images / "job-1.png"
+        output.write_bytes(b"generated")
+        self.write_documents([{
+            "asset_id": "asset-job-1", "job_id": "job-1", "subject_ref": SUBJECT,
+            "file_path": "output/images/job-1.png",
+        }])
+        report = self.root / "execution_report.json"
+        report.write_text(json.dumps({
+            "project": "documentary-project",
+            "jobs": [{
+                "job_id": "job-1", "type": "IMAGE", "status": "COMPLETED",
+                "output": "output/images/job-1.png", "project_id": PROJECT,
+                "tenant_id": TENANT, "subject_ref": SUBJECT,
+            }],
+        }), encoding="utf-8")
+        adapter = GenerationAssetPrivacyAdapter(
+            self.manifest, asset_roots={"output/images": self.images},
+            state_paths=[self.state], execution_report_paths=[report],
+        )
+        result = adapter.delete_subject_data(
+            subject_ref=SUBJECT, project_id=PROJECT, tenant_id=TENANT, request_id=REQUEST
+        )
+        self.assertTrue(result["confirmed"])
+        self.assertEqual(result["deleted_count"], 3)
+        self.assertFalse(output.exists())
+        self.assertEqual(json.loads(self.manifest.read_text(encoding="utf-8"))["assets"], [])
+        self.assertEqual(json.loads(self.state.read_text(encoding="utf-8"))["states"], [])
+        self.assertEqual(json.loads(report.read_text(encoding="utf-8"))["jobs"], [])
+
+    def test_execution_report_retention_purge_removes_expired_output_and_job(self):
+        output = self.images / "job-expired.png"
+        output.write_bytes(b"generated")
+        self.write_documents([{
+            "asset_id": "asset-job-expired", "job_id": "job-expired",
+            "subject_ref": SUBJECT, "expires_at": "2025-12-31T00:00:00Z",
+            "file_path": "output/images/job-expired.png",
+        }])
+        report = self.root / "execution_report.json"
+        report.write_text(json.dumps({
+            "project": "documentary-project",
+            "jobs": [{
+                "job_id": "job-expired", "type": "IMAGE", "status": "COMPLETED",
+                "output": "output/images/job-expired.png", "project_id": PROJECT,
+                "tenant_id": TENANT, "subject_ref": SUBJECT,
+                "expires_at": "2025-12-31T00:00:00Z",
+            }],
+        }), encoding="utf-8")
+        adapter = GenerationAssetPrivacyAdapter(
+            self.manifest, asset_roots={"output/images": self.images},
+            state_paths=[self.state], execution_report_paths=[report],
+        )
+        result = adapter.purge_expired_data(
+            cutoff=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            project_id=PROJECT, tenant_id=TENANT, request_id="report-purge-001",
+        )
+        self.assertEqual(result, {"confirmed": True, "status": "PURGED", "deleted_count": 3})
+        self.assertFalse(output.exists())
+        self.assertEqual(json.loads(report.read_text(encoding="utf-8"))["jobs"], [])
+
+    def test_execution_report_scope_migration_uses_job_type_and_document_project(self):
+        self.write_documents([{
+            "asset_id": "asset-job-1", "job_id": "job-1",
+            "file_path": None,
+        }])
+        report = self.root / "execution_report.json"
+        report.write_text(json.dumps({
+            "project": "documentary-project",
+            "jobs": [{"job_id": "job-1", "type": "IMAGE", "status": "COMPLETED",
+                      "output": None}],
+        }), encoding="utf-8")
+        adapter = GenerationAssetPrivacyAdapter(
+            self.manifest, asset_roots={"output/images": self.images},
+            state_paths=[self.state], execution_report_paths=[report],
+        )
+        seen = []
+        def resolver(lookup):
+            seen.append(dict(lookup))
+            return {
+                "project_id": PROJECT, "tenant_id": TENANT,
+                "subject_ref": SUBJECT, "expires_at": "2027-01-01T00:00:00Z",
+            }
+        migrated = adapter.migrate_legacy_scope_metadata(
+            scope_resolver=resolver, confirmed=True
+        )
+        self.assertEqual(migrated["status"], "GENERATION_SCOPE_METADATA_MIGRATED")
+        self.assertEqual(migrated["migrated_record_count"], 3)
+        report_lookup = next(x for x in seen if x.get("type") == "IMAGE")
+        self.assertEqual(report_lookup["media_type"], "IMAGE")
+        self.assertEqual(report_lookup["project"], "documentary-project")
+        self.assertEqual(adapter.audit()["unscoped_count"], 0)
+
+    def test_execution_report_encryption_migration_includes_all_three_documents(self):
+        self.write_documents([{
+            "asset_id": "asset-job-1", "job_id": "job-1",
+            "subject_ref": SUBJECT, "file_path": None,
+        }])
+        report = self.root / "execution_report.json"
+        report.write_text(json.dumps({
+            "project": "documentary-project",
+            "jobs": [{"job_id": "job-1", "type": "IMAGE", "status": "COMPLETED",
+                      "project_id": PROJECT, "tenant_id": TENANT,
+                      "subject_ref": SUBJECT, "output": None}],
+        }), encoding="utf-8")
+        key_provider = lambda _context: b"r" * 32
+        adapter = GenerationAssetPrivacyAdapter(
+            self.manifest, asset_roots={"output/images": self.images},
+            state_paths=[self.state], execution_report_paths=[report],
+            encryption_key_provider=key_provider,
+            encryption_context="test-generation-report-v1",
+            require_encrypted_metadata=True,
+            migrate_legacy_plaintext_metadata=True,
+        )
+        result = adapter.migrate_legacy_metadata(confirmed=True)
+        self.assertEqual(result["status"], "GENERATION_METADATA_ENCRYPTED")
+        self.assertEqual(result["document_count"], 3)
+        self.assertEqual(result["migrated_document_count"], 3)
+        self.assertTrue(json.loads(report.read_text(encoding="utf-8"))["format"].startswith("AI_CREATOR_AGENT_ENCRYPTED_JSON_STATE"))
+
 if __name__ == "__main__":
     unittest.main()
