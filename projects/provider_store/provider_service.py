@@ -152,30 +152,57 @@ class ProviderService:
         for label, instance in storage_managers.items():
             if instance is None:
                 continue
-            persistence_path = next(
-                (
-                    getattr(instance, attribute, None)
-                    for attribute in ("state_path", "ledger_path", "path")
-                    if getattr(instance, attribute, None) is not None
-                ),
-                None,
-            )
-            state_store = getattr(instance, "state_store", None)
-            if persistence_path is None and state_store is None:
+            required_paths: set[str] = set()
+            invalid_path = False
+            for attribute in ("state_path", "ledger_path", "path", "catalog_path", "history_path", "database_path"):
+                value = getattr(instance, attribute, None)
+                if value is None:
+                    continue
+                try:
+                    required_paths.add(str(__import__("pathlib").Path(value).resolve()))
+                except (TypeError, ValueError, OSError):
+                    invalid_path = True
+
+            state_stores = [
+                getattr(instance, attribute, None)
+                for attribute in ("state_store", "catalog_store", "config_store")
+                if getattr(instance, attribute, None) is not None
+            ]
+            if not required_paths and not state_stores:
                 continue
-            key_provider = getattr(state_store, "key_provider", None)
-            context = getattr(state_store, "context", None)
-            ready = (
-                isinstance(state_store, EncryptedJSONStateStore)
-                and callable(getattr(state_store, "read", None))
-                and callable(getattr(state_store, "write", None))
-                and callable(key_provider)
-                and isinstance(context, str)
-                and bool(context)
-                and (
-                    not require_encrypted_state
-                    or state_store.verify_key() is True
+
+            verified_store_paths: set[str] = set()
+            all_stores_ready = bool(state_stores) and not invalid_path
+            for state_store in state_stores:
+                key_provider = getattr(state_store, "key_provider", None)
+                context = getattr(state_store, "context", None)
+                store_path = getattr(state_store, "path", None)
+                valid_store = (
+                    isinstance(state_store, EncryptedJSONStateStore)
+                    and callable(getattr(state_store, "read", None))
+                    and callable(getattr(state_store, "write", None))
+                    and callable(key_provider)
+                    and isinstance(context, str)
+                    and bool(context)
+                    and (
+                        not require_encrypted_state
+                        or state_store.verify_key() is True
+                    )
                 )
+                if not valid_store:
+                    all_stores_ready = False
+                    continue
+                try:
+                    verified_store_paths.add(str(__import__("pathlib").Path(store_path).resolve()))
+                except (TypeError, ValueError, OSError):
+                    all_stores_ready = False
+
+            # Every known persistent file must have a matching authenticated
+            # store; an encrypted state file cannot mask a plaintext catalog.
+            ready = (
+                all_stores_ready
+                and bool(required_paths or verified_store_paths)
+                and required_paths == verified_store_paths
             )
             storage_status[label] = ready
             if require_encrypted_state and not ready:
