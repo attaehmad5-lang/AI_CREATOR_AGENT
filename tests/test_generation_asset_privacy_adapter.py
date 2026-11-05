@@ -382,8 +382,6 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
         self.assertEqual(self.state.read_bytes(), before_state)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
     def test_authoritative_scope_migration_resolves_legacy_rows_and_updates_all_documents(self):
@@ -425,3 +423,7 @@ if __name__ == "__main__":
         self.assertEqual(no_confirmation["status"], "GENERATION_SCOPE_MIGRATION_CONFIRMATION_REQUIRED")
         no_resolver = self.adapter.migrate_legacy_scope_metadata(scope_resolver=None, confirmed=True)
         self.assertEqual(no_resolver["status"], "GENERATION_SCOPE_RESOLVER_UNAVAILABLE")
+
+
+if __name__ == "__main__":
+    unittest.main()
