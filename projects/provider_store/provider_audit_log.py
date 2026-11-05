@@ -134,6 +134,11 @@ class ProviderAuditLogManager:
             raise ValueError("timezone-aware audit clock required")
         return current.astimezone(timezone.utc)
 
+    def _lock_path(self) -> Path:
+        """Create the log directory before attempting to lock a new log path."""
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        return self.log_path.with_name(self.log_path.name + ".lock")
+
     @staticmethod
     def _validate_event(event: Any, expected_sequence: int, expected_previous: str) -> bool:
         if not isinstance(event, dict) or set(event) != _EVENT_FIELDS:
@@ -236,7 +241,7 @@ class ProviderAuditLogManager:
         except (TypeError, ValueError, OverflowError):
             return {"status": "INVALID_AUDIT_CLOCK", "saved": False}
         try:
-            lock_path = self.log_path.with_name(self.log_path.name + ".lock")
+            lock_path = self._lock_path()
             with self._lock:
                 with interprocess_file_lock(lock_path):
                     events, previous = self._read_and_verify()
