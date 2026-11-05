@@ -645,6 +645,69 @@ class SQLitePrivacyDataAdapter:
         )
 
 
+class ProviderJobPrivacyAdapter:
+    """Adapt ProviderJobManager subject deletion and terminal retention to the lifecycle contract."""
+
+    def __init__(self, manager: Any) -> None:
+        if not callable(getattr(manager, "delete_subject_jobs", None)) or not callable(
+            getattr(manager, "purge_terminal_jobs_before", None)
+        ):
+            raise PrivacyAdapterConfigurationError("provider job manager lacks privacy deletion/retention methods")
+        self.manager = manager
+
+    def delete_subject_data(
+        self, *, subject_ref: str, project_id: str, tenant_id: str | None, request_id: str
+    ) -> dict[str, Any]:
+        try:
+            raw = self.manager.delete_subject_jobs(
+                subject_ref=subject_ref, project_id=project_id, tenant_id=tenant_id
+            )
+        except Exception:
+            return dict(_FAILURE)
+        if not isinstance(raw, Mapping):
+            return dict(_FAILURE)
+        status = raw.get("status")
+        confirmed = raw.get("confirmed")
+        count = raw.get("deleted_count")
+        if (
+            status not in {"DELETED", "ALREADY_ABSENT", "PENDING", "FAILED"}
+            or not isinstance(confirmed, bool)
+            or isinstance(count, bool) or not isinstance(count, int)
+            or not 0 <= count <= 1_000_000_000_000
+            or confirmed != (status in {"DELETED", "ALREADY_ABSENT"})
+            or (not confirmed and count != 0)
+        ):
+            return dict(_FAILURE)
+        return {"confirmed": confirmed, "status": status, "deleted_count": count}
+
+    def purge_expired_data(
+        self, *, cutoff: datetime, project_id: str, tenant_id: str | None, request_id: str
+    ) -> dict[str, Any]:
+        try:
+            raw = self.manager.purge_terminal_jobs_before(
+                cutoff=cutoff, project_id=project_id, tenant_id=tenant_id
+            )
+        except Exception:
+            return dict(_FAILURE)
+        if not isinstance(raw, Mapping):
+            return dict(_FAILURE)
+        count = raw.get("purged_count")
+        skipped = raw.get("skipped_invalid_timestamps", 0)
+        if (
+            not isinstance(raw.get("purged"), bool)
+            or isinstance(count, bool) or not isinstance(count, int)
+            or not 0 <= count <= 1_000_000_000_000
+            or isinstance(skipped, bool) or not isinstance(skipped, int)
+            or not 0 <= skipped <= 1_000_000_000_000
+        ):
+            return dict(_FAILURE)
+        if skipped:
+            # Some terminal records had invalid timestamps and remain stored.
+            return {"confirmed": False, "status": "PENDING", "deleted_count": 0}
+        status = "PURGED" if count else "ALREADY_EMPTY"
+        return {"confirmed": True, "status": status, "deleted_count": count}
+
+
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
         return None
