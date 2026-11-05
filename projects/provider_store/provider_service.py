@@ -1373,6 +1373,29 @@ class ProviderService:
         audit_actor = route_options.pop("_audit_actor_principal_id", None)
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
+        direct_paid_approvals = route_options.get("paid_approved_providers")
+        if direct_paid_approvals and self.authorization_manager is not None:
+            approval_authorization = self._authorize_operation(
+                audit_actor if isinstance(audit_actor, str) else None,
+                "billing.approve",
+                return_decision=True,
+            )
+            if not isinstance(approval_authorization, dict) or approval_authorization.get("allowed") is not True:
+                self._append_provider_audit_event(
+                    "BILLING_APPROVAL",
+                    outcome="DENIED",
+                    status_code="PAID_APPROVAL_AUTHORIZATION_DENIED",
+                    actor_principal_id=audit_actor if isinstance(audit_actor, str) else None,
+                    project_id=route_options.get("project_id") if isinstance(route_options.get("project_id"), str) else None,
+                    tenant_id=route_options.get("tenant_id") if isinstance(route_options.get("tenant_id"), str) else None,
+                    request_id=route_options.get("request_id") if isinstance(route_options.get("request_id"), str) else None,
+                    metadata={
+                        "approval_required": True,
+                        "approval_granted": False,
+                        "approval_operation": "billing.approve",
+                    },
+                )
+                return {"allowed": False, "status": "BILLING_APPROVAL_AUTHORIZATION_REQUIRED"}
         rejection = self._sensitive_input_rejection({"route_options": route_options})
         if rejection is not None:
             return {"allowed": False, **rejection}
