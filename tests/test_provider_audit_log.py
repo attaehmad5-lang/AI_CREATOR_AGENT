@@ -78,7 +78,7 @@ class ProviderAuditLogTests(unittest.TestCase):
         self.assertFalse(self.manager.verify_integrity()["valid"])
         blocked = self.append(request_id="request-3")
         self.assertFalse(blocked["saved"])
-        self.assertEqual(blocked["status"], "AUDIT_CHAIN_TAMPERED")
+        self.assertEqual(blocked["status"], "AUDIT_LOG_CHAIN_TAMPERED")
 
         self.path.write_text('{"incomplete":', encoding="utf-8")
         self.assertEqual(self.manager.verify_integrity()["status"], "AUDIT_LOG_TRUNCATED")
