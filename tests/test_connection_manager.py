@@ -586,8 +586,15 @@ class ConnectionManagerTests(unittest.TestCase):
         }
         master_path.write_text(json.dumps(master), encoding="utf-8")
         self.catalog_path.write_text("{corrupt", encoding="utf-8")
-        restored = ConnectionManager.restore_catalog_from_master(
+        blocked = ConnectionManager.restore_catalog_from_master(
             self.catalog_path, master_path
+        )
+        self.assertEqual(blocked["status"], "CATALOG_RECOVERY_ENCRYPTION_PROFILE_REQUIRED")
+        self.assertFalse(blocked["restored"])
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{corrupt")
+
+        restored = ConnectionManager.restore_catalog_from_master(
+            self.catalog_path, master_path, allow_plaintext_recovery=True
         )
         self.assertEqual(restored["status"], "RESTORED_FROM_MASTER")
         self.assertTrue(restored["restored"])
@@ -617,7 +624,7 @@ class ConnectionManagerTests(unittest.TestCase):
         master_path.write_text("{invalid", encoding="utf-8")
         self.catalog_path.write_text("{still-corrupt", encoding="utf-8")
         result = ConnectionManager.restore_catalog_from_master(
-            self.catalog_path, master_path
+            self.catalog_path, master_path, allow_plaintext_recovery=True
         )
         self.assertEqual(result["status"], "MASTER_CATALOG_INVALID")
         self.assertFalse(result["restored"])
