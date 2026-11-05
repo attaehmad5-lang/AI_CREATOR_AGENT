@@ -103,7 +103,14 @@ privacy_lifecycle = create_privacy_lifecycle_manager(
     digest_key_provider=privacy_hmac_key,
 )
 
-# Inject this manager into ProviderService(privacy_lifecycle_manager=privacy_lifecycle).
+# In production, require both encrypted persistent state and a non-empty privacy-store inventory.
+# This fails application startup when either security gate is not configured.
+provider_service = ProviderService(
+    connection_manager,
+    privacy_lifecycle_manager=privacy_lifecycle,
+    require_encrypted_state=True,
+    require_privacy_lifecycle=True,
+)
 ~~~
 
 Adapters must implement both delete_subject_data(subject_ref, project_id, tenant_id, request_id) and purge_expired_data(cutoff, project_id, tenant_id, request_id). If a system is not configured or a response is PENDING/FAILED/malformed, the coordinator returns PARTIAL. Do not register an adapter that returns success without performing and verifying the operation.
@@ -265,7 +272,7 @@ For provider JSON state managers, provide a deployment-owned AES-256 key callbac
 Before marking Feature 69 fully production-verified, attach evidence for all of the following:
 
 - KMS/secret-manager key provisioning, least-privilege IAM, key versioning, rotation, recovery and destruction of unique per-store DEKs.
-- Startup gate enabled and verified on the actual deployment for every persistent provider manager and active configuration.
+- Startup gates enabled and verified on the actual deployment: `require_encrypted_state=True` for every persistent provider manager and `require_privacy_lifecycle=True` with a non-empty, complete registered-store inventory; active provider configuration encryption must also be enabled.
 - Storage-level encryption for primary DBs, privacy ledgers, object stores, backups, snapshots and generated assets.
 - A complete inventory of every store/provider adapter registered in the lifecycle manager, with stable adapter IDs and persistent idempotency.
 - Live deletion and expiry-purge evidence for each adapter, including provider-side confirmation, tenant isolation, retry/crash recovery, and the absence of residual referenced assets/copies.
