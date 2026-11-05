@@ -35,6 +35,26 @@ class SensitiveDataPolicyTests(unittest.TestCase):
                 self.assertFalse(result["allowed"])
                 self.assertNotIn(value, repr(result))
 
+    def test_gitlab_token_prefix_families_are_detected(self):
+        policy = SensitiveDataPolicy()
+        samples = (
+            "glpat-" + ("a" * 24),
+            "gloas-" + ("b" * 24),
+            "gldt-" + ("c" * 24),
+            "glrt-" + ("d" * 24),
+            "glcbt-" + ("e" * 24),
+            "glptt-" + ("f" * 24),
+            "glagent-" + ("g" * 24),
+            "glsoat-" + ("h" * 24),
+            "glffct-" + ("i" * 24),
+        )
+        for sample in samples:
+            with self.subTest(prefix=sample.split("-", 1)[0]):
+                result = policy.inspect({"integration_token": sample})
+                self.assertFalse(result["allowed"])
+                self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+                self.assertNotIn(sample, repr(result))
+
     def test_clean_payload_is_allowed(self):
         result = SensitiveDataPolicy().inspect({"prompt": "A cinematic mountain landscape at dawn"})
         self.assertTrue(result["allowed"])
