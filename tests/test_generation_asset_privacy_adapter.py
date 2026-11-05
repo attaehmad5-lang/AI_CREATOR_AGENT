@@ -348,7 +348,7 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
         raw_state = self.state.read_bytes()
         self.assertNotIn(SUBJECT.encode(), raw_manifest)
         self.assertNotIn(SUBJECT.encode(), raw_state)
-        self.assertTrue(json.loads(raw_manifest)["format"].startswith("aca-encrypted"))
+        self.assertTrue(json.loads(raw_manifest)["format"].startswith("AI_CREATOR_AGENT_ENCRYPTED_JSON_STATE"))
         self.assertEqual(encrypted.audit()["status"], "ASSET_PRIVACY_READY")
         self.assertEqual(encrypted.audit()["encrypted_document_count"], 2)
 
