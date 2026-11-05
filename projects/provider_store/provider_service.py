@@ -67,6 +67,8 @@ class ProviderService:
             or privacy_lifecycle_manager.registered_store_count < 1
         ):
             raise ValueError("privacy_lifecycle_manager must have at least one registered store")
+        if require_privacy_lifecycle and privacy_lifecycle_manager.durable_idempotency_ready is not True:
+            raise ValueError("privacy_lifecycle_manager must enforce durable idempotency for every registered store")
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
         if tenant_isolation_manager is not None and authorization_manager is None:
@@ -236,10 +238,16 @@ class ProviderService:
         count = manager.registered_store_count if manager is not None else 0
         if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= 256:
             return {"status": "PRIVACY_LIFECYCLE_STATUS_INVALID", "configured": False, "registered_store_count": 0}
+        durable_ready = bool(
+            manager is not None and getattr(manager, "durable_idempotency_ready", False) is True
+        )
+        lifecycle_ready = count > 0 and (not self.require_privacy_lifecycle or durable_ready)
         return {
-            "status": "PRIVACY_LIFECYCLE_READY" if count > 0 else "PRIVACY_LIFECYCLE_NOT_CONFIGURED",
+            "status": "PRIVACY_LIFECYCLE_READY" if lifecycle_ready else "PRIVACY_LIFECYCLE_NOT_CONFIGURED",
             "configured": count > 0,
             "registered_store_count": count,
+            "durable_idempotency_required": self.require_privacy_lifecycle,
+            "durable_idempotency_ready": durable_ready,
         }
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
