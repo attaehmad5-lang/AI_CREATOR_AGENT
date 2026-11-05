@@ -108,6 +108,51 @@ privacy_lifecycle = create_privacy_lifecycle_manager(
 
 Adapters must implement both delete_subject_data(subject_ref, project_id, tenant_id, request_id) and purge_expired_data(cutoff, project_id, tenant_id, request_id). If a system is not configured or a response is PENDING/FAILED/malformed, the coordinator returns PARTIAL. Do not register an adapter that returns success without performing and verifying the operation.
 
+### Generated-media asset store integration
+
+The repository has a concrete local-filesystem adapter for the generation pipeline. It coordinates
+`projects/generation/asset_manifest.json`, `projects/generation/generation_state.json`, and the
+configured generated-media roots. Add it to the same lifecycle coordinator:
+
+~~~python
+from projects.generation.privacy_asset_adapter import GenerationAssetPrivacyAdapter
+
+generation_asset_privacy = GenerationAssetPrivacyAdapter(
+    "projects/generation/asset_manifest.json",
+    state_paths=["projects/generation/generation_state.json"],
+    asset_roots={
+        "output/images": "/srv/ai-creator/output/images",
+        "output/videos": "/srv/ai-creator/output/videos",
+        "output/voice": "/srv/ai-creator/output/voice",
+        "output/assets": "/srv/ai-creator/output/assets",
+    },
+)
+
+privacy_lifecycle = create_privacy_lifecycle_manager(
+    stores={
+        "application-db": database_adapter,
+        "generation-assets": generation_asset_privacy,
+        "vendor-provider": provider_api,
+    },
+    ledger_directory="/var/lib/ai-creator/privacy-ledgers",
+    digest_key_provider=privacy_hmac_key,
+)
+~~~
+
+The adapter uses an OS-level interprocess lock and atomic JSON replacements. It deletes only
+actual `file_path` / `output_file` entries under the exact configured root prefixes; planned
+output paths are never deleted. Shared paths referenced by a non-target subject block deletion.
+Every row must carry a pseudonymous `subject_ref`, `project_id`, and an explicit `tenant_id`
+(`None` means the no-tenant scope). The generation manifest/state builders propagate and validate
+these fields from their source execution report. A partial or sensitive scope is rejected rather
+than guessed.
+
+**Legacy migration gate:** the currently committed sample generation manifest/state files predate
+these fields. They are intentionally not backfilled with invented owners. Until legacy records are
+re-generated with trustworthy scope metadata or migrated from an authoritative ownership source,
+this adapter returns FAILED/PARTIAL and does not delete their files. Retention purge also requires
+an explicit timezone-aware `expires_at` on every in-scope record; no retention date is inferred.
+
 A complete deployment inventory should cover:
 1. Primary application databases and replicas.
 2. Object storage, generated image/video/audio assets and multipart upload remnants.
