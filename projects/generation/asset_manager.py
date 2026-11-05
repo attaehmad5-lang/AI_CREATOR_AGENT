@@ -1,6 +1,5 @@
 import json
 import os
-import json
 from datetime import datetime
 
 from projects.generation.providers.atomic_output import atomic_write_bytes
