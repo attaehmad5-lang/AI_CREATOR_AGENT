@@ -992,6 +992,7 @@ def create_privacy_lifecycle_manager(
     *,
     ledger_directory: str | os.PathLike[str],
     digest_key_provider: Callable[[str], bytes],
+    required_store_ids: Sequence[str],
     max_stores: int = 64,
 ) -> Any:
     """Build the lifecycle coordinator with durable idempotency for external stores.
@@ -1010,6 +1011,23 @@ def create_privacy_lifecycle_manager(
         raise PrivacyAdapterConfigurationError("max_stores must be within 1..256")
     if not callable(digest_key_provider):
         raise PrivacyAdapterConfigurationError("digest_key_provider must be callable")
+    if (
+        not isinstance(required_store_ids, Sequence)
+        or isinstance(required_store_ids, (str, bytes))
+        or not required_store_ids
+        or len(required_store_ids) > max_stores
+        or any(
+            not isinstance(store_id, str) or _COMPONENT_RE.fullmatch(store_id) is None
+            for store_id in required_store_ids
+        )
+        or len(set(required_store_ids)) != len(required_store_ids)
+    ):
+        raise PrivacyAdapterConfigurationError("required_store_ids must declare valid unique store IDs")
+    expected_store_ids = tuple(required_store_ids)
+    if frozenset(expected_store_ids) != frozenset(stores.keys()):
+        raise PrivacyAdapterConfigurationError(
+            "configured privacy adapters must exactly match required_store_ids"
+        )
 
     root = Path(ledger_directory)
     if root.exists() and (root.is_symlink() or not root.is_dir()):
@@ -1053,4 +1071,5 @@ def create_privacy_lifecycle_manager(
         stores=prepared,
         max_stores=max_stores,
         require_durable_idempotency=True,
+        required_store_ids=expected_store_ids,
     )
