@@ -57,7 +57,7 @@ def _normalise_adapter_result(value: Any, *, operation: str) -> dict[str, Any]:
         or not 0 <= count <= 1_000_000_000_000
     ):
         return dict(_FAILURE)
-    if confirmed != (status in allowed):
+    if confirmed != (status in allowed) or (not confirmed and count != 0):
         return dict(_FAILURE)
     return {"confirmed": confirmed, "status": status, "deleted_count": count}
 
@@ -809,7 +809,7 @@ class PrivacyRetentionJob:
         self.scopes = tuple(validated)
         self.retention_days = retention_days
         self.clock = clock or (lambda: datetime.now(timezone.utc))
-        self.request_id_factory = request_id_factory or (lambda: "privacy-retention-" + uuid.uuid4().hex)
+        self.request_id_factory = request_id_factory
 
     def run_once(self) -> dict[str, Any]:
         try:
@@ -822,14 +822,25 @@ class PrivacyRetentionJob:
             now = self.clock()
             if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
                 raise ValueError("clock must return an aware datetime")
-            cutoff = now.astimezone(timezone.utc) - timedelta(days=self.retention_days)
+            utc_day = now.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            cutoff = utc_day - timedelta(days=self.retention_days)
         except Exception:
             return {"status": "RETENTION_JOB_CLOCK_INVALID", "completed": False, "scope_count": len(self.scopes), "completed_count": 0, "results": []}
         results: list[dict[str, Any]] = []
         completed_count = 0
         for index, scope in enumerate(self.scopes):
             try:
-                request_id = self.request_id_factory()
+                request_id = (
+                    self.request_id_factory()
+                    if self.request_id_factory is not None
+                    else uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        "aca-privacy-retention-v1:"
+                        + scope["project_id"] + ":"
+                        + (scope["tenant_id"] or "no-tenant") + ":"
+                        + cutoff.isoformat(),
+                    ).hex
+                )
                 if not _valid_reference(request_id):
                     raise ValueError("invalid request ID")
                 raw = self.service.purge_expired_privacy_data(
