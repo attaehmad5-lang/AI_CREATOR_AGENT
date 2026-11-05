@@ -274,7 +274,26 @@ The default run ID is deterministic for one project/tenant and UTC cutoff day, s
 
 ## 7. Startup gates and release evidence
 
-For provider JSON state managers, provide a deployment-owned AES-256 key callback and set ProviderService(require_encrypted_state=True). The strict startup gate requires every detected persistent manager to use the concrete EncryptedJSONStateStore and verifies the key callback at startup. Also enable active provider-configuration encryption and encrypted migration backups in ProviderConfigLifecycleManager; the JSON state gate does not automatically protect active catalog files, external DBs or assets. Plan the one-time legacy plaintext migration and remove legacy backups only after an approved, verified migration.
+For provider JSON state managers, provide a deployment-owned AES-256 key callback and set ProviderService(require_encrypted_state=True). The strict startup gate requires every detected persistent file to be paired with a concrete EncryptedJSONStateStore and verifies each key callback at startup. For ConnectionManager this means **both** the connection-state JSON and the provider catalog JSON must be encrypted; encrypting state alone is insufficient.
+
+Example (the callback must resolve stable, separate 32-byte purpose-scoped keys by context):
+
+~~~python
+from projects.provider_store.connection_manager import ConnectionManager
+
+connections = ConnectionManager(
+    catalog_path="/var/lib/ai-creator/provider-catalog.json",
+    state_path="/var/lib/ai-creator/connection-state.json",
+    catalog_encryption_key_provider=provider_state_key,
+    state_encryption_key_provider=provider_state_key,
+    migrate_legacy_plaintext_catalog=True,  # approved one-time migration only
+    migrate_legacy_plaintext_state=True,    # approved one-time migration only
+)
+~~~
+
+The catalog's authenticated-encryption context is also bound to its resolved path. Remove both one-time migration flags after the verified migration; subsequent startups must reject plaintext files. Catalog recovery must pass the same deployment key callback to `ConnectionManager.restore_catalog_from_master(..., catalog_encryption_key_provider=...)`; without it, recovery refuses to overwrite an encrypted catalog with plaintext.
+
+Also enable active provider-configuration encryption and encrypted migration backups in ProviderConfigLifecycleManager. This separate config manager covers its own active configuration and migration backups; it does not automatically encrypt external DBs, object stores, backups or generated assets. Plan the one-time legacy plaintext migration and remove legacy plaintext backups only after an approved, verified migration.
 
 Before marking Feature 69 fully production-verified, attach evidence for all of the following:
 
