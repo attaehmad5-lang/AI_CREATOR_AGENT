@@ -26,7 +26,10 @@ from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.provider_tenant_isolation import ProviderTenantIsolationManager
-from projects.provider_store.privacy_data_lifecycle import PrivacyDataLifecycleManager
+from projects.provider_store.privacy_data_lifecycle import (
+    DURABLE_PRIVACY_ADAPTER_CAPABILITY,
+    PrivacyDataLifecycleManager,
+)
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 from projects.generation.providers.pollinations_provider import PollinationsProviderError
@@ -88,13 +91,29 @@ class ProviderServiceTests(unittest.TestCase):
             def purge_expired_data(self, **kwargs):
                 return {"confirmed": True, "status": "ALREADY_EMPTY", "deleted_count": 0}
 
-        lifecycle = PrivacyDataLifecycleManager({"application-db": Store()})
+        unprotected_lifecycle = PrivacyDataLifecycleManager({"application-db": Store()})
+        with self.assertRaisesRegex(ValueError, "must enforce durable idempotency"):
+            ProviderService(
+                self.connections,
+                privacy_lifecycle_manager=unprotected_lifecycle,
+                require_privacy_lifecycle=True,
+            )
+
+        class DurableStore(Store):
+            _privacy_durable_idempotency_capability = DURABLE_PRIVACY_ADAPTER_CAPABILITY
+
+        lifecycle = PrivacyDataLifecycleManager(
+            {"application-db": DurableStore()}, require_durable_idempotency=True
+        )
         service = ProviderService(
             self.connections,
             privacy_lifecycle_manager=lifecycle,
             require_privacy_lifecycle=True,
         )
-        self.assertEqual(service.get_privacy_lifecycle_status()["status"], "PRIVACY_LIFECYCLE_READY")
+        status = service.get_privacy_lifecycle_status()
+        self.assertEqual(status["status"], "PRIVACY_LIFECYCLE_READY")
+        self.assertTrue(status["durable_idempotency_required"])
+        self.assertTrue(status["durable_idempotency_ready"])
 
     def test_require_privacy_lifecycle_flag_must_be_boolean(self):
         with self.assertRaisesRegex(ValueError, "require_privacy_lifecycle must be boolean"):
