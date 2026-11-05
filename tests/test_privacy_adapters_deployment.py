@@ -301,7 +301,7 @@ def test_lifecycle_factory_wires_external_adapters_with_durable_idempotency(tmp_
     assert manager.durable_idempotency_ready is True
     assert manager.inventory_verified is True
     assert manager.required_store_count == 1
-    with pytest.raises(ValueError, match="durable idempotency"):
+    with pytest.raises(ValueError, match="declared required inventory"):
         manager.register_store("late-unwrapped", RecordingAdapter())
     ledger = tmp_path / "privacy-ledgers" / "provider-a.sqlite3"
     assert ledger.is_file()
