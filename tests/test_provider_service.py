@@ -69,6 +69,37 @@ class ProviderServiceTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_production_mode_requires_a_registered_privacy_lifecycle_store(self):
+        with self.assertRaisesRegex(ValueError, "privacy_lifecycle_manager must have at least one registered store"):
+            ProviderService(self.connections, require_privacy_lifecycle=True)
+
+        empty_lifecycle = PrivacyDataLifecycleManager()
+        with self.assertRaisesRegex(ValueError, "privacy_lifecycle_manager must have at least one registered store"):
+            ProviderService(
+                self.connections,
+                privacy_lifecycle_manager=empty_lifecycle,
+                require_privacy_lifecycle=True,
+            )
+
+        class Store:
+            def delete_subject_data(self, **kwargs):
+                return {"confirmed": True, "status": "ALREADY_ABSENT", "deleted_count": 0}
+
+            def purge_expired_data(self, **kwargs):
+                return {"confirmed": True, "status": "ALREADY_EMPTY", "deleted_count": 0}
+
+        lifecycle = PrivacyDataLifecycleManager({"application-db": Store()})
+        service = ProviderService(
+            self.connections,
+            privacy_lifecycle_manager=lifecycle,
+            require_privacy_lifecycle=True,
+        )
+        self.assertEqual(service.get_privacy_lifecycle_status()["status"], "PRIVACY_LIFECYCLE_READY")
+
+    def test_require_privacy_lifecycle_flag_must_be_boolean(self):
+        with self.assertRaisesRegex(ValueError, "require_privacy_lifecycle must be boolean"):
+            ProviderService(self.connections, require_privacy_lifecycle=1)
+
     def test_privacy_storage_status_reports_unencrypted_state_without_exposing_paths(self):
         service = ProviderService(self.connections, health_manager=self.health)
 
