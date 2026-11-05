@@ -19,9 +19,9 @@ from typing import Any, Callable
 from .interprocess_lock import interprocess_file_lock
 
 _ZERO_HASH = "0" * 64
-_HASH_RE = re.compile(r"[a-f0-9]{64}\\Z")
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\\Z")
-_STATUS_RE = re.compile(r"[A-Z][A-Z0-9_]{1,79}\\Z")
+_HASH_RE = re.compile(r"[a-f0-9]{64}\Z")
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
+_STATUS_RE = re.compile(r"[A-Z][A-Z0-9_]{1,79}\Z")
 _EVENT_TYPES = frozenset({
     "ROUTING_DECISION",
     "ROUTED_EXECUTION",
@@ -189,8 +189,8 @@ class ProviderAuditLogManager:
             raise ValueError("AUDIT_LOG_TRUNCATED")
         events: list[dict[str, Any]] = []
         previous = _ZERO_HASH
-        for index, line in enumerate(raw.splitlines(), start=1):
-            if not line or len(line) > 64 * 1024:
+        for index, line in enumerate(raw[:-1].split(b"\\n"), start=1):
+            if not line or b"\\r" in line or len(line) > 64 * 1024:
                 raise ValueError("AUDIT_LOG_RECORD_INVALID")
             try:
                 event = json.loads(line.decode("utf-8"))
@@ -218,9 +218,9 @@ class ProviderAuditLogManager:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Append one sanitized event; failure never falls back to an unlogged write."""
-        if event_type not in _EVENT_TYPES:
+        if not isinstance(event_type, str) or event_type not in _EVENT_TYPES:
             return {"status": "INVALID_AUDIT_EVENT_TYPE", "saved": False}
-        if outcome not in _OUTCOMES:
+        if not isinstance(outcome, str) or outcome not in _OUTCOMES:
             return {"status": "INVALID_AUDIT_OUTCOME", "saved": False}
         if not isinstance(status_code, str) or _STATUS_RE.fullmatch(status_code) is None:
             return {"status": "INVALID_AUDIT_STATUS_CODE", "saved": False}
