@@ -1312,7 +1312,7 @@ class ProviderService:
                 if subject_ref is None:
                     return {"status": "PRIVACY_SUBJECT_REFERENCE_UNAVAILABLE", "accepted": False}
                 submit_args["subject_ref"] = subject_ref
-            if self.tenant_isolation_manager is not None:
+            if tenant_id is not None:
                 submit_args["tenant_id"] = tenant_id
             result = self.job_manager.submit(**submit_args)
         except Exception as exc:
