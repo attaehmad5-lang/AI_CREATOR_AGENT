@@ -173,8 +173,11 @@ class ConnectionManager:
         *,
         catalog_encryption_key_provider: Any = None,
         catalog_encryption_context: str = "provider-catalog-v1",
+        allow_plaintext_recovery: bool = False,
     ) -> dict[str, Any]:
         """Restore a catalog, preserving authenticated encryption when requested."""
+        if not isinstance(allow_plaintext_recovery, bool):
+            return {"status": "INVALID_PLAINTEXT_RECOVERY_FLAG", "restored": False}
         target = Path(catalog_path) if catalog_path is not None else DEFAULT_CATALOG
         master = Path(master_path) if master_path is not None else MASTER_CATALOG
         target_context_digest = hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:24]
@@ -190,6 +193,8 @@ class ConnectionManager:
             return {"status": "RECOVERY_TARGET_EQUALS_MASTER", "restored": False}
         lock_path = target.with_name(target.name + ".lock")
         with interprocess_file_lock(lock_path):
+            if encrypted_store is None and not target.exists() and not allow_plaintext_recovery:
+                return {"status": "CATALOG_RECOVERY_ENCRYPTION_PROFILE_REQUIRED", "restored": False}
             if target.exists():
                 if encrypted_store is None:
                     try:
@@ -205,6 +210,8 @@ class ConnectionManager:
                     validation = {"valid": False, "errors": ["target catalog is unreadable"]}
                 if validation.get("valid") is True:
                     return {"status": "TARGET_CATALOG_VALID", "restored": False}
+                if encrypted_store is None and not allow_plaintext_recovery:
+                    return {"status": "CATALOG_RECOVERY_ENCRYPTION_PROFILE_REQUIRED", "restored": False}
             try:
                 backup = cls._load_json(master)
                 validation = cls.validate_catalog_schema(backup)
