@@ -28,6 +28,9 @@ class PrivacyLifecycleServiceStatusTests(unittest.TestCase):
                 "registered_store_count": 0,
                 "durable_idempotency_required": False,
                 "durable_idempotency_ready": False,
+                "store_inventory_required": False,
+                "store_inventory_verified": False,
+                "required_store_count": 0,
             },
         )
 
@@ -42,6 +45,9 @@ class PrivacyLifecycleServiceStatusTests(unittest.TestCase):
                 "registered_store_count": 1,
                 "durable_idempotency_required": False,
                 "durable_idempotency_ready": False,
+                "store_inventory_required": False,
+                "store_inventory_verified": False,
+                "required_store_count": 0,
             },
         )
 
