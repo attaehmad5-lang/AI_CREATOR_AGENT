@@ -314,3 +314,71 @@ if __name__ == "__main__":
         result = self.adapter.audit()
         self.assertEqual(result["status"], "ASSET_PRIVACY_MIGRATION_REQUIRED")
         self.assertEqual(result["unscoped_count"], 2)
+
+
+    def test_production_mode_requires_a_deployment_key_provider(self):
+        with self.assertRaises(GenerationAssetPrivacyError):
+            GenerationAssetPrivacyAdapter(
+                self.manifest, asset_roots={"output/images": self.images},
+                require_encrypted_metadata=True,
+            )
+
+
+    def test_legacy_metadata_migration_encrypts_both_documents_and_hides_subject(self):
+        self.write_documents([{
+            "asset_id": "encrypted", "subject_ref": SUBJECT,
+            "file_path": None, "planned_output_path": "output/images/not-created.png",
+        }])
+        key_provider = lambda _context: b"e" * 32
+        encrypted = GenerationAssetPrivacyAdapter(
+            self.manifest,
+            asset_roots={"output/images": self.images},
+            state_paths=[self.state],
+            encryption_key_provider=key_provider,
+            encryption_context="test-generation-assets-v1",
+            require_encrypted_metadata=True,
+            migrate_legacy_plaintext_metadata=True,
+        )
+        before = encrypted.audit()
+        self.assertEqual(before["status"], "ASSET_PRIVACY_ENCRYPTION_MIGRATION_REQUIRED")
+        self.assertEqual(before["encryption_migration_count"], 2)
+        self.assertEqual(encrypted.migrate_legacy_metadata()["status"], "GENERATION_METADATA_MIGRATION_CONFIRMATION_REQUIRED")
+        migrated = encrypted.migrate_legacy_metadata(confirmed=True)
+        self.assertEqual(migrated["status"], "GENERATION_METADATA_ENCRYPTED")
+        self.assertEqual(migrated["migrated_document_count"], 2)
+        raw_manifest = self.manifest.read_bytes()
+        raw_state = self.state.read_bytes()
+        self.assertNotIn(SUBJECT.encode(), raw_manifest)
+        self.assertNotIn(SUBJECT.encode(), raw_state)
+        self.assertTrue(json.loads(raw_manifest)["format"].startswith("aca-encrypted"))
+        self.assertEqual(encrypted.audit()["status"], "ASSET_PRIVACY_READY")
+        self.assertEqual(encrypted.audit()["encrypted_document_count"], 2)
+
+
+    def test_wrong_metadata_key_fails_closed_without_mutating_encrypted_documents(self):
+        self.write_documents([{
+            "asset_id": "encrypted", "subject_ref": SUBJECT,
+            "file_path": None, "planned_output_path": "output/images/not-created.png",
+        }])
+        correct = GenerationAssetPrivacyAdapter(
+            self.manifest, asset_roots={"output/images": self.images}, state_paths=[self.state],
+            encryption_key_provider=lambda _context: b"c" * 32,
+            encryption_context="test-generation-wrong-key-v1",
+            require_encrypted_metadata=True, migrate_legacy_plaintext_metadata=True,
+        )
+        self.assertEqual(correct.migrate_legacy_metadata(confirmed=True)["status"], "GENERATION_METADATA_ENCRYPTED")
+        before_manifest = self.manifest.read_bytes()
+        before_state = self.state.read_bytes()
+        wrong = GenerationAssetPrivacyAdapter(
+            self.manifest, asset_roots={"output/images": self.images}, state_paths=[self.state],
+            encryption_key_provider=lambda _context: b"w" * 32,
+            encryption_context="test-generation-wrong-key-v1",
+            require_encrypted_metadata=True,
+        )
+        self.assertEqual(wrong.audit()["status"], "ASSET_PRIVACY_AUDIT_FAILED")
+        result = wrong.delete_subject_data(
+            subject_ref=SUBJECT, project_id=PROJECT, tenant_id=TENANT, request_id=REQUEST,
+        )
+        self.assertFalse(result["confirmed"])
+        self.assertEqual(self.manifest.read_bytes(), before_manifest)
+        self.assertEqual(self.state.read_bytes(), before_state)
