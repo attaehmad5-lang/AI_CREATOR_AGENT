@@ -102,8 +102,20 @@ class ProviderServiceTests(unittest.TestCase):
         class DurableStore(Store):
             _privacy_durable_idempotency_capability = DURABLE_PRIVACY_ADAPTER_CAPABILITY
 
-        lifecycle = PrivacyDataLifecycleManager(
+        undeclared_inventory = PrivacyDataLifecycleManager(
             {"application-db": DurableStore()}, require_durable_idempotency=True
+        )
+        with self.assertRaisesRegex(ValueError, "declared complete store inventory"):
+            ProviderService(
+                self.connections,
+                privacy_lifecycle_manager=undeclared_inventory,
+                require_privacy_lifecycle=True,
+            )
+
+        lifecycle = PrivacyDataLifecycleManager(
+            {"application-db": DurableStore()},
+            require_durable_idempotency=True,
+            required_store_ids=("application-db",),
         )
         service = ProviderService(
             self.connections,
@@ -114,6 +126,9 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(status["status"], "PRIVACY_LIFECYCLE_READY")
         self.assertTrue(status["durable_idempotency_required"])
         self.assertTrue(status["durable_idempotency_ready"])
+        self.assertTrue(status["store_inventory_required"])
+        self.assertTrue(status["store_inventory_verified"])
+        self.assertEqual(status["required_store_count"], 1)
 
     def test_require_privacy_lifecycle_flag_must_be_boolean(self):
         with self.assertRaisesRegex(ValueError, "require_privacy_lifecycle must be boolean"):
