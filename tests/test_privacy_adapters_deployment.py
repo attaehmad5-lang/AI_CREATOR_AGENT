@@ -99,7 +99,7 @@ def test_sqlite_adapter_rejects_naive_cutoff_and_invalid_scope(tmp_path):
     con.close()
     adapter = SQLitePrivacyDataAdapter(db, table="records", digest_key_provider=key_provider)
     assert adapter.purge_expired_data(cutoff=datetime.now(), project_id=PROJECT, tenant_id=TENANT, request_id=REQUEST)["confirmed"] is False
-    assert adapter.delete_subject_data(subject_ref=SUBJECT, project_id="bad", tenant_id=TENANT, request_id=REQUEST)["confirmed"] is False
+    assert adapter.delete_subject_data(subject_ref=SUBJECT, project_id="bad scope", tenant_id=TENANT, request_id=REQUEST)["confirmed"] is False
 
 
 def test_sqlite_adapter_requires_expected_schema_and_stable_key(tmp_path):
@@ -271,7 +271,7 @@ def test_retention_job_rejects_unsafe_configuration():
     with pytest.raises(PrivacyAdapterConfigurationError):
         PrivacyRetentionJob(FakePrivacyService(), principal_provider=lambda: "svc", scopes=[], retention_days=30)
     with pytest.raises(PrivacyAdapterConfigurationError):
-        PrivacyRetentionJob(FakePrivacyService(), principal_provider=lambda: "svc", scopes=[{"project_id": "short"}], retention_days=30)
+        PrivacyRetentionJob(FakePrivacyService(), principal_provider=lambda: "svc", scopes=[{"project_id": "bad scope"}], retention_days=30)
     with pytest.raises(PrivacyAdapterConfigurationError):
         PrivacyRetentionJob(FakePrivacyService(), principal_provider=lambda: "svc", scopes=[{"project_id": PROJECT, "tenant_id": TENANT}], retention_days=0)
 
