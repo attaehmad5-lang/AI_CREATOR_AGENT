@@ -1794,6 +1794,10 @@ class ProviderService:
                     "executed": False,
                     "error_type": type(exc).__name__,
                 }
+            if self._sensitive_input_rejection({
+                "degraded_mode_state_response": degraded_state_result,
+            }) is not None:
+                return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "executed": False}
             degraded_mode_state = (
                 degraded_state_result.get("state")
                 if isinstance(degraded_state_result, dict) else None
@@ -1866,6 +1870,10 @@ class ProviderService:
                     "executed": False,
                     "error_type": type(exc).__name__,
                 }
+            if self._sensitive_input_rejection({
+                "feature_flag_response": feature_flag_result,
+            }) is not None:
+                return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "executed": False}
             if not isinstance(feature_flag_result, dict) or feature_flag_result.get("enabled") is not True:
                 return {
                     "status": "FEATURE_DISABLED",
@@ -1977,6 +1985,18 @@ class ProviderService:
                     binding = binding_fn(provider_id)
                 except Exception as exc:
                     binding = {"valid": False, "status": "MODALITY_BINDING_CHECK_FAILED", "error_type": type(exc).__name__}
+            if self._sensitive_input_rejection({
+                "modality_binding_response": binding,
+            }) is not None:
+                self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                    "executed": False,
+                    "provider": provider_id,
+                }
             requested_modality = modality.strip().casefold() if isinstance(modality, str) else None
             allowed_modalities = binding.get("output_modalities") if isinstance(binding, dict) else None
             binding_valid = isinstance(binding, dict) and binding.get("valid") is True and isinstance(allowed_modalities, list)
@@ -2010,6 +2030,18 @@ class ProviderService:
                     )
                 except Exception as exc:
                     health = {"eligible": False, "status": "HEALTH_CHECK_FAILED", "error_type": type(exc).__name__}
+            if self._sensitive_input_rejection({
+                "provider_health_response": health,
+            }) is not None:
+                self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                    "executed": False,
+                    "provider": provider_id,
+                }
             if not isinstance(health, dict) or health.get("eligible") is not True:
                 release = self.release_unstarted_request(project_id=project_id, provider_id=provider_id, request_id=request_id)
                 safe_health = {
@@ -2037,6 +2069,18 @@ class ProviderService:
                 return {
                     "status": "PROVIDER_DATA_POLICY_CHECK_FAILED", "executed": False,
                     "release": release, "error_type": type(exc).__name__,
+                }
+            if self._sensitive_input_rejection({
+                "provider_data_policy_response": data_policy_result,
+            }) is not None:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                    "executed": False,
+                    "release": release,
                 }
             if not isinstance(data_policy_result, dict) or data_policy_result.get("allowed") is not True:
                 release = self.release_unstarted_request(
