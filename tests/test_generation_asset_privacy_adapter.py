@@ -269,8 +269,6 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
         self.assertEqual(second["deleted_count"], 2)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
     def test_generation_scope_helper_requires_complete_pseudonymous_scope(self):
@@ -382,3 +380,7 @@ if __name__ == "__main__":
         self.assertFalse(result["confirmed"])
         self.assertEqual(self.manifest.read_bytes(), before_manifest)
         self.assertEqual(self.state.read_bytes(), before_state)
+
+
+if __name__ == "__main__":
+    unittest.main()
