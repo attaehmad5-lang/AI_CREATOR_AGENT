@@ -103,8 +103,15 @@ privacy_lifecycle = create_privacy_lifecycle_manager(
     digest_key_provider=privacy_hmac_key,
 )
 
-# In production, require both encrypted persistent state and a non-empty privacy-store inventory.
-# This fails application startup when either security gate is not configured.
+# The factory creates a strict lifecycle manager: each initial adapter is wrapped
+# with a persistent HMAC idempotency ledger unless it is already the transactional
+# SQLite adapter. The returned manager rejects later registrations that are not
+# already protected by the same durable-idempotency contract.
+assert privacy_lifecycle.require_durable_idempotency is True
+assert privacy_lifecycle.durable_idempotency_ready is True
+
+# In production, require encrypted persistent state and a non-empty inventory
+# in which every adapter has durable idempotency. Startup fails closed otherwise.
 provider_service = ProviderService(
     connection_manager,
     privacy_lifecycle_manager=privacy_lifecycle,
