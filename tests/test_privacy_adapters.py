@@ -213,6 +213,36 @@ class PrivacyAdapterTests(unittest.TestCase):
         self.assertTrue(second["replayed"])
         self.assertEqual(len(delegate.calls), 1)
 
+    def test_wrapper_validates_pseudonymous_subject_and_canonical_scope_ids(self):
+        delegate = Delegate()
+        wrapper = self.wrapper(delegate)
+        rejected = wrapper.delete_subject_data(
+            subject_ref="person@example.com",
+            project_id="film",
+            tenant_id="tenant-1",
+            request_id="request-id-011",
+        )
+        self.assertEqual(rejected["status"], "FAILED")
+        self.assertEqual(delegate.calls, [])
+
+        accepted = wrapper.delete_subject_data(
+            subject_ref="s-1",
+            project_id="film",
+            tenant_id="tenant-1",
+            request_id="request-id-012",
+        )
+        self.assertTrue(accepted["confirmed"])
+        self.assertEqual(len(delegate.calls), 1)
+
+        invalid_purge = wrapper.purge_expired_data(
+            cutoff=datetime(2026, 11, 1, tzinfo=timezone.utc),
+            project_id="",
+            tenant_id="tenant-1",
+            request_id="request-id-013",
+        )
+        self.assertEqual(invalid_purge["status"], "FAILED")
+        self.assertEqual(len(delegate.calls), 1)
+
     def test_ledger_file_is_private_on_posix(self):
         self.wrapper(Delegate())
         if os.name == "posix":
