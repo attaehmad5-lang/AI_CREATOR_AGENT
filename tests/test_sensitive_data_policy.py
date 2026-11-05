@@ -89,6 +89,8 @@ class SensitiveDataPolicyTests(unittest.TestCase):
                 "api_token": "opaque-api-token-value",
                 "clientSecret": "opaque-value-two",
                 "refresh_token": "opaque-value-three",
+                "integration_token": "opaque-value-four",
+                "token": "opaque-value-five",
                 "token_env": "PROVIDER_TOKEN",
                 "secret_ref": "vault://provider/token",
                 "api_key_configured": True,
@@ -99,7 +101,7 @@ class SensitiveDataPolicyTests(unittest.TestCase):
         self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
         self.assertEqual(
             {item["path"] for item in result["findings"]},
-            {"$.providerConfig.api_key", "$.providerConfig.api_token", "$.providerConfig.clientSecret", "$.providerConfig.refresh_token"},
+            {"$.providerConfig.api_key", "$.providerConfig.api_token", "$.providerConfig.clientSecret", "$.providerConfig.refresh_token", "$.providerConfig.integration_token", "$.providerConfig.token"},
         )
         self.assertNotIn("opaque-value", repr(result))
         self.assertNotIn("opaque-api-token-value", repr(result))
