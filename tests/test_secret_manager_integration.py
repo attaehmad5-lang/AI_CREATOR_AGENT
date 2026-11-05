@@ -5,6 +5,15 @@ from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.http_probe import ProviderHTTPConnectivityProbe
+
+
+def _public_resolver(hostname, port):
+    """Deterministic public DNS answer for tests; no external DNS is used."""
+    import socket
+    return [
+        (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "",
+         ("93.184.216.34", port))
+    ]
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
 from projects.provider_store.provider_service import ProviderService
 from projects.provider_store.secrets_manager import (
@@ -152,7 +161,7 @@ class ProviderSecretsIntegrationTests(unittest.TestCase):
 
         self.secrets.resolve_secret = tracking_resolve
         opener = FakeOpener()
-        probe = ProviderHTTPConnectivityProbe(
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, 
             secret_manager=self.secrets,
             opener=opener,
             principal_id="admin-1",
@@ -178,7 +187,7 @@ class ProviderSecretsIntegrationTests(unittest.TestCase):
 
     def test_http_probe_fails_before_network_when_managed_secret_manager_is_missing(self):
         opener = FakeOpener()
-        probe = ProviderHTTPConnectivityProbe(opener=opener)
+        probe = ProviderHTTPConnectivityProbe(resolver=_public_resolver, opener=opener)
         with self.assertRaisesRegex(PermissionError, "managed provider credential is unavailable"):
             probe({
                 **self.provider,
