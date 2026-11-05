@@ -741,5 +741,57 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         connection.close()
 
 
+
+
+    def test_default_transport_builds_pinned_https_handler_and_disables_proxies(self):
+        from unittest.mock import patch
+        from urllib.request import ProxyHandler
+        from projects.provider_store.http_probe import _PinnedHTTPSHandler, _RejectRedirects
+
+        opener = _Opener()
+        observed = {}
+
+        def fake_build_opener(*handlers):
+            observed["handlers"] = handlers
+            return opener
+
+        probe = ProviderHTTPConnectivityProbe(
+            environ={}, resolver=_public_resolver
+        )
+        with patch(
+            "projects.provider_store.http_probe.build_opener",
+            side_effect=fake_build_opener,
+        ):
+            result = probe({
+                "id": "public_provider", "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertTrue(result["ok"])
+        self.assertTrue(any(isinstance(item, ProxyHandler) for item in observed["handlers"]))
+        self.assertTrue(any(isinstance(item, _RejectRedirects) for item in observed["handlers"]))
+        pinned = next(item for item in observed["handlers"] if isinstance(item, _PinnedHTTPSHandler))
+        self.assertEqual(pinned.connect_ip, "93.184.216.34")
+
+    def test_pinned_https_handler_factory_passes_context_without_unsupported_options(self):
+        from unittest.mock import patch
+        from projects.provider_store.http_probe import _PinnedHTTPSConnection, _PinnedHTTPSHandler
+
+        handler = _PinnedHTTPSHandler("93.184.216.34")
+        captured = {}
+
+        def fake_do_open(factory, request, **kwargs):
+            captured["connection"] = factory("api.example.com", timeout=1.0, **kwargs)
+            return "opened"
+
+        with patch.object(handler, "do_open", side_effect=fake_do_open):
+            result = handler.https_open(object())
+        self.assertEqual(result, "opened")
+        connection = captured["connection"]
+        self.assertIsInstance(connection, _PinnedHTTPSConnection)
+        self.assertEqual(connection._connect_ip, "93.184.216.34")
+        self.assertIs(connection._context, handler._context)
+
+
 if __name__ == "__main__":
     unittest.main()
