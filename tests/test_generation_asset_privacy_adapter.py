@@ -4,7 +4,11 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from projects.generation.privacy_asset_adapter import GenerationAssetPrivacyAdapter
+from projects.generation.privacy_asset_adapter import (
+    GenerationAssetPrivacyAdapter,
+    GenerationAssetPrivacyError,
+    copy_generation_privacy_scope,
+)
 from projects.provider_store.privacy_adapters import create_privacy_lifecycle_manager
 
 
@@ -231,3 +235,25 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_generation_scope_helper_requires_complete_pseudonymous_scope(self):
+        source = {"project_id": PROJECT, "tenant_id": None, "subject_ref": SUBJECT}
+        self.assertEqual(copy_generation_privacy_scope(source), source)
+        with self.assertRaises(GenerationAssetPrivacyError):
+            copy_generation_privacy_scope({"project_id": PROJECT, "subject_ref": SUBJECT})
+        with self.assertRaises(GenerationAssetPrivacyError):
+            copy_generation_privacy_scope({"project_id": PROJECT, "tenant_id": TENANT, "subject_ref": "user@example.test"})
+        with self.assertRaises(GenerationAssetPrivacyError):
+            copy_generation_privacy_scope({"project_id": PROJECT, "tenant_id": TENANT, "subject_ref": "123456789"})
+
+
+    def test_generation_scope_helper_applies_row_override_and_validates_expiry(self):
+        document = {"project_id": PROJECT, "tenant_id": TENANT, "subject_ref": SUBJECT}
+        row = {"tenant_id": "tenant-other", "subject_ref": "subject-other", "expires_at": "2026-01-01T00:00:00Z"}
+        result = copy_generation_privacy_scope(document, row)
+        self.assertEqual(result["tenant_id"], "tenant-other")
+        self.assertEqual(result["subject_ref"], "subject-other")
+        self.assertEqual(result["expires_at"], row["expires_at"])
+        with self.assertRaises(GenerationAssetPrivacyError):
+            copy_generation_privacy_scope(document, {"expires_at": "2026-01-01T00:00:00"})
