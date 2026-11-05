@@ -20,7 +20,7 @@ _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
 _REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\Z")
 _ERROR_RE = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
 _TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED"}
-_SUBJECT_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\\Z")
+_SUBJECT_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z")
 
 
 def _valid_subject_ref(value: Any) -> bool:
