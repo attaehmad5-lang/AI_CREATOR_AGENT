@@ -185,11 +185,11 @@ class ProviderAuditLogManager:
             raise ValueError("AUDIT_LOG_READ_FAILED") from exc
         if not raw:
             return [], _ZERO_HASH
-        if not raw.endswith(b"\\n"):
+        if not raw.endswith(b"\n"):
             raise ValueError("AUDIT_LOG_TRUNCATED")
         events: list[dict[str, Any]] = []
         previous = _ZERO_HASH
-        for index, line in enumerate(raw[:-1].split(b"\\n"), start=1):
+        for index, line in enumerate(raw[:-1].split(b"\n"), start=1):
             if not line or b"\\r" in line or len(line) > 64 * 1024:
                 raise ValueError("AUDIT_LOG_RECORD_INVALID")
             try:
@@ -261,7 +261,7 @@ class ProviderAuditLogManager:
                         "previous_hash": previous,
                     }
                     record["event_hash"] = _event_hash(record)
-                    encoded = _canonical_json(record) + b"\\n"
+                    encoded = _canonical_json(record) + b"\n"
                     current_size = self.log_path.stat().st_size if self.log_path.exists() else 0
                     if current_size + len(encoded) > self.max_bytes or len(encoded) > 64 * 1024:
                         return {"status": "AUDIT_LOG_CAPACITY_EXCEEDED", "saved": False}
