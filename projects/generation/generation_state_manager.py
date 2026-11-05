@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 
 from projects.generation.providers.atomic_output import atomic_write_bytes
+from projects.generation.privacy_asset_adapter import copy_generation_privacy_scope
 
 INPUT_FILE = "projects/generation/asset_manifest.json"
 OUTPUT_FILE = "projects/generation/generation_state.json"
@@ -35,9 +36,7 @@ for asset in data["assets"]:
         ],
         "updated_at": datetime.now().isoformat()
     }
-    for key in ("project_id", "tenant_id", "subject_ref", "expires_at"):
-        if key in asset:
-            state[key] = asset[key]
+    state.update(copy_generation_privacy_scope(data, asset))
     states.append(state)
 
 output = {
@@ -66,9 +65,7 @@ output = {
     "created_at": datetime.now().isoformat()
 }
 
-for key in ("project_id", "tenant_id", "subject_ref", "expires_at"):
-    if key in data:
-        output[key] = data[key]
+output.update(copy_generation_privacy_scope(data))
 
 os.makedirs("projects/generation", exist_ok=True)
 atomic_write_bytes(
