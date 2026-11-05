@@ -509,12 +509,36 @@ class ProviderService:
         assign = getattr(self.authorization_manager, "assign_role", None)
         if not callable(assign):
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        target_hash = hashlib.sha256(target_principal_id.encode("utf-8")).hexdigest()[:32] if isinstance(target_principal_id, str) else None
+        audit_error = self._append_provider_audit_event(
+            "PROVIDER_ACCESS_CHANGE", outcome="REQUESTED",
+            status_code="PROVIDER_ROLE_ASSIGNMENT_REQUESTED",
+            actor_principal_id=actor_principal_id,
+            metadata={"target_principal_hash": target_hash, "role": role if isinstance(role, str) else None, "enabled": enabled},
+        )
+        if audit_error is not None:
+            return {"status": "AUDIT_LOG_WRITE_FAILED", "saved": False}
         try:
             result = assign(target_principal_id, role, enabled=enabled)
         except Exception as exc:
-            return {"status": "ROLE_ASSIGNMENT_FAILED", "saved": False, "error_type": type(exc).__name__}
+            audit_error = self._append_provider_audit_event(
+                "PROVIDER_ACCESS_CHANGE", outcome="FAILED",
+                status_code="PROVIDER_ROLE_ASSIGNMENT_FAILED",
+                actor_principal_id=actor_principal_id,
+                metadata={"target_principal_hash": target_hash, "role": role if isinstance(role, str) else None, "enabled": enabled, "error_type": type(exc).__name__},
+            )
+            return {"status": "AUDIT_LOG_FINALIZATION_FAILED" if audit_error is not None else "ROLE_ASSIGNMENT_FAILED", "saved": False, "error_type": type(exc).__name__}
         if not isinstance(result, dict):
             return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        audit_error = self._append_provider_audit_event(
+            "PROVIDER_ACCESS_CHANGE",
+            outcome="SUCCEEDED" if result.get("saved") is True else "FAILED",
+            status_code=self._safe_error_code(result.get("status"), "PROVIDER_ROLE_ASSIGNMENT_RECORDED"),
+            actor_principal_id=actor_principal_id,
+            metadata={"target_principal_hash": target_hash, "role": role if isinstance(role, str) else None, "enabled": enabled},
+        )
+        if audit_error is not None:
+            return {"status": "AUDIT_LOG_FINALIZATION_FAILED", "saved": result.get("saved") is True}
         return result
 
     def disable_provider_principal(
@@ -539,12 +563,36 @@ class ProviderService:
         disable = getattr(self.authorization_manager, "disable_principal", None)
         if not callable(disable):
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        target_hash = hashlib.sha256(target_principal_id.encode("utf-8")).hexdigest()[:32] if isinstance(target_principal_id, str) else None
+        audit_error = self._append_provider_audit_event(
+            "PROVIDER_ACCESS_CHANGE", outcome="REQUESTED",
+            status_code="PROVIDER_PRINCIPAL_DISABLE_REQUESTED",
+            actor_principal_id=actor_principal_id,
+            metadata={"target_principal_hash": target_hash, "enabled": False},
+        )
+        if audit_error is not None:
+            return {"status": "AUDIT_LOG_WRITE_FAILED", "saved": False}
         try:
             result = disable(target_principal_id)
         except Exception as exc:
-            return {"status": "PRINCIPAL_DISABLE_FAILED", "saved": False, "error_type": type(exc).__name__}
+            audit_error = self._append_provider_audit_event(
+                "PROVIDER_ACCESS_CHANGE", outcome="FAILED",
+                status_code="PROVIDER_PRINCIPAL_DISABLE_FAILED",
+                actor_principal_id=actor_principal_id,
+                metadata={"target_principal_hash": target_hash, "enabled": False, "error_type": type(exc).__name__},
+            )
+            return {"status": "AUDIT_LOG_FINALIZATION_FAILED" if audit_error is not None else "PRINCIPAL_DISABLE_FAILED", "saved": False, "error_type": type(exc).__name__}
         if not isinstance(result, dict):
             return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        audit_error = self._append_provider_audit_event(
+            "PROVIDER_ACCESS_CHANGE",
+            outcome="SUCCEEDED" if result.get("saved") is True else "FAILED",
+            status_code=self._safe_error_code(result.get("status"), "PROVIDER_PRINCIPAL_DISABLE_RECORDED"),
+            actor_principal_id=actor_principal_id,
+            metadata={"target_principal_hash": target_hash, "enabled": False},
+        )
+        if audit_error is not None:
+            return {"status": "AUDIT_LOG_FINALIZATION_FAILED", "saved": result.get("saved") is True}
         return result
 
     def _authorize_tenant_project(
