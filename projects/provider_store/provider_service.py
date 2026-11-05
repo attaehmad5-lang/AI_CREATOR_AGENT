@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Any
+import hashlib
+import hmac
 import inspect
 import re
 import time
@@ -32,6 +34,7 @@ class ProviderService:
         budget_alert_manager: Any | None = None,
         authorization_manager: Any | None = None,
         identity_authenticator: Any | None = None,
+        privacy_subject_ref_key_provider: Any | None = None,
         sensitive_data_policy: Any | None = None,
         data_handling_policy: Any | None = None,
         webhook_verifier: Any | None = None,
@@ -67,6 +70,16 @@ class ProviderService:
             or not callable(getattr(identity_authenticator, "is_authenticated_principal", None))
         ):
             raise ValueError("identity_authenticator must verify tokens and identify trusted principals")
+        if privacy_subject_ref_key_provider is not None:
+            if not callable(privacy_subject_ref_key_provider):
+                raise ValueError("privacy_subject_ref_key_provider must be callable")
+            try:
+                subject_key = privacy_subject_ref_key_provider("provider-job-subject-reference-v1")
+            except Exception as exc:
+                raise ValueError("privacy subject reference key is unavailable") from exc
+            if not isinstance(subject_key, bytes) or len(subject_key) != 32:
+                raise ValueError("privacy subject reference key must be exactly 32 bytes")
+        self.privacy_subject_ref_key_provider = privacy_subject_ref_key_provider
         resolved_secret_manager = secret_manager or getattr(connection_manager, "secret_manager", None)
         if resolved_secret_manager is not None and (
             not callable(getattr(resolved_secret_manager, "resolve_secret", None))
@@ -508,6 +521,27 @@ class ProviderService:
         if any(ord(char) < 32 or ord(char) == 127 for char in reference):
             return None
         return reference
+
+    def _derive_privacy_subject_ref(
+        self, principal_id: Any, *, project_id: str, tenant_id: str | None
+    ) -> str | None:
+        """Create a scope-bound, deployment-keyed pseudonym for persisted job ownership."""
+        provider = self.privacy_subject_ref_key_provider
+        if provider is None:
+            return None
+        principal_ref = self._privacy_principal_reference(principal_id)
+        if not isinstance(principal_ref, str) or not principal_ref:
+            return None
+        try:
+            key = provider("provider-job-subject-reference-v1")
+            if not isinstance(key, bytes) or len(key) != 32:
+                return None
+            tenant_scope = b"\\x00" if tenant_id is None else b"\\x01" + tenant_id.encode("utf-8")
+            message = project_id.encode("utf-8") + b"\\x00" + tenant_scope + b"\\x00" + principal_ref.encode("utf-8")
+            digest = hmac.new(key, message, hashlib.sha256).hexdigest()
+            return "subject-" + digest
+        except Exception:
+            return None
 
     def _authorize_tenant_project(
         self,
@@ -1271,6 +1305,13 @@ class ProviderService:
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
                 "payload_ref": payload_ref, "priority": priority,
             }
+            if self.privacy_subject_ref_key_provider is not None:
+                subject_ref = self._derive_privacy_subject_ref(
+                    principal_id, project_id=project_id, tenant_id=tenant_id
+                )
+                if subject_ref is None:
+                    return {"status": "PRIVACY_SUBJECT_REFERENCE_UNAVAILABLE", "accepted": False}
+                submit_args["subject_ref"] = subject_ref
             if self.tenant_isolation_manager is not None:
                 submit_args["tenant_id"] = tenant_id
             result = self.job_manager.submit(**submit_args)
