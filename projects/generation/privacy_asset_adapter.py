@@ -75,10 +75,11 @@ class GenerationAssetPrivacyAdapter:
     """Delete/purge generated asset records and files under explicit roots.
 
     asset_roots maps manifest-relative prefixes to dedicated directories,
-    e.g. {"output/images": "/srv/creator/output/images"}. Only file_path
-    and state output_file values are physical deletion candidates.
-    planned_output_path is never deleted. An OS-level interprocess lock and
-    atomic JSON replacement protect manifests from concurrent writers.
+    e.g. {"output/images": "/srv/creator/output/images"}. Only asset file_path,
+    state output_file, and execution-report output values are physical deletion
+    candidates. planned_output_path is never deleted. Manifest, state and
+    execution-report documents share one OS-level interprocess lock and atomic
+    JSON replacement rules.
     """
 
     def __init__(
@@ -87,6 +88,7 @@ class GenerationAssetPrivacyAdapter:
         *,
         asset_roots: Mapping[str, str | os.PathLike[str]],
         state_paths: Sequence[str | os.PathLike[str]] = (),
+        execution_report_paths: Sequence[str | os.PathLike[str]] = (),
         max_document_bytes: int = 16 * 1024 * 1024,
         max_records: int = 100_000,
         encryption_key_provider: Any = None,
@@ -96,16 +98,20 @@ class GenerationAssetPrivacyAdapter:
     ) -> None:
         self.manifest_path = Path(manifest_path)
         self.state_paths = tuple(Path(path) for path in state_paths)
-        if len(self.state_paths) > 16:
-            raise GenerationAssetPrivacyError("too many generation state documents")
+        self.execution_report_paths = tuple(Path(path) for path in execution_report_paths)
+        if len(self.state_paths) > 16 or len(self.execution_report_paths) > 16:
+            raise GenerationAssetPrivacyError("too many generation privacy documents")
+        if len(self.state_paths) + len(self.execution_report_paths) > 32:
+            raise GenerationAssetPrivacyError("generation privacy document inventory exceeds 32")
         if not isinstance(asset_roots, Mapping) or not asset_roots:
             raise GenerationAssetPrivacyError("asset root mapping is required")
         if isinstance(max_document_bytes, bool) or not isinstance(max_document_bytes, int) or not 1024 <= max_document_bytes <= 256 * 1024 * 1024:
             raise GenerationAssetPrivacyError("document size limit is invalid")
         if isinstance(max_records, bool) or not isinstance(max_records, int) or not 1 <= max_records <= 1_000_000:
             raise GenerationAssetPrivacyError("record limit is invalid")
-        if self.manifest_path.is_symlink():
-            raise GenerationAssetPrivacyError("manifest symlinks are not accepted")
+        configured_documents = (self.manifest_path, *self.state_paths, *self.execution_report_paths)
+        if any(path.is_symlink() for path in configured_documents):
+            raise GenerationAssetPrivacyError("generation privacy document symlinks are not accepted")
         if not isinstance(require_encrypted_metadata, bool) or not isinstance(migrate_legacy_plaintext_metadata, bool):
             raise GenerationAssetPrivacyError("metadata encryption flags must be boolean")
         if encryption_key_provider is not None and not callable(encryption_key_provider):
@@ -144,17 +150,24 @@ class GenerationAssetPrivacyAdapter:
             roots[normalized_prefix] = resolved
         self.asset_roots = roots
 
-        paths = (self.manifest_path, *self.state_paths)
+        paths = configured_documents
         normalized = [str(path.resolve(strict=False)) for path in paths]
         if len(set(normalized)) != len(normalized):
             raise GenerationAssetPrivacyError("manifest and state documents must be distinct")
 
         self._metadata_stores: dict[str, EncryptedJSONStateStore] = {}
         if self.encryption_key_provider is not None:
-            contexts = [self.encryption_context + ":manifest"] + [
-                self.encryption_context + ":state:" + str(index)
-                for index in range(len(self.state_paths))
-            ]
+            contexts = (
+                [self.encryption_context + ":manifest"]
+                + [
+                    self.encryption_context + ":state:" + str(index)
+                    for index in range(len(self.state_paths))
+                ]
+                + [
+                    self.encryption_context + ":execution-report:" + str(index)
+                    for index in range(len(self.execution_report_paths))
+                ]
+            )
             for path, context in zip(paths, contexts):
                 if len(context) > 128:
                     raise GenerationAssetPrivacyError("metadata encryption context is too long")
@@ -218,7 +231,11 @@ class GenerationAssetPrivacyAdapter:
             return {"status": "ASSET_PRIVACY_AUDIT_FAILED", "document_count": 0, "record_count": 0, "scoped_count": 0, "unscoped_count": 0, "retention_ready_count": 0, "retention_missing_expiry_count": 0}
         try:
             with interprocess_file_lock(lock_path):
-                specs = [(self.manifest_path, "assets")] + [(path, "states") for path in self.state_paths]
+                specs = (
+                    [(self.manifest_path, "assets")]
+                    + [(path, "states") for path in self.state_paths]
+                    + [(path, "jobs") for path in self.execution_report_paths]
+                )
                 record_count = 0
                 scoped_count = 0
                 unscoped_count = 0
@@ -239,7 +256,11 @@ class GenerationAssetPrivacyAdapter:
                     for row in rows:
                         try:
                             self._scope(row, document)
-                            actual_field = "file_path" if collection == "assets" else "output_file"
+                            actual_field = {
+                                "assets": "file_path",
+                                "states": "output_file",
+                                "jobs": "output",
+                            }[collection]
                             actual_paths = set()
                             if actual_field in row:
                                 actual = self._resolve_asset_path(row[actual_field])
@@ -406,7 +427,11 @@ class GenerationAssetPrivacyAdapter:
         lock_path = self.manifest_path.with_name(self.manifest_path.name + ".privacy.lock")
         if lock_path.is_symlink():
             return {"status": "GENERATION_METADATA_MIGRATION_FAILED", "migrated_document_count": 0}
-        specs = [(self.manifest_path, "assets")] + [(path, "states") for path in self.state_paths]
+        specs = (
+            [(self.manifest_path, "assets")]
+            + [(path, "states") for path in self.state_paths]
+            + [(path, "jobs") for path in self.execution_report_paths]
+        )
         migrated = 0
         try:
             with interprocess_file_lock(lock_path):
@@ -447,7 +472,11 @@ class GenerationAssetPrivacyAdapter:
         lock_path = self.manifest_path.with_name(self.manifest_path.name + ".privacy.lock")
         if lock_path.is_symlink():
             return {"status": "GENERATION_SCOPE_MIGRATION_FAILED", "migrated_record_count": 0}
-        specs = [(self.manifest_path, "assets")] + [(path, "states") for path in self.state_paths]
+        specs = (
+            [(self.manifest_path, "assets")]
+            + [(path, "states") for path in self.state_paths]
+            + [(path, "jobs") for path in self.execution_report_paths]
+        )
         prepared: list[tuple[Path, dict[str, Any], int]] = []
         migrated_records = 0
         written_records = 0
@@ -463,10 +492,15 @@ class GenerationAssetPrivacyAdapter:
                             self._scope(row, document)
                         except GenerationAssetPrivacyError:
                             lookup = {
-                                key: row[key]
-                                for key in ("asset_id", "job_id", "project", "scene", "media_type")
-                                if key in row
+                                key: row[key] if key in row else document[key]
+                                for key in ("asset_id", "job_id", "project", "scene")
+                                if key in row or key in document
                             }
+                            media_type = row.get("media_type", row.get("type", document.get("media_type")))
+                            if media_type is not None:
+                                lookup["media_type"] = media_type
+                            if "output" in row:
+                                lookup["output"] = row["output"]
                             try:
                                 resolved = scope_resolver(lookup)
                             except Exception as exc:
@@ -535,6 +569,7 @@ class GenerationAssetPrivacyAdapter:
                 (self.manifest_path, "assets", ("file_path",), ("planned_output_path",)),
             ]
             docs.extend((path, "states", ("output_file",), ("planned_output_path",)) for path in self.state_paths)
+            docs.extend((path, "jobs", ("output",), ("planned_output_path",)) for path in self.execution_report_paths)
             loaded: list[dict[str, Any]] = []
             target_paths: set[Path] = set()
             other_paths: set[Path] = set()
