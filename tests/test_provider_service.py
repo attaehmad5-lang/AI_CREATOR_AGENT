@@ -3209,6 +3209,139 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["incident"]["incident"]["severity"], "critical")
         self.assertEqual(incidents.snapshot()["counts"]["OPEN"], 1)
 
+    def test_generation_blocks_sensitive_degraded_state_before_routing(self):
+        secret = "Bearer " + ("r" * 40)
+        calls = {"route": 0, "adapter": 0}
+
+        class DegradedStub:
+            def get_state(self, category):
+                return {
+                    "status": "PROVIDER_CATEGORY_NORMAL",
+                    "state": {
+                        "category": category,
+                        "mode": "NORMAL",
+                        "healthy_provider_ids": ["image"],
+                        "unhealthy_provider_ids": [],
+                        "healthy_count": 1,
+                        "provider_count": 1,
+                        "diagnostics": secret,
+                    },
+                }
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls["route"] += 1
+                return {"allowed": True, "provider": "image"}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            degraded_mode_manager=DegradedStub(),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-degraded-state",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.__setitem__("adapter", calls["adapter"] + 1),
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(calls, {"route": 0, "adapter": 0})
+
+    def test_generation_blocks_sensitive_feature_flag_response_before_routing(self):
+        secret = "sk-" + ("f" * 40)
+        calls = {"route": 0, "adapter": 0}
+
+        class FlagStub:
+            def evaluate(self, *args, **kwargs):
+                return {"enabled": False, "diagnostics": secret}
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls["route"] += 1
+                return {"allowed": True, "provider": "image"}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            feature_flag_manager=FlagStub(),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-feature-flag",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.__setitem__("adapter", calls["adapter"] + 1),
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(calls, {"route": 0, "adapter": 0})
+
+    def test_generation_blocks_sensitive_modality_binding_response(self):
+        secret = "Bearer " + ("m" * 40)
+        service = self._modality_service()
+
+        class BindingConnections:
+            @staticmethod
+            def get_modality_binding(provider_id):
+                return {
+                    "valid": True,
+                    "category": "image",
+                    "output_modalities": ["image"],
+                    "diagnostics": secret,
+                }
+
+        service.connection_manager = BindingConnections()
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-modality-binding",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            require_modality_binding=True,
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(calls, [])
+
+    def test_generation_blocks_sensitive_health_response_before_adapter(self):
+        secret = "sk-" + ("h" * 40)
+
+        class HealthStub:
+            def is_eligible(self, *args, **kwargs):
+                return {"eligible": False, "reason": secret}
+
+        service = self._modality_service(health_manager=HealthStub())
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-health-result",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            require_fresh_health_check=True,
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(calls, [])
+
+    def test_generation_blocks_sensitive_data_policy_response_before_adapter(self):
+        secret = "Bearer " + ("p" * 40)
+
+        class DataPolicyStub:
+            def evaluate(self, **kwargs):
+                return {"allowed": False, "status": "POLICY_REJECTED", "diagnostics": secret}
+
+        service = self._modality_service(data_handling_policy=DataPolicyStub())
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-data-policy",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(calls, [])
+
     def test_disabled_generation_feature_flag_blocks_routing_and_adapter(self):
         calls = {"route": 0, "adapter": 0}
 
