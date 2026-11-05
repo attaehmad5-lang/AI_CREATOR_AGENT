@@ -834,6 +834,17 @@ class ProviderService:
         secret_ref = provider.get("secret_ref")
         if not isinstance(secret_ref, str):
             return {"status": "PROVIDER_SECRET_REFERENCE_REQUIRED", "rotated": False}
+        audit_error = self._append_provider_audit_event(
+            "CREDENTIAL_ROTATION",
+            outcome="REQUESTED",
+            status_code="CREDENTIAL_ROTATION_REQUESTED",
+            actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+            tenant_id=tenant_id,
+            provider_id=provider_id,
+            metadata={"authentication_method": "VAULT_ROTATION"},
+        )
+        if audit_error is not None:
+            return {"status": "AUDIT_LOG_WRITE_FAILED", "rotated": False}
         try:
             result = self.secret_manager.rotate_secret(
                 secret_ref,
@@ -844,8 +855,17 @@ class ProviderService:
                 tenant_id=tenant_id,
             )
         except Exception as exc:
+            audit_error = self._append_provider_audit_event(
+                "CREDENTIAL_ROTATION",
+                outcome="FAILED",
+                status_code="SECRET_ROTATION_FAILED",
+                actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                tenant_id=tenant_id,
+                provider_id=provider_id,
+                metadata={"authentication_method": "VAULT_ROTATION", "error_type": type(exc).__name__},
+            )
             return {
-                "status": "SECRET_ROTATION_FAILED",
+                "status": "AUDIT_LOG_FINALIZATION_FAILED" if audit_error is not None else "SECRET_ROTATION_FAILED",
                 "rotated": False,
                 "error_type": type(exc).__name__,
             }
@@ -861,7 +881,39 @@ class ProviderService:
                 and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", candidate_status)
                 else "INVALID_ROTATION_RESPONSE"
             )
-            return {"status": safe_status, "rotated": False}
+            audit_error = self._append_provider_audit_event(
+                "CREDENTIAL_ROTATION",
+                outcome="FAILED",
+                status_code=self._safe_error_code(safe_status, "INVALID_ROTATION_RESPONSE"),
+                actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                tenant_id=tenant_id,
+                provider_id=provider_id,
+                metadata={"authentication_method": "VAULT_ROTATION"},
+            )
+            return {
+                "status": "AUDIT_LOG_FINALIZATION_FAILED" if audit_error is not None else safe_status,
+                "rotated": False,
+            }
+        audit_error = self._append_provider_audit_event(
+            "CREDENTIAL_ROTATION",
+            outcome="SUCCEEDED",
+            status_code="PROVIDER_SECRET_ROTATED",
+            actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+            tenant_id=tenant_id,
+            provider_id=provider_id,
+            metadata={
+                "authentication_method": "VAULT_ROTATION",
+                "credential_backend": result.get("backend") if isinstance(result.get("backend"), str) else None,
+                "credential_version_id": result.get("version_id") if isinstance(result.get("version_id"), str) else None,
+                "credential_present": True,
+            },
+        )
+        if audit_error is not None:
+            return {
+                "status": "AUDIT_LOG_FINALIZATION_FAILED",
+                "rotated": True,
+                "audit_pending": True,
+            }
         return {
             "status": "PROVIDER_SECRET_ROTATED",
             "rotated": True,
