@@ -1553,10 +1553,10 @@ class ProviderService:
         tenant_id = route_options.get("tenant_id")
         request_id = route_options.get("request_id")
         requested_metadata = {
-            key: route_options[key]
+            key: route_options.get(key)
             for key in ("category", "capability", "model", "model_version", "strategy")
             if isinstance(route_options.get(key), (str, int, float, bool))
-            or route_options.get(key) is None
+            or (key in route_options and route_options.get(key) is None)
         }
         audit_error = self._append_provider_audit_event(
             "ROUTING_DECISION",
