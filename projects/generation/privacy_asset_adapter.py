@@ -428,6 +428,79 @@ class GenerationAssetPrivacyAdapter:
                 "document_count": len(specs),
             }
 
+    def migrate_legacy_scope_metadata(
+        self,
+        *,
+        scope_resolver: Any,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Resolve legacy ownership using a trusted deployment source, never inference.
+
+        The callback receives only non-personal asset/job metadata and must return
+        explicit project_id, tenant_id (including explicit None) and pseudonymous
+        subject_ref. All documents are preflighted before any manifest is rewritten.
+        """
+        if confirmed is not True:
+            return {"status": "GENERATION_SCOPE_MIGRATION_CONFIRMATION_REQUIRED", "migrated_record_count": 0}
+        if not callable(scope_resolver):
+            return {"status": "GENERATION_SCOPE_RESOLVER_UNAVAILABLE", "migrated_record_count": 0}
+        lock_path = self.manifest_path.with_name(self.manifest_path.name + ".privacy.lock")
+        if lock_path.is_symlink():
+            return {"status": "GENERATION_SCOPE_MIGRATION_FAILED", "migrated_record_count": 0}
+        specs = [(self.manifest_path, "assets")] + [(path, "states") for path in self.state_paths]
+        prepared: list[tuple[Path, dict[str, Any], int]] = []
+        migrated_records = 0
+        try:
+            with interprocess_file_lock(lock_path):
+                for path, collection in specs:
+                    document, rows = self._read_document(path, collection)
+                    rewritten = []
+                    changed = 0
+                    for original in rows:
+                        row = dict(original)
+                        try:
+                            self._scope(row, document)
+                        except GenerationAssetPrivacyError:
+                            lookup = {
+                                key: row[key]
+                                for key in ("asset_id", "job_id", "project", "scene", "media_type")
+                                if key in row
+                            }
+                            try:
+                                resolved = scope_resolver(lookup)
+                            except Exception as exc:
+                                raise GenerationAssetPrivacyError("authoritative asset scope lookup failed") from exc
+                            if not isinstance(resolved, Mapping):
+                                raise GenerationAssetPrivacyError("authoritative asset scope response is invalid")
+                            validated = copy_generation_privacy_scope({}, resolved)
+                            for key in ("project_id", "tenant_id", "subject_ref"):
+                                row[key] = validated[key]
+                            if "expires_at" in validated:
+                                row["expires_at"] = validated["expires_at"]
+                            self._scope(row, document)
+                            changed += 1
+                        rewritten.append(row)
+                    updated = dict(document)
+                    updated[collection] = rewritten
+                    prepared.append((path, updated, changed))
+                    migrated_records += changed
+
+                # Do not write anything until every legacy row passed the authoritative preflight.
+                for path, document, changed in prepared:
+                    if changed:
+                        self._atomic_write(path, document)
+            return {
+                "status": "GENERATION_SCOPE_METADATA_MIGRATED" if migrated_records else "GENERATION_SCOPE_METADATA_ALREADY_VALID",
+                "migrated_record_count": migrated_records,
+                "document_count": len(specs),
+            }
+        except Exception:
+            return {
+                "status": "GENERATION_SCOPE_MIGRATION_FAILED",
+                "migrated_record_count": 0,
+                "document_count": len(specs),
+            }
+
     def _operate(
         self,
         *,
