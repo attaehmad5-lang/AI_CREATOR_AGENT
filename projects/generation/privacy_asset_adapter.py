@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
+from projects.provider_store.encrypted_state_store import EncryptedJSONStateStore, EncryptedStateError
 from projects.provider_store.interprocess_lock import (
     atomic_replace_with_retry,
     interprocess_file_lock,
@@ -88,6 +89,10 @@ class GenerationAssetPrivacyAdapter:
         state_paths: Sequence[str | os.PathLike[str]] = (),
         max_document_bytes: int = 16 * 1024 * 1024,
         max_records: int = 100_000,
+        encryption_key_provider: Any = None,
+        encryption_context: str = "generation-assets-v1",
+        require_encrypted_metadata: bool = False,
+        migrate_legacy_plaintext_metadata: bool = False,
     ) -> None:
         self.manifest_path = Path(manifest_path)
         self.state_paths = tuple(Path(path) for path in state_paths)
@@ -101,8 +106,24 @@ class GenerationAssetPrivacyAdapter:
             raise GenerationAssetPrivacyError("record limit is invalid")
         if self.manifest_path.is_symlink():
             raise GenerationAssetPrivacyError("manifest symlinks are not accepted")
+        if not isinstance(require_encrypted_metadata, bool) or not isinstance(migrate_legacy_plaintext_metadata, bool):
+            raise GenerationAssetPrivacyError("metadata encryption flags must be boolean")
+        if encryption_key_provider is not None and not callable(encryption_key_provider):
+            raise GenerationAssetPrivacyError("metadata encryption key provider must be callable")
+        if (require_encrypted_metadata or migrate_legacy_plaintext_metadata) and encryption_key_provider is None:
+            raise GenerationAssetPrivacyError("metadata encryption requires a deployment-managed key provider")
+        if (
+            not isinstance(encryption_context, str)
+            or not 1 <= len(encryption_context) <= 100
+            or any(ord(char) < 33 or ord(char) > 126 for char in encryption_context)
+        ):
+            raise GenerationAssetPrivacyError("metadata encryption context is invalid")
         self.max_document_bytes = max_document_bytes
         self.max_records = max_records
+        self.encryption_key_provider = encryption_key_provider
+        self.encryption_context = encryption_context
+        self.require_encrypted_metadata = require_encrypted_metadata
+        self.migrate_legacy_plaintext_metadata = migrate_legacy_plaintext_metadata
 
         roots: dict[str, Path] = {}
         for prefix, directory in asset_roots.items():
@@ -127,6 +148,26 @@ class GenerationAssetPrivacyAdapter:
         normalized = [str(path.resolve(strict=False)) for path in paths]
         if len(set(normalized)) != len(normalized):
             raise GenerationAssetPrivacyError("manifest and state documents must be distinct")
+
+        self._metadata_stores: dict[str, EncryptedJSONStateStore] = {}
+        if self.encryption_key_provider is not None:
+            contexts = [self.encryption_context + ":manifest"] + [
+                self.encryption_context + ":state:" + str(index)
+                for index in range(len(self.state_paths))
+            ]
+            for path, context in zip(paths, contexts):
+                if len(context) > 128:
+                    raise GenerationAssetPrivacyError("metadata encryption context is too long")
+                store = EncryptedJSONStateStore(
+                    path,
+                    key_provider=self.encryption_key_provider,
+                    context=context,
+                    migrate_legacy_plaintext=self.migrate_legacy_plaintext_metadata,
+                    max_state_bytes=self.max_document_bytes,
+                )
+                if self.require_encrypted_metadata and not store.verify_key():
+                    raise GenerationAssetPrivacyError("generation metadata encryption key is unavailable")
+                self._metadata_stores[str(path.resolve(strict=False))] = store
 
     @staticmethod
     def _valid_subject(value: Any) -> bool:
@@ -184,9 +225,17 @@ class GenerationAssetPrivacyAdapter:
                 untracked_planned_count = 0
                 retention_ready = 0
                 retention_missing = 0
+                encrypted_document_count = 0
+                encryption_migration_count = 0
                 for path, collection in specs:
                     document, rows = self._read_document(path, collection)
                     record_count += len(rows)
+                    store = self._metadata_stores.get(str(path.resolve(strict=False)))
+                    if store is not None:
+                        if store.migration_required:
+                            encryption_migration_count += 1
+                        else:
+                            encrypted_document_count += 1
                     for row in rows:
                         try:
                             self._scope(row, document)
@@ -210,7 +259,11 @@ class GenerationAssetPrivacyAdapter:
                         except Exception:
                             unscoped_count += 1
                 ready = unscoped_count == 0 and untracked_planned_count == 0
-                status = "ASSET_PRIVACY_READY" if ready else "ASSET_PRIVACY_MIGRATION_REQUIRED"
+                status = (
+                    "ASSET_PRIVACY_ENCRYPTION_MIGRATION_REQUIRED"
+                    if self.require_encrypted_metadata and encryption_migration_count > 0
+                    else "ASSET_PRIVACY_READY" if ready else "ASSET_PRIVACY_MIGRATION_REQUIRED"
+                )
                 return {
                     "status": status,
                     "document_count": len(specs),
@@ -220,6 +273,9 @@ class GenerationAssetPrivacyAdapter:
                     "untracked_planned_count": untracked_planned_count,
                     "retention_ready_count": retention_ready,
                     "retention_missing_expiry_count": retention_missing,
+                    "encryption_required": self.require_encrypted_metadata,
+                    "encrypted_document_count": encrypted_document_count,
+                    "encryption_migration_count": encryption_migration_count,
                 }
         except Exception:
             return {"status": "ASSET_PRIVACY_AUDIT_FAILED", "document_count": 0, "record_count": 0, "scoped_count": 0, "unscoped_count": 0, "retention_ready_count": 0, "retention_missing_expiry_count": 0}
@@ -230,13 +286,19 @@ class GenerationAssetPrivacyAdapter:
         size = path.stat().st_size
         if size < 1 or size > self.max_document_bytes:
             raise GenerationAssetPrivacyError("asset privacy document size is outside limits")
-        raw = path.read_bytes()
-        if len(raw) != size:
-            raise GenerationAssetPrivacyError("asset privacy document changed while reading")
         try:
-            document = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
-            raise GenerationAssetPrivacyError("asset privacy document is malformed") from None
+            store = self._metadata_stores.get(str(path.resolve(strict=False)))
+            if store is not None:
+                document = store.read({collection: []})
+                if store.migration_required and not self.migrate_legacy_plaintext_metadata:
+                    raise GenerationAssetPrivacyError("plaintext generation metadata requires explicit migration")
+            else:
+                raw = path.read_bytes()
+                if len(raw) != size:
+                    raise GenerationAssetPrivacyError("asset privacy document changed while reading")
+                document = json.loads(raw.decode("utf-8"))
+        except (EncryptedStateError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+            raise GenerationAssetPrivacyError("asset privacy document is malformed or encrypted metadata is unavailable") from None
         if not isinstance(document, dict) or not isinstance(document.get(collection), list):
             raise GenerationAssetPrivacyError("asset privacy document schema is invalid")
         records = document[collection]
@@ -299,6 +361,13 @@ class GenerationAssetPrivacyAdapter:
         raise GenerationAssetPrivacyError("asset path escaped the configured roots")
 
     def _atomic_write(self, path: Path, document: dict[str, Any]) -> None:
+        store = self._metadata_stores.get(str(path.resolve(strict=False)))
+        if store is not None:
+            try:
+                store.write(document)
+                return
+            except EncryptedStateError:
+                raise GenerationAssetPrivacyError("encrypted asset metadata persistence failed") from None
         encoded = json.dumps(document, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
         if len(encoded) > self.max_document_bytes:
             raise GenerationAssetPrivacyError("updated asset privacy document exceeds size limit")
@@ -327,6 +396,37 @@ class GenerationAssetPrivacyAdapter:
             except FileNotFoundError:
                 pass
             raise
+
+    def migrate_legacy_metadata(self, *, confirmed: bool = False) -> dict[str, Any]:
+        """Explicitly encrypt legacy manifest/state documents using dedicated KMS contexts."""
+        if confirmed is not True:
+            return {"status": "GENERATION_METADATA_MIGRATION_CONFIRMATION_REQUIRED", "migrated_document_count": 0}
+        if not self.require_encrypted_metadata or not self.migrate_legacy_plaintext_metadata:
+            return {"status": "GENERATION_METADATA_MIGRATION_NOT_CONFIGURED", "migrated_document_count": 0}
+        lock_path = self.manifest_path.with_name(self.manifest_path.name + ".privacy.lock")
+        if lock_path.is_symlink():
+            return {"status": "GENERATION_METADATA_MIGRATION_FAILED", "migrated_document_count": 0}
+        specs = [(self.manifest_path, "assets")] + [(path, "states") for path in self.state_paths]
+        migrated = 0
+        try:
+            with interprocess_file_lock(lock_path):
+                for path, collection in specs:
+                    document, _rows = self._read_document(path, collection)
+                    store = self._metadata_stores[str(path.resolve(strict=False))]
+                    if store.migration_required:
+                        store.write(document)
+                        migrated += 1
+            return {
+                "status": "GENERATION_METADATA_ENCRYPTED" if migrated else "GENERATION_METADATA_ALREADY_ENCRYPTED",
+                "migrated_document_count": migrated,
+                "document_count": len(specs),
+            }
+        except Exception:
+            return {
+                "status": "GENERATION_METADATA_MIGRATION_PARTIAL" if migrated else "GENERATION_METADATA_MIGRATION_FAILED",
+                "migrated_document_count": migrated,
+                "document_count": len(specs),
+            }
 
     def _operate(
         self,
