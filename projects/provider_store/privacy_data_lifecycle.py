@@ -115,12 +115,16 @@ class PrivacyDataLifecycleManager:
                 "status": "PRIVACY_STORES_NOT_CONFIGURED", "confirmed": False,
                 "completed": False, "store_count": 0, "deleted_count": 0, "stores": {},
             }
+        # Freeze the adapter set for this operation. A plugin may register a
+        # store while handling a callback; that new store belongs to the next
+        # lifecycle run, not the in-flight iteration.
+        registered_stores = tuple(self._stores.items())
         store_results: dict[str, dict[str, Any]] = {}
         total_deleted = 0
         all_confirmed = True
         method_name = "delete_subject_data" if operation == "delete" else "purge_expired_data"
         allowed_statuses = _DELETE_STATUSES if operation == "delete" else _RETENTION_STATUSES
-        for store_id, adapter in self._stores.items():
+        for store_id, adapter in registered_stores:
             try:
                 method = getattr(adapter, method_name)
                 if operation == "delete":
@@ -159,7 +163,7 @@ class PrivacyDataLifecycleManager:
         return {
             "status": success_status if all_confirmed else partial_status,
             "confirmed": all_confirmed, "completed": all_confirmed,
-            "store_count": len(self._stores), "deleted_count": total_deleted,
+            "store_count": len(registered_stores), "deleted_count": total_deleted,
             "stores": store_results,
         }
 
