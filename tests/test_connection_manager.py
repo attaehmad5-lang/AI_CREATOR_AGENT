@@ -10,6 +10,7 @@ from pathlib import Path
 from projects.provider_store.connection_manager import (
     MODALITY_CONTRACTS, MODALITY_OUTPUT_KINDS, ConnectionManager,
 )
+from projects.provider_store.encrypted_state_store import EncryptedStateError
 from projects.provider_store.output_validator import ProviderOutputValidator
 
 
@@ -178,6 +179,43 @@ class ConnectionManagerTests(unittest.TestCase):
         loaded = ConnectionManager(catalog_path, state_path)
         self.assertEqual(len(loaded.list_providers()), 20)
         self.assertEqual(len({p["id"] for p in loaded.list_providers()}), 20)
+
+    def test_catalog_requires_explicit_encryption_migration_and_is_encrypted_at_rest(self):
+        key_provider = lambda context: b"c" * 32
+
+        with self.assertRaises(EncryptedStateError):
+            ConnectionManager(
+                self.catalog_path,
+                self.state_path,
+                catalog_encryption_key_provider=key_provider,
+            )
+        # A rejected implicit migration must leave the original file unchanged.
+        self.assertIn(b'"providers"', self.catalog_path.read_bytes())
+
+        encrypted = ConnectionManager(
+            self.catalog_path,
+            self.state_path,
+            catalog_encryption_key_provider=key_provider,
+            migrate_legacy_plaintext_catalog=True,
+        )
+        ciphertext = self.catalog_path.read_bytes()
+        self.assertNotIn(b'"providers"', ciphertext)
+        self.assertNotIn(b"public_image", ciphertext)
+        self.assertEqual(len(encrypted.list_providers()), 2)
+
+        reopened = ConnectionManager(
+            self.catalog_path,
+            self.state_path,
+            catalog_encryption_key_provider=key_provider,
+        )
+        self.assertEqual(reopened.list_providers(), encrypted.list_providers())
+
+        with self.assertRaises(EncryptedStateError):
+            ConnectionManager(
+                self.catalog_path,
+                self.state_path,
+                catalog_encryption_key_provider=lambda context: b"w" * 32,
+            )
 
     def test_connection_state_supports_authenticated_encryption_and_wrong_key_rejection(self):
         encrypted_path = self.root / "encrypted-connection-state.json"
