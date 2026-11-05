@@ -1601,6 +1601,77 @@ class ProviderService:
         if isinstance(allowed_provider_ids, list):
             route_options["allowed_provider_ids"] = set(allowed_provider_ids)
 
+        requested_paid_approvals = route_options.get("paid_approved_providers")
+        if requested_paid_approvals:
+            if not isinstance(requested_paid_approvals, (set, frozenset)) or any(
+                not isinstance(value, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}", value) is None
+                for value in requested_paid_approvals
+            ):
+                return {"status": "INVALID_PAID_APPROVAL_SET", "executed": False}
+            approval_event = self._append_provider_audit_event(
+                "BILLING_APPROVAL",
+                outcome="REQUESTED",
+                status_code="PAID_APPROVAL_REQUESTED",
+                actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                tenant_id=tenant_id if isinstance(tenant_id, str) else None,
+                project_id=project_id,
+                request_id=request_id,
+                metadata={
+                    "approval_required": True,
+                    "approval_granted": False,
+                    "approval_operation": "billing.approve",
+                    "candidate_count": len(requested_paid_approvals),
+                },
+            )
+            if approval_event is not None:
+                return {"status": "AUDIT_LOG_WRITE_FAILED", "executed": False}
+            approval_authorization = self._authorize_operation(
+                principal_id, "billing.approve", return_decision=True
+            )
+            if not isinstance(approval_authorization, dict) or approval_authorization.get("allowed") is not True:
+                self._append_provider_audit_event(
+                    "BILLING_APPROVAL",
+                    outcome="DENIED",
+                    status_code="PAID_APPROVAL_AUTHORIZATION_DENIED",
+                    actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                    tenant_id=tenant_id if isinstance(tenant_id, str) else None,
+                    project_id=project_id,
+                    request_id=request_id,
+                    metadata={
+                        "approval_required": True,
+                        "approval_granted": False,
+                        "approval_operation": "billing.approve",
+                    },
+                )
+                return {
+                    "status": "BILLING_APPROVAL_AUTHORIZATION_REQUIRED",
+                    "executed": False,
+                    "authorization": {
+                        "allowed": False,
+                        "status": approval_authorization.get("status", "AUTHORIZATION_DENIED")
+                        if isinstance(approval_authorization, dict)
+                        else "INVALID_AUTHORIZATION_RESPONSE",
+                    },
+                }
+            approval_event = self._append_provider_audit_event(
+                "BILLING_APPROVAL",
+                outcome="ALLOWED",
+                status_code="PAID_APPROVAL_ACTOR_AUTHORIZED",
+                actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                tenant_id=tenant_id if isinstance(tenant_id, str) else None,
+                project_id=project_id,
+                request_id=request_id,
+                metadata={
+                    "approval_required": True,
+                    "approval_granted": True,
+                    "approval_operation": "billing.approve",
+                    "candidate_count": len(requested_paid_approvals),
+                },
+            )
+            if approval_event is not None:
+                return {"status": "AUDIT_LOG_WRITE_FAILED", "executed": False}
+
         if self.tenant_isolation_manager is not None:
             if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
                 return {"status": "TENANT_CONTEXT_REQUIRED", "executed": False}
