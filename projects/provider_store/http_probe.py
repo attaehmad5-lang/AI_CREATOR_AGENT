@@ -5,12 +5,15 @@ an endpoint supports generation or that a provider has available credits.
 """
 from __future__ import annotations
 
+import http.client
+import ipaddress
 import math
 import os
 import re
+import socket
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
 from .connection_manager import ConnectionManager, ProviderAuthenticationVerificationRequired
 from .safe_numbers import finite_number
@@ -40,8 +43,49 @@ class _RejectRedirects(HTTPRedirectHandler):
         return None
 
 
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Connect to a prevalidated IP while retaining the URL hostname for TLS SNI."""
+
+    def __init__(self, host: str, *, connect_ip: str, **kwargs: Any) -> None:
+        self._connect_ip = connect_ip
+        super().__init__(host, **kwargs)
+
+    def connect(self) -> None:
+        sock = socket.create_connection(
+            (self._connect_ip, self.port),
+            self.timeout,
+            self.source_address,
+        )
+        if self._tunnel_host:
+            self._tunnel()
+        server_hostname = self._tunnel_host or self.host
+        self.sock = self._context.wrap_socket(
+            sock, server_hostname=server_hostname
+        )
+
+
+class _PinnedHTTPSHandler(HTTPSHandler):
+    """Use the validated DNS address instead of resolving the hostname again."""
+
+    def __init__(self, connect_ip: str) -> None:
+        super().__init__()
+        self.connect_ip = connect_ip
+
+    def https_open(self, request: Any) -> Any:
+        def connection_factory(host: str, **kwargs: Any) -> _PinnedHTTPSConnection:
+            return _PinnedHTTPSConnection(
+                host, connect_ip=self.connect_ip, **kwargs
+            )
+
+        return self.do_open(
+            connection_factory,
+            request,
+            context=self._context,
+        )
+
+
 class ProviderHTTPConnectivityProbe:
-    """Perform a bounded HTTPS GET against a validated, explicitly configured endpoint."""
+    """Perform a bounded HTTPS GET against a validated and DNS-pinned endpoint."""
 
     _DEFAULT_TOKEN_ENV = {
         "huggingface": "HF_TOKEN",
@@ -104,6 +148,7 @@ class ProviderHTTPConnectivityProbe:
         secret_manager: Any | None = None,
         tenant_id: str | None = None,
         principal_id: str | None = None,
+        resolver: Any = None,
     ) -> None:
         if secret_manager is not None and not callable(getattr(secret_manager, "resolve_secret", None)):
             raise ValueError("secret_manager must support secret resolution")
@@ -126,12 +171,55 @@ class ProviderHTTPConnectivityProbe:
             raise ValueError("max_response_bytes must be an integer between 0 and 1000000")
         if opener is not None and not callable(getattr(opener, "open", None)):
             raise ValueError("opener must provide an open method")
+        if resolver is not None and not callable(resolver):
+            raise ValueError("resolver must be callable")
         self.environ = os.environ if environ is None else environ
-        self.opener = opener or build_opener(_RejectRedirects())
+        self.opener = opener
+        self.resolver = resolver or self._default_resolver
         self.max_response_bytes = max_response_bytes
         self.secret_manager = secret_manager
         self.tenant_id = tenant_id
         self.principal_id = principal_id
+
+    @staticmethod
+    def _default_resolver(hostname: str, port: int) -> list[tuple[Any, ...]]:
+        return socket.getaddrinfo(
+            hostname, port, type=socket.SOCK_STREAM
+        )
+
+    def _resolve_public_address(self, hostname: str, port: int) -> str:
+        """Resolve once, reject unsafe/mixed answers, and return one IP to pin."""
+        try:
+            answers = self.resolver(hostname, port)
+        except Exception:
+            raise ConnectionError("PROVIDER_DNS_RESOLUTION_FAILED") from None
+        if not isinstance(answers, (list, tuple)) or not answers or len(answers) > 32:
+            raise ConnectionError("PROVIDER_DNS_RESPONSE_INVALID")
+        public_addresses: list[str] = []
+        seen: set[str] = set()
+        for answer in answers:
+            if (
+                not isinstance(answer, (list, tuple))
+                or len(answer) < 5
+                or not isinstance(answer[4], (list, tuple))
+                or not answer[4]
+                or not isinstance(answer[4][0], str)
+            ):
+                raise ConnectionError("PROVIDER_DNS_RESPONSE_INVALID")
+            try:
+                address = ipaddress.ip_address(answer[4][0])
+            except ValueError:
+                raise ConnectionError("PROVIDER_DNS_RESPONSE_INVALID") from None
+            effective_address = address.ipv4_mapped if getattr(address, "ipv4_mapped", None) else address
+            if not effective_address.is_global:
+                raise PermissionError("PROVIDER_DNS_NON_PUBLIC_ADDRESS_REJECTED")
+            normalized = address.compressed
+            if normalized not in seen:
+                seen.add(normalized)
+                public_addresses.append(normalized)
+        if not public_addresses:
+            raise ConnectionError("PROVIDER_DNS_RESPONSE_EMPTY")
+        return public_addresses[0]
 
     def __call__(self, provider: dict[str, Any], *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         if not isinstance(provider, dict):
@@ -156,6 +244,15 @@ class ProviderHTTPConnectivityProbe:
         )
         if not validation.get("valid"):
             raise ValueError(str(validation.get("status", "INVALID_ENDPOINT")))
+        pinned_address = self._resolve_public_address(
+            validation["hostname"], validation.get("port") or 443
+        )
+        # The default transport connects directly to the checked IP and keeps the
+        # original hostname for TLS SNI/certificate verification. Injected openers
+        # are trusted in-process transports and own their own pinning policy.
+        opener = self.opener or build_opener(
+            ProxyHandler({}), _RejectRedirects(), _PinnedHTTPSHandler(pinned_address)
+        )
 
         headers = {
             "Accept": "application/json, */*;q=0.8",
@@ -251,7 +348,7 @@ class ProviderHTTPConnectivityProbe:
         try:
             request = Request(endpoint.strip(), headers=headers, method="GET")
             try:
-                response = self.opener.open(request, timeout=timeout_value)
+                response = opener.open(request, timeout=timeout_value)
             except HTTPError as exc:
                 clear_credential()
                 status_code = exc.code

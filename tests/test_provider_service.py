@@ -29,6 +29,15 @@ from projects.provider_store.retry_policy import RetryPolicy
 from projects.generation.providers.pollinations_provider import PollinationsProviderError
 
 
+def _public_resolver(hostname, port):
+    """Provide a deterministic public DNS result without external network access."""
+    import socket
+    return [
+        (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "",
+         ("93.184.216.34", port))
+    ]
+
+
 class ProviderServiceTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -167,7 +176,8 @@ class ProviderServiceTests(unittest.TestCase):
         service = ProviderService(manager, health_manager=health)
         opener = Opener()
         result = service.verify_http_provider(
-            "huggingface", environ={"HF_TOKEN": "do-not-persist"},
+            "huggingface",
+            resolver=_public_resolver, environ={"HF_TOKEN": "do-not-persist"},
             opener=opener, timeout_seconds=1.5,
         )
         self.assertTrue(result["verified"])
@@ -227,7 +237,7 @@ class ProviderServiceTests(unittest.TestCase):
         health = ProviderHealthManager(health_path)
         service = ProviderService(manager, health_manager=health)
         opener = Opener()
-        result = service.verify_oauth_provider("oauth_image", OAuthStub(), opener=opener)
+        result = service.verify_oauth_provider("oauth_image", OAuthStub(), opener=opener, resolver=_public_resolver)
         self.assertTrue(result["verified"])
         self.assertEqual(result["status"], "CONNECTED")
         self.assertEqual(opener.request_headers[0].get("authorization"), "Bearer oauth-access-secret")
@@ -269,7 +279,7 @@ class ProviderServiceTests(unittest.TestCase):
             def verify_connectivity(self, provider_id, probe, **kwargs):
                 return {"status": "CONNECTED", "provider": provider_id, "verified": True}
         service = ProviderService(ConnectionStub())
-        result = service.verify_oauth_provider("image", OAuthStub())
+        result = service.verify_oauth_provider("image", OAuthStub(), resolver=_public_resolver)
         self.assertFalse(result["verified"])
         self.assertEqual(result["status"], "OAUTH_ACCESS_TOKEN_UNAVAILABLE")
 
