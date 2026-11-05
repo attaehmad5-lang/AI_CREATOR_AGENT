@@ -10,6 +10,7 @@ import time
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
 from .secrets_manager import SecretManagerError
+from .trace_context import TraceContext, TraceContextError
 
 
 class ProviderService:
@@ -205,6 +206,7 @@ class ProviderService:
         provider_id: str | None = None,
         request_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        trace_context: TraceContext | None = None,
     ) -> dict[str, Any] | None:
         """Append a sanitized audit event; None means auditing is not configured or saved."""
         if self.audit_log_manager is None:
@@ -217,6 +219,16 @@ class ProviderService:
             ).strip("_")[:80]
             if re.fullmatch(r"[A-Z][A-Z0-9_]{1,79}", safe_audit_status) is None:
                 safe_audit_status = "PROVIDER_ACTION_RECORDED"
+        safe_metadata = dict(metadata or {})
+        if trace_context is not None:
+            if not isinstance(trace_context, TraceContext):
+                return {"status": "INVALID_TRACE_CONTEXT"}
+            safe_metadata.update({
+                "trace_id": trace_context.trace_id,
+                "span_id": trace_context.span_id,
+                "parent_span_id": trace_context.parent_span_id,
+                "trace_flags": trace_context.trace_flags,
+            })
         try:
             result = self.audit_log_manager.record_event(
                 event_type,
@@ -227,7 +239,7 @@ class ProviderService:
                 project_id=project_id,
                 provider_id=provider_id,
                 request_id=request_id,
-                metadata=metadata,
+                metadata=safe_metadata,
             )
         except Exception as exc:
             return {"status": "AUDIT_LOG_WRITE_FAILED", "error_type": type(exc).__name__}
@@ -1520,8 +1532,26 @@ class ProviderService:
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         audit_actor = route_options.pop("_audit_actor_principal_id", None)
+        trace_context = route_options.pop("_trace_context", None)
+        if trace_context is None:
+            try:
+                trace_context = TraceContext.create(
+                    route_options.get("request_id"),
+                    trace_id=route_options.pop("trace_id", None),
+                    traceparent=route_options.pop("traceparent", None),
+                )
+            except TraceContextError:
+                return {"allowed": False, "status": "INVALID_TRACE_CONTEXT"}
+        elif not isinstance(trace_context, TraceContext):
+            return {"allowed": False, "status": "INVALID_TRACE_CONTEXT"}
+        route_options["request_id"] = trace_context.request_id
+        trace_fields = {
+            "request_id": trace_context.request_id,
+            "trace_id": trace_context.trace_id,
+            "traceparent": trace_context.traceparent,
+        }
         if self.routing_manager is None:
-            return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
+            return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE", **trace_fields}
         direct_paid_approvals = route_options.get("paid_approved_providers")
         if direct_paid_approvals and self.authorization_manager is not None:
             approval_authorization = self._authorize_operation(
@@ -1543,11 +1573,12 @@ class ProviderService:
                         "approval_granted": False,
                         "approval_operation": "billing.approve",
                     },
+                    trace_context=trace_context,
                 )
-                return {"allowed": False, "status": "BILLING_APPROVAL_AUTHORIZATION_REQUIRED"}
+                return {"allowed": False, "status": "BILLING_APPROVAL_AUTHORIZATION_REQUIRED", **trace_fields}
         rejection = self._sensitive_input_rejection({"route_options": route_options})
         if rejection is not None:
-            return {"allowed": False, **rejection}
+            return {"allowed": False, **rejection, **trace_fields}
         category = route_options.get("category")
         project_id = route_options.get("project_id")
         tenant_id = route_options.get("tenant_id")
@@ -1567,9 +1598,10 @@ class ProviderService:
             project_id=project_id if isinstance(project_id, str) else None,
             request_id=request_id if isinstance(request_id, str) else None,
             metadata=requested_metadata,
+            trace_context=trace_context,
         )
         if audit_error is not None:
-            return {"allowed": False, "status": "AUDIT_LOG_WRITE_FAILED", "audit": audit_error}
+            return {"allowed": False, "status": "AUDIT_LOG_WRITE_FAILED", "audit": audit_error, **trace_fields}
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
@@ -1598,6 +1630,7 @@ class ProviderService:
             provider_id=provider_id if isinstance(provider_id, str) else None,
             request_id=request_id if isinstance(request_id, str) else None,
             metadata=final_metadata,
+            trace_context=trace_context,
         )
         if audit_error is not None:
             release = None
@@ -1637,6 +1670,7 @@ class ProviderService:
                     "approval_granted": granted,
                     "approval_operation": "billing.approve",
                 },
+                trace_context=trace_context,
             )
             if audit_error is not None:
                 release = None
@@ -1655,6 +1689,8 @@ class ProviderService:
                     "status": "AUDIT_LOG_FINALIZATION_FAILED",
                     "reservation_release": release,
                 }
+        result = dict(result)
+        result.update(trace_fields)
         return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
@@ -1682,7 +1718,7 @@ class ProviderService:
         *,
         category: str,
         project_id: str,
-        request_id: str,
+        request_id: str | None = None,
         estimated_cost: float,
         adapter: Any,
         modality: str,
@@ -1695,6 +1731,8 @@ class ProviderService:
         output_path: Any = None,
         estimated_cost_unit: str = "USD",
         adapter_options: dict[str, Any] | None = None,
+        trace_id: str | None = None,
+        traceparent: str | None = None,
         require_modality_binding: bool = False,
         use_managed_credential: bool = False,
         require_fresh_health_check: bool = False,
@@ -1713,7 +1751,9 @@ class ProviderService:
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
         if not isinstance(use_managed_credential, bool):
             return {"status": "INVALID_MANAGED_CREDENTIAL_POLICY", "executed": False}
-        if not isinstance(request_id, str) or not request_id.strip():
+        if request_id is not None and (
+            not isinstance(request_id, str) or not request_id.strip()
+        ):
             return {"status": "INVALID_REQUEST_ID", "executed": False}
         if not isinstance(category, str) or not category.strip():
             return {"status": "INVALID_CATEGORY", "executed": False}
@@ -1721,6 +1761,17 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        try:
+            trace_context = TraceContext.create(
+                request_id, trace_id=trace_id, traceparent=traceparent
+            )
+        except TraceContextError:
+            return {"status": "INVALID_TRACE_CONTEXT", "executed": False}
+        request_id = trace_context.request_id
+        trace_fields = {
+            "trace_id": trace_context.trace_id,
+            "traceparent": trace_context.traceparent,
+        }
 
         degraded_mode_state = None
         if self.degraded_mode_manager is not None:
@@ -1847,6 +1898,7 @@ class ProviderService:
                     "approval_operation": "billing.approve",
                     "candidate_count": len(requested_paid_approvals),
                 },
+                trace_context=trace_context,
             )
             if approval_event is not None:
                 return {"status": "AUDIT_LOG_WRITE_FAILED", "executed": False}
@@ -1867,6 +1919,7 @@ class ProviderService:
                         "approval_granted": False,
                         "approval_operation": "billing.approve",
                     },
+                    trace_context=trace_context,
                 )
                 return {
                     "status": "BILLING_APPROVAL_AUTHORIZATION_REQUIRED",
@@ -1892,6 +1945,7 @@ class ProviderService:
                     "approval_operation": "billing.approve",
                     "candidate_count": len(requested_paid_approvals),
                 },
+                trace_context=trace_context,
             )
             if approval_event is not None:
                 return {"status": "AUDIT_LOG_WRITE_FAILED", "executed": False}
@@ -1933,6 +1987,7 @@ class ProviderService:
             route_options["tenant_id"] = tenant_id
         route = self.route_request(
             _audit_actor_principal_id=principal_id,
+            _trace_context=trace_context,
             category=category,
             project_id=project_id,
             request_id=request_id,
@@ -1941,10 +1996,10 @@ class ProviderService:
             **route_options,
         )
         if not isinstance(route, dict) or route.get("allowed") is not True:
-            return {"status": "ROUTING_REJECTED", "executed": False, "route": route}
+            return {"status": "ROUTING_REJECTED", "executed": False, "route": route, **trace_fields}
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
-            return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
+            return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route, **trace_fields}
         scoped_authorization = self._authorize_operation(
             principal_id, "provider.generate", provider_id=provider_id
         )
@@ -2063,6 +2118,10 @@ class ProviderService:
         options = dict(adapter_options or {})
         options["provider_id"] = provider_id
         options["request_id"] = request_id
+        # Caller-supplied trace fields are always overwritten by validated context.
+        options["trace_id"] = trace_context.trace_id
+        options["traceparent"] = trace_context.traceparent
+        options["trace_headers"] = trace_context.headers
         secret_lease = None
         if use_managed_credential:
             try:
@@ -2131,6 +2190,7 @@ class ProviderService:
                 provider_id=provider_id,
                 request_id=request_id,
                 metadata={"authentication_method": "MANAGED_SECRET"},
+                trace_context=trace_context,
             )
             if credential_audit is not None:
                 released = self.release_unstarted_request(
@@ -2166,6 +2226,7 @@ class ProviderService:
                     provider_id=provider_id,
                     request_id=request_id,
                     metadata={"authentication_method": "MANAGED_SECRET", "credential_present": True},
+                    trace_context=trace_context,
                 )
                 if credential_audit is not None:
                     secret_lease.close()
@@ -2195,6 +2256,7 @@ class ProviderService:
                     provider_id=provider_id,
                     request_id=request_id,
                     metadata={"authentication_method": "MANAGED_SECRET", "error_type": type(exc).__name__},
+                    trace_context=trace_context,
                 )
                 options.pop("provider_credential_lease", None)
                 released = self.release_unstarted_request(
@@ -2224,6 +2286,7 @@ class ProviderService:
                 "model": route.get("model") if isinstance(route.get("model"), str) else None,
                 "execution_started": False,
             },
+            trace_context=trace_context,
         )
         if execution_audit is not None:
             if secret_lease is not None:
@@ -2298,12 +2361,14 @@ class ProviderService:
                 tenant_id=tenant_id, project_id=project_id,
                 provider_id=provider_id, request_id=request_id,
                 metadata={"execution_started": True, "error_type": type(exc).__name__},
+                trace_context=trace_context,
             )
             return {
                 "status": "EXECUTION_AUDIT_FINALIZATION_FAILED" if execution_audit is not None else "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                **trace_fields,
                 "reservations_retained": True,
                 "error_type": type(exc).__name__,
                 "provider_error": provider_error,
@@ -2324,12 +2389,14 @@ class ProviderService:
                 tenant_id=tenant_id, project_id=project_id,
                 provider_id=provider_id, request_id=request_id,
                 metadata={"execution_started": True},
+                trace_context=trace_context,
             )
             return {
                 "status": "EXECUTION_AUDIT_FINALIZATION_FAILED" if execution_audit is not None else "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                **trace_fields,
                 "reservations_retained": True,
             }
         if adapter_result["started"] is False:
@@ -2354,12 +2421,14 @@ class ProviderService:
                     tenant_id=tenant_id, project_id=project_id,
                     provider_id=provider_id, request_id=request_id,
                     metadata={"execution_started": False},
+                    trace_context=trace_context,
                 )
                 return {
                     "status": "EXECUTION_AUDIT_FINALIZATION_FAILED" if execution_audit is not None else "INCONSISTENT_START_RESULT",
                     "executed": False,
                     "provider": provider_id,
                     "request_id": request_id,
+                **trace_fields,
                     "reservations_retained": True,
                 }
             execution_audit = self._append_provider_audit_event(
@@ -2370,6 +2439,7 @@ class ProviderService:
                 tenant_id=tenant_id, project_id=project_id,
                 provider_id=provider_id, request_id=request_id,
                 metadata={"execution_started": False, "execution_success": False},
+                trace_context=trace_context,
             )
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id, tenant_id=tenant_id
@@ -2379,6 +2449,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                **trace_fields,
                 "release": released,
             }
 
@@ -2487,6 +2558,7 @@ class ProviderService:
             billing_mode=route.get("billing_mode"),
             credit_outcome=credit_outcome,
             actual_credit_amount=actual_credit_amount,
+            trace_id=trace_context.trace_id,
         )
         benchmark_result = None
         if self.benchmark_manager is not None:
@@ -2651,6 +2723,7 @@ class ProviderService:
                 "credit_outcome": credit_outcome,
                 "latency_ms": latency_ms,
             },
+            trace_context=trace_context,
         )
         if execution_audit is not None:
             status = "EXECUTION_AUDIT_FINALIZATION_FAILED"
@@ -2660,6 +2733,7 @@ class ProviderService:
             "audit_log_saved": execution_audit is None if self.audit_log_manager is not None else None,
             "provider": provider_id,
             "request_id": request_id,
+            **trace_fields,
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "media_integrity": media_integrity_result,
@@ -2713,6 +2787,7 @@ class ProviderService:
         credit_outcome: str = "used",
         actual_credit_amount: float | None = None,
         tenant_id: str | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         """Account for a started request without assuming ambiguous failures were free.
 
@@ -2729,6 +2804,12 @@ class ProviderService:
             return {"status": "TENANT_CONTEXT_REQUIRED", "finalized": False}
         if not isinstance(success, bool):
             return {"status": "INVALID_EXECUTION_RESULT", "finalized": False}
+        if trace_id is not None and (
+            not isinstance(trace_id, str)
+            or not re.fullmatch(r"[0-9a-f]{32}", trace_id)
+            or not any(char != "0" for char in trace_id)
+        ):
+            return {"status": "INVALID_TRACE_ID", "finalized": False}
         if not isinstance(charge_outcome, str) or charge_outcome not in {"unknown", "incurred", "not_incurred"}:
             return {"status": "INVALID_CHARGE_OUTCOME", "finalized": False}
         if billing_mode is not None and (
@@ -2909,6 +2990,7 @@ class ProviderService:
                     latency_ms=latency_ms,
                     error_code=None if success else (error_code or "EXECUTION_FAILED"),
                     request_id=request_id,
+                    trace_id=trace_id,
                 )
             except Exception as exc:
                 health_result = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}

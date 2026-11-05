@@ -6,9 +6,11 @@ on:
       - task-25-provider-connection-manager
       - pollinations-current-api-20261030
       - task-25-feature-72-audit-trail
+      - task-25-feature-73-current-trace-propagation
   pull_request:
     branches:
       - main
+      - task-25-feature-72-audit-trail
 
 permissions:
   contents: read
