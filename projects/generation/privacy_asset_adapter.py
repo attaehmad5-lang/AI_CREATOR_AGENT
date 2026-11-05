@@ -346,16 +346,16 @@ class GenerationAssetPrivacyAdapter:
             ):
                 raise GenerationAssetPrivacyError("retention cutoff must be timezone-aware")
 
-            docs: list[tuple[Path, str, tuple[str, ...]]] = [
-                (self.manifest_path, "assets", ("file_path",)),
+            docs: list[tuple[Path, str, tuple[str, ...], tuple[str, ...]]] = [
+                (self.manifest_path, "assets", ("file_path",), ("planned_output_path",)),
             ]
-            docs.extend((path, "states", ("output_file",)) for path in self.state_paths)
+            docs.extend((path, "states", ("output_file",), ("planned_output_path",)) for path in self.state_paths)
             loaded: list[dict[str, Any]] = []
             target_paths: set[Path] = set()
             other_paths: set[Path] = set()
             changed_counts: list[int] = []
 
-            for path, collection, file_fields in docs:
+            for path, collection, actual_fields, planned_fields in docs:
                 document, rows = self._read_document(path, collection)
                 kept: list[dict[str, Any]] = []
                 removed = 0
@@ -370,17 +370,28 @@ class GenerationAssetPrivacyAdapter:
                         if expiry_value is _MISSING:
                             raise GenerationAssetPrivacyError("scoped asset lacks an explicit expiry")
                         selected = self._aware_utc(expiry_value) <= cutoff.astimezone(timezone.utc)
-                    resolved_paths: list[Path] = []
-                    for field in file_fields:
+                    actual_paths: list[Path] = []
+                    for field in actual_fields:
                         if field in row:
                             candidate = self._resolve_asset_path(row[field])
                             if candidate is not None:
-                                resolved_paths.append(candidate)
+                                actual_paths.append(candidate)
+                    planned_paths: list[Path] = []
+                    for field in planned_fields:
+                        if field in row:
+                            candidate = self._resolve_asset_path(row[field])
+                            if candidate is not None and candidate.exists():
+                                planned_paths.append(candidate)
                     if selected:
-                        target_paths.update(resolved_paths)
+                        # If a planned file exists but no matching actual output
+                        # reference records it, do not claim complete erasure.
+                        if any(candidate not in actual_paths for candidate in planned_paths):
+                            raise GenerationAssetPrivacyError("an untracked planned output file exists")
+                        target_paths.update(actual_paths)
                         removed += 1
                     else:
-                        other_paths.update(resolved_paths)
+                        other_paths.update(actual_paths)
+                        other_paths.update(planned_paths)
                         kept.append(row)
                 document[collection] = kept
                 loaded.append({"path": path, "document": document, "changed": removed > 0})
