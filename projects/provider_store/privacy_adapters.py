@@ -120,8 +120,6 @@ class PersistentPrivacyAdapter:
             raise PrivacyAdapterConfigurationError("privacy request ledger path must be a file")
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialise_ledger()
-parent.mkdir(parents=True, exist_ok=True)
-        self._initialise_ledger()
 
     def _digest_key(self) -> bytes:
         try:
@@ -253,18 +251,20 @@ parent.mkdir(parents=True, exist_ok=True)
                     (self.adapter_id, request_digest, operation, scope_digest, now),
                 )
             connection.execute("COMMIT")
-            return None
+            claimed_attempt = int(attempts) + 1 if row is not None else 1
+            return {"__claim_attempt": claimed_attempt}
         except Exception:
-            try:
-                connection.execute("ROLLBACK")
-            except Exception:
-                pass
+            if connection is not None:
+                try:
+                    connection.execute("ROLLBACK")
+                except Exception:
+                    pass
             return dict(_FAILURE)
         finally:
             if connection is not None:
                 connection.close()
 
-    def _finish(self, request_digest: str, result: dict[str, Any]) -> bool:
+    def _finish(self, request_digest: str, result: dict[str, Any], *, attempt: int) -> bool:
         try:
             now = float(self.clock())
         except Exception:
@@ -278,8 +278,8 @@ parent.mkdir(parents=True, exist_ok=True)
             connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(
                 "UPDATE privacy_request_ledger SET state=?, result_status=?, deleted_count=?, updated_at=? "
-                "WHERE adapter_id=? AND request_digest=?",
-                (state, result["status"], result["deleted_count"], now, self.adapter_id, request_digest),
+                "WHERE adapter_id=? AND request_digest=? AND attempts=? AND state='RUNNING'",
+                (state, result["status"], result["deleted_count"], now, self.adapter_id, request_digest, attempt),
             )
             connection.execute("COMMIT")
             return cursor.rowcount == 1
@@ -302,15 +302,18 @@ parent.mkdir(parents=True, exist_ok=True)
             scope_digest = self._digest({"operation": operation, **scope}, digest_key)
         except (TypeError, ValueError, UnicodeEncodeError, PrivacyAdapterConfigurationError):
             return dict(_FAILURE)
-        cached = self._claim(request_digest, operation, scope_digest)
-        if cached is not None:
-            return cached
+        claim = self._claim(request_digest, operation, scope_digest)
+        if claim is None:
+            return dict(_FAILURE)
+        if "__claim_attempt" not in claim:
+            return claim
+        attempt = claim["__claim_attempt"]
         try:
             raw = getattr(self.adapter, "delete_subject_data" if operation == "delete" else "purge_expired_data")(**kwargs)
         except Exception:
             raw = dict(_FAILURE)
         result = _normalise_adapter_result(raw, operation=operation)
-        if not self._finish(request_digest, result):
+        if not self._finish(request_digest, result, attempt=attempt):
             # A failed durable completion write cannot be reported as success.
             return {"confirmed": False, "status": "PENDING", "deleted_count": 0}
         return result
