@@ -1897,6 +1897,7 @@ class ProviderService:
                     "approval_operation": "billing.approve",
                     "candidate_count": len(requested_paid_approvals),
                 },
+                trace_context=trace_context,
             )
             if approval_event is not None:
                 return {"status": "AUDIT_LOG_WRITE_FAILED", "executed": False}
@@ -1917,6 +1918,7 @@ class ProviderService:
                         "approval_granted": False,
                         "approval_operation": "billing.approve",
                     },
+                    trace_context=trace_context,
                 )
                 return {
                     "status": "BILLING_APPROVAL_AUTHORIZATION_REQUIRED",
@@ -1942,6 +1944,7 @@ class ProviderService:
                     "approval_operation": "billing.approve",
                     "candidate_count": len(requested_paid_approvals),
                 },
+                trace_context=trace_context,
             )
             if approval_event is not None:
                 return {"status": "AUDIT_LOG_WRITE_FAILED", "executed": False}
@@ -2186,6 +2189,7 @@ class ProviderService:
                 provider_id=provider_id,
                 request_id=request_id,
                 metadata={"authentication_method": "MANAGED_SECRET"},
+                trace_context=trace_context,
             )
             if credential_audit is not None:
                 released = self.release_unstarted_request(
@@ -2221,6 +2225,7 @@ class ProviderService:
                     provider_id=provider_id,
                     request_id=request_id,
                     metadata={"authentication_method": "MANAGED_SECRET", "credential_present": True},
+                    trace_context=trace_context,
                 )
                 if credential_audit is not None:
                     secret_lease.close()
@@ -2250,6 +2255,7 @@ class ProviderService:
                     provider_id=provider_id,
                     request_id=request_id,
                     metadata={"authentication_method": "MANAGED_SECRET", "error_type": type(exc).__name__},
+                    trace_context=trace_context,
                 )
                 options.pop("provider_credential_lease", None)
                 released = self.release_unstarted_request(
@@ -2279,6 +2285,7 @@ class ProviderService:
                 "model": route.get("model") if isinstance(route.get("model"), str) else None,
                 "execution_started": False,
             },
+            trace_context=trace_context,
         )
         if execution_audit is not None:
             if secret_lease is not None:
@@ -2353,6 +2360,7 @@ class ProviderService:
                 tenant_id=tenant_id, project_id=project_id,
                 provider_id=provider_id, request_id=request_id,
                 metadata={"execution_started": True, "error_type": type(exc).__name__},
+                trace_context=trace_context,
             )
             return {
                 "status": "EXECUTION_AUDIT_FINALIZATION_FAILED" if execution_audit is not None else "EXECUTION_OUTCOME_UNKNOWN",
@@ -2379,6 +2387,7 @@ class ProviderService:
                 tenant_id=tenant_id, project_id=project_id,
                 provider_id=provider_id, request_id=request_id,
                 metadata={"execution_started": True},
+                trace_context=trace_context,
             )
             return {
                 "status": "EXECUTION_AUDIT_FINALIZATION_FAILED" if execution_audit is not None else "EXECUTION_OUTCOME_UNKNOWN",
@@ -2409,6 +2418,7 @@ class ProviderService:
                     tenant_id=tenant_id, project_id=project_id,
                     provider_id=provider_id, request_id=request_id,
                     metadata={"execution_started": False},
+                    trace_context=trace_context,
                 )
                 return {
                     "status": "EXECUTION_AUDIT_FINALIZATION_FAILED" if execution_audit is not None else "INCONSISTENT_START_RESULT",
@@ -2425,6 +2435,7 @@ class ProviderService:
                 tenant_id=tenant_id, project_id=project_id,
                 provider_id=provider_id, request_id=request_id,
                 metadata={"execution_started": False, "execution_success": False},
+                trace_context=trace_context,
             )
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id, tenant_id=tenant_id
@@ -2707,6 +2718,7 @@ class ProviderService:
                 "credit_outcome": credit_outcome,
                 "latency_ms": latency_ms,
             },
+            trace_context=trace_context,
         )
         if execution_audit is not None:
             status = "EXECUTION_AUDIT_FINALIZATION_FAILED"
