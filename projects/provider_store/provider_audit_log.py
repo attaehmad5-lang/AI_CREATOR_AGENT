@@ -37,6 +37,7 @@ _OUTCOMES = frozenset({
 })
 _METADATA_KEYS = frozenset({
     "category", "capability", "model", "model_version", "strategy",
+    "trace_id", "span_id", "parent_span_id", "trace_flags",
     "candidate_count", "selected_provider", "fallback_used",
     "approval_required", "approval_granted", "approval_operation",
     "charge_outcome", "credit_outcome", "estimated_cost", "cost_unit",
