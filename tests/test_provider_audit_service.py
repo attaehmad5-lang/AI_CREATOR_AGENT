@@ -18,6 +18,18 @@ class ConnectionStub:
     def get_provider(self, provider_id):
         return self.provider if provider_id == "image" else None
 
+    def configure_provider(self, provider_id, **kwargs):
+        return {
+            "status": "CONFIGURED", "provider": provider_id,
+            "saved": True, "configuration": {"model": kwargs.get("model")},
+        }
+
+    def set_provider_enabled(self, provider_id, enabled):
+        return {
+            "status": "PROVIDER_ENABLED" if enabled else "PROVIDER_DISABLED",
+            "provider": provider_id, "enabled": enabled, "saved": True,
+        }
+
 
 class RoutingStub:
     def __init__(self, *, billing_mode=None):
@@ -214,6 +226,94 @@ class ProviderAuditServiceTests(unittest.TestCase):
             principal_id="disabled-user", tenant_id="tenant-1", project_id="project-1"
         )
         self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+
+
+    def test_provider_configuration_enablement_and_role_changes_are_audited(self):
+        service = self.service()
+        configured = service.configure_provider(
+            "image", principal_id="admin-user", model="safe-model"
+        )
+        self.assertTrue(configured["saved"])
+        enabled = service.set_provider_enabled(
+            "image", True, principal_id="admin-user"
+        )
+        self.assertTrue(enabled["saved"])
+        disabled = service.set_provider_enabled(
+            "image", False, principal_id="admin-user"
+        )
+        self.assertTrue(disabled["saved"])
+        assigned = service.assign_provider_role(
+            "new-user", "viewer", actor_principal_id="admin-user"
+        )
+        self.assertTrue(assigned["saved"])
+        principal_disabled = service.disable_provider_principal(
+            "new-user", actor_principal_id="admin-user"
+        )
+        self.assertTrue(principal_disabled["saved"])
+        events = self.audit.read_events()["events"]
+        config_events = [x for x in events if x["event_type"] == "PROVIDER_CONFIGURATION"]
+        access_events = [x for x in events if x["event_type"] == "PROVIDER_ACCESS_CHANGE"]
+        self.assertEqual(len(config_events), 6)
+        self.assertEqual(len(access_events), 4)
+        self.assertEqual(access_events[0]["outcome"], "REQUESTED")
+        self.assertEqual(access_events[1]["outcome"], "SUCCEEDED")
+        raw = self.audit.log_path.read_text(encoding="utf-8")
+        self.assertNotIn("new-user", raw)
+
+    def test_direct_paid_route_is_audited_and_denied_without_billing_permission(self):
+        routing = RoutingStub(billing_mode="PAID_APPROVED")
+        service = self.service(routing)
+        result = service.route_request(
+            category="image", project_id="project-1",
+            request_id="paid-direct", estimated_cost=3.0,
+            paid_approved_providers={"image"},
+            _audit_actor_principal_id="creator-user",
+        )
+        self.assertEqual(result["status"], "BILLING_APPROVAL_AUTHORIZATION_REQUIRED")
+        self.assertEqual(routing.calls, [])
+        events = self.audit.read_events()["events"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event_type"], "BILLING_APPROVAL")
+        self.assertEqual(events[0]["outcome"], "DENIED")
+
+    def test_audit_write_failure_blocks_routing_before_reservations(self):
+        class FailingAudit:
+            def record_event(self, *args, **kwargs):
+                return {"status": "AUDIT_LOG_WRITE_FAILED", "saved": False}
+
+            def verify_integrity(self):
+                return {"status": "AUDIT_LOG_READ_FAILED", "valid": False}
+
+        routing = RoutingStub()
+        service = ProviderService(
+            self.connection,
+            routing_manager=routing,
+            authorization_manager=self.authorization,
+            audit_log_manager=FailingAudit(),
+        )
+        result = service.route_request(
+            category="image", project_id="project-1", request_id="audit-fail"
+        )
+        self.assertEqual(result["status"], "AUDIT_LOG_WRITE_FAILED")
+        self.assertEqual(routing.calls, [])
+
+    def test_configured_audit_chain_tampering_blocks_further_routing(self):
+        service = self.service()
+        first = service.route_request(
+            category="image", project_id="project-1", request_id="before-tamper"
+        )
+        self.assertTrue(first["allowed"])
+        lines = self.audit.log_path.read_text(encoding="utf-8").splitlines()
+        record = json.loads(lines[0])
+        record["outcome"] = "DENIED"
+        lines[0] = json.dumps(record, sort_keys=True, separators=(",", ":"))
+        self.audit.log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        routing = service.routing_manager
+        second = service.route_request(
+            category="image", project_id="project-1", request_id="after-tamper"
+        )
+        self.assertEqual(second["status"], "AUDIT_LOG_WRITE_FAILED")
+        self.assertEqual(len(routing.calls), 1)
 
 
 if __name__ == "__main__":
