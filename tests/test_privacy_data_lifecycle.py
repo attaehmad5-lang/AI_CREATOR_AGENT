@@ -1,4 +1,5 @@
 """Regression tests for multi-store privacy deletion and retention orchestration."""
+import threading
 import unittest
 from datetime import datetime, timezone
 
@@ -170,6 +171,50 @@ class PrivacyDataLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(result["store_count"], 1)
         self.assertEqual(set(result["stores"]), {"initial-store"})
         self.assertEqual(late_store.calls, [])
+
+
+    def test_concurrent_registration_is_deferred_to_next_run(self):
+        manager = PrivacyDataLifecycleManager()
+        late_store = StoreStub()
+        registration_errors = []
+
+        class ConcurrentRegisteringStore(StoreStub):
+            def delete_subject_data(self, **kwargs):
+                self.calls.append(("delete", kwargs))
+
+                def register_late_store():
+                    try:
+                        manager.register_store("late-store", late_store)
+                    except Exception as exc:
+                        registration_errors.append(exc)
+
+                worker = threading.Thread(target=register_late_store)
+                worker.start()
+                worker.join(timeout=3)
+                if worker.is_alive():
+                    raise RuntimeError("concurrent store registration did not finish")
+                if registration_errors:
+                    raise registration_errors[0]
+                return {"confirmed": True, "status": "DELETED", "deleted_count": 1}
+
+        manager.register_store("initial-store", ConcurrentRegisteringStore())
+        first = manager.delete_subject_data(
+            subject_ref="subject-23", project_id="film", tenant_id=None,
+            request_id="delete-009", confirmed=True,
+        )
+        self.assertEqual(first["status"], "SUBJECT_DATA_DELETED")
+        self.assertEqual(first["store_count"], 1)
+        self.assertEqual(set(first["stores"]), {"initial-store"})
+        self.assertEqual(manager.registered_store_count, 2)
+        self.assertEqual(late_store.calls, [])
+
+        second = manager.delete_subject_data(
+            subject_ref="subject-24", project_id="film", tenant_id=None,
+            request_id="delete-010", confirmed=True,
+        )
+        self.assertEqual(second["status"], "SUBJECT_DATA_DELETED")
+        self.assertEqual(second["store_count"], 2)
+        self.assertEqual(len(late_store.calls), 1)
 
     def test_missing_store_configuration_never_reports_success(self):
         manager = PrivacyDataLifecycleManager()
