@@ -41,7 +41,7 @@ _METADATA_KEYS = frozenset({
     "approval_required", "approval_granted", "approval_operation",
     "charge_outcome", "credit_outcome", "estimated_cost", "cost_unit",
     "credential_backend", "credential_version_id", "credential_present",
-    "authentication_method", "endpoint_host", "enabled", "role",
+    "authentication_method", "authentication_required", "endpoint_host", "enabled", "role",
     "target_principal_hash", "scope_count", "policy_status",
     "execution_started", "execution_success", "error_type", "latency_ms",
 })
