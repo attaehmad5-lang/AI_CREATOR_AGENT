@@ -2066,8 +2066,17 @@ class ProviderService:
                         "saved": False,
                         "error_type": type(incident_exc).__name__,
                     }
+            execution_audit = self._append_provider_audit_event(
+                "ROUTED_EXECUTION",
+                outcome="UNKNOWN",
+                status_code="EXECUTION_OUTCOME_UNKNOWN",
+                actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                tenant_id=tenant_id, project_id=project_id,
+                provider_id=provider_id, request_id=request_id,
+                metadata={"execution_started": True, "error_type": type(exc).__name__},
+            )
             return {
-                "status": "EXECUTION_OUTCOME_UNKNOWN",
+                "status": "EXECUTION_AUDIT_FINALIZATION_FAILED" if execution_audit is not None else "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
@@ -2083,8 +2092,17 @@ class ProviderService:
                 secret_lease.close()
                 secret_lease = None
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
+            execution_audit = self._append_provider_audit_event(
+                "ROUTED_EXECUTION",
+                outcome="UNKNOWN",
+                status_code="INVALID_ADAPTER_EXECUTION_RESULT",
+                actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                tenant_id=tenant_id, project_id=project_id,
+                provider_id=provider_id, request_id=request_id,
+                metadata={"execution_started": True},
+            )
             return {
-                "status": "EXECUTION_OUTCOME_UNKNOWN",
+                "status": "EXECUTION_AUDIT_FINALIZATION_FAILED" if execution_audit is not None else "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
@@ -2104,18 +2122,36 @@ class ProviderService:
                     and adapter_result.get("actual_credit_amount") > 0
                 )
             ):
+                execution_audit = self._append_provider_audit_event(
+                    "ROUTED_EXECUTION",
+                    outcome="UNKNOWN",
+                    status_code="INCONSISTENT_START_RESULT",
+                    actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                    tenant_id=tenant_id, project_id=project_id,
+                    provider_id=provider_id, request_id=request_id,
+                    metadata={"execution_started": False},
+                )
                 return {
-                    "status": "INCONSISTENT_START_RESULT",
+                    "status": "EXECUTION_AUDIT_FINALIZATION_FAILED" if execution_audit is not None else "INCONSISTENT_START_RESULT",
                     "executed": False,
                     "provider": provider_id,
                     "request_id": request_id,
                     "reservations_retained": True,
                 }
+            execution_audit = self._append_provider_audit_event(
+                "ROUTED_EXECUTION",
+                outcome="FAILED",
+                status_code="EXECUTION_NOT_STARTED",
+                actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+                tenant_id=tenant_id, project_id=project_id,
+                provider_id=provider_id, request_id=request_id,
+                metadata={"execution_started": False, "execution_success": False},
+            )
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id, tenant_id=tenant_id
             )
             return {
-                "status": "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED",
+                "status": "AUDIT_LOG_FINALIZATION_FAILED" if execution_audit is not None else ("EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED"),
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
@@ -2373,9 +2409,31 @@ class ProviderService:
             status = "EXECUTION_SUCCEEDED"
         else:
             status = "EXECUTION_FINALIZATION_PARTIAL"
+        execution_audit = self._append_provider_audit_event(
+            "ROUTED_EXECUTION",
+            outcome="SUCCEEDED" if final_success else "FAILED",
+            status_code="EXECUTION_SUCCEEDED" if final_success else error_code,
+            actor_principal_id=principal_id if isinstance(principal_id, str) else None,
+            tenant_id=tenant_id, project_id=project_id,
+            provider_id=provider_id, request_id=request_id,
+            metadata={
+                "category": category,
+                "model": route.get("model") if isinstance(route.get("model"), str) else None,
+                "execution_started": True,
+                "execution_success": final_success,
+                "estimated_cost": estimated_cost,
+                "cost_unit": estimated_cost_unit,
+                "charge_outcome": charge_outcome,
+                "credit_outcome": credit_outcome,
+                "latency_ms": latency_ms,
+            },
+        )
+        if execution_audit is not None:
+            status = "EXECUTION_AUDIT_FINALIZATION_FAILED"
         return {
             "status": status,
             "executed": True,
+            "audit_log_saved": execution_audit is None if self.audit_log_manager is not None else None,
             "provider": provider_id,
             "request_id": request_id,
             "billing_mode": route.get("billing_mode"),
