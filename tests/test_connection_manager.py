@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 import tempfile
@@ -223,10 +224,14 @@ class ConnectionManagerTests(unittest.TestCase):
         master.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
         key_provider = lambda context: b"r" * 32
         from projects.provider_store.encrypted_state_store import EncryptedJSONStateStore
+        path_context = (
+            "provider-catalog-recovery-test:"
+            + hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:24]
+        )
         EncryptedJSONStateStore(
             target,
             key_provider=key_provider,
-            context="provider-catalog-recovery-test",
+            context=path_context,
         ).write({"invalid": "catalog"})
 
         without_key = ConnectionManager.restore_catalog_from_master(target, master)
