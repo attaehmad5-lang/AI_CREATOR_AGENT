@@ -270,6 +270,24 @@ class GenerationAssetPrivacyAdapter:
             return candidate
         raise GenerationAssetPrivacyError("asset path is outside configured roots")
 
+    def _assert_safe_asset_file(self, asset_path: Path) -> None:
+        for root in self.asset_roots.values():
+            try:
+                relative = asset_path.relative_to(root)
+            except ValueError:
+                continue
+            if root.is_symlink():
+                raise GenerationAssetPrivacyError("asset root became a symlink")
+            current = root
+            for part in relative.parts:
+                current = current / part
+                if current.is_symlink():
+                    raise GenerationAssetPrivacyError("asset path changed to a symlink")
+            if current.exists() and not current.is_file():
+                raise GenerationAssetPrivacyError("asset path is no longer a regular file")
+            return
+        raise GenerationAssetPrivacyError("asset path escaped the configured roots")
+
     def _atomic_write(self, path: Path, document: dict[str, Any]) -> None:
         encoded = json.dumps(document, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
         if len(encoded) > self.max_document_bytes:
@@ -374,9 +392,8 @@ class GenerationAssetPrivacyAdapter:
             # Delete physical assets first. If a later metadata write fails, the
             # old record remains retryable and an already-absent file is harmless.
             for asset_path in sorted(target_paths, key=str):
+                self._assert_safe_asset_file(asset_path)
                 if asset_path.exists():
-                    if asset_path.is_symlink() or not asset_path.is_file():
-                        raise GenerationAssetPrivacyError("asset changed to a non-regular file")
                     asset_path.unlink()
 
             for entry in loaded:
