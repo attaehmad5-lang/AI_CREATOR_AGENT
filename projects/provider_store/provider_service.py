@@ -1318,18 +1318,120 @@ class ProviderService:
         }
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
+        audit_actor = route_options.pop("_audit_actor_principal_id", None)
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
         rejection = self._sensitive_input_rejection({"route_options": route_options})
         if rejection is not None:
             return {"allowed": False, **rejection}
+        category = route_options.get("category")
+        project_id = route_options.get("project_id")
+        tenant_id = route_options.get("tenant_id")
+        request_id = route_options.get("request_id")
+        requested_metadata = {
+            key: route_options[key]
+            for key in ("category", "capability", "model", "model_version", "strategy")
+            if isinstance(route_options.get(key), (str, int, float, bool))
+            or route_options.get(key) is None
+        }
+        audit_error = self._append_provider_audit_event(
+            "ROUTING_DECISION",
+            outcome="REQUESTED",
+            status_code="ROUTING_REQUESTED",
+            actor_principal_id=audit_actor if isinstance(audit_actor, str) else None,
+            tenant_id=tenant_id if isinstance(tenant_id, str) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            request_id=request_id if isinstance(request_id, str) else None,
+            metadata=requested_metadata,
+        )
+        if audit_error is not None:
+            return {"allowed": False, "status": "AUDIT_LOG_WRITE_FAILED", "audit": audit_error}
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
-            return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
-        }
+            result = {
+                "allowed": False, "status": "ROUTING_FAILED",
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"allowed": False, "status": "INVALID_ROUTING_RESPONSE"}
+        provider_id = result.get("provider")
+        decisions = result.get("prior_decisions", result.get("decisions", []))
+        candidate_count = len(decisions) if isinstance(decisions, list) else 0
+        final_metadata = dict(requested_metadata)
+        if isinstance(provider_id, str):
+            final_metadata["selected_provider"] = provider_id
+        final_metadata["candidate_count"] = candidate_count
+        audit_error = self._append_provider_audit_event(
+            "ROUTING_DECISION",
+            outcome="ALLOWED" if result.get("allowed") is True else "DENIED",
+            status_code=self._safe_error_code(
+                result.get("status"), "ROUTE_DECISION_RECORDED"
+            ),
+            actor_principal_id=audit_actor if isinstance(audit_actor, str) else None,
+            tenant_id=tenant_id if isinstance(tenant_id, str) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            provider_id=provider_id if isinstance(provider_id, str) else None,
+            request_id=request_id if isinstance(request_id, str) else None,
+            metadata=final_metadata,
+        )
+        if audit_error is not None:
+            release = None
+            if result.get("allowed") is True and isinstance(provider_id, str):
+                try:
+                    release = self.release_unstarted_request(
+                        project_id=project_id,
+                        provider_id=provider_id,
+                        request_id=request_id,
+                        tenant_id=tenant_id,
+                    )
+                except Exception as exc:
+                    release = {"released": False, "status": "RESERVATION_RELEASE_FAILED", "error_type": type(exc).__name__}
+            return {
+                "allowed": False,
+                "status": "AUDIT_LOG_FINALIZATION_FAILED",
+                "reservation_release": release,
+            }
+        billing_mode = result.get("billing_mode")
+        denied_paid_approval = any(
+            isinstance(item, dict) and item.get("status") == "PAID_APPROVAL_REQUIRED"
+            for item in decisions
+        ) if isinstance(decisions, list) else False
+        if billing_mode == "PAID_APPROVED" or denied_paid_approval:
+            granted = billing_mode == "PAID_APPROVED"
+            audit_error = self._append_provider_audit_event(
+                "BILLING_APPROVAL",
+                outcome="ALLOWED" if granted else "DENIED",
+                status_code="PAID_APPROVAL_ACCEPTED" if granted else "PAID_APPROVAL_REQUIRED",
+                actor_principal_id=audit_actor if isinstance(audit_actor, str) else None,
+                tenant_id=tenant_id if isinstance(tenant_id, str) else None,
+                project_id=project_id if isinstance(project_id, str) else None,
+                provider_id=provider_id if isinstance(provider_id, str) else None,
+                request_id=request_id if isinstance(request_id, str) else None,
+                metadata={
+                    "approval_required": True,
+                    "approval_granted": granted,
+                    "approval_operation": "billing.approve",
+                },
+            )
+            if audit_error is not None:
+                release = None
+                if result.get("allowed") is True and isinstance(provider_id, str):
+                    try:
+                        release = self.release_unstarted_request(
+                            project_id=project_id,
+                            provider_id=provider_id,
+                            request_id=request_id,
+                            tenant_id=tenant_id,
+                        )
+                    except Exception as exc:
+                        release = {"released": False, "status": "RESERVATION_RELEASE_FAILED", "error_type": type(exc).__name__}
+                return {
+                    "allowed": False,
+                    "status": "AUDIT_LOG_FINALIZATION_FAILED",
+                    "reservation_release": release,
+                }
+        return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
         if self.output_validator is None:
@@ -1535,6 +1637,7 @@ class ProviderService:
         if self.tenant_isolation_manager is not None:
             route_options["tenant_id"] = tenant_id
         route = self.route_request(
+            _audit_actor_principal_id=principal_id,
             category=category,
             project_id=project_id,
             request_id=request_id,
