@@ -117,6 +117,10 @@ configured generated-media roots. Add it to the same lifecycle coordinator:
 ~~~python
 from projects.generation.privacy_asset_adapter import GenerationAssetPrivacyAdapter
 
+def generation_metadata_dek(context: str) -> bytes:
+    # KMS/Secret Manager: return the stable, dedicated 32-byte DEK for this context.
+    return kms_client.get_or_create_data_key(context=context, purpose="generation-privacy-metadata")
+
 generation_asset_privacy = GenerationAssetPrivacyAdapter(
     "projects/generation/asset_manifest.json",
     state_paths=["projects/generation/generation_state.json"],
@@ -126,8 +130,57 @@ generation_asset_privacy = GenerationAssetPrivacyAdapter(
         "output/voice": "/srv/ai-creator/output/voice",
         "output/assets": "/srv/ai-creator/output/assets",
     },
+    encryption_key_provider=generation_metadata_dek,
+    encryption_context="generation-assets-v1",
+    require_encrypted_metadata=True,
+    migrate_legacy_plaintext_metadata=True,  # One-time, controlled migration only.
 )
 
+# First encrypt existing JSON metadata. This does not invent ownership.
+encryption_migration = generation_asset_privacy.migrate_legacy_metadata(confirmed=True)
+if encryption_migration["status"] not in {"GENERATION_METADATA_ENCRYPTED", "GENERATION_METADATA_ALREADY_ENCRYPTED"}:
+    raise RuntimeError("generation metadata encryption migration failed")
+
+# Resolve each legacy asset/job ID against the authoritative project/tenant/user database.
+# The resolver returns project_id, tenant_id (including explicit None), subject_ref,
+# and optionally an aware expires_at. Never use email/phone as subject_ref.
+def resolve_generation_owner(lookup: dict) -> dict:
+    return ownership_store.resolve_asset_scope(
+        asset_id=lookup.get("asset_id"),
+        job_id=lookup.get("job_id"),
+        project_name=lookup.get("project"),
+        scene=lookup.get("scene"),
+        media_type=lookup.get("media_type"),
+    )
+
+scope_migration = generation_asset_privacy.migrate_legacy_scope_metadata(
+    scope_resolver=resolve_generation_owner,
+    confirmed=True,
+)
+if scope_migration["status"] not in {"GENERATION_SCOPE_METADATA_MIGRATED", "GENERATION_SCOPE_METADATA_ALREADY_VALID"}:
+    raise RuntimeError("authoritative generation ownership migration failed")
+
+asset_audit = generation_asset_privacy.audit()
+if asset_audit["status"] != "ASSET_PRIVACY_READY":
+    raise RuntimeError("generation asset privacy scope migration is incomplete")
+if asset_audit["retention_missing_expiry_count"] != 0:
+    raise RuntimeError("generation asset retention metadata is incomplete")
+
+# Recreate in steady-state mode: legacy plaintext is no longer accepted.
+generation_asset_privacy = GenerationAssetPrivacyAdapter(
+    "projects/generation/asset_manifest.json",
+    state_paths=["projects/generation/generation_state.json"],
+    asset_roots={
+        "output/images": "/srv/ai-creator/output/images",
+        "output/videos": "/srv/ai-creator/output/videos",
+        "output/voice": "/srv/ai-creator/output/voice",
+        "output/assets": "/srv/ai-creator/output/assets",
+    },
+    encryption_key_provider=generation_metadata_dek,
+    encryption_context="generation-assets-v1",
+    require_encrypted_metadata=True,
+    migrate_legacy_plaintext_metadata=False,
+)
 privacy_lifecycle = create_privacy_lifecycle_manager(
     stores={
         "application-db": database_adapter,
