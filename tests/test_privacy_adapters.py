@@ -244,12 +244,12 @@ class SQLitePrivacyAdapterTests(unittest.TestCase):
         self.temp.cleanup()
 
     def adapter(self, **kwargs):
-        return SQLitePrivacyDataAdapter(
-            self.path,
-            table="subjects",
-            digest_key_provider=lambda context: b"s" * 32,
-            **kwargs,
-        )
+        options = {
+            "table": "subjects",
+            "digest_key_provider": lambda context: b"s" * 32,
+        }
+        options.update(kwargs)
+        return SQLitePrivacyDataAdapter(self.path, **options)
 
     def rows(self):
         db = sqlite3.connect(self.path)
