@@ -152,6 +152,20 @@ these fields. They are intentionally not backfilled with invented owners. Until 
 re-generated with trustworthy scope metadata or migrated from an authoritative ownership source,
 this adapter returns FAILED/PARTIAL and does not delete their files. Retention purge also requires
 an explicit timezone-aware `expires_at` on every in-scope record; no retention date is inferred.
+ 
+Run the metadata-only readiness audit before enabling subject deletion or retention:
+
+~~~python
+asset_audit = generation_asset_privacy.audit()
+if asset_audit["status"] != "ASSET_PRIVACY_READY":
+    raise RuntimeError("generation asset privacy scope migration is required")
+if asset_audit["retention_missing_expiry_count"] != 0:
+    raise RuntimeError("generation asset retention metadata is incomplete")
+~~~
+
+The audit reports document/record counts only; it never returns subject IDs, filenames or paths.
+Subject deletion may be enabled when all rows are explicitly scoped. Scheduled retention also
+requires zero in-scope records without explicit expiry metadata.
 
 A complete deployment inventory should cover:
 1. Primary application databases and replicas.
