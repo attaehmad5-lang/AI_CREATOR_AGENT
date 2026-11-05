@@ -384,3 +384,44 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_authoritative_scope_migration_resolves_legacy_rows_and_updates_all_documents(self):
+        self.manifest.write_text(json.dumps({"assets": [{"asset_id": "legacy-asset", "job_id": "job-legacy"}]}), encoding="utf-8")
+        self.state.write_text(json.dumps({"states": [{"asset_id": "legacy-asset", "job_id": "job-legacy"}]}), encoding="utf-8")
+        calls = []
+        def resolver(lookup):
+            calls.append(lookup)
+            return {"project_id": PROJECT, "tenant_id": TENANT, "subject_ref": SUBJECT, "expires_at": "2027-01-01T00:00:00Z"}
+        result = self.adapter.migrate_legacy_scope_metadata(scope_resolver=resolver, confirmed=True)
+        self.assertEqual(result["status"], "GENERATION_SCOPE_METADATA_MIGRATED")
+        self.assertEqual(result["migrated_record_count"], 2)
+        self.assertEqual(len(calls), 2)
+        audit = self.adapter.audit()
+        self.assertEqual(audit["status"], "ASSET_PRIVACY_READY")
+        self.assertEqual(audit["retention_ready_count"], 2)
+        self.assertNotIn(SUBJECT, repr(result))
+        self.assertEqual(json.loads(self.manifest.read_text(encoding="utf-8"))["assets"][0]["subject_ref"], SUBJECT)
+
+
+    def test_authoritative_scope_migration_fails_closed_on_untrusted_resolver_result(self):
+        manifest = {"assets": [{"asset_id": "legacy-asset", "job_id": "job-legacy"}]}
+        state = {"states": [{"asset_id": "legacy-asset", "job_id": "job-legacy"}]}
+        self.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+        self.state.write_text(json.dumps(state), encoding="utf-8")
+        before_manifest = self.manifest.read_bytes()
+        before_state = self.state.read_bytes()
+        result = self.adapter.migrate_legacy_scope_metadata(
+            scope_resolver=lambda _lookup: {"project_id": PROJECT, "tenant_id": TENANT, "subject_ref": "person@example.test"},
+            confirmed=True,
+        )
+        self.assertEqual(result["status"], "GENERATION_SCOPE_MIGRATION_FAILED")
+        self.assertEqual(self.manifest.read_bytes(), before_manifest)
+        self.assertEqual(self.state.read_bytes(), before_state)
+
+
+    def test_authoritative_scope_migration_requires_confirmation_and_resolver(self):
+        no_confirmation = self.adapter.migrate_legacy_scope_metadata(scope_resolver=lambda _row: {}, confirmed=False)
+        self.assertEqual(no_confirmation["status"], "GENERATION_SCOPE_MIGRATION_CONFIRMATION_REQUIRED")
+        no_resolver = self.adapter.migrate_legacy_scope_metadata(scope_resolver=None, confirmed=True)
+        self.assertEqual(no_resolver["status"], "GENERATION_SCOPE_RESOLVER_UNAVAILABLE")
