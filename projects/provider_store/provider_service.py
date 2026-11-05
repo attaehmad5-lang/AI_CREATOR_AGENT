@@ -208,6 +208,18 @@ class ProviderService:
             "managers": configured,
         }
 
+    def get_privacy_lifecycle_status(self) -> dict[str, Any]:
+        """Report registered deletion/retention stores without exposing adapter details."""
+        manager = self.privacy_lifecycle_manager
+        count = manager.registered_store_count if manager is not None else 0
+        if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= 256:
+            return {"status": "PRIVACY_LIFECYCLE_STATUS_INVALID", "configured": False, "registered_store_count": 0}
+        return {
+            "status": "PRIVACY_LIFECYCLE_READY" if count > 0 else "PRIVACY_LIFECYCLE_NOT_CONFIGURED",
+            "configured": count > 0,
+            "registered_store_count": count,
+        }
+
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
 
