@@ -57,6 +57,7 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
                 "tenant_id": row.get("tenant_id", TENANT),
                 "subject_ref": row.get("subject_ref", SUBJECT),
                 "output_file": row.get("file_path"),
+                "planned_output_path": row.get("planned_output_path"),
             }
             if "expires_at" in row:
                 state_row["expires_at"] = row["expires_at"]
@@ -110,7 +111,7 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
         self.assertEqual(result["status"], "FAILED")
         self.assertTrue(asset.exists())
 
-    def test_never_deletes_planned_output_paths(self):
+    def test_untracked_planned_output_blocks_deletion_without_deleting_file(self):
         planned = self.images / "planned.png"
         planned.write_bytes(b"not-yet-generated")
         self.write_documents([{
@@ -122,9 +123,37 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
         result = self.adapter.delete_subject_data(
             subject_ref=SUBJECT, project_id=PROJECT, tenant_id=TENANT, request_id=REQUEST
         )
+        self.assertFalse(result["confirmed"])
+        self.assertTrue(planned.exists())
+        self.assertTrue(json.loads(self.manifest.read_text(encoding="utf-8"))["assets"])
+
+    def test_missing_planned_output_does_not_block_record_deletion(self):
+        self.write_documents([{
+            "asset_id": "planned",
+            "subject_ref": SUBJECT,
+            "file_path": None,
+            "planned_output_path": "output/images/not-created.png",
+        }])
+        result = self.adapter.delete_subject_data(
+            subject_ref=SUBJECT, project_id=PROJECT, tenant_id=TENANT, request_id=REQUEST
+        )
         self.assertTrue(result["confirmed"])
         self.assertEqual(result["deleted_count"], 2)
-        self.assertTrue(planned.exists())
+
+    def test_actual_file_matching_planned_path_can_be_deleted(self):
+        actual = self.images / "actual.png"
+        actual.write_bytes(b"actual")
+        self.write_documents([{
+            "asset_id": "actual",
+            "subject_ref": SUBJECT,
+            "file_path": "output/images/actual.png",
+            "planned_output_path": "output/images/actual.png",
+        }])
+        result = self.adapter.delete_subject_data(
+            subject_ref=SUBJECT, project_id=PROJECT, tenant_id=TENANT, request_id=REQUEST
+        )
+        self.assertTrue(result["confirmed"])
+        self.assertFalse(actual.exists())
 
     def test_path_traversal_is_rejected_before_any_mutation(self):
         asset = self.images / "safe.png"
