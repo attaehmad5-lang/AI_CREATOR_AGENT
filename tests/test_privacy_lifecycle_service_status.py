@@ -26,6 +26,8 @@ class PrivacyLifecycleServiceStatusTests(unittest.TestCase):
                 "status": "PRIVACY_LIFECYCLE_NOT_CONFIGURED",
                 "configured": False,
                 "registered_store_count": 0,
+                "durable_idempotency_required": False,
+                "durable_idempotency_ready": False,
             },
         )
 
@@ -38,6 +40,8 @@ class PrivacyLifecycleServiceStatusTests(unittest.TestCase):
                 "status": "PRIVACY_LIFECYCLE_READY",
                 "configured": True,
                 "registered_store_count": 1,
+                "durable_idempotency_required": False,
+                "durable_idempotency_ready": False,
             },
         )
 
