@@ -168,17 +168,36 @@ class ConnectionManager:
         cls,
         catalog_path: str | os.PathLike[str] | None = None,
         master_path: str | os.PathLike[str] | None = None,
+        *,
+        catalog_encryption_key_provider: Any = None,
+        catalog_encryption_context: str = "provider-catalog-v1",
     ) -> dict[str, Any]:
-        """Restore only a missing/invalid catalog from a separately validated master copy."""
+        """Restore a catalog, preserving authenticated encryption when requested."""
         target = Path(catalog_path) if catalog_path is not None else DEFAULT_CATALOG
         master = Path(master_path) if master_path is not None else MASTER_CATALOG
+        target_context_digest = hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:24]
+        encrypted_store = (
+            EncryptedJSONStateStore(
+                target,
+                key_provider=catalog_encryption_key_provider,
+                context=f"{catalog_encryption_context}:{target_context_digest}",
+            )
+            if catalog_encryption_key_provider is not None else None
+        )
         if target.resolve() == master.resolve():
             return {"status": "RECOVERY_TARGET_EQUALS_MASTER", "restored": False}
         lock_path = target.with_name(target.name + ".lock")
         with interprocess_file_lock(lock_path):
             if target.exists():
+                if encrypted_store is None:
+                    try:
+                        envelope = json.loads(target.read_text(encoding="utf-8"))
+                    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                        envelope = None
+                    if isinstance(envelope, dict) and envelope.get("format") == "AI_CREATOR_AGENT_ENCRYPTED_JSON_STATE":
+                        return {"status": "CATALOG_ENCRYPTION_KEY_REQUIRED", "restored": False}
                 try:
-                    current = cls._load_json(target)
+                    current = encrypted_store.read({}) if encrypted_store is not None else cls._load_json(target)
                     validation = cls.validate_catalog_schema(current)
                 except (OSError, ValueError, json.JSONDecodeError):
                     validation = {"valid": False, "errors": ["target catalog is unreadable"]}
@@ -196,8 +215,11 @@ class ConnectionManager:
                     "errors": validation.get("errors", []),
                 }
             try:
-                cls._atomic_write_json(target, backup)
-            except OSError as exc:
+                if encrypted_store is not None:
+                    encrypted_store.write(backup)
+                else:
+                    cls._atomic_write_json(target, backup)
+            except (OSError, ValueError) as exc:
                 return {
                     "status": "CATALOG_RECOVERY_WRITE_FAILED",
                     "restored": False,
