@@ -43,6 +43,7 @@ class ProviderService:
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
         secret_manager: Any | None = None,
+        audit_log_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -88,6 +89,8 @@ class ProviderService:
             (degraded_mode_manager, "evaluate", "degraded_mode_manager"),
             (degraded_mode_manager, "get_state", "degraded_mode_manager"),
             (tenant_isolation_manager, "authorize_project", "tenant_isolation_manager"),
+            (audit_log_manager, "record_event", "audit_log_manager"),
+            (audit_log_manager, "verify_integrity", "audit_log_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -118,6 +121,7 @@ class ProviderService:
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
+        self.audit_log_manager = audit_log_manager
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
@@ -186,6 +190,101 @@ class ProviderService:
             return result
         return result if return_decision else None
 
+
+
+    def _append_provider_audit_event(
+        self,
+        event_type: str,
+        *,
+        outcome: str,
+        status_code: str,
+        actor_principal_id: str | None = None,
+        tenant_id: str | None = None,
+        project_id: str | None = None,
+        provider_id: str | None = None,
+        request_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Append a sanitized audit event; None means auditing is not configured or saved."""
+        if self.audit_log_manager is None:
+            return None
+        try:
+            result = self.audit_log_manager.record_event(
+                event_type,
+                outcome=outcome,
+                status_code=status_code,
+                actor_principal_id=actor_principal_id,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                provider_id=provider_id,
+                request_id=request_id,
+                metadata=metadata,
+            )
+        except Exception as exc:
+            return {"status": "AUDIT_LOG_WRITE_FAILED", "error_type": type(exc).__name__}
+        if isinstance(result, dict) and result.get("saved") is True:
+            return None
+        candidate = result.get("status") if isinstance(result, dict) else None
+        safe_status = (
+            candidate if isinstance(candidate, str)
+            and re.fullmatch(r"AUDIT_[A-Z0-9_]{1,72}", candidate)
+            else "AUDIT_LOG_WRITE_FAILED"
+        )
+        return {"status": safe_status}
+
+    def verify_provider_audit_log(
+        self, *, principal_id: str | None
+    ) -> dict[str, Any]:
+        """Verify the complete append-only provider audit chain for authorized readers."""
+        if self.audit_log_manager is None:
+            return {"status": "AUDIT_LOG_MANAGER_UNAVAILABLE", "valid": False}
+        authorization = self._authorize_operation(principal_id, "provider.read")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "valid": False}
+        try:
+            result = self.audit_log_manager.verify_integrity()
+        except Exception:
+            return {"status": "AUDIT_LOG_VERIFICATION_FAILED", "valid": False}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_AUDIT_VERIFICATION_RESPONSE", "valid": False,
+        }
+
+    def read_provider_audit_events(
+        self,
+        *,
+        principal_id: str | None,
+        after_sequence: int = 0,
+        limit: int = 100,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Read verified audit events; tenant-scoped deployments cannot read all tenants."""
+        if self.audit_log_manager is None:
+            return {"status": "AUDIT_LOG_MANAGER_UNAVAILABLE", "events": []}
+        authorization = self._authorize_operation(principal_id, "provider.read")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "events": []}
+        if self.tenant_isolation_manager is not None:
+            if not isinstance(tenant_id, str) or not tenant_id.strip():
+                return {"status": "TENANT_CONTEXT_REQUIRED", "events": []}
+            if not isinstance(principal_id, str) or not principal_id.strip():
+                return {"status": "AUTHENTICATED_PRINCIPAL_REQUIRED", "events": []}
+            try:
+                check = self.tenant_isolation_manager.authorize_project(
+                    tenant_id, self._audit_read_project_id, principal_id
+                )
+            except Exception:
+                return {"status": "TENANT_ISOLATION_CHECK_FAILED", "events": []}
+            if not isinstance(check, dict) or check.get("allowed") is not True:
+                return {"status": "TENANT_ISOLATION_DENIED", "events": []}
+        try:
+            result = self.audit_log_manager.read_events(
+                after_sequence=after_sequence, limit=limit, tenant_id=tenant_id
+            )
+        except Exception:
+            return {"status": "AUDIT_LOG_READ_FAILED", "events": []}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_AUDIT_READ_RESPONSE", "events": [],
+        }
 
     def set_provider_access_scopes(
         self,
