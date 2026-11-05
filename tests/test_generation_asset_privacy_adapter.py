@@ -120,6 +120,9 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
             "file_path": None,
             "planned_output_path": "output/images/planned.png",
         }])
+        audit = self.adapter.audit()
+        self.assertEqual(audit["status"], "ASSET_PRIVACY_MIGRATION_REQUIRED")
+        self.assertEqual(audit["untracked_planned_count"], 2)
         result = self.adapter.delete_subject_data(
             subject_ref=SUBJECT, project_id=PROJECT, tenant_id=TENANT, request_id=REQUEST
         )
@@ -154,6 +157,7 @@ class GenerationAssetPrivacyAdapterTests(unittest.TestCase):
         )
         self.assertTrue(result["confirmed"])
         self.assertFalse(actual.exists())
+        self.assertEqual(self.adapter.audit()["status"], "ASSET_PRIVACY_READY")
 
     def test_path_traversal_is_rejected_before_any_mutation(self):
         asset = self.images / "safe.png"
