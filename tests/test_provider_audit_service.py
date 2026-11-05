@@ -105,12 +105,16 @@ class ProviderAuditServiceTests(unittest.TestCase):
 
     def test_route_decisions_are_logged_before_and_after_routing(self):
         service = self.service(RoutingStub(billing_mode="FREE_CREDITS"))
+        incoming_trace = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
         result = service.route_request(
             category="image", project_id="project-1",
             request_id="route-1", estimated_cost=0.25,
+            traceparent=incoming_trace,
             _audit_actor_principal_id="creator-user",
         )
         self.assertTrue(result["allowed"])
+        self.assertEqual(result["trace_id"], "0123456789abcdef0123456789abcdef")
+        self.assertNotEqual(result["traceparent"], incoming_trace)
         events = self.audit.read_events()["events"]
         self.assertEqual([event["event_type"] for event in events], [
             "ROUTING_DECISION", "ROUTING_DECISION"
@@ -119,6 +123,10 @@ class ProviderAuditServiceTests(unittest.TestCase):
         self.assertEqual(events[1]["outcome"], "ALLOWED")
         self.assertEqual(events[1]["provider_id"], "image")
         self.assertEqual(events[1]["actor_principal_id"], "creator-user")
+        self.assertEqual(
+            events[1]["metadata"]["trace_id"], "0123456789abcdef0123456789abcdef"
+        )
+        self.assertEqual(events[0]["metadata"]["trace_id"], events[1]["metadata"]["trace_id"])
 
     def test_paid_route_requires_billing_approval_and_logs_denial(self):
         routing = RoutingStub(billing_mode="PAID_APPROVED")
