@@ -340,7 +340,7 @@ class SQLitePrivacyAdapterTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "FAILED")
         invalid = self.adapter().delete_subject_data(
-            subject_ref="short",
+            subject_ref="person@example.com",
             project_id="project-id-01",
             tenant_id="tenant-id-01",
             request_id="request-id-105",
