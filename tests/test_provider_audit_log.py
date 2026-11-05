@@ -74,7 +74,7 @@ class ProviderAuditLogTests(unittest.TestCase):
         event = json.loads(lines[0])
         event["outcome"] = "DENIED"
         lines[0] = json.dumps(event, sort_keys=True, separators=(",", ":"))
-        self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.path.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
         self.assertFalse(self.manager.verify_integrity()["valid"])
         blocked = self.append(request_id="request-3")
         self.assertFalse(blocked["saved"])
