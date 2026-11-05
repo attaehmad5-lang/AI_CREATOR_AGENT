@@ -3214,6 +3214,12 @@ class ProviderServiceTests(unittest.TestCase):
         calls = {"route": 0, "adapter": 0}
 
         class DegradedStub:
+            def configure(self, *args, **kwargs):
+                return {"saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                return {"evaluated": True}
+
             def get_state(self, category):
                 return {
                     "status": "PROVIDER_CATEGORY_NORMAL",
@@ -3307,6 +3313,9 @@ class ProviderServiceTests(unittest.TestCase):
         secret = "sk-" + ("h" * 40)
 
         class HealthStub:
+            def record_result(self, *args, **kwargs):
+                return {"saved": True}
+
             def is_eligible(self, *args, **kwargs):
                 return {"eligible": False, "reason": secret}
 
