@@ -209,10 +209,11 @@ class ProviderAuditServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "AUDIT_EVENTS_READ")
         self.assertTrue(result["verified"])
         self.assertTrue(service.verify_provider_audit_log(principal_id="admin-user")["valid"])
+        self.authorization.assign_role("disabled-user", "viewer", enabled=False)
         denied = service.read_provider_audit_events(
-            principal_id="creator-user", tenant_id="tenant-1", project_id="project-1"
+            principal_id="disabled-user", tenant_id="tenant-1", project_id="project-1"
         )
-        self.assertEqual(denied["status"], "AUDIT_LOG_MANAGER_UNAVAILABLE" if self.audit is None else "AUDIT_EVENTS_READ")
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
 
 
 if __name__ == "__main__":
