@@ -1,0 +1,36 @@
+name: Parallel Development Engine Foundation
+
+on:
+  push:
+    branches:
+      - "feature/parallel-development-engine-foundation"
+    paths:
+      - "tools/parallel_engine.py"
+      - "tests/test_parallel_development_engine.py"
+      - ".github/workflows/parallel-engine.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: parallel-engine-foundation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Scheduler unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile
+        run: python -m compileall -q tools/parallel_engine.py tests/test_parallel_development_engine.py
+      - name: Run scheduler tests
+        run: python -m unittest discover -s tests -p "test_parallel_development_engine.py" -v
