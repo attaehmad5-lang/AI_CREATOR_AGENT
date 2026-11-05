@@ -113,6 +113,8 @@ class ConnectionManager:
         self.secret_manager = secret_manager
         self.catalog_path = Path(catalog_path) if catalog_path else self._default_catalog()
         self.state_path = Path(state_path) if state_path else DEFAULT_STATE
+        if self.catalog_path.resolve() == self.state_path.resolve():
+            raise ValueError("provider catalog and connection state must use separate files")
         catalog_path_digest = hashlib.sha256(
             str(self.catalog_path.resolve()).encode("utf-8")
         ).hexdigest()[:24]
