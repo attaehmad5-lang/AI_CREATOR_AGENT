@@ -1623,7 +1623,6 @@ class ProviderService:
             outcome="ALLOWED" if result.get("allowed") is True else "DENIED",
             status_code=self._safe_error_code(
                 result.get("status"), "ROUTE_DECISION_RECORDED"
-                trace_context=trace_context,
             ),
             actor_principal_id=audit_actor if isinstance(audit_actor, str) else None,
             tenant_id=tenant_id if isinstance(tenant_id, str) else None,
