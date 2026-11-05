@@ -472,6 +472,31 @@ class ProviderService:
             return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
         return result
 
+    def _privacy_principal_reference(self, principal_id: Any) -> str | None:
+        """Return a tenant-binding ID only after validating the caller principal.
+
+        OIDC capabilities stay opaque at the service boundary. Conversion to a
+        stable identity string is allowed only after the configured authenticator
+        confirms that the exact in-process principal object is trusted.
+        """
+        if self.identity_authenticator is None:
+            return principal_id if isinstance(principal_id, str) and principal_id.strip() else None
+        try:
+            trusted = self.identity_authenticator.is_authenticated_principal(principal_id)
+        except Exception:
+            trusted = False
+        if trusted is not True:
+            return None
+        try:
+            reference = str(principal_id)
+        except Exception:
+            return None
+        if not isinstance(reference, str) or not reference.strip() or len(reference) > 256:
+            return None
+        if any(ord(char) < 32 or ord(char) == 127 for char in reference):
+            return None
+        return reference
+
     def _authorize_tenant_project(
         self,
         *,
@@ -1489,7 +1514,7 @@ class ProviderService:
         subject_ref: str,
         project_id: str,
         request_id: str,
-        principal_id: str | None,
+        principal_id: Any,
         tenant_id: str | None = None,
         confirmed: bool = False,
     ) -> dict[str, Any]:
@@ -1510,7 +1535,8 @@ class ProviderService:
             return {"confirmed": False, "completed": False, **rejection}
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "confirmed": False, "completed": False}
-        if not isinstance(principal_id, str) or not principal_id.strip():
+        tenant_principal_id = self._privacy_principal_reference(principal_id)
+        if tenant_principal_id is None:
             return {"status": "AUTHENTICATED_PRINCIPAL_REQUIRED", "confirmed": False, "completed": False}
         authorization = self._authorize_operation(principal_id, "provider.access.manage")
         if authorization is not None:
@@ -1518,7 +1544,7 @@ class ProviderService:
         tenant_error = self._authorize_tenant_project(
             tenant_id=tenant_id,
             project_id=project_id,
-            principal_id=principal_id,
+            principal_id=tenant_principal_id,
         )
         if tenant_error is not None:
             return {"status": tenant_error["status"], "confirmed": False, "completed": False}
@@ -1549,7 +1575,7 @@ class ProviderService:
         cutoff: datetime,
         project_id: str,
         request_id: str,
-        principal_id: str | None,
+        principal_id: Any,
         tenant_id: str | None = None,
         confirmed: bool = False,
     ) -> dict[str, Any]:
@@ -1580,7 +1606,8 @@ class ProviderService:
             return {"confirmed": False, "completed": False, **rejection}
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "confirmed": False, "completed": False}
-        if not isinstance(principal_id, str) or not principal_id.strip():
+        tenant_principal_id = self._privacy_principal_reference(principal_id)
+        if tenant_principal_id is None:
             return {"status": "AUTHENTICATED_PRINCIPAL_REQUIRED", "confirmed": False, "completed": False}
         authorization = self._authorize_operation(principal_id, "provider.access.manage")
         if authorization is not None:
@@ -1588,7 +1615,7 @@ class ProviderService:
         tenant_error = self._authorize_tenant_project(
             tenant_id=tenant_id,
             project_id=project_id,
-            principal_id=principal_id,
+            principal_id=tenant_principal_id,
         )
         if tenant_error is not None:
             return {"status": tenant_error["status"], "confirmed": False, "completed": False}
