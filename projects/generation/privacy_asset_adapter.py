@@ -170,6 +170,50 @@ class GenerationAssetPrivacyAdapter:
             raise GenerationAssetPrivacyError("asset subject handle is not pseudonymous")
         return project_id, tenant_id, subject_ref
 
+    def audit(self) -> dict[str, Any]:
+        """Return privacy readiness counts without exposing identifiers or paths."""
+        lock_path = self.manifest_path.with_name(self.manifest_path.name + ".privacy.lock")
+        if lock_path.is_symlink():
+            return {"status": "ASSET_PRIVACY_AUDIT_FAILED", "document_count": 0, "record_count": 0, "scoped_count": 0, "unscoped_count": 0, "retention_ready_count": 0, "retention_missing_expiry_count": 0}
+        try:
+            with interprocess_file_lock(lock_path):
+                specs = [(self.manifest_path, "assets")] + [(path, "states") for path in self.state_paths]
+                record_count = 0
+                scoped_count = 0
+                unscoped_count = 0
+                retention_ready = 0
+                retention_missing = 0
+                for path, collection in specs:
+                    document, rows = self._read_document(path, collection)
+                    record_count += len(rows)
+                    for row in rows:
+                        try:
+                            self._scope(row, document)
+                            for field in (("file_path",) if collection == "assets" else ("output_file",)):
+                                if field in row:
+                                    self._resolve_asset_path(row[field])
+                            scoped_count += 1
+                            expiry = row.get("expires_at", document.get("expires_at", _MISSING))
+                            if expiry is _MISSING:
+                                retention_missing += 1
+                            else:
+                                self._aware_utc(expiry)
+                                retention_ready += 1
+                        except Exception:
+                            unscoped_count += 1
+                status = "ASSET_PRIVACY_READY" if unscoped_count == 0 else "ASSET_PRIVACY_MIGRATION_REQUIRED"
+                return {
+                    "status": status,
+                    "document_count": len(specs),
+                    "record_count": record_count,
+                    "scoped_count": scoped_count,
+                    "unscoped_count": unscoped_count,
+                    "retention_ready_count": retention_ready,
+                    "retention_missing_expiry_count": retention_missing,
+                }
+        except Exception:
+            return {"status": "ASSET_PRIVACY_AUDIT_FAILED", "document_count": 0, "record_count": 0, "scoped_count": 0, "unscoped_count": 0, "retention_ready_count": 0, "retention_missing_expiry_count": 0}
+
     def _read_document(self, path: Path, collection: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         if path.is_symlink() or not path.exists() or not path.is_file():
             raise GenerationAssetPrivacyError("configured asset privacy document is unavailable")
@@ -358,6 +402,8 @@ class GenerationAssetPrivacyAdapter:
     ) -> dict[str, Any]:
         lock_path = self.manifest_path.with_name(self.manifest_path.name + ".privacy.lock")
         try:
+            if lock_path.is_symlink():
+                raise GenerationAssetPrivacyError("asset privacy lock symlink is not accepted")
             with interprocess_file_lock(lock_path):
                 return self._operate(
                     operation="delete",
@@ -379,6 +425,8 @@ class GenerationAssetPrivacyAdapter:
     ) -> dict[str, Any]:
         lock_path = self.manifest_path.with_name(self.manifest_path.name + ".privacy.lock")
         try:
+            if lock_path.is_symlink():
+                raise GenerationAssetPrivacyError("asset privacy lock symlink is not accepted")
             with interprocess_file_lock(lock_path):
                 return self._operate(
                     operation="purge",
