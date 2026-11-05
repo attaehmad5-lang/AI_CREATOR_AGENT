@@ -487,7 +487,7 @@ class ProviderDataRetentionManager:
         if not isinstance(worker_id, str) or _ID_RE.fullmatch(worker_id) is None:
             return {"status": "INVALID_WORKER_ID", "completed": False}
         if not isinstance(error_code, str) or _ERROR_RE.fullmatch(error_code) is None or any(
-            term in error_code.casefold() for term in ("TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")
+            term in error_code.casefold() for term in ("token", "secret", "password", "credential", "auth")
         ):
             error_code = "PROVIDER_DELETE_FAILED"
         try:
