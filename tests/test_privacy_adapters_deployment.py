@@ -11,6 +11,7 @@ from projects.provider_store.privacy_adapters import (
     PrivacyAdapterConfigurationError,
     PrivacyRetentionJob,
     SQLitePrivacyDataAdapter,
+    create_privacy_lifecycle_manager,
 )
 
 
@@ -273,3 +274,82 @@ def test_retention_job_rejects_unsafe_configuration():
         PrivacyRetentionJob(FakePrivacyService(), principal_provider=lambda: "svc", scopes=[{"project_id": "short"}], retention_days=30)
     with pytest.raises(PrivacyAdapterConfigurationError):
         PrivacyRetentionJob(FakePrivacyService(), principal_provider=lambda: "svc", scopes=[{"project_id": PROJECT, "tenant_id": TENANT}], retention_days=0)
+
+
+def test_lifecycle_factory_wires_external_adapters_with_durable_idempotency(tmp_path):
+    wrapped = RecordingAdapter()
+    manager = create_privacy_lifecycle_manager(
+        {"provider-a": wrapped},
+        ledger_directory=tmp_path / "privacy-ledgers",
+        digest_key_provider=key_provider,
+    )
+    first = manager.delete_subject_data(
+        subject_ref=SUBJECT, project_id=PROJECT, tenant_id=TENANT,
+        request_id=REQUEST, confirmed=True,
+    )
+    replay = manager.delete_subject_data(
+        subject_ref=SUBJECT, project_id=PROJECT, tenant_id=TENANT,
+        request_id=REQUEST, confirmed=True,
+    )
+    assert first["completed"] is True and replay["completed"] is True
+    assert first["stores"]["provider-a"]["confirmed"] is True
+    assert len(wrapped.calls) == 1
+    ledger = tmp_path / "privacy-ledgers" / "provider-a.sqlite3"
+    assert ledger.is_file()
+
+
+def test_lifecycle_factory_keeps_transactional_sqlite_adapter_unwrapped(tmp_path):
+    db = tmp_path / "app.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE records(subject_ref TEXT, project_id TEXT, tenant_id TEXT, expires_at TEXT)")
+    con.commit()
+    con.close()
+    adapter = SQLitePrivacyDataAdapter(db, table="records", digest_key_provider=key_provider)
+    manager = create_privacy_lifecycle_manager(
+        {"app-db": adapter}, ledger_directory=tmp_path / "privacy-ledgers", digest_key_provider=key_provider
+    )
+    assert manager._stores["app-db"] is adapter
+
+
+def test_lifecycle_factory_rejects_insecure_or_incomplete_configuration(tmp_path):
+    with pytest.raises(PrivacyAdapterConfigurationError):
+        create_privacy_lifecycle_manager({}, ledger_directory=tmp_path / "ledgers", digest_key_provider=key_provider)
+    bad_dir = tmp_path / "ledger-link"
+    target = tmp_path / "target-dir"
+    target.mkdir()
+    bad_dir.symlink_to(target, target_is_directory=True)
+    with pytest.raises(PrivacyAdapterConfigurationError):
+        create_privacy_lifecycle_manager(
+            {"provider-a": RecordingAdapter()}, ledger_directory=bad_dir, digest_key_provider=key_provider
+        )
+
+
+def test_https_adapter_rejects_http_200_pending_response():
+    pending = FakeOpener(FakeResponse(b'{"confirmed":false,"status":"PENDING","deleted_count":0}', 200))
+    result = make_https(pending).delete_subject_data(subject_ref=SUBJECT, project_id=PROJECT, tenant_id=TENANT, request_id=REQUEST)
+    assert result["confirmed"] is False and result["status"] == "FAILED"
+
+
+def test_https_adapter_rejects_malformed_dns_host_labels():
+    for host in ("-bad.privacy.example.test", "bad-.privacy.example.test", "a..privacy.example.test", "privacy.example.test."):
+        with pytest.raises(PrivacyAdapterConfigurationError):
+            HTTPSPrivacyProviderAdapter(
+                delete_url=f"https://{host}/delete",
+                purge_url="https://privacy.example.test/purge",
+                allowed_hosts=[host, "privacy.example.test"],
+                authorization_header=lambda: "Bearer x",
+            )
+
+
+def test_retention_job_preserves_opaque_oidc_principal_capability():
+    service = FakePrivacyService()
+    class OpaquePrincipal:
+        pass
+    principal = OpaquePrincipal()
+    job = PrivacyRetentionJob(
+        service, principal_provider=lambda: principal,
+        scopes=[{"project_id": PROJECT, "tenant_id": TENANT}], retention_days=30,
+    )
+    result = job.run_once()
+    assert result["completed"] is True
+    assert service.calls[0]["principal_id"] is principal
