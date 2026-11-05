@@ -282,6 +282,7 @@ def test_lifecycle_factory_wires_external_adapters_with_durable_idempotency(tmp_
     wrapped = RecordingAdapter()
     manager = create_privacy_lifecycle_manager(
         {"provider-a": wrapped},
+        required_store_ids=("provider-a",),
         ledger_directory=tmp_path / "privacy-ledgers",
         digest_key_provider=key_provider,
     )
@@ -298,6 +299,8 @@ def test_lifecycle_factory_wires_external_adapters_with_durable_idempotency(tmp_
     assert len(wrapped.calls) == 1
     assert manager.require_durable_idempotency is True
     assert manager.durable_idempotency_ready is True
+    assert manager.inventory_verified is True
+    assert manager.required_store_count == 1
     with pytest.raises(ValueError, match="durable idempotency"):
         manager.register_store("late-unwrapped", RecordingAdapter())
     ledger = tmp_path / "privacy-ledgers" / "provider-a.sqlite3"
@@ -312,7 +315,8 @@ def test_lifecycle_factory_keeps_transactional_sqlite_adapter_unwrapped(tmp_path
     con.close()
     adapter = SQLitePrivacyDataAdapter(db, table="records", digest_key_provider=key_provider)
     manager = create_privacy_lifecycle_manager(
-        {"app-db": adapter}, ledger_directory=tmp_path / "privacy-ledgers", digest_key_provider=key_provider
+        {"app-db": adapter}, required_store_ids=("app-db",),
+        ledger_directory=tmp_path / "privacy-ledgers", digest_key_provider=key_provider
     )
     assert manager._stores["app-db"] is adapter
     assert manager.require_durable_idempotency is True
@@ -321,16 +325,45 @@ def test_lifecycle_factory_keeps_transactional_sqlite_adapter_unwrapped(tmp_path
 
 def test_lifecycle_factory_rejects_insecure_or_incomplete_configuration(tmp_path):
     with pytest.raises(PrivacyAdapterConfigurationError):
-        create_privacy_lifecycle_manager({}, ledger_directory=tmp_path / "ledgers", digest_key_provider=key_provider)
+        create_privacy_lifecycle_manager(
+            {}, required_store_ids=("provider-a",),
+            ledger_directory=tmp_path / "ledgers", digest_key_provider=key_provider
+        )
     bad_dir = tmp_path / "ledger-link"
     target = tmp_path / "target-dir"
     target.mkdir()
     bad_dir.symlink_to(target, target_is_directory=True)
     with pytest.raises(PrivacyAdapterConfigurationError):
         create_privacy_lifecycle_manager(
-            {"provider-a": RecordingAdapter()}, ledger_directory=bad_dir, digest_key_provider=key_provider
+            {"provider-a": RecordingAdapter()}, required_store_ids=("provider-a",),
+            ledger_directory=bad_dir, digest_key_provider=key_provider
         )
 
+
+
+def test_lifecycle_factory_requires_exact_declared_store_inventory(tmp_path):
+    adapter = RecordingAdapter()
+    with pytest.raises(PrivacyAdapterConfigurationError, match="exactly match"):
+        create_privacy_lifecycle_manager(
+            {"application-db": adapter},
+            required_store_ids=("application-db", "generation-assets"),
+            ledger_directory=tmp_path / "missing-store",
+            digest_key_provider=key_provider,
+        )
+    with pytest.raises(PrivacyAdapterConfigurationError, match="exactly match"):
+        create_privacy_lifecycle_manager(
+            {"application-db": adapter, "unlisted-cache": RecordingAdapter()},
+            required_store_ids=("application-db",),
+            ledger_directory=tmp_path / "extra-store",
+            digest_key_provider=key_provider,
+        )
+    with pytest.raises(PrivacyAdapterConfigurationError, match="valid unique"):
+        create_privacy_lifecycle_manager(
+            {"application-db": adapter},
+            required_store_ids=("application-db", "application-db"),
+            ledger_directory=tmp_path / "duplicate-store",
+            digest_key_provider=key_provider,
+        )
 
 def test_https_adapter_rejects_http_200_pending_response():
     pending = FakeOpener(FakeResponse(b'{"confirmed":false,"status":"PENDING","deleted_count":0}', 200))
