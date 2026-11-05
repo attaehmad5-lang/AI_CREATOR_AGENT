@@ -97,8 +97,11 @@ privacy_lifecycle = create_privacy_lifecycle_manager(
     stores={
         "application-db": database_adapter,  # SQLitePrivacyDataAdapter
         "vendor-provider": provider_api,     # HTTPS / external adapter
-        # Add cache, object-store, asset, backup and analytics adapters.
+        # Add cache, object-store, generation-assets, backup and analytics adapters.
     },
+    # Maintain this required inventory separately in protected deployment config.
+    # Add every configured store ID here as well as to the stores mapping above.
+    required_store_ids=("application-db", "vendor-provider"),
     ledger_directory="/var/lib/ai-creator/privacy-ledgers",
     digest_key_provider=privacy_hmac_key,
 )
@@ -109,9 +112,12 @@ privacy_lifecycle = create_privacy_lifecycle_manager(
 # already protected by the same durable-idempotency contract.
 assert privacy_lifecycle.require_durable_idempotency is True
 assert privacy_lifecycle.durable_idempotency_ready is True
+assert privacy_lifecycle.inventory_verified is True
 
-# In production, require encrypted persistent state and a non-empty inventory
-# in which every adapter has durable idempotency. Startup fails closed otherwise.
+# The separately declared inventory must include every real database, cache,
+# object store, backup, asset, analytics and provider surface. The factory rejects
+# missing/extra adapters; the manager rejects late unlisted registrations.
+# Production startup fails closed unless both inventory and idempotency are verified.
 provider_service = ProviderService(
     connection_manager,
     privacy_lifecycle_manager=privacy_lifecycle,
@@ -201,6 +207,7 @@ privacy_lifecycle = create_privacy_lifecycle_manager(
         "generation-assets": generation_asset_privacy,
         "vendor-provider": provider_api,
     },
+    required_store_ids=("application-db", "generation-assets", "vendor-provider"),
     ledger_directory="/var/lib/ai-creator/privacy-ledgers",
     digest_key_provider=privacy_hmac_key,
 )
