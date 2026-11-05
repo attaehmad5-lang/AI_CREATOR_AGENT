@@ -256,8 +256,9 @@ class ProviderService:
         after_sequence: int = 0,
         limit: int = 100,
         tenant_id: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
-        """Read verified audit events; tenant-scoped deployments cannot read all tenants."""
+        """Read verified audit events; tenant deployments require project membership."""
         if self.audit_log_manager is None:
             return {"status": "AUDIT_LOG_MANAGER_UNAVAILABLE", "events": []}
         authorization = self._authorize_operation(principal_id, "provider.read")
@@ -266,11 +267,13 @@ class ProviderService:
         if self.tenant_isolation_manager is not None:
             if not isinstance(tenant_id, str) or not tenant_id.strip():
                 return {"status": "TENANT_CONTEXT_REQUIRED", "events": []}
+            if not isinstance(project_id, str) or not project_id.strip():
+                return {"status": "PROJECT_CONTEXT_REQUIRED", "events": []}
             if not isinstance(principal_id, str) or not principal_id.strip():
                 return {"status": "AUTHENTICATED_PRINCIPAL_REQUIRED", "events": []}
             try:
                 check = self.tenant_isolation_manager.authorize_project(
-                    tenant_id, self._audit_read_project_id, principal_id
+                    tenant_id, project_id, principal_id
                 )
             except Exception:
                 return {"status": "TENANT_ISOLATION_CHECK_FAILED", "events": []}
@@ -278,7 +281,8 @@ class ProviderService:
                 return {"status": "TENANT_ISOLATION_DENIED", "events": []}
         try:
             result = self.audit_log_manager.read_events(
-                after_sequence=after_sequence, limit=limit, tenant_id=tenant_id
+                after_sequence=after_sequence, limit=limit,
+                tenant_id=tenant_id, project_id=project_id,
             )
         except Exception:
             return {"status": "AUDIT_LOG_READ_FAILED", "events": []}
