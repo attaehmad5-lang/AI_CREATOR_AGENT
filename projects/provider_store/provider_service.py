@@ -1573,11 +1573,12 @@ class ProviderService:
                         "approval_granted": False,
                         "approval_operation": "billing.approve",
                     },
+                    trace_context=trace_context,
                 )
-                return {"allowed": False, "status": "BILLING_APPROVAL_AUTHORIZATION_REQUIRED"}
+                return {"allowed": False, "status": "BILLING_APPROVAL_AUTHORIZATION_REQUIRED", **trace_fields}
         rejection = self._sensitive_input_rejection({"route_options": route_options})
         if rejection is not None:
-            return {"allowed": False, **rejection}
+            return {"allowed": False, **rejection, **trace_fields}
         category = route_options.get("category")
         project_id = route_options.get("project_id")
         tenant_id = route_options.get("tenant_id")
@@ -1600,7 +1601,7 @@ class ProviderService:
             trace_context=trace_context,
         )
         if audit_error is not None:
-            return {"allowed": False, "status": "AUDIT_LOG_WRITE_FAILED", "audit": audit_error}
+            return {"allowed": False, "status": "AUDIT_LOG_WRITE_FAILED", "audit": audit_error, **trace_fields}
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
@@ -1622,6 +1623,7 @@ class ProviderService:
             outcome="ALLOWED" if result.get("allowed") is True else "DENIED",
             status_code=self._safe_error_code(
                 result.get("status"), "ROUTE_DECISION_RECORDED"
+                trace_context=trace_context,
             ),
             actor_principal_id=audit_actor if isinstance(audit_actor, str) else None,
             tenant_id=tenant_id if isinstance(tenant_id, str) else None,
