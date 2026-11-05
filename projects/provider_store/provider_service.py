@@ -1717,7 +1717,7 @@ class ProviderService:
         *,
         category: str,
         project_id: str,
-        request_id: str,
+        request_id: str | None = None,
         estimated_cost: float,
         adapter: Any,
         modality: str,
@@ -2367,6 +2367,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                **trace_fields,
                 "reservations_retained": True,
                 "error_type": type(exc).__name__,
                 "provider_error": provider_error,
@@ -2394,6 +2395,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                **trace_fields,
                 "reservations_retained": True,
             }
         if adapter_result["started"] is False:
@@ -2425,6 +2427,7 @@ class ProviderService:
                     "executed": False,
                     "provider": provider_id,
                     "request_id": request_id,
+                **trace_fields,
                     "reservations_retained": True,
                 }
             execution_audit = self._append_provider_audit_event(
@@ -2445,6 +2448,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                **trace_fields,
                 "release": released,
             }
 
