@@ -181,6 +181,7 @@ class GenerationAssetPrivacyAdapter:
                 record_count = 0
                 scoped_count = 0
                 unscoped_count = 0
+                untracked_planned_count = 0
                 retention_ready = 0
                 retention_missing = 0
                 for path, collection in specs:
@@ -189,9 +190,16 @@ class GenerationAssetPrivacyAdapter:
                     for row in rows:
                         try:
                             self._scope(row, document)
-                            for field in (("file_path",) if collection == "assets" else ("output_file",)):
-                                if field in row:
-                                    self._resolve_asset_path(row[field])
+                            actual_field = "file_path" if collection == "assets" else "output_file"
+                            actual_paths = set()
+                            if actual_field in row:
+                                actual = self._resolve_asset_path(row[actual_field])
+                                if actual is not None:
+                                    actual_paths.add(actual)
+                            if "planned_output_path" in row:
+                                planned = self._resolve_asset_path(row["planned_output_path"])
+                                if planned is not None and planned.exists() and planned not in actual_paths:
+                                    untracked_planned_count += 1
                             scoped_count += 1
                             expiry = row.get("expires_at", document.get("expires_at", _MISSING))
                             if expiry is _MISSING:
@@ -201,13 +209,15 @@ class GenerationAssetPrivacyAdapter:
                                 retention_ready += 1
                         except Exception:
                             unscoped_count += 1
-                status = "ASSET_PRIVACY_READY" if unscoped_count == 0 else "ASSET_PRIVACY_MIGRATION_REQUIRED"
+                ready = unscoped_count == 0 and untracked_planned_count == 0
+                status = "ASSET_PRIVACY_READY" if ready else "ASSET_PRIVACY_MIGRATION_REQUIRED"
                 return {
                     "status": status,
                     "document_count": len(specs),
                     "record_count": record_count,
                     "scoped_count": scoped_count,
                     "unscoped_count": unscoped_count,
+                    "untracked_planned_count": untracked_planned_count,
                     "retention_ready_count": retention_ready,
                     "retention_missing_expiry_count": retention_missing,
                 }
