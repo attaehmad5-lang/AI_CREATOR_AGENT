@@ -2,6 +2,9 @@ import json
 import os
 from datetime import datetime
 
+from projects.generation.providers.atomic_output import atomic_write_bytes
+from projects.generation.privacy_asset_adapter import copy_generation_privacy_scope
+
 INPUT_FILE = "projects/generation/asset_manifest.json"
 OUTPUT_FILE = "projects/generation/generation_state.json"
 
@@ -12,35 +15,30 @@ states = []
 
 for asset in data["assets"]:
 
-    states.append({
+    state = {
         "asset_id": asset["asset_id"],
         "job_id": asset["job_id"],
         "scene": asset["scene"],
         "media_type": asset["media_type"],
         "provider": asset["provider"],
-
         "state": "QUEUED",
-
         "previous_state": None,
-
         "attempts": 0,
         "max_attempts": asset["max_attempts"],
-
         "progress": 0,
-
         "error": None,
-
         "output_file": None,
-
+        "planned_output_path": asset.get("planned_output_path"),
         "state_history": [
             {
                 "state": "QUEUED",
                 "timestamp": datetime.now().isoformat()
             }
         ],
-
         "updated_at": datetime.now().isoformat()
-    })
+    }
+    state.update(copy_generation_privacy_scope(data, asset))
+    states.append(state)
 
 output = {
     "project": data["project"],
@@ -65,14 +63,17 @@ output = {
     "retrying": 0,
 
     "states": states,
-
     "created_at": datetime.now().isoformat()
 }
 
-os.makedirs("projects/generation", exist_ok=True)
+output.update(copy_generation_privacy_scope(data))
 
-with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-    json.dump(output, f, indent=4, ensure_ascii=False)
+os.makedirs("projects/generation", exist_ok=True)
+atomic_write_bytes(
+    OUTPUT_FILE,
+    json.dumps(output, indent=4, ensure_ascii=False, allow_nan=False).encode("utf-8"),
+    max_bytes=16 * 1024 * 1024,
+)
 
 print("===================================")
 print("   GENERATION STATE MANAGER")

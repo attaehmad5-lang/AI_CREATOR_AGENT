@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from .encrypted_state_store import EncryptedJSONStateStore
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .safe_numbers import finite_number
 
@@ -31,13 +32,33 @@ class ProviderProjectPolicyManager:
         "require_verified_connection",
     }
 
-    def __init__(self, path: str | os.PathLike[str] | None = None) -> None:
+    def __init__(
+        self,
+        path: str | os.PathLike[str] | None = None,
+        *,
+        state_encryption_key_provider: Any = None,
+        state_encryption_context: str = "provider-project-policy-v1",
+        migrate_legacy_plaintext_state: bool = False,
+    ) -> None:
+        if state_encryption_key_provider is None and migrate_legacy_plaintext_state:
+            raise ValueError("legacy state migration requires an encryption key provider")
         self.path = Path(path) if path is not None else PROJECT_POLICY_PATH
         self.lock_path = self.path.with_name(self.path.name + ".lock")
+        self.state_store = (
+            EncryptedJSONStateStore(
+                self.path,
+                key_provider=state_encryption_key_provider,
+                context=state_encryption_context,
+                migrate_legacy_plaintext=migrate_legacy_plaintext_state,
+            )
+            if state_encryption_key_provider is not None else None
+        )
         self._lock = threading.RLock()
         with interprocess_file_lock(self.lock_path):
-            self.data = self._load(self.path)
-        self._validate_document(self.data)
+            self.data = self._load_current()
+            self._validate_document(self.data)
+            if self.state_store is not None and self.state_store.migration_required:
+                self._save_unlocked()
 
     @staticmethod
     def _load(path: Path | None = None) -> dict[str, Any]:
@@ -56,6 +77,8 @@ class ProviderProjectPolicyManager:
         return data
 
     def _load_current(self) -> dict[str, Any]:
+        if self.state_store is not None:
+            return self.state_store.read({"version": "1.0", "projects": {}})
         return self._load(self.path)
 
     @classmethod
@@ -121,6 +144,9 @@ class ProviderProjectPolicyManager:
 
     def _save_unlocked(self) -> None:
         self._validate_document(self.data)
+        if self.state_store is not None:
+            self.state_store.write(self.data)
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(prefix=self.path.name + ".", suffix=".tmp", dir=str(self.path.parent))
         try:

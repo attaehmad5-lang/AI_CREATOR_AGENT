@@ -372,6 +372,86 @@ class ProviderJobManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "scheduler state"):
             ProviderJobManager(self.path)
 
+    def test_retention_purge_removes_only_expired_terminal_jobs_in_selected_project(self):
+        self.submit("old-job")
+        old_claim = self.manager.claim_next(worker_id="worker-1")
+        self.manager.complete(
+            job_id="old-job", worker_id="worker-1",
+            lease_token=old_claim["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+        self.now[0] += timedelta(days=10)
+        self.manager.submit(
+            job_id="new-job", project_id="film", provider_id="image",
+            payload_ref="payload:new-job",
+        )
+        self.manager.submit(
+            job_id="other-project", project_id="other-film", provider_id="image",
+            payload_ref="payload:other-project",
+        )
+        self.manager.cancel(job_id="other-project")
+        self.manager.data["jobs"]["old-job"]["completed_at"] = (
+            self.now[0] - timedelta(days=9)
+        ).isoformat()
+        self.manager._save()
+
+        result = self.manager.purge_terminal_jobs_before(
+            project_id="film", cutoff=self.now[0] - timedelta(days=5)
+        )
+
+        self.assertEqual(result["status"], "JOB_RETENTION_PURGED")
+        self.assertEqual(result["purged_count"], 1)
+        self.assertEqual(self.manager.poll(job_id="old-job")["status"], "JOB_NOT_FOUND")
+        self.assertEqual(self.manager.poll(job_id="new-job")["status"], "JOB_STATUS")
+        self.assertEqual(self.manager.poll(job_id="other-project")["status"], "JOB_STATUS")
+
+    def test_unscoped_retention_purge_never_deletes_tenant_owned_jobs(self):
+        self.manager.submit(
+            job_id="tenant-job", project_id="film", provider_id="image",
+            payload_ref="payload:tenant-job", tenant_id="tenant-01",
+        )
+        claimed = self.manager.claim_next(worker_id="worker-tenant")
+        self.manager.complete(
+            job_id="tenant-job", worker_id="worker-tenant",
+            lease_token=claimed["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+        result = self.manager.purge_terminal_jobs_before(
+            project_id="film", cutoff=self.now[0] + timedelta(days=1)
+        )
+        self.assertEqual(result["purged_count"], 0)
+        self.assertEqual(
+            self.manager.poll(job_id="tenant-job", tenant_id="tenant-01")["status"],
+            "JOB_STATUS",
+        )
+
+    def test_retention_purge_preserves_running_jobs_and_invalid_completion_timestamps(self):
+        self.submit("running-job")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.submit("bad-terminal")
+        self.manager.cancel(job_id="bad-terminal")
+        self.manager.data["jobs"]["bad-terminal"]["completed_at"] = "not-a-timestamp"
+        self.manager._save()
+
+        result = self.manager.purge_terminal_jobs_before(
+            project_id="film", cutoff=self.now[0] + timedelta(days=1)
+        )
+
+        self.assertEqual(result["purged_count"], 0)
+        self.assertEqual(result["skipped_invalid_timestamps"], 1)
+        self.assertEqual(self.manager.poll(job_id="running-job")["job"]["status"], "RUNNING")
+        self.assertEqual(self.manager.poll(job_id="bad-terminal")["job"]["status"], "CANCELLED")
+
+    def test_retention_purge_requires_timezone_aware_cutoff_and_valid_scope(self):
+        bad_cutoff = self.manager.purge_terminal_jobs_before(
+            project_id="film", cutoff=datetime(2026, 10, 16, 12)
+        )
+        self.assertEqual(bad_cutoff["status"], "INVALID_RETENTION_CUTOFF")
+        bad_project = self.manager.purge_terminal_jobs_before(
+            project_id="../film", cutoff=self.now[0]
+        )
+        self.assertEqual(bad_project["status"], "INVALID_PROJECT_ID")
+
     def test_job_lifecycle_poll_and_result_reference(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
@@ -526,6 +606,86 @@ class ProviderJobManagerTests(unittest.TestCase):
         )["status"], "INVALID_JOB_ID")
         self.assertEqual(self.manager.claim_next(worker_id="bad worker")["status"], "INVALID_WORKER_ID")
         self.assertEqual(self.manager.poll(job_id="missing")["status"], "JOB_NOT_FOUND")
+
+
+
+
+    def test_subject_reference_is_validated_and_stored_without_raw_identity(self):
+        result = self.manager.submit(
+            job_id="job-subject", project_id="film", provider_id="image",
+            payload_ref="payload:subject", subject_ref="subject-ref-123",
+        )
+        self.assertTrue(result["accepted"])
+        persisted = self.path.read_text(encoding="utf-8")
+        self.assertIn("subject-ref-123", persisted)
+        self.assertNotIn("person@example.test", persisted)
+        invalid = self.manager.submit(
+            job_id="job-email", project_id="film", provider_id="image",
+            payload_ref="payload:email", subject_ref="person@example.test",
+        )
+        self.assertEqual(invalid["status"], "INVALID_SUBJECT_REFERENCE")
+
+
+    def test_subject_job_deletion_removes_only_exact_project_tenant_scope(self):
+        # Three distinct queued jobs are needed to prove cross-tenant isolation.
+        # The shared fixture intentionally has capacity two for backpressure tests.
+        manager = ProviderJobManager(
+            self.path, max_queue_size=3, max_concurrent=1,
+            lease_seconds=10, max_attempts=2,
+            clock=lambda: self.now[0],
+        )
+        self.assertTrue(manager.submit(
+            job_id="target-job", project_id="film", provider_id="image",
+            payload_ref="payload:target", tenant_id="tenant-a", subject_ref="subject-ref-123",
+        )["accepted"])
+        self.assertTrue(manager.submit(
+            job_id="other-subject", project_id="film", provider_id="image",
+            payload_ref="payload:other", tenant_id="tenant-a", subject_ref="subject-ref-other",
+        )["accepted"])
+        self.assertTrue(manager.submit(
+            job_id="other-tenant", project_id="film", provider_id="image",
+            payload_ref="payload:tenant", tenant_id="tenant-b", subject_ref="subject-ref-123",
+        )["accepted"])
+        self.assertEqual(manager.poll(job_id="other-tenant", tenant_id="tenant-b")["status"], "JOB_STATUS")
+        deleted = manager.delete_subject_jobs(
+            subject_ref="subject-ref-123", project_id="film", tenant_id="tenant-a"
+        )
+        self.assertEqual(deleted, {"confirmed": True, "status": "DELETED", "deleted_count": 1})
+        self.assertEqual(manager.poll(job_id="target-job", tenant_id="tenant-a")["status"], "JOB_NOT_FOUND")
+        self.assertEqual(manager.poll(job_id="other-subject", tenant_id="tenant-a")["status"], "JOB_STATUS")
+        self.assertEqual(manager.poll(job_id="other-tenant", tenant_id="tenant-b")["status"], "JOB_STATUS")
+
+
+    def test_subject_job_deletion_waits_for_running_worker_cancellation(self):
+        self.manager.submit(
+            job_id="running-subject", project_id="film", provider_id="image",
+            payload_ref="payload:running", tenant_id="tenant-a", subject_ref="subject-ref-123",
+        )
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        pending = self.manager.delete_subject_jobs(
+            subject_ref="subject-ref-123", project_id="film", tenant_id="tenant-a"
+        )
+        self.assertEqual(pending, {"confirmed": False, "status": "PENDING", "deleted_count": 0})
+        self.assertTrue(self.manager.data["jobs"]["running-subject"]["cancel_requested"])
+        completed = self.manager.complete(
+            job_id="running-subject", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"], success=True, result_ref="asset:discarded",
+        )
+        self.assertEqual(completed["job"]["status"], "CANCELLED")
+        retry = self.manager.delete_subject_jobs(
+            subject_ref="subject-ref-123", project_id="film", tenant_id="tenant-a"
+        )
+        self.assertEqual(retry, {"confirmed": True, "status": "DELETED", "deleted_count": 1})
+
+
+    def test_subject_job_deletion_rejects_invalid_or_email_identifiers(self):
+        for invalid in ("person@example.test", "123456789", "bad id"):
+            result = self.manager.delete_subject_jobs(
+                subject_ref=invalid, project_id="film", tenant_id=None
+            )
+            self.assertFalse(result["confirmed"])
+            self.assertEqual(result["status"], "FAILED")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 import tempfile
+from datetime import datetime, timedelta, timezone
 import unittest
 from pathlib import Path
 
@@ -24,6 +25,11 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.provider_tenant_isolation import ProviderTenantIsolationManager
+from projects.provider_store.privacy_data_lifecycle import (
+    DURABLE_PRIVACY_ADAPTER_CAPABILITY,
+    PrivacyDataLifecycleManager,
+)
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 from projects.generation.providers.pollinations_provider import PollinationsProviderError
@@ -66,6 +72,185 @@ class ProviderServiceTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_production_mode_requires_a_registered_privacy_lifecycle_store(self):
+        with self.assertRaisesRegex(ValueError, "privacy_lifecycle_manager must have at least one registered store"):
+            ProviderService(self.connections, require_privacy_lifecycle=True)
+
+        empty_lifecycle = PrivacyDataLifecycleManager()
+        with self.assertRaisesRegex(ValueError, "privacy_lifecycle_manager must have at least one registered store"):
+            ProviderService(
+                self.connections,
+                privacy_lifecycle_manager=empty_lifecycle,
+                require_privacy_lifecycle=True,
+            )
+
+        class Store:
+            def delete_subject_data(self, **kwargs):
+                return {"confirmed": True, "status": "ALREADY_ABSENT", "deleted_count": 0}
+
+            def purge_expired_data(self, **kwargs):
+                return {"confirmed": True, "status": "ALREADY_EMPTY", "deleted_count": 0}
+
+        unprotected_lifecycle = PrivacyDataLifecycleManager({"application-db": Store()})
+        with self.assertRaisesRegex(ValueError, "must enforce durable idempotency"):
+            ProviderService(
+                self.connections,
+                privacy_lifecycle_manager=unprotected_lifecycle,
+                require_privacy_lifecycle=True,
+            )
+
+        class DurableStore(Store):
+            _privacy_durable_idempotency_capability = DURABLE_PRIVACY_ADAPTER_CAPABILITY
+
+        undeclared_inventory = PrivacyDataLifecycleManager(
+            {"application-db": DurableStore()}, require_durable_idempotency=True
+        )
+        with self.assertRaisesRegex(ValueError, "declared complete store inventory"):
+            ProviderService(
+                self.connections,
+                privacy_lifecycle_manager=undeclared_inventory,
+                require_privacy_lifecycle=True,
+            )
+
+        lifecycle = PrivacyDataLifecycleManager(
+            {"application-db": DurableStore()},
+            require_durable_idempotency=True,
+            required_store_ids=("application-db",),
+        )
+        service = ProviderService(
+            self.connections,
+            privacy_lifecycle_manager=lifecycle,
+            require_privacy_lifecycle=True,
+        )
+        status = service.get_privacy_lifecycle_status()
+        self.assertEqual(status["status"], "PRIVACY_LIFECYCLE_READY")
+        self.assertTrue(status["durable_idempotency_required"])
+        self.assertTrue(status["durable_idempotency_ready"])
+        self.assertTrue(status["store_inventory_required"])
+        self.assertTrue(status["store_inventory_verified"])
+        self.assertEqual(status["required_store_count"], 1)
+
+    def test_require_privacy_lifecycle_flag_must_be_boolean(self):
+        with self.assertRaisesRegex(ValueError, "require_privacy_lifecycle must be boolean"):
+            ProviderService(self.connections, require_privacy_lifecycle=1)
+
+    def test_privacy_storage_status_reports_unencrypted_state_without_exposing_paths(self):
+        service = ProviderService(self.connections, health_manager=self.health)
+
+        result = service.get_privacy_storage_status()
+
+        self.assertEqual(result["status"], "ENCRYPTED_STORAGE_NOT_REQUIRED")
+        self.assertFalse(result["managers"]["connection_manager"])
+        self.assertFalse(result["managers"]["health_manager"])
+        self.assertNotIn(str(self.state_path), repr(result))
+
+    def test_production_mode_rejects_unencrypted_persistent_provider_managers(self):
+        with self.assertRaisesRegex(ValueError, "connection_manager must use deployment-key-encrypted"):
+            ProviderService(
+                self.connections,
+                health_manager=self.health,
+                require_encrypted_state=True,
+            )
+
+    def test_production_mode_rejects_unavailable_or_invalid_kms_key(self):
+        encrypted_state_path = self.root / "unavailable-kms-connections.json"
+        def unavailable_key_provider(context):
+            raise TimeoutError("KMS endpoint details must not escape")
+
+        connections = ConnectionManager(
+            self.catalog_path,
+            encrypted_state_path,
+            state_encryption_key_provider=unavailable_key_provider,
+        )
+
+        with self.assertRaisesRegex(ValueError, "connection_manager must use deployment-key-encrypted"):
+            ProviderService(connections, require_encrypted_state=True)
+
+        self.assertFalse(encrypted_state_path.exists())
+
+    def test_production_mode_rejects_unencrypted_cost_ledger_and_project_policy_path(self):
+        encrypted_connections = ConnectionManager(
+            self.catalog_path,
+            self.root / "strict-encrypted-connection-state.json",
+            state_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+            catalog_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+            migrate_legacy_plaintext_catalog=True,
+        )
+        with self.assertRaisesRegex(ValueError, "cost_policy must use deployment-key-encrypted"):
+            ProviderService(
+                encrypted_connections,
+                cost_policy=self.cost,
+                require_encrypted_state=True,
+            )
+
+        project_policy = ProviderProjectPolicyManager(
+            self.root / "unencrypted-project-policies.json"
+        )
+        with self.assertRaisesRegex(ValueError, "project_policy_manager must use deployment-key-encrypted"):
+            ProviderService(
+                encrypted_connections,
+                project_policy_manager=project_policy,
+                require_encrypted_state=True,
+            )
+
+    def test_production_mode_rejects_duck_typed_non_encrypted_state_store(self):
+        class LookalikeStateStore:
+            key_provider = staticmethod(lambda context: b"0123456789abcdef0123456789abcdef")
+            context = "pretend-encrypted"
+
+            def read(self, default):
+                return default
+
+            def write(self, value):
+                return None
+
+        class LookalikeConnectionManager:
+            state_path = self.root / "lookalike-state.json"
+            state_store = LookalikeStateStore()
+
+            def verify_connectivity(self, *args, **kwargs):
+                return {"verified": True}
+
+        with self.assertRaisesRegex(ValueError, "connection_manager must use deployment-key-encrypted"):
+            ProviderService(
+                LookalikeConnectionManager(),
+                require_encrypted_state=True,
+            )
+
+    def test_production_mode_rejects_plaintext_catalog_even_when_state_is_encrypted(self):
+        encrypted_state_only = ConnectionManager(
+            self.catalog_path,
+            self.root / "state-only-encrypted.json",
+            state_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
+        with self.assertRaisesRegex(ValueError, "connection_manager must use deployment-key-encrypted"):
+            ProviderService(
+                encrypted_state_only,
+                require_encrypted_state=True,
+            )
+
+    def test_production_mode_accepts_deployment_key_encrypted_connection_state(self):
+        encrypted_state_path = self.root / "encrypted-connections.json"
+        encrypted_connections = ConnectionManager(
+            self.catalog_path,
+            encrypted_state_path,
+            state_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+            catalog_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+            migrate_legacy_plaintext_catalog=True,
+        )
+
+        service = ProviderService(
+            encrypted_connections,
+            require_encrypted_state=True,
+        )
+        result = service.get_privacy_storage_status()
+
+        self.assertEqual(result["status"], "ENCRYPTED_STORAGE_READY")
+        self.assertTrue(result["required"])
+        self.assertEqual(result["configured_persistent_managers"], 1)
+        self.assertEqual(result["encrypted_persistent_managers"], 1)
+        self.assertTrue(result["managers"]["connection_manager"])
+
     def test_project_policy_simulation_requires_admin_and_never_persists_candidate(self):
         policy_path = self.root / "project-policies.json"
         policy_manager = ProviderProjectPolicyManager(policy_path)
@@ -105,6 +290,26 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertEqual(operator_result["status"], "AUTHORIZATION_DENIED")
         self.assertFalse(operator_result["persisted"])
+
+    def test_authorization_manager_credentials_are_withheld_from_service_results(self):
+        token = "Bearer " + ("u" * 40)
+
+        class AuthorizationStub:
+            def authorize(self, principal_id, operation, **kwargs):
+                return {
+                    "allowed": False,
+                    "status": "AUTHORIZATION_DENIED",
+                    "diagnostics": {"access_token": token},
+                }
+
+        service = ProviderService(
+            self.connections, authorization_manager=AuthorizationStub()
+        )
+        result = service._authorize_operation("principal-1", "provider.read")
+
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertNotIn(token, repr(result))
 
     def test_project_policy_simulation_fails_closed_without_authorization_manager(self):
         result = ProviderService(self.connections).simulate_project_provider_policy(
@@ -306,6 +511,108 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "NETWORK_ERROR")
         self.assertNotIn("private endpoint and token", repr(result))
         self.assertEqual(self.health.data["providers"]["image"]["status"], "DEGRADED")
+
+    def test_output_validator_response_with_credentials_is_not_returned(self):
+        secret = "Bearer " + ("o" * 40)
+
+        class OutputValidator:
+            def validate_file(self, path, *, modality):
+                return {
+                    "valid": True,
+                    "status": "OUTPUT_VALID",
+                    "metadata": {"authorization": secret},
+                }
+
+        service = ProviderService(
+            self.connections, output_validator=OutputValidator()
+        )
+        result = service.validate_output("output.png", modality="image")
+
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+    def test_provider_connection_response_with_credentials_is_not_returned(self):
+        secret = "ghp_" + ("x" * 36)
+
+        class ConnectionStub:
+            def verify_connectivity(self, provider_id, probe, **kwargs):
+                return {
+                    "status": "CONNECTED",
+                    "verified": True,
+                    "debug": {"api_key": secret},
+                }
+
+        service = ProviderService(ConnectionStub())
+        result = service.verify_provider("image", lambda *_args, **_kwargs: True)
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+    def test_retry_policy_input_with_credentials_is_blocked_before_decision(self):
+        token = "Bearer " + ("q" * 40)
+
+        class RetryStub:
+            def __init__(self):
+                self.calls = 0
+
+            def decide(self, **failure):
+                self.calls += 1
+                return type("Decision", (), {
+                    "retry": True, "attempt": 1,
+                    "delay_seconds": 1.0, "reason": "RETRY_ALLOWED",
+                })()
+
+        retry = RetryStub()
+        service = ProviderService(self.connections, retry_policy=retry)
+        result = service.retry_decision(error=token)
+
+        self.assertFalse(result["retry"])
+        self.assertEqual(result["reason"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(retry.calls, 0)
+        self.assertNotIn(token, repr(result))
+
+    def test_retry_policy_response_credentials_are_withheld_without_losing_retry_decision(self):
+        token = "Bearer " + ("s" * 40)
+
+        class RetryStub:
+            def decide(self, **failure):
+                return type("Decision", (), {
+                    "retry": True, "attempt": token,
+                    "delay_seconds": token, "reason": token,
+                })()
+
+        service = ProviderService(
+            self.connections, retry_policy=RetryStub()
+        )
+        result = service.retry_decision(error="HTTP_503")
+
+        self.assertTrue(result["retry"])
+        self.assertEqual(result["reason"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertEqual(result["attempt"], 0)
+        self.assertEqual(result["delay_seconds"], 0.0)
+        self.assertNotIn(token, repr(result))
+
+    def test_retry_policy_non_string_reason_is_not_returned(self):
+        secret = "Bearer " + ("x" * 40)
+
+        class RetryStub:
+            def decide(self, **failure):
+                return type("Decision", (), {
+                    "retry": True,
+                    "attempt": 1,
+                    "delay_seconds": 0.25,
+                    "reason": {"api_key": secret},
+                })()
+
+        service = ProviderService(self.connections, retry_policy=RetryStub())
+        result = service.retry_decision(error="HTTP_503")
+
+        self.assertTrue(result["retry"])
+        self.assertEqual(result["reason"], "INVALID_RETRY_RESPONSE")
+        self.assertNotIn(secret, repr(result))
+
 
     def test_output_validation_and_retry_decision_are_delegated(self):
         path = self.root / "script.txt"
@@ -1269,6 +1576,687 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(missing_identity["authorization"]["status"], "INVALID_PRINCIPAL_ID")
         self.assertEqual(called, [])
 
+    def test_sensitive_request_identifier_is_blocked_before_provider_routing(self):
+        token = "Bearer " + ("i" * 40)
+
+        class RoutingStub:
+            def __init__(self):
+                self.calls = []
+
+            def route(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        router = RoutingStub()
+        service = ProviderService(self.connections, routing_manager=router)
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id=token,
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: {"started": False},
+            modality="image",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(router.calls, [])
+        self.assertNotIn(token, repr(result))
+
+    def test_sensitive_job_id_is_blocked_before_poll_and_cancel_managers(self):
+        token = "ghp_" + ("p" * 36)
+
+        class JobStub:
+            def __init__(self):
+                self.poll_calls = []
+                self.cancel_calls = []
+
+            def submit(self, **kwargs):
+                return {"status": "SUBMITTED", "accepted": True}
+
+            def poll(self, **kwargs):
+                self.poll_calls.append(kwargs)
+                return {"status": "JOB_FOUND", "job": {"job_id": "safe-id"}}
+
+            def cancel(self, **kwargs):
+                self.cancel_calls.append(kwargs)
+                return {"status": "JOB_CANCELLED", "saved": True}
+
+        jobs = JobStub()
+        service = ProviderService(self.connections, job_manager=jobs)
+
+        polled = service.poll_job(job_id=token)
+        cancelled = service.cancel_job(job_id=token)
+
+        self.assertEqual(polled["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(cancelled["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(jobs.poll_calls, [])
+        self.assertEqual(jobs.cancel_calls, [])
+        self.assertNotIn(token, repr(polled))
+        self.assertNotIn(token, repr(cancelled))
+
+    def test_sensitive_principal_and_tenant_contexts_are_blocked_before_authority_managers(self):
+        token = "Bearer " + ("j" * 40)
+
+        class AuthorizationStub:
+            def __init__(self):
+                self.calls = []
+
+            def authorize(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                return {"allowed": True, "status": "AUTHORIZED"}
+
+        class TenantStub:
+            def __init__(self):
+                self.calls = []
+
+            def authorize_project(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                return {"allowed": True, "status": "TENANT_AUTHORIZED"}
+
+        auth = AuthorizationStub()
+        tenant = TenantStub()
+        service = ProviderService(
+            self.connections, authorization_manager=auth,
+            tenant_isolation_manager=tenant,
+        )
+
+        principal_result = service._authorize_operation(
+            token, "provider.read", provider_id="image"
+        )
+        tenant_result = service._authorize_tenant_project(
+            tenant_id=token, project_id="film", principal_id="principal-1"
+        )
+
+        self.assertEqual(principal_result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(tenant_result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(auth.calls, [])
+        self.assertEqual(tenant.calls, [])
+
+    def test_failed_degraded_mode_configuration_response_is_scanned_before_return(self):
+        class DegradedStub:
+            def configure(self, *args, **kwargs):
+                return {
+                    "status": "CONFIGURATION_REJECTED",
+                    "saved": False,
+                    "diagnostics": "Bearer " + ("q" * 40),
+                }
+
+            def evaluate(self, *args, **kwargs):
+                return {"status": "NOT_EVALUATED", "evaluated": False}
+
+            def get_state(self, *args, **kwargs):
+                return {"status": "OK", "state": {"mode": "NORMAL"}}
+
+        authorization = ProviderAuthorizationManager(self.root / "degraded-output-auth.json")
+        authorization.assign_role("degraded-admin", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            degraded_mode_manager=DegradedStub(),
+        )
+
+        result = service.configure_category_degraded_mode(
+            "image", principal_id="degraded-admin"
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["saved"])
+        self.assertNotIn("Bearer", repr(result))
+        self.assertNotIn("q" * 40, repr(result))
+
+    def test_failed_degraded_mode_evaluation_response_is_scanned_before_return(self):
+        secret = "sk-" + ("d" * 40)
+
+        class DegradedStub:
+            def configure(self, *args, **kwargs):
+                return {"status": "CONFIGURED", "saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                return {
+                    "status": "EVALUATION_FAILED",
+                    "evaluated": False,
+                    "diagnostics": secret,
+                }
+
+            def get_state(self, *args, **kwargs):
+                return {"status": "OK", "state": {"mode": "NORMAL"}}
+
+        authorization = ProviderAuthorizationManager(self.root / "degraded-eval-auth.json")
+        authorization.assign_role("degraded-admin", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            health_manager=self.health,
+            degraded_mode_manager=DegradedStub(),
+        )
+
+        result = service.evaluate_category_degraded_mode(
+            "image", ["image"], principal_id="degraded-admin"
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["evaluated"])
+        self.assertNotIn(secret, repr(result))
+
+    def test_failed_slo_configuration_response_is_scanned_before_return(self):
+        secret = "ghp_" + ("z" * 40)
+
+        class SLOStub:
+            def configure(self, *args, **kwargs):
+                return {
+                    "status": "CONFIGURATION_REJECTED",
+                    "saved": False,
+                    "metadata": {"token": secret},
+                }
+
+            def evaluate(self, *args, **kwargs):
+                return {"status": "NOT_EVALUATED"}
+
+            def record(self, *args, **kwargs):
+                return {"saved": True}
+
+        authorization = ProviderAuthorizationManager(self.root / "slo-output-auth.json")
+        authorization.assign_role("slo-admin", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            slo_manager=SLOStub(),
+        )
+
+        result = service.configure_service_level_objective(
+            "film-slo", provider_id="image", category="image",
+            availability_target=0.99, max_p95_latency_ms=1000,
+            principal_id="slo-admin",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["saved"])
+        self.assertNotIn(secret, repr(result))
+
+    def test_degraded_mode_configuration_scans_category_before_manager_call(self):
+        calls = []
+
+        class DegradedStub:
+            def configure(self, *args, **kwargs):
+                calls.append(kwargs)
+                return {"saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                return {"evaluated": True}
+
+            def get_state(self, *args, **kwargs):
+                return {"status": "OK", "state": {"mode": "NORMAL"}}
+
+        service = ProviderService(
+            self.connections, degraded_mode_manager=DegradedStub()
+        )
+        result = service.configure_category_degraded_mode(
+            "Bearer " + ("i" * 40)
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(calls, [])
+
+    def test_degraded_mode_evaluation_scans_provider_ids_before_health_calls(self):
+        calls = []
+
+        class HealthStub:
+            def record_result(self, *args, **kwargs):
+                return {"saved": True}
+
+            def is_eligible(self, *args, **kwargs):
+                calls.append(args)
+                return {"eligible": True}
+
+        class DegradedStub:
+            def configure(self, *args, **kwargs):
+                return {"saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                return {"evaluated": True}
+
+            def get_state(self, *args, **kwargs):
+                return {"status": "OK", "state": {"mode": "NORMAL"}}
+
+        service = ProviderService(
+            self.connections,
+            health_manager=HealthStub(),
+            degraded_mode_manager=DegradedStub(),
+        )
+        result = service.evaluate_category_degraded_mode(
+            "image", ["sk-" + ("i" * 40)]
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["evaluated"])
+        self.assertEqual(calls, [])
+
+    def test_slo_configuration_scans_slo_id_before_authorization_or_manager_call(self):
+        calls = []
+
+        class SLOStub:
+            def configure(self, *args, **kwargs):
+                calls.append(kwargs)
+                return {"saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                return {"status": "OK"}
+
+            def record(self, *args, **kwargs):
+                return {"saved": True}
+
+        service = ProviderService(self.connections, slo_manager=SLOStub())
+        result = service.configure_service_level_objective(
+            "ghp_" + ("i" * 40), provider_id="image", category="image",
+            availability_target=0.99, max_p95_latency_ms=1000,
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["saved"])
+        self.assertEqual(calls, [])
+
+    def test_slo_evaluation_scans_slo_id_before_authorization_or_manager_call(self):
+        calls = []
+
+        class SLOStub:
+            def configure(self, *args, **kwargs):
+                return {"saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                calls.append(args)
+                return {"status": "OK"}
+
+            def record(self, *args, **kwargs):
+                return {"saved": True}
+
+        service = ProviderService(self.connections, slo_manager=SLOStub())
+        result = service.evaluate_service_level_objective(
+            "Bearer " + ("i" * 40)
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertIsNone(result["evaluation"])
+        self.assertEqual(calls, [])
+
+    def test_sensitive_data_policy_is_enabled_by_default_for_direct_routing(self):
+        calls = []
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        secret = "Bearer " + ("x" * 40)
+        result = service.route_request(category="image", project_id="film", authorization=secret)
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(calls, [])
+        self.assertNotIn(secret, repr(result))
+
+    def test_default_service_policy_blocks_luhn_valid_payment_cards_before_routing(self):
+        calls = []
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls.append(kwargs)
+                return {"allowed": True, "provider": "image"}
+
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        card_number = "4111 1111 1111 1111"
+        result = service.route_request(
+            category="image", project_id="film", notes="billing card " + card_number
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["allowed"])
+        self.assertEqual(calls, [])
+        self.assertNotIn(card_number, repr(result))
+
+    def test_sensitive_data_policy_is_enabled_by_default_before_adapter(self):
+        calls = []
+        service = ProviderService(self.connections, routing_manager=type(
+            "RoutingStub", (), {"route": lambda self, **kwargs: {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}}
+        )())
+
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="default-sensitive-policy",
+            estimated_cost=0.0,
+            modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            adapter_options={"headers": {"Authorization": "Bearer " + ("z" * 40)}},
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
+
+    def test_sensitive_data_policy_blocks_credentials_in_routing_response(self):
+        secret = "sk-" + ("r" * 40)
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "provider": "image",
+                    "diagnostics": {"api_key": secret},
+                }
+
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        result = service.route_request(category="image", project_id="film")
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["allowed"])
+        self.assertNotIn(secret, repr(result))
+
+    def test_sensitive_data_policy_checks_entire_job_response_not_only_job_payload(self):
+        secret = "ghp_" + ("a" * 40)
+        result = ProviderService._sanitize_job_response(
+            {
+                "status": "JOB_COMPLETED",
+                "job": {"job_id": "job-1", "status": "completed"},
+                "diagnostics": {"access_token": secret},
+            },
+            SensitiveDataPolicy(),
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertIsNone(result["job"])
+        self.assertNotIn(secret, repr(result))
+
+    def test_webhook_verifier_response_is_scanned_before_return(self):
+        secret = "Bearer " + ("w" * 40)
+
+        class WebhookStub:
+            def verify(self, **kwargs):
+                return {
+                    "verified": True,
+                    "status": "WEBHOOK_VERIFIED",
+                    "metadata": {"authorization": secret},
+                }
+
+        service = ProviderService(self.connections, webhook_verifier=WebhookStub())
+        result = service.verify_webhook(
+            provider_id="image",
+            payload=b'{"event":"complete"}',
+            signature="sha256=" + ("0" * 64),
+            timestamp=1,
+            event_id="event-1",
+            secret="s" * 32,
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+    def test_execute_response_is_blocked_when_manager_returns_credential(self):
+        secret = "hf_" + ("q" * 40)
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "provider": "image",
+                    "billing_mode": "ZERO_COST",
+                }
+
+        class MetricsStub:
+            def record(self, **kwargs):
+                return {"status": "RECORDED", "metadata": {"access_token": secret}}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            metrics_manager=MetricsStub(),
+        )
+        service.finalize_started_request = lambda **kwargs: {"finalized": True}
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            request_id="outbound-sensitive-response",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: {
+                "started": True,
+                "success": False,
+                "actual_cost": 0.0,
+                "charge_outcome": "not_incurred",
+                "credit_outcome": "not_used",
+            },
+            modality="image",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertTrue(result["executed"])
+        self.assertTrue(result["accounting_finalized"])
+        self.assertNotIn(secret, repr(result))
+
+
+    def test_manual_provider_connection_response_is_scanned_before_return(self):
+        secret = "Bearer " + ("m" * 40)
+
+        class ConnectionStub:
+            def verify_connectivity(self, *args, **kwargs):
+                return {"status": "CONNECTED", "verified": True}
+
+            def verify_manual_connection(self, *args, **kwargs):
+                return {
+                    "status": "CONNECTED",
+                    "verified": True,
+                    "metadata": {"authorization": secret},
+                }
+
+        service = ProviderService(ConnectionStub())
+        result = service.verify_manual_provider(
+            "image", manual_session=object(), probe=lambda *_args, **_kwargs: True
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+    def test_slo_manager_response_is_scanned_before_return(self):
+        secret = "sk-" + ("s" * 40)
+        authorization = ProviderAuthorizationManager(self.root / "privacy-slo-auth.json")
+        authorization.assign_role("privacy-admin", "admin")
+
+        class SLOStub:
+            def record(self, **kwargs):
+                return {"status": "RECORDED"}
+
+            def configure(self, **kwargs):
+                return {"status": "CONFIGURED"}
+
+            def evaluate(self, slo_id):
+                return {
+                    "status": "SLO_EVALUATED",
+                    "evaluation": {"api_key": secret},
+                }
+
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            slo_manager=SLOStub(),
+        )
+        result = service.evaluate_service_level_objective(
+            "privacy-slo", principal_id="privacy-admin"
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertIsNone(result["evaluation"])
+        self.assertNotIn(secret, repr(result))
+
+
+    def test_usage_finalization_response_with_credentials_is_not_returned(self):
+        secret = "ghp_" + ("f" * 36)
+
+        class CostPolicyStub:
+            def reconcile_usage(self, **kwargs):
+                return {"status": "RECONCILED"}
+
+            def finalize_usage(self, **kwargs):
+                return {
+                    "status": "FINALIZED",
+                    "saved": True,
+                    "metadata": {"api_key": secret},
+                }
+
+        service = ProviderService(self.connections, cost_policy=CostPolicyStub())
+        result = service.finalize_started_request(
+            project_id="film",
+            provider_id="image",
+            request_id="privacy-finalize-response",
+            estimated_cost=0.0,
+            actual_cost=0.0,
+            success=True,
+            charge_outcome="not_incurred",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertTrue(result["finalized"])
+        self.assertNotIn(secret, repr(result))
+
+    def test_reservation_release_response_with_credentials_is_not_returned(self):
+        secret = "Bearer " + ("r" * 40)
+
+        class CostPolicyStub:
+            def reconcile_usage(self, **kwargs):
+                return {"status": "RECONCILED"}
+
+            def release_reservation(self, **kwargs):
+                return {
+                    "status": "RESERVATION_RELEASED",
+                    "metadata": {"authorization": secret},
+                }
+
+        service = ProviderService(self.connections, cost_policy=CostPolicyStub())
+        result = service.release_unstarted_request(
+            project_id="film",
+            provider_id="image",
+            request_id="privacy-release-response",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertTrue(result["released"])
+        self.assertNotIn(secret, repr(result))
+
+
+    def test_project_policy_simulation_blocks_sensitive_input_before_manager(self):
+        calls = []
+        authorization = ProviderAuthorizationManager(self.root / "privacy-policy-auth.json")
+        authorization.assign_role("policy-admin", "admin")
+
+        class PolicyManager:
+            def simulate_policy(self, project_id, candidate_policy, scenarios):
+                calls.append((project_id, candidate_policy, scenarios))
+                return {
+                    "status": "POLICY_SIMULATION_COMPLETED",
+                    "project_id": project_id,
+                    "persisted": False,
+                }
+
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            project_policy_manager=PolicyManager(),
+        )
+        secret = "sk-" + ("p" * 40)
+        result = service.simulate_project_provider_policy(
+            "film",
+            {"provider": "image", "api_key": secret},
+            [{"provider": "image", "allowed": True}],
+            principal_id="policy-admin",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["persisted"])
+        self.assertEqual(calls, [])
+        self.assertNotIn(secret, repr(result))
+
+    def test_provider_role_manager_response_is_scanned_before_return(self):
+        secret = "Bearer " + ("a" * 40)
+        authorization = ProviderAuthorizationManager(self.root / "privacy-role-auth.json")
+        authorization.assign_role("role-admin", "admin")
+        original_assign = authorization.assign_role
+
+        def contaminated_assign(target_principal_id, role, *, enabled=True):
+            result = original_assign(target_principal_id, role, enabled=enabled)
+            return {**result, "metadata": {"authorization": secret}}
+
+        authorization.assign_role = contaminated_assign
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+        )
+        result = service.assign_provider_role(
+            "role-target",
+            "creator",
+            actor_principal_id="role-admin",
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["saved"])
+        self.assertNotIn(secret, repr(result))
+
+
+    def test_authorization_manager_response_with_credential_is_not_exposed(self):
+        secret = "sk-" + ("z" * 40)
+
+        class AuthorizationStub:
+            def authorize(self, principal_id, operation):
+                return {
+                    "allowed": False,
+                    "status": "AUTHORIZATION_DENIED",
+                    "metadata": {"api_key": secret},
+                }
+
+        service = ProviderService(
+            self.connections,
+            authorization_manager=AuthorizationStub(),
+        )
+        result = service._authorize_operation(
+            "privacy-user", "provider.read", return_decision=True
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+
+    def test_claim_response_keeps_worker_token_but_never_exposes_lease_hash(self):
+        lease_token = "worker-lease-capability"
+        lease_hash = "private-lease-verifier-hash"
+
+        class JobManagerStub:
+            def submit(self, **kwargs):
+                return {"status": "SUBMITTED", "accepted": True}
+
+            def claim_next(self, *, worker_id):
+                return {
+                    "status": "CLAIMED",
+                    "job": {
+                        "job_id": "job-privacy-1",
+                        "lease_token": lease_token,
+                        "lease_token_hash": lease_hash,
+                    },
+                }
+
+        service = ProviderService(
+            self.connections,
+            job_manager=JobManagerStub(),
+        )
+        result = service.claim_next_job(worker_id="worker-privacy-1")
+
+        self.assertEqual(result["status"], "CLAIMED")
+        self.assertEqual(result["job"]["lease_token"], lease_token)
+        self.assertNotIn("lease_token_hash", result["job"])
+        self.assertNotIn(lease_hash, repr(result))
+
+
     def test_sensitive_credentials_are_blocked_before_routing_and_adapter(self):
         calls = {"route": 0, "adapter": 0}
 
@@ -1447,6 +2435,72 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(allowed["verified"])
         self.assertEqual(calls, ["image"])
 
+    def test_routing_manager_response_is_scanned_before_service_return(self):
+        secret = "Bearer " + ("r" * 40)
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "provider": "image",
+                    "debug": {"access_token": secret},
+                }
+
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        result = service.route_request(category="image", project_id="film")
+
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+    def test_webhook_verifier_response_is_scanned_before_service_return(self):
+        secret = "Bearer " + ("w" * 40)
+
+        class WebhookStub:
+            def verify(self, **kwargs):
+                return {
+                    "verified": True,
+                    "status": "WEBHOOK_VERIFIED",
+                    "metadata": {"access_token": secret},
+                }
+
+        service = ProviderService(self.connections, webhook_verifier=WebhookStub())
+        result = service.verify_webhook(
+            provider_id="video", payload=b'{"event":"done"}',
+            signature="sha256=" + "a" * 64, timestamp="1792152000",
+            event_id="event-sensitive", secret="webhook-test-secret-value",
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertNotIn(secret, repr(result))
+
+    def test_adapter_response_with_sensitive_data_is_blocked_without_releasing_reservations(self):
+        secret = "Bearer " + ("a" * 40)
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {
+                    "allowed": True, "provider": "image",
+                    "billing_mode": "ZERO_COST",
+                }
+
+        service = ProviderService(self.connections, routing_manager=RoutingStub())
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-adapter-response",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: {
+                "started": True, "success": False,
+                "actual_cost": 0.0, "charge_outcome": "not_incurred",
+                "provider_metadata": {"access_token": secret},
+            },
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(result["execution_outcome"], "UNKNOWN")
+        self.assertTrue(result["reservations_retained"])
+        self.assertNotIn(secret, repr(result))
+
     def test_webhook_verification_is_delegated_without_echoing_secret(self):
         class WebhookStub:
             def verify(self, **kwargs):
@@ -1473,6 +2527,73 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["verified"])
         self.assertEqual(result["status"], "WEBHOOK_VERIFIED")
         self.assertNotIn(secret, repr(result))
+
+    def test_inbound_webhook_payload_credentials_are_blocked_before_verifier(self):
+        calls = []
+
+        class WebhookStub:
+            def verify(self, **kwargs):
+                calls.append(kwargs)
+                return {"verified": True, "status": "WEBHOOK_VERIFIED"}
+
+        service = ProviderService(self.connections, webhook_verifier=WebhookStub())
+        token = "Bearer " + ("w" * 40)
+        result = service.verify_webhook(
+            provider_id="video",
+            payload=("{\"event\":\"done\",\"authorization\":\""+token+"\"}").encode("utf-8"),
+            signature="sha256=" + "a" * 64,
+            timestamp="1792152000",
+            event_id="event-credential-payload",
+            secret="webhook-test-secret-value",
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertEqual(calls, [])
+        self.assertNotIn(token, repr(result))
+
+    def test_oversized_webhook_payload_is_rejected_before_decode_or_verifier(self):
+        calls = []
+
+        class WebhookStub:
+            max_payload_bytes = 8
+
+            def verify(self, **kwargs):
+                calls.append(kwargs)
+                return {"verified": True, "status": "WEBHOOK_VERIFIED"}
+
+        service = ProviderService(self.connections, webhook_verifier=WebhookStub())
+        result = service.verify_webhook(
+            provider_id="video",
+            payload=b"x" * 9,
+            signature="sha256=" + "c" * 64,
+            timestamp="1792152000",
+            event_id="oversized-event",
+            secret="webhook-test-secret-value",
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "WEBHOOK_PAYLOAD_TOO_LARGE")
+        self.assertEqual(calls, [])
+
+    def test_inbound_webhook_payload_rejects_non_utf8_bytes_before_verifier(self):
+        calls = []
+
+        class WebhookStub:
+            def verify(self, **kwargs):
+                calls.append(kwargs)
+                return {"verified": True, "status": "WEBHOOK_VERIFIED"}
+
+        service = ProviderService(self.connections, webhook_verifier=WebhookStub())
+        result = service.verify_webhook(
+            provider_id="video", payload=b"\xff\xfe",
+            signature="sha256=" + "b" * 64, timestamp="1792152000",
+            event_id="event-binary-payload", secret="webhook-test-secret-value",
+        )
+
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["status"], "INVALID_WEBHOOK_PAYLOAD_ENCODING")
+        self.assertEqual(calls, [])
 
     def test_job_lease_renewal_facade_requires_authorized_principal(self):
         jobs = ProviderJobManager(self.root / "lease-renewal-jobs.json")
@@ -1608,6 +2729,86 @@ class ProviderServiceTests(unittest.TestCase):
             "SUCCEEDED",
         )
 
+
+    def test_job_retention_purge_requires_confirmation_and_admin_authorization(self):
+        jobs = ProviderJobManager(self.root / "job-retention-auth.json")
+        jobs.submit(
+            job_id="old-retention-job", project_id="film", provider_id="image",
+            payload_ref="payload:old-retention-job",
+        )
+        claimed = jobs.claim_next(worker_id="worker-retention")
+        jobs.complete(
+            job_id="old-retention-job", worker_id="worker-retention",
+            lease_token=claimed["job"]["lease_token"], success=True,
+            result_ref="asset:old-retention-result",
+        )
+        authorization = ProviderAuthorizationManager(self.root / "job-retention-auth-state.json")
+        authorization.assign_role("retention-admin", "admin")
+        authorization.assign_role("retention-creator", "creator")
+        service = ProviderService(
+            self.connections, job_manager=jobs,
+            authorization_manager=authorization,
+        )
+        cutoff = datetime.now(timezone.utc) + timedelta(days=1)
+
+        unconfirmed = service.purge_expired_job_records(
+            project_id="film", cutoff=cutoff, principal_id="retention-admin",
+        )
+        self.assertEqual(unconfirmed["status"], "JOB_RETENTION_CONFIRMATION_REQUIRED")
+        self.assertEqual(jobs.poll(job_id="old-retention-job")["status"], "JOB_STATUS")
+
+        denied = service.purge_expired_job_records(
+            project_id="film", cutoff=cutoff, principal_id="retention-creator",
+            confirmed=True,
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(jobs.poll(job_id="old-retention-job")["status"], "JOB_STATUS")
+
+        purged = service.purge_expired_job_records(
+            project_id="film", cutoff=cutoff, principal_id="retention-admin",
+            confirmed=True,
+        )
+        self.assertEqual(purged["status"], "JOB_RETENTION_PURGED")
+        self.assertEqual(purged["purged_count"], 1)
+        self.assertEqual(jobs.poll(job_id="old-retention-job")["status"], "JOB_NOT_FOUND")
+
+    def test_job_retention_purge_enforces_tenant_project_binding(self):
+        jobs = ProviderJobManager(self.root / "job-retention-tenant.json")
+        jobs.submit(
+            job_id="tenant-old-job", project_id="tenant-film", provider_id="image",
+            payload_ref="payload:tenant-old-job", tenant_id="tenant-01",
+        )
+        claimed = jobs.claim_next(worker_id="tenant-worker")
+        jobs.complete(
+            job_id="tenant-old-job", worker_id="tenant-worker",
+            lease_token=claimed["job"]["lease_token"], success=False,
+            error_code="TEST_DONE",
+        )
+        tenant_manager = ProviderTenantIsolationManager(self.root / "job-retention-tenants.json")
+        self.assertTrue(tenant_manager.register_tenant("tenant-01")["saved"])
+        self.assertTrue(tenant_manager.bind_principal("tenant-01", "tenant-retention-admin")["saved"])
+        self.assertTrue(tenant_manager.bind_project("tenant-01", "tenant-film")["saved"])
+        authorization = ProviderAuthorizationManager(self.root / "job-retention-tenant-auth.json")
+        authorization.assign_role("tenant-retention-admin", "admin")
+        service = ProviderService(
+            self.connections, job_manager=jobs,
+            authorization_manager=authorization,
+            tenant_isolation_manager=tenant_manager,
+        )
+
+        denied = service.purge_expired_job_records(
+            project_id="tenant-film", cutoff=datetime.now(timezone.utc) + timedelta(days=1),
+            principal_id="tenant-retention-admin", tenant_id="tenant-other", confirmed=True,
+        )
+        self.assertEqual(denied["status"], "TENANT_ISOLATION_DENIED")
+        self.assertEqual(jobs.poll(job_id="tenant-old-job", tenant_id="tenant-01")["status"], "JOB_STATUS")
+
+        purged = service.purge_expired_job_records(
+            project_id="tenant-film", cutoff=datetime.now(timezone.utc) + timedelta(days=1),
+            principal_id="tenant-retention-admin", tenant_id="tenant-01", confirmed=True,
+        )
+        self.assertEqual(purged["status"], "JOB_RETENTION_PURGED")
+        self.assertEqual(purged["purged_count"], 1)
 
     def test_job_submission_blocks_credentialed_payload_reference_before_persisting(self):
         jobs = ProviderJobManager(self.root / "sensitive-submit-jobs.json")
@@ -2089,6 +3290,148 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["incident"]["incident"]["severity"], "critical")
         self.assertEqual(incidents.snapshot()["counts"]["OPEN"], 1)
 
+    def test_generation_blocks_sensitive_degraded_state_before_routing(self):
+        secret = "Bearer " + ("r" * 40)
+        calls = {"route": 0, "adapter": 0}
+
+        class DegradedStub:
+            def configure(self, *args, **kwargs):
+                return {"saved": True}
+
+            def evaluate(self, *args, **kwargs):
+                return {"evaluated": True}
+
+            def get_state(self, category):
+                return {
+                    "status": "PROVIDER_CATEGORY_NORMAL",
+                    "state": {
+                        "category": category,
+                        "mode": "NORMAL",
+                        "healthy_provider_ids": ["image"],
+                        "unhealthy_provider_ids": [],
+                        "healthy_count": 1,
+                        "provider_count": 1,
+                        "diagnostics": secret,
+                    },
+                }
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls["route"] += 1
+                return {"allowed": True, "provider": "image"}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            degraded_mode_manager=DegradedStub(),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-degraded-state",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.__setitem__("adapter", calls["adapter"] + 1),
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(calls, {"route": 0, "adapter": 0})
+
+    def test_generation_blocks_sensitive_feature_flag_response_before_routing(self):
+        secret = "sk-" + ("f" * 40)
+        calls = {"route": 0, "adapter": 0}
+
+        class FlagStub:
+            def evaluate(self, *args, **kwargs):
+                return {"enabled": False, "diagnostics": secret}
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls["route"] += 1
+                return {"allowed": True, "provider": "image"}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=RoutingStub(),
+            feature_flag_manager=FlagStub(),
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-feature-flag",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.__setitem__("adapter", calls["adapter"] + 1),
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(calls, {"route": 0, "adapter": 0})
+
+    def test_generation_blocks_sensitive_modality_binding_response(self):
+        secret = "Bearer " + ("m" * 40)
+        service = self._modality_service()
+
+        class BindingConnections:
+            @staticmethod
+            def get_modality_binding(provider_id):
+                return {
+                    "valid": True,
+                    "category": "image",
+                    "output_modalities": ["image"],
+                    "diagnostics": secret,
+                }
+
+        service.connection_manager = BindingConnections()
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-modality-binding",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            require_modality_binding=True,
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(calls, [])
+
+    def test_generation_blocks_sensitive_health_response_before_adapter(self):
+        secret = "sk-" + ("h" * 40)
+
+        class HealthStub:
+            def record_result(self, *args, **kwargs):
+                return {"saved": True}
+
+            def is_eligible(self, *args, **kwargs):
+                return {"eligible": False, "reason": secret}
+
+        service = self._modality_service(health_manager=HealthStub())
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-health-result",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+            require_fresh_health_check=True,
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(calls, [])
+
+    def test_generation_blocks_sensitive_data_policy_response_before_adapter(self):
+        secret = "Bearer " + ("p" * 40)
+
+        class DataPolicyStub:
+            def evaluate(self, **kwargs):
+                return {"allowed": False, "status": "POLICY_REJECTED", "diagnostics": secret}
+
+        service = self._modality_service(data_handling_policy=DataPolicyStub())
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="sensitive-data-policy",
+            estimated_cost=0.0, modality="image",
+            adapter=lambda **kwargs: calls.append(kwargs),
+        )
+        self.assertEqual(result["status"], "SENSITIVE_DATA_OUTPUT_BLOCKED")
+        self.assertFalse(result["executed"])
+        self.assertNotIn(secret, repr(result))
+        self.assertEqual(calls, [])
+
     def test_disabled_generation_feature_flag_blocks_routing_and_adapter(self):
         calls = {"route": 0, "adapter": 0}
 
@@ -2238,6 +3581,186 @@ class ProviderServiceTests(unittest.TestCase):
         service = ProviderService(self.connections)
         self.assertEqual(service.route_request(category="image", project_id="film")["status"], "ROUTING_MANAGER_UNAVAILABLE")
         self.assertEqual(service.validate_output("missing.png", modality="image")["status"], "OUTPUT_VALIDATOR_UNAVAILABLE")
+
+
+    def test_subject_deletion_is_confirmation_and_admin_gated(self):
+        class Store:
+            def __init__(self):
+                self.calls = []
+
+            def delete_subject_data(self, **kwargs):
+                self.calls.append(("delete", kwargs))
+                return {"confirmed": True, "status": "DELETED", "deleted_count": 2}
+
+            def purge_expired_data(self, **kwargs):
+                self.calls.append(("purge", kwargs))
+                return {"confirmed": True, "status": "PURGED", "deleted_count": 1}
+
+        store = Store()
+        lifecycle = PrivacyDataLifecycleManager({"database": store})
+        authorization = ProviderAuthorizationManager(self.root / "privacy-delete-auth.json")
+        authorization.assign_role("privacy-admin", "admin")
+        authorization.assign_role("privacy-creator", "creator")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            privacy_lifecycle_manager=lifecycle,
+        )
+
+        unconfirmed = service.delete_subject_data(
+            subject_ref="subject-31", project_id="film", request_id="delete-031",
+            principal_id="privacy-admin",
+        )
+        self.assertEqual(unconfirmed["status"], "SUBJECT_DELETION_CONFIRMATION_REQUIRED")
+        self.assertEqual(store.calls, [])
+
+        denied = service.delete_subject_data(
+            subject_ref="subject-31", project_id="film", request_id="delete-032",
+            principal_id="privacy-creator", confirmed=True,
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(store.calls, [])
+
+        deleted = service.delete_subject_data(
+            subject_ref="subject-31", project_id="film", request_id="delete-033",
+            principal_id="privacy-admin", confirmed=True,
+        )
+        self.assertEqual(deleted["status"], "SUBJECT_DATA_DELETED")
+        self.assertTrue(deleted["confirmed"])
+        self.assertEqual(deleted["deleted_count"], 2)
+        self.assertNotIn("subject-31", repr(deleted))
+        self.assertEqual(len(store.calls), 1)
+
+    def test_subject_deletion_enforces_tenant_project_principal_binding(self):
+        class Store:
+            def __init__(self):
+                self.calls = []
+
+            def delete_subject_data(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"confirmed": True, "status": "DELETED", "deleted_count": 1}
+
+            def purge_expired_data(self, **kwargs):
+                return {"confirmed": True, "status": "PURGED", "deleted_count": 0}
+
+        store = Store()
+        tenant_manager = ProviderTenantIsolationManager(self.root / "privacy-delete-tenants.json")
+        self.assertTrue(tenant_manager.register_tenant("tenant-31")["saved"])
+        self.assertTrue(tenant_manager.bind_principal("tenant-31", "privacy-tenant-admin")["saved"])
+        self.assertTrue(tenant_manager.bind_project("tenant-31", "film-31")["saved"])
+        authorization = ProviderAuthorizationManager(self.root / "privacy-delete-tenant-auth.json")
+        authorization.assign_role("privacy-tenant-admin", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            tenant_isolation_manager=tenant_manager,
+            privacy_lifecycle_manager=PrivacyDataLifecycleManager({"database": store}),
+        )
+
+        denied = service.delete_subject_data(
+            subject_ref="subject-32", project_id="film-31", tenant_id="tenant-other",
+            request_id="delete-034", principal_id="privacy-tenant-admin", confirmed=True,
+        )
+        self.assertEqual(denied["status"], "TENANT_ISOLATION_DENIED")
+        self.assertEqual(store.calls, [])
+
+        deleted = service.delete_subject_data(
+            subject_ref="subject-32", project_id="film-31", tenant_id="tenant-31",
+            request_id="delete-035", principal_id="privacy-tenant-admin", confirmed=True,
+        )
+        self.assertEqual(deleted["status"], "SUBJECT_DATA_DELETED")
+        self.assertEqual(store.calls[0]["tenant_id"], "tenant-31")
+
+    def test_privacy_retention_purge_is_admin_gated_and_uses_aware_cutoff(self):
+        class Store:
+            def __init__(self):
+                self.calls = []
+
+            def delete_subject_data(self, **kwargs):
+                return {"confirmed": True, "status": "DELETED", "deleted_count": 0}
+
+            def purge_expired_data(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"confirmed": True, "status": "PURGED", "deleted_count": 4}
+
+        store = Store()
+        authorization = ProviderAuthorizationManager(self.root / "privacy-retention-auth.json")
+        authorization.assign_role("privacy-admin", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            privacy_lifecycle_manager=PrivacyDataLifecycleManager({"database": store}),
+        )
+
+        invalid = service.purge_expired_privacy_data(
+            cutoff=datetime(2026, 1, 1), project_id="film", request_id="purge-031",
+            principal_id="privacy-admin", confirmed=True,
+        )
+        self.assertEqual(invalid["status"], "INVALID_RETENTION_PURGE_SCOPE")
+        self.assertEqual(store.calls, [])
+
+        purged = service.purge_expired_privacy_data(
+            cutoff=datetime(2026, 1, 1, tzinfo=timezone.utc), project_id="film",
+            request_id="purge-032", principal_id="privacy-admin", confirmed=True,
+        )
+        self.assertEqual(purged["status"], "RETENTION_PURGE_CONFIRMED")
+        self.assertTrue(purged["confirmed"])
+        self.assertEqual(purged["deleted_count"], 4)
+        self.assertEqual(len(store.calls), 1)
+
+
+
+    def test_privacy_lifecycle_never_uses_trusted_internal_auth_bypass(self):
+        class Store:
+            def __init__(self):
+                self.calls = []
+
+            def delete_subject_data(self, **kwargs):
+                self.calls.append(("delete", kwargs))
+                return {"confirmed": True, "status": "DELETED", "deleted_count": 1}
+
+            def purge_expired_data(self, **kwargs):
+                self.calls.append(("purge", kwargs))
+                return {"confirmed": True, "status": "PURGED", "deleted_count": 1}
+
+        store = Store()
+        lifecycle = PrivacyDataLifecycleManager({"database": store})
+        service_without_auth = ProviderService(
+            self.connections,
+            privacy_lifecycle_manager=lifecycle,
+        )
+        delete_result = service_without_auth.delete_subject_data(
+            subject_ref="subject-41", project_id="film", request_id="delete-041",
+            principal_id=None, confirmed=True,
+        )
+        purge_result = service_without_auth.purge_expired_privacy_data(
+            cutoff=datetime(2026, 1, 1, tzinfo=timezone.utc), project_id="film",
+            request_id="purge-041", principal_id=None, confirmed=True,
+        )
+        self.assertEqual(delete_result["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertEqual(purge_result["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertEqual(store.calls, [])
+
+        authorization = ProviderAuthorizationManager(self.root / "privacy-missing-principal.json")
+        authorization.assign_role("privacy-admin", "admin")
+        service_with_auth = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            privacy_lifecycle_manager=lifecycle,
+        )
+        missing_principal = service_with_auth.delete_subject_data(
+            subject_ref="subject-42", project_id="film", request_id="delete-042",
+            principal_id=None, confirmed=True,
+        )
+        self.assertEqual(missing_principal["status"], "AUTHENTICATED_PRINCIPAL_REQUIRED")
+        missing_purge_principal = service_with_auth.purge_expired_privacy_data(
+            cutoff=datetime(2026, 1, 1, tzinfo=timezone.utc), project_id="film",
+            request_id="purge-042", principal_id=None, confirmed=True,
+        )
+        self.assertEqual(missing_purge_principal["status"], "AUTHENTICATED_PRINCIPAL_REQUIRED")
+        self.assertEqual(store.calls, [])
+
+
 
 
 if __name__ == "__main__":

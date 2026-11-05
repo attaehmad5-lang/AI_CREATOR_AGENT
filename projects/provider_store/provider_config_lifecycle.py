@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import shutil
@@ -11,7 +12,9 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Callable
 
+from .encrypted_state_store import EncryptedJSONStateStore, EncryptedStateError
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
+from .sensitive_data_policy import SensitiveDataPolicy
 
 
 class ProviderConfigLifecycleManager:
@@ -20,12 +23,47 @@ class ProviderConfigLifecycleManager:
         validator: Callable[[dict[str, Any]], Any],
         *,
         max_history: int = 5,
+        sensitive_data_policy: SensitiveDataPolicy | None = None,
+        backup_encryption_key_provider: Any = None,
+        backup_encryption_context: str = "provider-config-backup-v1",
+        config_encryption_key_provider: Any = None,
+        config_encryption_context: str = "provider-active-config-v1",
     ) -> None:
         if not callable(validator):
             raise ValueError("validator must be callable")
         if isinstance(max_history, bool) or not isinstance(max_history, int) or not 1 <= max_history <= 100:
             raise ValueError("max_history is outside safe limits")
+        if sensitive_data_policy is not None and not callable(getattr(sensitive_data_policy, "inspect", None)):
+            raise ValueError("sensitive_data_policy must support inspect")
+        if backup_encryption_key_provider is not None and not callable(backup_encryption_key_provider):
+            raise ValueError("backup_encryption_key_provider must be callable")
+        if config_encryption_key_provider is not None and not callable(config_encryption_key_provider):
+            raise ValueError("config_encryption_key_provider must be callable")
+        for context, label in (
+            (backup_encryption_context, "backup_encryption_context"),
+            (config_encryption_context, "config_encryption_context"),
+        ):
+            if (
+                not isinstance(context, str)
+                or not context
+                or len(context) > 96
+                or any(ord(char) < 33 or ord(char) > 126 for char in context)
+            ):
+                raise ValueError(f"{label} is invalid")
         self.validator = validator
+        self.sensitive_data_policy = sensitive_data_policy or SensitiveDataPolicy(
+            blocked_categories=("credential", "payment_card")
+        )
+        self.config_encryption_key_provider = config_encryption_key_provider
+        self.config_encryption_context = config_encryption_context
+        # Reuse the deployment KMS callback by default, with a separate context,
+        # so enabling active-config encryption cannot silently create plaintext backups.
+        self.backup_encryption_key_provider = (
+            backup_encryption_key_provider
+            if backup_encryption_key_provider is not None
+            else config_encryption_key_provider
+        )
+        self.backup_encryption_context = backup_encryption_context
         self.max_history = max_history
         self._lock = threading.RLock()
         self.active_config: dict[str, Any] | None = None
@@ -37,6 +75,18 @@ class ProviderConfigLifecycleManager:
             return False, "CONFIG_NOT_A_MAPPING"
         try:
             json.dumps(config, allow_nan=False)
+        except Exception as exc:
+            return False, f"CONFIG_VALIDATION_FAILED:{type(exc).__name__}"
+        try:
+            scan = self.sensitive_data_policy.inspect(config)
+        except Exception:
+            return False, "SENSITIVE_DATA_SCAN_FAILED"
+        if not isinstance(scan, dict) or scan.get("allowed") is not True:
+            return False, (
+                scan.get("status", "SENSITIVE_DATA_SCAN_FAILED")
+                if isinstance(scan, dict) else "SENSITIVE_DATA_SCAN_FAILED"
+            )
+        try:
             result = self.validator(copy.deepcopy(config))
         except Exception as exc:
             return False, f"CONFIG_VALIDATION_FAILED:{type(exc).__name__}"
@@ -57,6 +107,18 @@ class ProviderConfigLifecycleManager:
             return {"status": "INVALID_TARGET_VERSION", "migrated": False}
         if not isinstance(migrations, dict):
             return {"status": "INVALID_MIGRATION_MAP", "migrated": False}
+        try:
+            initial_scan = self.sensitive_data_policy.inspect(config)
+        except Exception:
+            initial_scan = None
+        if not isinstance(initial_scan, dict) or initial_scan.get("allowed") is not True:
+            return {
+                "status": (
+                    initial_scan.get("status", "SENSITIVE_DATA_SCAN_FAILED")
+                    if isinstance(initial_scan, dict) else "SENSITIVE_DATA_SCAN_FAILED"
+                ),
+                "migrated": False,
+            }
         candidate = copy.deepcopy(config)
         visited = set()
         steps = 0
@@ -149,15 +211,166 @@ class ProviderConfigLifecycleManager:
         *,
         target_version: str,
         migrations: dict[str, Callable[[dict[str, Any]], dict[str, Any]]],
+        allow_legacy_plaintext: bool = False,
     ) -> dict[str, Any]:
+        if not isinstance(allow_legacy_plaintext, bool):
+            return {"status": "INVALID_LEGACY_MIGRATION_FLAG", "migrated": False}
+        if allow_legacy_plaintext and self.config_encryption_key_provider is None:
+            return {"status": "CONFIG_ENCRYPTION_REQUIRED_FOR_LEGACY_MIGRATION", "migrated": False}
         config_path = Path(path)
         lock_path = config_path.with_name(config_path.name + ".lock")
         # Serialize the complete read/validate/backup/replace/reload transaction
         # across processes so concurrent migrations cannot overwrite each other.
         with interprocess_file_lock(lock_path):
             return self._migrate_file_locked(
-                config_path, target_version=target_version, migrations=migrations
+                config_path,
+                target_version=target_version,
+                migrations=migrations,
+                allow_legacy_plaintext=allow_legacy_plaintext,
             )
+
+    def _config_store(
+        self,
+        config_path: Path,
+        *,
+        allow_legacy_plaintext: bool = False,
+    ) -> EncryptedJSONStateStore:
+        if self.config_encryption_key_provider is None:
+            raise ValueError("active config encryption key provider is unavailable")
+        path_digest = hashlib.sha256(str(config_path.resolve()).encode("utf-8")).hexdigest()[:24]
+        context = f"{self.config_encryption_context}:{path_digest}"
+        if len(context) > 128:
+            raise ValueError("active config encryption context exceeds safe limits")
+        return EncryptedJSONStateStore(
+            config_path,
+            key_provider=self.config_encryption_key_provider,
+            context=context,
+            migrate_legacy_plaintext=allow_legacy_plaintext,
+        )
+
+    def _backup_path(self, config_path: Path) -> Path:
+        suffix = ".bak.enc" if self.backup_encryption_key_provider is not None else ".bak"
+        return config_path.with_name(config_path.name + suffix)
+
+    def _backup_store(self, backup_path: Path) -> EncryptedJSONStateStore:
+        if self.backup_encryption_key_provider is None:
+            raise ValueError("encrypted config backup key provider is unavailable")
+        if backup_path.is_symlink():
+            raise ValueError("encrypted config backup path must not be a symlink")
+        # A path-derived context prevents ciphertext from being transplanted
+        # between independently configured provider configuration files.
+        path_digest = hashlib.sha256(str(backup_path.resolve()).encode("utf-8")).hexdigest()[:24]
+        context = f"{self.backup_encryption_context}:{path_digest}"
+        if len(context) > 128:
+            raise ValueError("encrypted config backup context exceeds safe limits")
+        return EncryptedJSONStateStore(
+            backup_path,
+            key_provider=self.backup_encryption_key_provider,
+            context=context,
+        )
+
+    def _write_backup(self, config_path: Path, backup_path: Path, original: dict[str, Any]) -> None:
+        if self.backup_encryption_key_provider is not None:
+            self._backup_store(backup_path).write(original)
+            return
+        shutil.copy2(config_path, backup_path)
+
+    def _restore_backup(self, config_path: Path, backup_path: Path) -> None:
+        if self.backup_encryption_key_provider is None:
+            shutil.copy2(backup_path, config_path)
+            return
+        original = self._backup_store(backup_path).read({})
+        if not isinstance(original, dict):
+            raise ValueError("encrypted config backup payload is invalid")
+        if self.config_encryption_key_provider is not None:
+            self._config_store(config_path).write(original)
+            return
+        fd_restore, restore_name = tempfile.mkstemp(
+            prefix=f".{config_path.name}.restore.", suffix=".tmp",
+            dir=str(config_path.parent), text=True,
+        )
+        try:
+            with os.fdopen(fd_restore, "w", encoding="utf-8") as stream:
+                json.dump(original, stream, indent=2, ensure_ascii=False, allow_nan=False)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            atomic_replace_with_retry(restore_name, config_path)
+        except Exception:
+            try:
+                os.unlink(restore_name)
+            except FileNotFoundError:
+                pass
+            raise
+
+    def erase_encrypted_backup(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        key_destroyer: Callable[[str], bool],
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Cryptographically erase this config's encrypted migration backup.
+
+        This requires the deployment callback to destroy the unique DEK for
+        the path-bound backup context. A legacy plaintext .bak is never
+        silently treated as covered by encrypted-backup erasure.
+        """
+        if self.backup_encryption_key_provider is None:
+            return {
+                "status": "CONFIG_BACKUP_ENCRYPTION_REQUIRED",
+                "erased": False,
+            }
+        if not callable(key_destroyer):
+            return {
+                "status": "CONFIG_BACKUP_KEY_DESTROYER_UNAVAILABLE",
+                "erased": False,
+            }
+        if confirmed is not True:
+            return {
+                "status": "CONFIG_BACKUP_ERASURE_CONFIRMATION_REQUIRED",
+                "erased": False,
+            }
+        try:
+            config_path = Path(path)
+            backup_path = self._backup_path(config_path)
+            legacy_plaintext_backup = config_path.with_name(config_path.name + ".bak")
+            lock_path = config_path.with_name(config_path.name + ".lock")
+            with interprocess_file_lock(lock_path):
+                if legacy_plaintext_backup.exists():
+                    return {
+                        "status": "CONFIG_PLAINTEXT_BACKUP_REQUIRES_MANUAL_CLEANUP",
+                        "erased": False,
+                    }
+                result = self._backup_store(backup_path).erase(
+                    {},
+                    key_destroyer=key_destroyer,
+                    confirmed=True,
+                )
+        except Exception as exc:
+            return {
+                "status": "CONFIG_BACKUP_ERASURE_FAILED",
+                "erased": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {
+                "status": "INVALID_CONFIG_BACKUP_ERASURE_RESPONSE",
+                "erased": False,
+            }
+        if result.get("status") == "STATE_CRYPTOGRAPHICALLY_ERASED":
+            return {
+                "status": "CONFIG_BACKUP_CRYPTOGRAPHICALLY_ERASED",
+                "erased": True,
+            }
+        return {
+            "status": result.get("status", "CONFIG_BACKUP_ERASURE_FAILED"),
+            "erased": result.get("erased") is True,
+            **(
+                {"error_type": result["error_type"]}
+                if isinstance(result.get("error_type"), str) else {}
+            ),
+        }
 
     def _migrate_file_locked(
         self,
@@ -165,46 +378,65 @@ class ProviderConfigLifecycleManager:
         *,
         target_version: str,
         migrations: dict[str, Callable[[dict[str, Any]], dict[str, Any]]],
+        allow_legacy_plaintext: bool,
     ) -> dict[str, Any]:
+        if config_path.is_symlink():
+            return {"status": "CONFIG_FILE_SYMLINK_REJECTED", "migrated": False}
         if not config_path.is_file():
             return {"status": "CONFIG_FILE_NOT_FOUND", "migrated": False}
         try:
-            with config_path.open("r", encoding="utf-8") as stream:
-                original = json.load(stream)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            if self.config_encryption_key_provider is not None:
+                original = self._config_store(
+                    config_path, allow_legacy_plaintext=allow_legacy_plaintext
+                ).read({})
+            else:
+                with config_path.open("r", encoding="utf-8") as stream:
+                    original = json.load(stream)
+        except (EncryptedStateError, json.JSONDecodeError, UnicodeDecodeError, RecursionError, OSError) as exc:
             return {"status": "INVALID_CONFIG_FILE", "migrated": False, "error_type": type(exc).__name__}
         result = self.migrate(original, target_version=target_version, migrations=migrations)
         if result.get("migrated") is not True:
             return result
-        backup_path = config_path.with_name(config_path.name + ".bak")
-        fd, temp_name = tempfile.mkstemp(
-            prefix=f".{config_path.name}.", suffix=".tmp",
-            dir=str(config_path.parent), text=True,
-        )
+        backup_path = self._backup_path(config_path)
+        legacy_plaintext_backup = config_path.with_name(config_path.name + ".bak")
+        if (
+            self.backup_encryption_key_provider is not None
+            and legacy_plaintext_backup.exists()
+        ):
+            return {
+                "status": "CONFIG_PLAINTEXT_BACKUP_REQUIRES_MANUAL_CLEANUP",
+                "migrated": False,
+            }
+        temp_name = None
         try:
-            shutil.copy2(config_path, backup_path)
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(result["config"], stream, indent=2, ensure_ascii=False, allow_nan=False)
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-            atomic_replace_with_retry(temp_name, config_path)
+            # Complete and durably verify the backup before replacing active
+            # config. With active encryption enabled, the backup callback is
+            # also configured by default and uses its own authenticated context.
+            self._write_backup(config_path, backup_path, original)
+            if self.config_encryption_key_provider is not None:
+                self._config_store(config_path).write(result["config"])
+            else:
+                fd, temp_name = tempfile.mkstemp(
+                    prefix=f".{config_path.name}.", suffix=".tmp",
+                    dir=str(config_path.parent), text=True,
+                )
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    json.dump(result["config"], stream, indent=2, ensure_ascii=False, allow_nan=False)
+                    stream.write("\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                atomic_replace_with_retry(temp_name, config_path)
         except Exception as exc:
-            try:
-                os.unlink(temp_name)
-            except FileNotFoundError:
-                pass
+            if temp_name is not None:
+                try:
+                    os.unlink(temp_name)
+                except FileNotFoundError:
+                    pass
             return {"status": "CONFIG_MIGRATION_WRITE_FAILED", "migrated": False, "error_type": type(exc).__name__}
         reloaded = self.reload(result["config"])
         if reloaded.get("reloaded") is not True:
             try:
-                fd_restore, restore_name = tempfile.mkstemp(
-                    prefix=f".{config_path.name}.restore.", suffix=".tmp",
-                    dir=str(config_path.parent), text=True,
-                )
-                os.close(fd_restore)
-                shutil.copy2(backup_path, restore_name)
-                atomic_replace_with_retry(restore_name, config_path)
+                self._restore_backup(config_path, backup_path)
             except Exception:
                 return {
                     "status": "CONFIG_MIGRATION_ROLLBACK_FAILED",

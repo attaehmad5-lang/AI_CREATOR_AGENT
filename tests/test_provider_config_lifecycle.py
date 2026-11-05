@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
+from projects.provider_store.encrypted_state_store import EncryptedStateError
 from projects.provider_store.provider_config_lifecycle import ProviderConfigLifecycleManager
 import projects.provider_store.provider_config_lifecycle as lifecycle_module
 
@@ -89,6 +90,104 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(manager.active_config, first)
         self.assertEqual(manager.generation, 3)
 
+    def test_config_migration_blocks_literal_credentials_before_migration_callback(self):
+        calls = []
+
+        def migration(config):
+            calls.append(True)
+            return migrate_v1_to_v2(config)
+
+        unsafe = {
+            "schema_version": "1",
+            "providers": {
+                "image": {"api_token": "provider-secret-value"},
+            },
+        }
+        result = self.manager.migrate(
+            unsafe, target_version="2", migrations={"1": migration}
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(calls, [])
+        self.assertNotIn("provider-secret-value", repr(result))
+
+    def test_config_migration_blocks_payment_card_by_default(self):
+        calls = []
+
+        def migration(config):
+            calls.append(True)
+            return migrate_v1_to_v2(config)
+
+        unsafe = {
+            "schema_version": "1",
+            "providers": {
+                "image": {"billing_note": "4111 1111 1111 1111"},
+            },
+        }
+        result = self.manager.migrate(
+            unsafe, target_version="2", migrations={"1": migration}
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(calls, [])
+        self.assertNotIn("4111 1111 1111 1111", repr(result))
+
+    def test_migration_fails_closed_when_injected_privacy_scanner_raises(self):
+        class BrokenScanner:
+            def inspect(self, payload):
+                raise RuntimeError("scanner unavailable")
+
+        manager = ProviderConfigLifecycleManager(
+            valid_config, sensitive_data_policy=BrokenScanner()
+        )
+        calls = []
+
+        def migration(config):
+            calls.append(True)
+            return migrate_v1_to_v2(config)
+
+        result = manager.migrate(
+            {"schema_version": "1", "providers": {}},
+            target_version="2",
+            migrations={"1": migration},
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_SCAN_FAILED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(calls, [])
+
+    def test_hot_reload_fails_closed_when_privacy_scanner_raises(self):
+        class BrokenScanner:
+            def inspect(self, payload):
+                raise RuntimeError("scanner unavailable")
+
+        manager = ProviderConfigLifecycleManager(
+            valid_config, sensitive_data_policy=BrokenScanner()
+        )
+        result = manager.reload({"schema_version": "1", "providers": {}})
+
+        self.assertEqual(result["status"], "HOT_RELOAD_REJECTED")
+        self.assertEqual(result["reason"], "SENSITIVE_DATA_SCAN_FAILED")
+        self.assertFalse(result["reloaded"])
+        self.assertIsNone(manager.active_config)
+        self.assertEqual(manager.generation, 0)
+
+    def test_hot_reload_blocks_literal_credentials_before_validator_or_activation(self):
+        unsafe = {
+            "schema_version": "1",
+            "providers": {
+                "video": {"authorization": "Bearer " + ("t" * 40)},
+            },
+        }
+        result = self.manager.reload(unsafe)
+
+        self.assertEqual(result["status"], "HOT_RELOAD_REJECTED")
+        self.assertEqual(result["reason"], "SENSITIVE_DATA_BLOCKED")
+        self.assertIsNone(self.manager.active_config)
+        self.assertNotIn("Bearer ", repr(result))
+
     def test_file_migration_creates_backup_and_writes_atomically(self):
         path = self.root / "provider-config.json"
         original = {"schema_version": "1", "providers": {"image": {}}}
@@ -99,6 +198,317 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "CONFIG_MIGRATION_APPLIED")
         self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["schema_version"], "2")
         self.assertEqual(json.loads(Path(str(path) + ".bak").read_text(encoding="utf-8"))["schema_version"], "1")
+
+    def test_file_migration_encrypts_backup_when_deployment_key_is_configured(self):
+        path = self.root / "provider-config.json"
+        original = {
+            "schema_version": "1",
+            "providers": {"image": {}},
+            "owner_contact": "private.owner@example.com",
+        }
+        path.write_text(json.dumps(original), encoding="utf-8")
+        key_provider = lambda context: b"0123456789abcdef0123456789abcdef"
+        manager = ProviderConfigLifecycleManager(
+            valid_config, backup_encryption_key_provider=key_provider
+        )
+
+        result = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        backup_path = Path(result["backup_path"])
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_APPLIED")
+        self.assertTrue(backup_path.name.endswith(".bak.enc"))
+        self.assertFalse(path.with_name(path.name + ".bak").exists())
+        self.assertNotIn(b"private.owner@example.com", backup_path.read_bytes())
+        self.assertEqual(manager._backup_store(backup_path).read({}), original)
+
+    def test_encrypted_config_backup_restores_original_after_reload_rejection(self):
+        path = self.root / "provider-config.json"
+        original = {
+            "schema_version": "1",
+            "providers": {"image": {}},
+            "owner_contact": "private.owner@example.com",
+        }
+        path.write_text(json.dumps(original), encoding="utf-8")
+        key_provider = lambda context: b"0123456789abcdef0123456789abcdef"
+        manager = ProviderConfigLifecycleManager(
+            valid_config, backup_encryption_key_provider=key_provider
+        )
+        with patch.object(manager, "reload", return_value={"reloaded": False}):
+            result = manager.migrate_file(
+                path, target_version="2", migrations={"1": migrate_v1_to_v2}
+            )
+
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_ROLLED_BACK")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), original)
+        backup_path = Path(result["backup_path"])
+        self.assertNotIn(b"private.owner@example.com", backup_path.read_bytes())
+        self.assertEqual(manager._backup_store(backup_path).read({}), original)
+
+    def test_encrypted_config_backup_is_bound_to_its_source_path(self):
+        first_path = self.root / "first" / "provider-config.json"
+        second_path = self.root / "second" / "provider-config.json"
+        first_path.parent.mkdir()
+        second_path.parent.mkdir()
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        first_path.write_text(json.dumps(original), encoding="utf-8")
+        second_path.write_text(json.dumps(original), encoding="utf-8")
+        key_provider = lambda context: b"0123456789abcdef0123456789abcdef"
+        manager = ProviderConfigLifecycleManager(
+            valid_config, backup_encryption_key_provider=key_provider
+        )
+        result = manager.migrate_file(
+            first_path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+        backup_path = Path(result["backup_path"])
+        transplanted = second_path.with_name(second_path.name + ".bak.enc")
+        transplanted.write_bytes(backup_path.read_bytes())
+        with self.assertRaises(EncryptedStateError):
+            manager._backup_store(transplanted).read({})
+
+    def test_failed_backup_encryption_leaves_config_unchanged(self):
+        path = self.root / "provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        original_text = json.dumps(original)
+        path.write_text(original_text, encoding="utf-8")
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            backup_encryption_key_provider=lambda context: b"invalid-key",
+        )
+
+        result = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_WRITE_FAILED")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(path.read_text(encoding="utf-8"), original_text)
+        self.assertFalse(path.with_name(path.name + ".bak.enc").exists())
+
+    def test_encrypted_backup_mode_refuses_to_leave_legacy_plaintext_backup_untouched(self):
+        path = self.root / "provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        original_text = json.dumps(original)
+        path.write_text(original_text, encoding="utf-8")
+        legacy_backup = path.with_name(path.name + ".bak")
+        legacy_backup.write_text(json.dumps({"private": "legacy-backup"}), encoding="utf-8")
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            backup_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
+
+        result = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        self.assertEqual(result["status"], "CONFIG_PLAINTEXT_BACKUP_REQUIRES_MANUAL_CLEANUP")
+        self.assertFalse(result["migrated"])
+        self.assertEqual(path.read_text(encoding="utf-8"), original_text)
+        self.assertEqual(legacy_backup.read_text(encoding="utf-8"), json.dumps({"private": "legacy-backup"}))
+
+    def test_encrypted_config_backup_erasure_requires_confirmation_and_destroys_backup_key(self):
+        path = self.root / "erase-provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        path.write_text(json.dumps(original), encoding="utf-8")
+        keyring = {}
+        destroyed = []
+
+        def key_provider(context):
+            keyring.setdefault(context, b"0123456789abcdef0123456789abcdef")
+            return keyring[context]
+
+        manager = ProviderConfigLifecycleManager(
+            valid_config, backup_encryption_key_provider=key_provider
+        )
+        migrated = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+        backup_path = Path(migrated["backup_path"])
+        self.assertTrue(backup_path.exists())
+
+        def destroy_key(context):
+            destroyed.append(context)
+            return keyring.pop(context, None) is not None
+
+        unconfirmed = manager.erase_encrypted_backup(
+            path, key_destroyer=destroy_key, confirmed=False
+        )
+        self.assertEqual(
+            unconfirmed["status"],
+            "CONFIG_BACKUP_ERASURE_CONFIRMATION_REQUIRED",
+        )
+        self.assertTrue(backup_path.exists())
+        self.assertEqual(destroyed, [])
+
+        erased = manager.erase_encrypted_backup(
+            path, key_destroyer=destroy_key, confirmed=True
+        )
+        self.assertEqual(
+            erased["status"], "CONFIG_BACKUP_CRYPTOGRAPHICALLY_ERASED"
+        )
+        self.assertTrue(erased["erased"])
+        self.assertFalse(backup_path.exists())
+        self.assertEqual(len(destroyed), 1)
+        self.assertNotIn(str(backup_path), repr(erased))
+
+    def test_encrypted_backup_erasure_refuses_to_ignore_legacy_plaintext_backup(self):
+        path = self.root / "legacy-backup-provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        path.write_text(json.dumps(original), encoding="utf-8")
+        keyring = {}
+        def key_provider(context):
+            keyring.setdefault(context, b"0123456789abcdef0123456789abcdef")
+            return keyring[context]
+
+        manager = ProviderConfigLifecycleManager(
+            valid_config, backup_encryption_key_provider=key_provider
+        )
+        migrated = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+        backup_path = Path(migrated["backup_path"])
+        legacy = path.with_name(path.name + ".bak")
+        legacy.write_text(json.dumps({"private": "old-plaintext-copy"}), encoding="utf-8")
+        calls = []
+
+        result = manager.erase_encrypted_backup(
+            path,
+            key_destroyer=lambda context: calls.append(context) or True,
+            confirmed=True,
+        )
+
+        self.assertEqual(
+            result["status"],
+            "CONFIG_PLAINTEXT_BACKUP_REQUIRES_MANUAL_CLEANUP",
+        )
+        self.assertFalse(result["erased"])
+        self.assertTrue(backup_path.exists())
+        self.assertTrue(legacy.exists())
+        self.assertEqual(calls, [])
+
+    def test_encrypted_backup_erasure_preserves_backup_when_key_destruction_fails(self):
+        path = self.root / "failed-erase-provider-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        path.write_text(json.dumps(original), encoding="utf-8")
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            backup_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
+        migrated = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+        backup_path = Path(migrated["backup_path"])
+
+        result = manager.erase_encrypted_backup(
+            path, key_destroyer=lambda context: False, confirmed=True
+        )
+
+        self.assertEqual(
+            result["status"], "STATE_KEY_DESTRUCTION_NOT_CONFIRMED"
+        )
+        self.assertFalse(result["erased"])
+        self.assertTrue(backup_path.exists())
+        self.assertEqual(
+            manager._backup_store(backup_path).read({}), original
+        )
+
+    def test_active_config_encryption_migrates_legacy_plaintext_with_encrypted_backup(self):
+        path = self.root / "active-encrypted-provider-config.json"
+        original = {
+            "schema_version": "1",
+            "providers": {"image": {}},
+            "owner_contact": "owner.private@example.com",
+        }
+        path.write_text(json.dumps(original), encoding="utf-8")
+        key = b"0123456789abcdef0123456789abcdef"
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            config_encryption_key_provider=lambda context: key,
+        )
+
+        result = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2},
+            allow_legacy_plaintext=True,
+        )
+
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_APPLIED")
+        self.assertTrue(result["migrated"])
+        self.assertNotIn("owner.private@example.com", path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            manager._config_store(path).read({}),
+            {
+                "schema_version": "2",
+                "providers": {"image": {}},
+                "owner_contact": "owner.private@example.com",
+                "reload_mode": "atomic",
+            },
+        )
+        backup_path = Path(result["backup_path"])
+        self.assertTrue(backup_path.name.endswith(".bak.enc"))
+        self.assertNotIn(b"owner.private@example.com", backup_path.read_bytes())
+        self.assertEqual(manager._backup_store(backup_path).read({}), original)
+
+    def test_active_config_encryption_rejects_plaintext_without_explicit_migration(self):
+        path = self.root / "no-implicit-plaintext-config.json"
+        original = {"schema_version": "1", "providers": {"image": {}}}
+        original_text = json.dumps(original)
+        path.write_text(original_text, encoding="utf-8")
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            config_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
+
+        result = manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        self.assertEqual(result["status"], "INVALID_CONFIG_FILE")
+        self.assertEqual(path.read_text(encoding="utf-8"), original_text)
+        self.assertFalse(path.with_name(path.name + ".bak.enc").exists())
+
+    def test_active_encrypted_config_rolls_back_to_encrypted_original(self):
+        path = self.root / "active-encrypted-rollback-config.json"
+        original = {
+            "schema_version": "1",
+            "providers": {"image": {}},
+            "owner_contact": "rollback.owner@example.com",
+        }
+        path.write_text(json.dumps(original), encoding="utf-8")
+        key = b"0123456789abcdef0123456789abcdef"
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            config_encryption_key_provider=lambda context: key,
+        )
+        with patch.object(manager, "reload", return_value={"reloaded": False}):
+            result = manager.migrate_file(
+                path, target_version="2", migrations={"1": migrate_v1_to_v2},
+                allow_legacy_plaintext=True,
+            )
+
+        self.assertEqual(result["status"], "CONFIG_MIGRATION_ROLLED_BACK")
+        self.assertNotIn("rollback.owner@example.com", path.read_text(encoding="utf-8"))
+        self.assertEqual(manager._config_store(path).read({}), original)
+        self.assertTrue(Path(result["backup_path"]).exists())
+
+    def test_encrypted_backup_rejects_symlink_without_overwriting_target(self):
+        target = self.root / "backup-target.json"
+        target.write_text("unmodified-target", encoding="utf-8")
+        link_path = self.root / "provider-config.json.bak.enc"
+        try:
+            link_path.symlink_to(target)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink creation unavailable: {type(exc).__name__}")
+        manager = ProviderConfigLifecycleManager(
+            valid_config,
+            backup_encryption_key_provider=lambda context: b"0123456789abcdef0123456789abcdef",
+        )
+
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            manager._backup_store(link_path)
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "unmodified-target")
+        self.assertTrue(link_path.is_symlink())
 
     def test_file_migration_runs_inside_interprocess_lock(self):
         path = self.root / "provider-config.json"
@@ -120,6 +530,24 @@ class ProviderConfigLifecycleManagerTests(unittest.TestCase):
         lock_factory.assert_called_once_with(path.with_name(path.name + ".lock"))
         lock_context.__enter__.assert_called_once_with()
         migrate_locked.assert_called_once()
+
+    def test_deeply_nested_config_file_is_rejected_without_crashing_or_rewriting(self):
+        path = self.root / "deep-config.json"
+        deep_value = "safe"
+        for _ in range(20):
+            deep_value = {"nested": deep_value}
+        config = {"schema_version": "1", "providers": deep_value}
+        content = json.dumps(config)
+        path.write_text(content, encoding="utf-8")
+
+        result = self.manager.migrate_file(
+            path, target_version="2", migrations={"1": migrate_v1_to_v2}
+        )
+
+        self.assertEqual(result["status"], "SENSITIVE_DATA_SCAN_LIMIT_EXCEEDED")
+        self.assertFalse(result["migrated"])
+        self.assertFalse(path.with_name(path.name + ".bak").exists())
+        self.assertEqual(path.read_text(encoding="utf-8"), content)
 
     def test_invalid_config_file_is_not_overwritten(self):
         path = self.root / "bad.json"

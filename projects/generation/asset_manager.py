@@ -2,6 +2,9 @@ import json
 import os
 from datetime import datetime
 
+from projects.generation.providers.atomic_output import atomic_write_bytes
+from projects.generation.privacy_asset_adapter import copy_generation_privacy_scope
+
 INPUT_FILE = "projects/generation/execution_report.json"
 OUTPUT_FILE = "projects/generation/asset_manifest.json"
 
@@ -29,7 +32,7 @@ for job in data["jobs"]:
 
     asset_id = "ASSET_" + job["job_id"]
 
-    assets.append({
+    asset = {
         "asset_id": asset_id,
         "job_id": job["job_id"],
         "project": data["project"],
@@ -43,7 +46,11 @@ for job in data["jobs"]:
         "attempts": 0,
         "max_attempts": job["max_attempts"],
         "created_at": datetime.now().isoformat()
-    })
+    }
+    # Validate and propagate only explicit pseudonymous privacy metadata.
+    # No tenant/subject is inferred from project names, emails or job IDs.
+    asset.update(copy_generation_privacy_scope(data, job))
+    assets.append(asset)
 
 output = {
     "project": data["project"],
@@ -63,10 +70,15 @@ output = {
     "created_at": datetime.now().isoformat()
 }
 
-os.makedirs("projects/generation", exist_ok=True)
+# Preserve only validated, explicit owner/scope values at document level.
+output.update(copy_generation_privacy_scope(data))
 
-with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-    json.dump(output, f, indent=4, ensure_ascii=False)
+os.makedirs("projects/generation", exist_ok=True)
+atomic_write_bytes(
+    OUTPUT_FILE,
+    json.dumps(output, indent=4, ensure_ascii=False, allow_nan=False).encode("utf-8"),
+    max_bytes=16 * 1024 * 1024,
+)
 
 print("===================================")
 print("      ADVANCED ASSET MANAGER")

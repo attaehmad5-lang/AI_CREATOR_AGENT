@@ -2,13 +2,20 @@
 from __future__ import annotations
 
 from typing import Any
+import hashlib
+import hmac
 import inspect
 import re
 import time
+from datetime import datetime
+from pathlib import Path
 
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
 from .secrets_manager import SecretManagerError
+from .encrypted_state_store import EncryptedJSONStateStore
+from .sensitive_data_policy import SensitiveDataPolicy
+from .privacy_data_lifecycle import PrivacyDataLifecycleManager
 
 
 class ProviderService:
@@ -28,6 +35,7 @@ class ProviderService:
         budget_alert_manager: Any | None = None,
         authorization_manager: Any | None = None,
         identity_authenticator: Any | None = None,
+        privacy_subject_ref_key_provider: Any | None = None,
         sensitive_data_policy: Any | None = None,
         data_handling_policy: Any | None = None,
         webhook_verifier: Any | None = None,
@@ -42,8 +50,28 @@ class ProviderService:
         slo_manager: Any | None = None,
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
+        privacy_lifecycle_manager: PrivacyDataLifecycleManager | None = None,
         secret_manager: Any | None = None,
+        require_encrypted_state: bool = False,
+        require_privacy_lifecycle: bool = False,
     ) -> None:
+        if not isinstance(require_encrypted_state, bool):
+            raise ValueError("require_encrypted_state must be boolean")
+        if not isinstance(require_privacy_lifecycle, bool):
+            raise ValueError("require_privacy_lifecycle must be boolean")
+        if privacy_lifecycle_manager is not None and not isinstance(
+            privacy_lifecycle_manager, PrivacyDataLifecycleManager
+        ):
+            raise ValueError("privacy_lifecycle_manager must use PrivacyDataLifecycleManager")
+        if require_privacy_lifecycle and (
+            privacy_lifecycle_manager is None
+            or privacy_lifecycle_manager.registered_store_count < 1
+        ):
+            raise ValueError("privacy_lifecycle_manager must have at least one registered store")
+        if require_privacy_lifecycle and privacy_lifecycle_manager.durable_idempotency_ready is not True:
+            raise ValueError("privacy_lifecycle_manager must enforce durable idempotency for every registered store")
+        if require_privacy_lifecycle and privacy_lifecycle_manager.inventory_verified is not True:
+            raise ValueError("privacy_lifecycle_manager must match a declared complete store inventory")
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
         if tenant_isolation_manager is not None and authorization_manager is None:
@@ -55,6 +83,16 @@ class ProviderService:
             or not callable(getattr(identity_authenticator, "is_authenticated_principal", None))
         ):
             raise ValueError("identity_authenticator must verify tokens and identify trusted principals")
+        if privacy_subject_ref_key_provider is not None:
+            if not callable(privacy_subject_ref_key_provider):
+                raise ValueError("privacy_subject_ref_key_provider must be callable")
+            try:
+                subject_key = privacy_subject_ref_key_provider("provider-job-subject-reference-v1")
+            except Exception as exc:
+                raise ValueError("privacy subject reference key is unavailable") from exc
+            if not isinstance(subject_key, bytes) or len(subject_key) != 32:
+                raise ValueError("privacy subject reference key must be exactly 32 bytes")
+        self.privacy_subject_ref_key_provider = privacy_subject_ref_key_provider
         resolved_secret_manager = secret_manager or getattr(connection_manager, "secret_manager", None)
         if resolved_secret_manager is not None and (
             not callable(getattr(resolved_secret_manager, "resolve_secret", None))
@@ -92,6 +130,86 @@ class ProviderService:
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
                 raise ValueError(f"{label} does not support {method}")
+        # Only managers with persistent state are checked. In-memory adapters
+        # remain supported; an activated file-backed manager must expose the
+        # authenticated state-store contract when strict storage is requested.
+        resolved_credit_manager = credit_manager or getattr(routing_manager, "credit_manager", None)
+        storage_managers = {
+            "connection_manager": connection_manager,
+            "authorization_manager": authorization_manager,
+            "tenant_isolation_manager": tenant_isolation_manager,
+            "job_manager": job_manager,
+            "cost_policy": cost_policy,
+            "quota_manager": quota_manager,
+            "credit_manager": resolved_credit_manager,
+            "budget_alert_manager": budget_alert_manager,
+            "webhook_verifier": webhook_verifier,
+            "incident_manager": incident_manager,
+            "health_manager": health_manager,
+            "feature_flag_manager": feature_flag_manager,
+            "degraded_mode_manager": degraded_mode_manager,
+            "slo_manager": slo_manager,
+            "project_policy_manager": project_policy_manager,
+        }
+        storage_status: dict[str, bool] = {}
+        for label, instance in storage_managers.items():
+            if instance is None:
+                continue
+            required_paths: set[str] = set()
+            invalid_path = False
+            for attribute in ("state_path", "ledger_path", "path", "catalog_path", "history_path", "database_path"):
+                value = getattr(instance, attribute, None)
+                if value is None:
+                    continue
+                try:
+                    required_paths.add(str(Path(value).resolve()))
+                except (TypeError, ValueError, OSError):
+                    invalid_path = True
+
+            state_stores = [
+                getattr(instance, attribute, None)
+                for attribute in ("state_store", "catalog_store", "config_store")
+                if getattr(instance, attribute, None) is not None
+            ]
+            if not required_paths and not state_stores:
+                continue
+
+            verified_store_paths: set[str] = set()
+            all_stores_ready = bool(state_stores) and not invalid_path
+            for state_store in state_stores:
+                key_provider = getattr(state_store, "key_provider", None)
+                context = getattr(state_store, "context", None)
+                store_path = getattr(state_store, "path", None)
+                valid_store = (
+                    isinstance(state_store, EncryptedJSONStateStore)
+                    and callable(getattr(state_store, "read", None))
+                    and callable(getattr(state_store, "write", None))
+                    and callable(key_provider)
+                    and isinstance(context, str)
+                    and bool(context)
+                    and (
+                        not require_encrypted_state
+                        or state_store.verify_key() is True
+                    )
+                )
+                if not valid_store:
+                    all_stores_ready = False
+                    continue
+                try:
+                    verified_store_paths.add(str(Path(store_path).resolve()))
+                except (TypeError, ValueError, OSError):
+                    all_stores_ready = False
+
+            # Every known persistent file must have a matching authenticated
+            # store; an encrypted state file cannot mask a plaintext catalog.
+            ready = (
+                all_stores_ready
+                and bool(required_paths or verified_store_paths)
+                and required_paths == verified_store_paths
+            )
+            storage_status[label] = ready
+            if require_encrypted_state and not ready:
+                raise ValueError(f"{label} must use deployment-key-encrypted persistent state")
         self.connection_manager = connection_manager
         self.routing_manager = routing_manager
         self.health_manager = health_manager
@@ -103,7 +221,11 @@ class ProviderService:
         self.budget_alert_manager = budget_alert_manager
         self.authorization_manager = authorization_manager
         self.identity_authenticator = identity_authenticator
-        self.sensitive_data_policy = sensitive_data_policy
+        self.sensitive_data_policy = (
+            sensitive_data_policy if sensitive_data_policy is not None else SensitiveDataPolicy(
+                blocked_categories=("credential", "payment_card")
+            )
+        )
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
         self.job_manager = job_manager
@@ -117,7 +239,59 @@ class ProviderService:
         self.slo_manager = slo_manager
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
+        self.privacy_lifecycle_manager = privacy_lifecycle_manager
         self.secret_manager = resolved_secret_manager
+        self.require_encrypted_state = require_encrypted_state
+        self.require_privacy_lifecycle = require_privacy_lifecycle
+        self._privacy_storage_status = storage_status
+
+    def get_privacy_storage_status(self) -> dict[str, Any]:
+        """Report encryption readiness without exposing file paths or key material."""
+        configured = dict(self._privacy_storage_status)
+        all_ready = all(configured.values())
+        status = (
+            "ENCRYPTED_STORAGE_READY" if all_ready and configured
+            else "ENCRYPTED_STORAGE_NOT_REQUIRED" if not self.require_encrypted_state
+            else "ENCRYPTED_STORAGE_NOT_VERIFIED"
+        )
+        return {
+            "status": status,
+            "required": self.require_encrypted_state,
+            "configured_persistent_managers": len(configured),
+            "encrypted_persistent_managers": sum(1 for ready in configured.values() if ready),
+            "managers": configured,
+        }
+
+    def get_privacy_lifecycle_status(self) -> dict[str, Any]:
+        """Report registered deletion/retention stores without exposing adapter details."""
+        manager = self.privacy_lifecycle_manager
+        count = manager.registered_store_count if manager is not None else 0
+        if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= 256:
+            return {"status": "PRIVACY_LIFECYCLE_STATUS_INVALID", "configured": False, "registered_store_count": 0}
+        durable_ready = bool(
+            manager is not None and getattr(manager, "durable_idempotency_ready", False) is True
+        )
+        inventory_verified = bool(
+            manager is not None and getattr(manager, "inventory_verified", False) is True
+        )
+        required_store_count = (
+            manager.required_store_count
+            if manager is not None and isinstance(manager.required_store_count, int)
+            else 0
+        )
+        lifecycle_ready = count > 0 and (
+            not self.require_privacy_lifecycle or (durable_ready and inventory_verified)
+        )
+        return {
+            "status": "PRIVACY_LIFECYCLE_READY" if lifecycle_ready else "PRIVACY_LIFECYCLE_NOT_CONFIGURED",
+            "configured": count > 0,
+            "registered_store_count": count,
+            "durable_idempotency_required": self.require_privacy_lifecycle,
+            "durable_idempotency_ready": durable_ready,
+            "store_inventory_required": self.require_privacy_lifecycle,
+            "store_inventory_verified": inventory_verified,
+            "required_store_count": required_store_count,
+        }
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
@@ -153,6 +327,16 @@ class ProviderService:
         provider_id: str | None = None,
         return_decision: bool = False,
     ) -> dict[str, Any] | None:
+        auth_context = {"operation": operation}
+        if provider_id is not None:
+            auth_context["provider_id"] = provider_id
+        if isinstance(principal_id, str):
+            auth_context["principal_id"] = principal_id
+        input_rejection = self._sensitive_input_rejection(
+            {"identity_context": auth_context}
+        )
+        if input_rejection is not None:
+            return {"allowed": False, "status": input_rejection["status"]}
         if self.identity_authenticator is not None:
             try:
                 trusted_identity = self.identity_authenticator.is_authenticated_principal(principal_id)
@@ -182,6 +366,12 @@ class ProviderService:
             return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
         if not isinstance(result, dict):
             result = {"allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"}
+        if self._sensitive_input_rejection({"permission_manager_response": result}) is not None:
+            return {"allowed": False, "status": "SENSITIVE_DATA_OUTPUT_BLOCKED"}
+        if result.get("allowed") is not True or return_decision:
+            rejection = self._sensitive_input_rejection({"authz_decision": result})
+            if rejection is not None:
+                return {"allowed": False, "status": "SENSITIVE_DATA_OUTPUT_BLOCKED"}
         if result.get("allowed") is not True:
             return result
         return result if return_decision else None
@@ -215,9 +405,11 @@ class ProviderService:
             result = setter(target_principal_id, provider_scopes)
         except Exception as exc:
             return {"status": "PROVIDER_SCOPE_UPDATE_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False
-        }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        if self._sensitive_input_rejection({"provider_scope_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
+        return result
 
     def configure_provider(
         self,
@@ -251,13 +443,18 @@ class ProviderService:
         if not callable(configure):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
         try:
-            return configure(
+            result = configure(
                 provider_id, model=model, endpoint=endpoint,
                 probe_endpoint=probe_endpoint,
                 authentication_required=authentication_required,
             )
         except Exception as exc:
             return {"status": "PROVIDER_CONFIGURATION_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_CONNECTION_MANAGER_RESPONSE", "provider": provider_id, "saved": False}
+        if self._sensitive_input_rejection({"provider_configuration_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "provider": provider_id, "saved": False}
+        return result
 
     def set_provider_enabled(
         self,
@@ -281,9 +478,14 @@ class ProviderService:
         if not callable(setter):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
         try:
-            return setter(provider_id, enabled)
+            result = setter(provider_id, enabled)
         except Exception as exc:
             return {"status": "PROVIDER_ENABLEMENT_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_CONNECTION_MANAGER_RESPONSE", "provider": provider_id, "saved": False}
+        if self._sensitive_input_rejection({"provider_enablement_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "provider": provider_id, "saved": False}
+        return result
 
     def assign_provider_role(
         self,
@@ -319,6 +521,8 @@ class ProviderService:
             return {"status": "ROLE_ASSIGNMENT_FAILED", "saved": False, "error_type": type(exc).__name__}
         if not isinstance(result, dict):
             return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        if self._sensitive_input_rejection({"provider_role_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
         return result
 
     def disable_provider_principal(
@@ -349,7 +553,55 @@ class ProviderService:
             return {"status": "PRINCIPAL_DISABLE_FAILED", "saved": False, "error_type": type(exc).__name__}
         if not isinstance(result, dict):
             return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        if self._sensitive_input_rejection({"principal_disable_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
         return result
+
+    def _privacy_principal_reference(self, principal_id: Any) -> str | None:
+        """Return a tenant-binding ID only after validating the caller principal.
+
+        OIDC capabilities stay opaque at the service boundary. Conversion to a
+        stable identity string is allowed only after the configured authenticator
+        confirms that the exact in-process principal object is trusted.
+        """
+        if self.identity_authenticator is None:
+            return principal_id if isinstance(principal_id, str) and principal_id.strip() else None
+        try:
+            trusted = self.identity_authenticator.is_authenticated_principal(principal_id)
+        except Exception:
+            trusted = False
+        if trusted is not True:
+            return None
+        try:
+            reference = str(principal_id)
+        except Exception:
+            return None
+        if not isinstance(reference, str) or not reference.strip() or len(reference) > 256:
+            return None
+        if any(ord(char) < 32 or ord(char) == 127 for char in reference):
+            return None
+        return reference
+
+    def _derive_privacy_subject_ref(
+        self, principal_id: Any, *, project_id: str, tenant_id: str | None
+    ) -> str | None:
+        """Create a scope-bound, deployment-keyed pseudonym for persisted job ownership."""
+        provider = self.privacy_subject_ref_key_provider
+        if provider is None:
+            return None
+        principal_ref = self._privacy_principal_reference(principal_id)
+        if not isinstance(principal_ref, str) or not principal_ref:
+            return None
+        try:
+            key = provider("provider-job-subject-reference-v1")
+            if not isinstance(key, bytes) or len(key) != 32:
+                return None
+            tenant_scope = b"\\x00" if tenant_id is None else b"\\x01" + tenant_id.encode("utf-8")
+            message = project_id.encode("utf-8") + b"\\x00" + tenant_scope + b"\\x00" + principal_ref.encode("utf-8")
+            digest = hmac.new(key, message, hashlib.sha256).hexdigest()
+            return "subject-" + digest
+        except Exception:
+            return None
 
     def _authorize_tenant_project(
         self,
@@ -366,6 +618,11 @@ class ProviderService:
             or len(tenant_id) > 128
         ):
             return {"status": "TENANT_CONTEXT_REQUIRED"}
+        tenant_context = {"tenant_id": tenant_id, "project_id": project_id}
+        if isinstance(principal_id, str):
+            tenant_context["principal_id"] = principal_id
+        if self._sensitive_input_rejection({"tenant_context": tenant_context}) is not None:
+            return {"status": "SENSITIVE_DATA_BLOCKED"}
         try:
             result = self.tenant_isolation_manager.authorize_project(
                 tenant_id, project_id, principal_id
@@ -389,6 +646,16 @@ class ProviderService:
         principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Configure outage/degraded thresholds using admin-only permission."""
+        rejection = self._sensitive_input_rejection({
+            "degraded_mode_configuration_request": {
+                "category": category,
+                "normal_min_healthy_providers": normal_min_healthy_providers,
+                "degraded_min_healthy_providers": degraded_min_healthy_providers,
+                "recovery_success_samples": recovery_success_samples,
+            },
+        })
+        if rejection is not None:
+            return {"saved": False, **rejection}
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
         authorization = self._authorize_operation(principal_id, "provider.configure")
@@ -405,10 +672,15 @@ class ProviderService:
             )
         except Exception as exc:
             return {"status": "DEGRADED_MODE_CONFIGURATION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        if not isinstance(result, dict) or result.get("saved") is not True:
-            return result if isinstance(result, dict) else {
-                "status": "INVALID_DEGRADED_MODE_CONFIGURATION_RESPONSE", "saved": False,
+        if not isinstance(result, dict):
+            return {
+                "status": "INVALID_DEGRADED_MODE_CONFIGURATION_RESPONSE",
+                "saved": False,
             }
+        if self._sensitive_input_rejection({"degraded_mode_configuration_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
+        if result.get("saved") is not True:
+            return result
         return result
 
     def evaluate_category_degraded_mode(
@@ -421,6 +693,14 @@ class ProviderService:
         principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Evaluate configured mode from current health evidence, fail-closed on missing probes."""
+        rejection = self._sensitive_input_rejection({
+            "degraded_mode_evaluation_request": {
+                "category": category,
+                "provider_ids": provider_ids,
+            },
+        })
+        if rejection is not None:
+            return {"evaluated": False, **rejection}
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "evaluated": False}
         authorization = self._authorize_operation(principal_id, "provider.verify")
@@ -453,10 +733,15 @@ class ProviderService:
             result = self.degraded_mode_manager.evaluate(category, statuses)
         except Exception as exc:
             return {"status": "DEGRADED_MODE_EVALUATION_FAILED", "evaluated": False, "error_type": type(exc).__name__}
-        if not isinstance(result, dict) or result.get("evaluated") is not True:
-            return result if isinstance(result, dict) else {
-                "status": "INVALID_DEGRADED_MODE_RESPONSE", "evaluated": False,
+        if not isinstance(result, dict):
+            return {
+                "status": "INVALID_DEGRADED_MODE_RESPONSE",
+                "evaluated": False,
             }
+        if self._sensitive_input_rejection({"degraded_mode_evaluation_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "evaluated": False}
+        if result.get("evaluated") is not True:
+            return result
         return result
 
     def configure_service_level_objective(
@@ -472,6 +757,19 @@ class ProviderService:
         principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Configure an SLO using administrator-only provider configuration permission."""
+        rejection = self._sensitive_input_rejection({
+            "slo_configuration_request": {
+                "slo_id": slo_id,
+                "provider_id": provider_id,
+                "category": category,
+                "availability_target": availability_target,
+                "max_p95_latency_ms": max_p95_latency_ms,
+                "window_seconds": window_seconds,
+                "minimum_samples": minimum_samples,
+            },
+        })
+        if rejection is not None:
+            return {"saved": False, **rejection}
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
         authorization = self._authorize_operation(principal_id, "provider.configure", provider_id=provider_id)
@@ -489,10 +787,15 @@ class ProviderService:
             )
         except Exception as exc:
             return {"status": "SLO_CONFIGURATION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        if not isinstance(result, dict) or result.get("saved") is not True:
-            return result if isinstance(result, dict) else {
-                "status": "INVALID_SLO_CONFIGURATION_RESPONSE", "saved": False,
+        if not isinstance(result, dict):
+            return {
+                "status": "INVALID_SLO_CONFIGURATION_RESPONSE",
+                "saved": False,
             }
+        if self._sensitive_input_rejection({"slo_configuration_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "saved": False}
+        if result.get("saved") is not True:
+            return result
         return result
 
     def evaluate_service_level_objective(
@@ -502,6 +805,9 @@ class ProviderService:
         principal_id: str | None = None,
     ) -> dict[str, Any]:
         """Read a rolling SLO evaluation after provider.read authorization."""
+        rejection = self._sensitive_input_rejection({"slo_evaluation_request": {"slo_id": slo_id}})
+        if rejection is not None:
+            return {"evaluation": None, **rejection}
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "evaluation": None}
         authorization = self._authorize_operation(principal_id, "provider.read")
@@ -515,6 +821,8 @@ class ProviderService:
             return {"status": "SLO_EVALUATION_FAILED", "evaluation": None, "error_type": type(exc).__name__}
         if not isinstance(result, dict) or not isinstance(result.get("status"), str):
             return {"status": "INVALID_SLO_EVALUATION_RESPONSE", "evaluation": None}
+        if self._sensitive_input_rejection({"slo_evaluation_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "evaluation": None}
         return result
 
     def simulate_project_provider_policy(
@@ -546,6 +854,15 @@ class ProviderService:
                 "project_id": project_id,
                 "persisted": False,
             }
+        rejection = self._sensitive_input_rejection({
+            "project_policy_simulation": {
+                "project_id": project_id,
+                "candidate_policy": candidate_policy,
+                "scenarios": scenarios,
+            },
+        })
+        if rejection is not None:
+            return {"status": rejection["status"], "project_id": project_id, "persisted": False}
         try:
             result = self.project_policy_manager.simulate_policy(
                 project_id, candidate_policy, scenarios
@@ -569,6 +886,12 @@ class ProviderService:
         ):
             return {
                 "status": "INVALID_POLICY_SIMULATION_RESPONSE",
+                "project_id": project_id,
+                "persisted": False,
+            }
+        if self._sensitive_input_rejection({"policy_simulation_response": result}) is not None:
+            return {
+                "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
                 "project_id": project_id,
                 "persisted": False,
             }
@@ -688,6 +1011,16 @@ class ProviderService:
                 )
             except Exception as exc:
                 health = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
+        rejection = self._sensitive_input_rejection({
+            "provider_connection_response": connection,
+            "provider_health_response": health,
+        })
+        if rejection is not None:
+            return {
+                "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                "provider": provider_id,
+                "verified": False,
+            }
         return {
             "status": connection.get("status", "UNKNOWN"),
             "provider": provider_id,
@@ -759,7 +1092,7 @@ class ProviderService:
                 else "INVALID_ROTATION_RESPONSE"
             )
             return {"status": safe_status, "rotated": False}
-        return {
+        response = {
             "status": "PROVIDER_SECRET_ROTATED",
             "rotated": True,
             "provider_id": provider_id,
@@ -767,6 +1100,9 @@ class ProviderService:
             **({"version_id": result["version_id"]} if isinstance(result.get("version_id"), str) else {}),
             **({"rotated_at": result["rotated_at"]} if isinstance(result.get("rotated_at"), str) else {}),
         }
+        if self._sensitive_input_rejection({"rotation_metadata": response}) is not None:
+            return {"status": "PROVIDER_SECRET_ROTATED", "rotated": True, "provider_id": provider_id}
+        return response
 
     def verify_http_provider(
         self,
@@ -923,6 +1259,11 @@ class ProviderService:
                     "status": "HEALTH_RECORD_FAILED", "saved": False,
                     "error_type": type(exc).__name__,
                 }
+        if self._sensitive_input_rejection({
+            "manual_connection_response": connection,
+            "manual_health_response": health,
+        }) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "provider": provider_id, "verified": False}
         return {
             "status": connection.get("status", "UNKNOWN"),
             "provider": provider_id,
@@ -941,15 +1282,14 @@ class ProviderService:
         """
         safe_result = dict(result)
         job = safe_result.get("job")
-        if not isinstance(job, dict):
-            return safe_result
-
-        safe_job = dict(job)
-        safe_job.pop("lease_token", None)
-        safe_job.pop("lease_token_hash", None)
+        if isinstance(job, dict):
+            safe_job = dict(job)
+            safe_job.pop("lease_token", None)
+            safe_job.pop("lease_token_hash", None)
+            safe_result["job"] = safe_job
         if sensitive_data_policy is not None:
             try:
-                scan = sensitive_data_policy.inspect(safe_job)
+                scan = sensitive_data_policy.inspect(safe_result)
             except Exception:
                 scan = {
                     "allowed": False,
@@ -968,7 +1308,6 @@ class ProviderService:
                         "blocked_categories": [],
                     },
                 }
-        safe_result["job"] = safe_job
         return safe_result
 
     def _sensitive_input_rejection(self, payload: Any) -> dict[str, Any] | None:
@@ -1026,7 +1365,14 @@ class ProviderService:
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
                 "payload_ref": payload_ref, "priority": priority,
             }
-            if self.tenant_isolation_manager is not None:
+            if self.privacy_subject_ref_key_provider is not None:
+                subject_ref = self._derive_privacy_subject_ref(
+                    principal_id, project_id=project_id, tenant_id=tenant_id
+                )
+                if subject_ref is None:
+                    return {"status": "PRIVACY_SUBJECT_REFERENCE_UNAVAILABLE", "accepted": False}
+                submit_args["subject_ref"] = subject_ref
+            if tenant_id is not None:
                 submit_args["tenant_id"] = tenant_id
             result = self.job_manager.submit(**submit_args)
         except Exception as exc:
@@ -1039,6 +1385,11 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
+        input_rejection = self._sensitive_input_rejection({
+            "job_poll_context": {"job_id": job_id, "tenant_id": tenant_id},
+        })
+        if input_rejection is not None:
+            return {"job": None, **input_rejection}
         authorization = self._authorize_operation(
             principal_id, "provider.read", provider_id="*", return_decision=True
         )
@@ -1088,7 +1439,24 @@ class ProviderService:
             result = self.job_manager.claim_next(worker_id=worker_id)
         except Exception as exc:
             return {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+        safe_result = dict(result)
+        scan_result = dict(result)
+        if isinstance(safe_result.get("job"), dict):
+            safe_job = dict(safe_result["job"])
+            scan_job = dict(safe_job)
+            # Only the freshly issued lease token is intentionally returned to
+            # the claiming worker. The verifier hash is never a public field.
+            scan_job.pop("lease_token", None)
+            scan_job.pop("lease_token_hash", None)
+            safe_job.pop("lease_token_hash", None)
+            safe_result["job"] = safe_job
+            scan_result["job"] = scan_job
+        rejection = self._sensitive_input_rejection({"job_claim_response": scan_result})
+        if rejection is not None:
+            return {"status": rejection["status"], "job": None}
+        return safe_result
 
     def renew_job_lease(
         self, *, job_id: str, worker_id: str, lease_token: str,
@@ -1096,6 +1464,11 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "renewed": False}
+        input_rejection = self._sensitive_input_rejection({
+            "job_lease_context": {"job_id": job_id, "worker_id": worker_id},
+        })
+        if input_rejection is not None:
+            return {"renewed": False, **input_rejection}
         authorization = self._authorize_operation(principal_id, "provider.generate")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "renewed": False, "authorization": authorization}
@@ -1105,7 +1478,12 @@ class ProviderService:
             )
         except Exception as exc:
             return {"status": "JOB_LEASE_RENEWAL_FAILED", "renewed": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "renewed": False}
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_MANAGER_RESPONSE", "renewed": False}
+        rejection = self._sensitive_input_rejection({"job_lease_renewal_response": result})
+        if rejection is not None:
+            return {"status": rejection["status"], "renewed": False}
+        return result
 
     def complete_job(self, *, job_id: str, worker_id: str, lease_token: str, success: bool,
                      result_ref: str | None = None, error_code: str | None = None,
@@ -1141,6 +1519,11 @@ class ProviderService:
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
+        input_rejection = self._sensitive_input_rejection({
+            "job_cancel_context": {"job_id": job_id, "tenant_id": tenant_id},
+        })
+        if input_rejection is not None:
+            return {"saved": False, **input_rejection}
         authorization = self._authorize_operation(
             principal_id, "provider.generate", provider_id="*", return_decision=True
         )
@@ -1182,6 +1565,194 @@ class ProviderService:
             return {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
         return self._sanitize_job_response(result, self.sensitive_data_policy) if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
 
+    def purge_expired_job_records(
+        self,
+        *,
+        project_id: str,
+        cutoff: datetime,
+        principal_id: str | None = None,
+        tenant_id: str | None = None,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Admin-gated local retention purge for old terminal jobs in one project."""
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "purged": False, "purged_count": 0}
+        if confirmed is not True:
+            return {"status": "JOB_RETENTION_CONFIRMATION_REQUIRED", "purged": False, "purged_count": 0}
+        if not isinstance(cutoff, datetime) or cutoff.tzinfo is None or cutoff.utcoffset() is None:
+            return {"status": "INVALID_RETENTION_CUTOFF", "purged": False, "purged_count": 0}
+        if not callable(getattr(self.job_manager, "purge_terminal_jobs_before", None)):
+            return {"status": "JOB_RETENTION_UNAVAILABLE", "purged": False, "purged_count": 0}
+        input_rejection = self._sensitive_input_rejection({
+            "job_retention_request": {
+                "project_id": project_id,
+                "tenant_id": tenant_id,
+                "cutoff": cutoff.isoformat(),
+            },
+        })
+        if input_rejection is not None:
+            return {"purged": False, "purged_count": 0, **input_rejection}
+        authorization = self._authorize_operation(principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "purged": False, "purged_count": 0}
+        tenant_error = self._authorize_tenant_project(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            principal_id=principal_id,
+        )
+        if tenant_error is not None:
+            return {"status": tenant_error["status"], "purged": False, "purged_count": 0}
+        try:
+            result = self.job_manager.purge_terminal_jobs_before(
+                project_id=project_id,
+                cutoff=cutoff,
+                tenant_id=tenant_id,
+            )
+        except Exception as exc:
+            return {
+                "status": "JOB_RETENTION_PURGE_FAILED",
+                "purged": False,
+                "purged_count": 0,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_RETENTION_RESPONSE", "purged": False, "purged_count": 0}
+        if self._sensitive_input_rejection({"job_retention_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "purged": False, "purged_count": 0}
+        return result
+
+    def delete_subject_data(
+        self,
+        *,
+        subject_ref: str,
+        project_id: str,
+        request_id: str,
+        principal_id: Any,
+        tenant_id: str | None = None,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Admin-gated subject deletion across every registered privacy store."""
+        if self.privacy_lifecycle_manager is None:
+            return {"status": "PRIVACY_LIFECYCLE_MANAGER_UNAVAILABLE", "confirmed": False, "completed": False}
+        if confirmed is not True:
+            return {"status": "SUBJECT_DELETION_CONFIRMATION_REQUIRED", "confirmed": False, "completed": False}
+        rejection = self._sensitive_input_rejection({
+            "subject_deletion_request": {
+                "subject_ref": subject_ref,
+                "project_id": project_id,
+                "tenant_id": tenant_id,
+                "request_id": request_id,
+            },
+        })
+        if rejection is not None:
+            return {"confirmed": False, "completed": False, **rejection}
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "confirmed": False, "completed": False}
+        tenant_principal_id = self._privacy_principal_reference(principal_id)
+        if tenant_principal_id is None:
+            return {"status": "AUTHENTICATED_PRINCIPAL_REQUIRED", "confirmed": False, "completed": False}
+        authorization = self._authorize_operation(principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "confirmed": False, "completed": False}
+        tenant_error = self._authorize_tenant_project(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            principal_id=tenant_principal_id,
+        )
+        if tenant_error is not None:
+            return {"status": tenant_error["status"], "confirmed": False, "completed": False}
+        try:
+            result = self.privacy_lifecycle_manager.delete_subject_data(
+                subject_ref=subject_ref,
+                project_id=project_id,
+                tenant_id=tenant_id,
+                request_id=request_id,
+                confirmed=True,
+            )
+        except Exception as exc:
+            return {
+                "status": "SUBJECT_DATA_DELETION_FAILED",
+                "confirmed": False,
+                "completed": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_PRIVACY_LIFECYCLE_RESPONSE", "confirmed": False, "completed": False}
+        if self._sensitive_input_rejection({"subject_deletion_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "confirmed": False, "completed": False}
+        return result
+
+    def purge_expired_privacy_data(
+        self,
+        *,
+        cutoff: datetime,
+        project_id: str,
+        request_id: str,
+        principal_id: Any,
+        tenant_id: str | None = None,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Admin-gated retention purge across every registered privacy store."""
+        if self.privacy_lifecycle_manager is None:
+            return {"status": "PRIVACY_LIFECYCLE_MANAGER_UNAVAILABLE", "confirmed": False, "completed": False}
+        if confirmed is not True:
+            return {"status": "RETENTION_PURGE_CONFIRMATION_REQUIRED", "confirmed": False, "completed": False}
+        try:
+            cutoff_is_aware = (
+                isinstance(cutoff, datetime)
+                and cutoff.tzinfo is not None
+                and cutoff.utcoffset() is not None
+            )
+        except Exception:
+            cutoff_is_aware = False
+        if not cutoff_is_aware:
+            return {"status": "INVALID_RETENTION_PURGE_SCOPE", "confirmed": False, "completed": False}
+        rejection = self._sensitive_input_rejection({
+            "privacy_retention_request": {
+                "project_id": project_id,
+                "tenant_id": tenant_id,
+                "request_id": request_id,
+                "cutoff": cutoff.isoformat(),
+            },
+        })
+        if rejection is not None:
+            return {"confirmed": False, "completed": False, **rejection}
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "confirmed": False, "completed": False}
+        tenant_principal_id = self._privacy_principal_reference(principal_id)
+        if tenant_principal_id is None:
+            return {"status": "AUTHENTICATED_PRINCIPAL_REQUIRED", "confirmed": False, "completed": False}
+        authorization = self._authorize_operation(principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "confirmed": False, "completed": False}
+        tenant_error = self._authorize_tenant_project(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            principal_id=tenant_principal_id,
+        )
+        if tenant_error is not None:
+            return {"status": tenant_error["status"], "confirmed": False, "completed": False}
+        try:
+            result = self.privacy_lifecycle_manager.purge_expired_data(
+                cutoff=cutoff,
+                project_id=project_id,
+                tenant_id=tenant_id,
+                request_id=request_id,
+                confirmed=True,
+            )
+        except Exception as exc:
+            return {
+                "status": "RETENTION_PURGE_FAILED",
+                "confirmed": False,
+                "completed": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_PRIVACY_LIFECYCLE_RESPONSE", "confirmed": False, "completed": False}
+        if self._sensitive_input_rejection({"privacy_retention_response": result}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "confirmed": False, "completed": False}
+        return result
+
     def verify_webhook(
         self,
         *,
@@ -1195,6 +1766,28 @@ class ProviderService:
         """Verify a provider callback without persisting its secret or body."""
         if self.webhook_verifier is None:
             return {"verified": False, "status": "WEBHOOK_VERIFIER_UNAVAILABLE"}
+        if not isinstance(payload, bytes):
+            return {"verified": False, "status": "INVALID_WEBHOOK_PAYLOAD"}
+        max_payload_bytes = getattr(
+            self.webhook_verifier, "max_payload_bytes", 1_000_000
+        )
+        if (
+            isinstance(max_payload_bytes, bool)
+            or not isinstance(max_payload_bytes, int)
+            or not 1 <= max_payload_bytes <= 10_000_000
+        ):
+            return {"verified": False, "status": "INVALID_WEBHOOK_PAYLOAD_LIMIT"}
+        if len(payload) > max_payload_bytes:
+            return {"verified": False, "status": "WEBHOOK_PAYLOAD_TOO_LARGE"}
+        try:
+            payload_text = payload.decode("utf-8")
+        except UnicodeDecodeError:
+            return {"verified": False, "status": "INVALID_WEBHOOK_PAYLOAD_ENCODING"}
+        payload_rejection = self._sensitive_input_rejection(
+            {"webhook_payload": payload_text}
+        )
+        if payload_rejection is not None:
+            return {"verified": False, **payload_rejection}
         try:
             result = self.webhook_verifier.verify(
                 provider_id=provider_id,
@@ -1210,9 +1803,12 @@ class ProviderService:
                 "status": "WEBHOOK_VERIFICATION_FAILED",
                 "error_type": type(exc).__name__,
             }
-        return result if isinstance(result, dict) else {
-            "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
-        }
+        if not isinstance(result, dict):
+            return {"verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"}
+        rejection = self._sensitive_input_rejection({"webhook_verifier_response": result})
+        if rejection is not None:
+            return {"verified": False, **rejection}
+        return result
 
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
@@ -1224,9 +1820,12 @@ class ProviderService:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
             return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
-        }
+        if not isinstance(result, dict):
+            return {"allowed": False, "status": "INVALID_ROUTING_RESPONSE"}
+        rejection = self._sensitive_input_rejection({"routing_response": result})
+        if rejection is not None:
+            return {"allowed": False, **rejection}
+        return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
         if self.output_validator is None:
@@ -1235,9 +1834,14 @@ class ProviderService:
             result = self.output_validator.validate_file(path, modality=modality)
         except Exception as exc:
             return {"valid": False, "status": "OUTPUT_VALIDATION_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "valid": False, "status": "INVALID_OUTPUT_VALIDATION_RESPONSE"
-        }
+        if not isinstance(result, dict):
+            return {"valid": False, "status": "INVALID_OUTPUT_VALIDATION_RESPONSE"}
+        rejection = self._sensitive_input_rejection(
+            {"output_validation_response": result}
+        )
+        if rejection is not None:
+            return {"valid": False, **rejection}
+        return result
 
     @staticmethod
     def _safe_error_code(value: Any, default: str) -> str:
@@ -1284,6 +1888,16 @@ class ProviderService:
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
         if not isinstance(use_managed_credential, bool):
             return {"status": "INVALID_MANAGED_CREDENTIAL_POLICY", "executed": False}
+        # Managed credentials must be supplied only by the server-side secret manager.
+        # Reject caller injection before routing can create any billable reservation.
+        if use_managed_credential and adapter_options and (
+            "provider_credential" in adapter_options
+            or "provider_credential_lease" in adapter_options
+        ):
+            return {
+                "status": "CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED",
+                "executed": False,
+            }
         if not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST_ID", "executed": False}
         if not isinstance(category, str) or not category.strip():
@@ -1292,6 +1906,23 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+
+        request_context = {
+            "category": category,
+            "project_id": project_id,
+            "request_id": request_id,
+            "modality": modality,
+            "data_categories": data_categories,
+        }
+        if isinstance(principal_id, str):
+            request_context["principal_id"] = principal_id
+        if isinstance(tenant_id, str):
+            request_context["tenant_id"] = tenant_id
+        request_rejection = self._sensitive_input_rejection(
+            {"generation_request_context": request_context}
+        )
+        if request_rejection is not None:
+            return {"status": request_rejection["status"], "executed": False}
 
         degraded_mode_state = None
         if self.degraded_mode_manager is not None:
@@ -1303,6 +1934,10 @@ class ProviderService:
                     "executed": False,
                     "error_type": type(exc).__name__,
                 }
+            if self._sensitive_input_rejection({
+                "degraded_mode_state_response": degraded_state_result,
+            }) is not None:
+                return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "executed": False}
             degraded_mode_state = (
                 degraded_state_result.get("state")
                 if isinstance(degraded_state_result, dict) else None
@@ -1375,6 +2010,10 @@ class ProviderService:
                     "executed": False,
                     "error_type": type(exc).__name__,
                 }
+            if self._sensitive_input_rejection({
+                "feature_flag_response": feature_flag_result,
+            }) is not None:
+                return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "executed": False}
             if not isinstance(feature_flag_result, dict) or feature_flag_result.get("enabled") is not True:
                 return {
                     "status": "FEATURE_DISABLED",
@@ -1486,6 +2125,18 @@ class ProviderService:
                     binding = binding_fn(provider_id)
                 except Exception as exc:
                     binding = {"valid": False, "status": "MODALITY_BINDING_CHECK_FAILED", "error_type": type(exc).__name__}
+            if self._sensitive_input_rejection({
+                "modality_binding_response": binding,
+            }) is not None:
+                self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                    "executed": False,
+                    "provider": provider_id,
+                }
             requested_modality = modality.strip().casefold() if isinstance(modality, str) else None
             allowed_modalities = binding.get("output_modalities") if isinstance(binding, dict) else None
             binding_valid = isinstance(binding, dict) and binding.get("valid") is True and isinstance(allowed_modalities, list)
@@ -1519,6 +2170,18 @@ class ProviderService:
                     )
                 except Exception as exc:
                     health = {"eligible": False, "status": "HEALTH_CHECK_FAILED", "error_type": type(exc).__name__}
+            if self._sensitive_input_rejection({
+                "provider_health_response": health,
+            }) is not None:
+                self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                    "executed": False,
+                    "provider": provider_id,
+                }
             if not isinstance(health, dict) or health.get("eligible") is not True:
                 release = self.release_unstarted_request(project_id=project_id, provider_id=provider_id, request_id=request_id)
                 safe_health = {
@@ -1546,6 +2209,18 @@ class ProviderService:
                 return {
                     "status": "PROVIDER_DATA_POLICY_CHECK_FAILED", "executed": False,
                     "release": release, "error_type": type(exc).__name__,
+                }
+            if self._sensitive_input_rejection({
+                "provider_data_policy_response": data_policy_result,
+            }) is not None:
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                    "executed": False,
+                    "release": release,
                 }
             if not isinstance(data_policy_result, dict) or data_policy_result.get("allowed") is not True:
                 release = self.release_unstarted_request(
@@ -1605,17 +2280,6 @@ class ProviderService:
                 )
                 return {
                     "status": "SECRET_MANAGER_UNAVAILABLE",
-                    "executed": False,
-                    "provider": provider_id,
-                    "release": released,
-                }
-            if "provider_credential" in options or "provider_credential_lease" in options:
-                released = self.release_unstarted_request(
-                    project_id=project_id, provider_id=provider_id,
-                    request_id=request_id, tenant_id=tenant_id,
-                )
-                return {
-                    "status": "CALLER_SUPPLIED_MANAGED_CREDENTIAL_REJECTED",
                     "executed": False,
                     "provider": provider_id,
                     "release": released,
@@ -1715,6 +2379,24 @@ class ProviderService:
                 options.pop("provider_credential_lease", None)
                 secret_lease.close()
                 secret_lease = None
+        adapter_rejection = self._sensitive_input_rejection(
+            {"adapter_response": adapter_result}
+        )
+        if adapter_rejection is not None:
+            # An adapter may already have transmitted a paid request. Do not
+            # release reservations when its response cannot safely be disclosed.
+            return {
+                "status": adapter_rejection["status"],
+                "executed": False,
+                "provider": provider_id,
+                "request_id": request_id,
+                "execution_outcome": "UNKNOWN",
+                "reservations_retained": True,
+                **({"error_type": adapter_rejection["error_type"]}
+                   if "error_type" in adapter_rejection else {}),
+                **({"sensitive_data_scan": adapter_rejection["sensitive_data_scan"]}
+                   if "sensitive_data_scan" in adapter_rejection else {}),
+            }
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
@@ -2006,7 +2688,7 @@ class ProviderService:
             status = "EXECUTION_SUCCEEDED"
         else:
             status = "EXECUTION_FINALIZATION_PARTIAL"
-        return {
+        response = {
             "status": status,
             "executed": True,
             "provider": provider_id,
@@ -2029,20 +2711,79 @@ class ProviderService:
             "data_policy": data_policy_result,
             "retry_decision": retry,
         }
+        # Scan externally supplied adapter and manager result values, but do not
+        # classify this facade's own authorization decision as a caller credential.
+        outbound_results = {
+            # Inspect provider-controlled adapter data and manager results. The
+            # facade's own authorization decision is deliberately excluded.
+            "adapter_response": adapter_result,
+            "finalization": finalization,
+            "metrics": metrics_result,
+            "slo_observation": slo_result,
+            "benchmark": benchmark_result,
+            "incident": incident_result,
+            "provider_error": provider_error,
+            "budget_alerts": budget_alerts,
+            "degraded_mode": degraded_mode_state,
+            "feature_flag": feature_flag_result,
+            "data_policy": data_policy_result,
+            "quality": quality_result,
+            "media_integrity": media_integrity_result,
+            "output_validation": output_validation,
+        }
+        rejection = self._sensitive_input_rejection({"outbound_results": outbound_results})
+        if rejection is not None:
+            return {
+                "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                "executed": True,
+                "provider": provider_id,
+                "request_id": request_id,
+                "accounting_finalized": finalization.get("finalized") is True,
+            }
+        return response
 
     def retry_decision(self, **failure: Any) -> dict[str, Any]:
         if self.retry_policy is None:
             return {"retry": False, "reason": "RETRY_POLICY_UNAVAILABLE"}
+        input_rejection = self._sensitive_input_rejection({"retry_failure": failure})
+        if input_rejection is not None:
+            return {"retry": False, "reason": "SENSITIVE_DATA_BLOCKED"}
         try:
             decision = self.retry_policy.decide(**failure)
         except Exception as exc:
             return {"retry": False, "reason": "RETRY_POLICY_FAILED", "error_type": type(exc).__name__}
-        return {
+        raw_attempt = getattr(decision, "attempt", 0)
+        attempt = (
+            raw_attempt
+            if isinstance(raw_attempt, int) and not isinstance(raw_attempt, bool)
+            and 0 <= raw_attempt <= 1_000_000
+            else 0
+        )
+        delay = finite_number(
+            getattr(decision, "delay_seconds", 0.0),
+            minimum=0,
+            maximum=86_400,
+        )
+        raw_reason = getattr(decision, "reason", "INVALID_RETRY_RESPONSE")
+        reason = (
+            raw_reason
+            if isinstance(raw_reason, str) and len(raw_reason) <= 256
+            else "INVALID_RETRY_RESPONSE"
+        )
+        response = {
             "retry": bool(getattr(decision, "retry", False)),
-            "attempt": getattr(decision, "attempt", 0),
-            "delay_seconds": getattr(decision, "delay_seconds", 0.0),
-            "reason": getattr(decision, "reason", "INVALID_RETRY_RESPONSE"),
+            "attempt": attempt,
+            "delay_seconds": 0.0 if delay is None else delay,
+            "reason": reason,
         }
+        if self._sensitive_input_rejection({"retry_policy_response": response}) is not None:
+            return {
+                "retry": response["retry"],
+                "attempt": attempt,
+                "delay_seconds": 0.0 if delay is None else delay,
+                "reason": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+            }
+        return response
 
     @staticmethod
     def _valid_amount(value: Any) -> bool:
@@ -2269,7 +3010,7 @@ class ProviderService:
             and (credit_result is None or credit_result.get("saved") is True)
             and (health_result is None or health_result.get("saved") is True)
         )
-        return {
+        response = {
             "status": "FINALIZED" if finalized else "FINALIZATION_PARTIAL",
             "finalized": finalized,
             "cost": cost_result,
@@ -2277,6 +3018,12 @@ class ProviderService:
             "credits": credit_result,
             "health": health_result,
         }
+        if self._sensitive_input_rejection({"usage_finalization_response": response}) is not None:
+            return {
+                "status": "SENSITIVE_DATA_OUTPUT_BLOCKED",
+                "finalized": finalized,
+            }
+        return response
 
     def release_unstarted_request(
         self, *, project_id: str, provider_id: str, request_id: str,
@@ -2326,4 +3073,7 @@ class ProviderService:
             item.get("status") in {"RESERVATION_RELEASED", "RELEASED", "RESERVATION_NOT_FOUND"}
             for item in results.values()
         )
-        return {"status": "RELEASED" if released else "RELEASE_PARTIAL", "released": released, **results}
+        response = {"status": "RELEASED" if released else "RELEASE_PARTIAL", "released": released, **results}
+        if self._sensitive_input_rejection({"reservation_release_response": response}) is not None:
+            return {"status": "SENSITIVE_DATA_OUTPUT_BLOCKED", "released": released}
+        return response

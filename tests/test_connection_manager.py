@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 import tempfile
@@ -10,6 +11,7 @@ from pathlib import Path
 from projects.provider_store.connection_manager import (
     MODALITY_CONTRACTS, MODALITY_OUTPUT_KINDS, ConnectionManager,
 )
+from projects.provider_store.encrypted_state_store import EncryptedStateError
 from projects.provider_store.output_validator import ProviderOutputValidator
 
 
@@ -178,6 +180,137 @@ class ConnectionManagerTests(unittest.TestCase):
         loaded = ConnectionManager(catalog_path, state_path)
         self.assertEqual(len(loaded.list_providers()), 20)
         self.assertEqual(len({p["id"] for p in loaded.list_providers()}), 20)
+
+    def test_catalog_requires_explicit_encryption_migration_and_is_encrypted_at_rest(self):
+        key_provider = lambda context: b"c" * 32
+
+        with self.assertRaises(EncryptedStateError):
+            ConnectionManager(
+                self.catalog_path,
+                self.state_path,
+                catalog_encryption_key_provider=key_provider,
+            )
+        # A rejected implicit migration must leave the original file unchanged.
+        self.assertIn(b'"providers"', self.catalog_path.read_bytes())
+
+        encrypted = ConnectionManager(
+            self.catalog_path,
+            self.state_path,
+            catalog_encryption_key_provider=key_provider,
+            migrate_legacy_plaintext_catalog=True,
+        )
+        ciphertext = self.catalog_path.read_bytes()
+        self.assertNotIn(b'"providers"', ciphertext)
+        self.assertNotIn(b"public_image", ciphertext)
+        self.assertEqual(len(encrypted.list_providers()), 2)
+
+        reopened = ConnectionManager(
+            self.catalog_path,
+            self.state_path,
+            catalog_encryption_key_provider=key_provider,
+        )
+        self.assertEqual(reopened.list_providers(), encrypted.list_providers())
+
+        with self.assertRaises(EncryptedStateError):
+            ConnectionManager(
+                self.catalog_path,
+                self.state_path,
+                catalog_encryption_key_provider=lambda context: b"w" * 32,
+            )
+
+    def test_encrypted_catalog_recovery_requires_key_and_preserves_encryption(self):
+        target = self.root / "recoverable-encrypted-catalog.json"
+        master = self.root / "validated-master-catalog.json"
+        master.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+        key_provider = lambda context: b"r" * 32
+        from projects.provider_store.encrypted_state_store import EncryptedJSONStateStore
+        path_context = (
+            "provider-catalog-recovery-test:"
+            + hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:24]
+        )
+        EncryptedJSONStateStore(
+            target,
+            key_provider=key_provider,
+            context=path_context,
+        ).write({"invalid": "catalog"})
+
+        without_key = ConnectionManager.restore_catalog_from_master(target, master)
+        self.assertEqual(without_key["status"], "CATALOG_ENCRYPTION_KEY_REQUIRED")
+        self.assertFalse(without_key["restored"])
+
+        restored = ConnectionManager.restore_catalog_from_master(
+            target,
+            master,
+            catalog_encryption_key_provider=key_provider,
+            catalog_encryption_context="provider-catalog-recovery-test",
+        )
+        self.assertEqual(restored["status"], "RESTORED_FROM_MASTER")
+        raw = target.read_bytes()
+        self.assertNotIn(b'"providers"', raw)
+        reopened = ConnectionManager(
+            target,
+            self.state_path,
+            catalog_encryption_key_provider=key_provider,
+            catalog_encryption_context="provider-catalog-recovery-test",
+        )
+        self.assertEqual(reopened.list_providers(), self.manager.list_providers())
+
+    def test_connection_state_supports_authenticated_encryption_and_wrong_key_rejection(self):
+        encrypted_path = self.root / "encrypted-connection-state.json"
+        key_provider = lambda context: b"k" * 32
+        encrypted = ConnectionManager(
+            self.catalog_path,
+            encrypted_path,
+            state_encryption_key_provider=key_provider,
+        )
+
+        saved = encrypted.set_state("public_image", "READY")
+        self.assertTrue(saved["saved"])
+        ciphertext = encrypted_path.read_bytes()
+        self.assertNotIn(b"public_image", ciphertext)
+        self.assertNotIn(b"USER_CONTROLLED", ciphertext)
+
+        reopened = ConnectionManager(
+            self.catalog_path,
+            encrypted_path,
+            state_encryption_key_provider=key_provider,
+        )
+        self.assertEqual(reopened.get_state("public_image")["status"], "READY")
+
+        with self.assertRaises(ValueError):
+            ConnectionManager(
+                self.catalog_path,
+                encrypted_path,
+                state_encryption_key_provider=lambda context: b"z" * 32,
+            )
+
+    def test_connection_state_explicitly_migrates_legacy_plaintext(self):
+        legacy_path = self.root / "legacy-connection-state.json"
+        legacy_path.write_text(
+            json.dumps({
+                "version": "1.0",
+                "policy": "USER_CONTROLLED",
+                "providers": {
+                    "public_image": {
+                        "status": "READY",
+                        "verified": False,
+                        "secret_ref": "vault/providers/public-image",
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        manager = ConnectionManager(
+            self.catalog_path,
+            legacy_path,
+            state_encryption_key_provider=lambda context: b"m" * 32,
+            migrate_legacy_plaintext_state=True,
+        )
+
+        persisted = legacy_path.read_bytes()
+        self.assertNotIn(b"vault/providers/public-image", persisted)
+        self.assertNotIn(b"public_image", persisted)
+        self.assertEqual(manager.get_state("public_image")["status"], "READY")
 
     def test_loads_catalog_and_unknown_state(self):
         self.assertTrue(self.manager.provider_exists("public_image"))
@@ -453,8 +586,15 @@ class ConnectionManagerTests(unittest.TestCase):
         }
         master_path.write_text(json.dumps(master), encoding="utf-8")
         self.catalog_path.write_text("{corrupt", encoding="utf-8")
-        restored = ConnectionManager.restore_catalog_from_master(
+        blocked = ConnectionManager.restore_catalog_from_master(
             self.catalog_path, master_path
+        )
+        self.assertEqual(blocked["status"], "CATALOG_RECOVERY_ENCRYPTION_PROFILE_REQUIRED")
+        self.assertFalse(blocked["restored"])
+        self.assertEqual(self.catalog_path.read_text(encoding="utf-8"), "{corrupt")
+
+        restored = ConnectionManager.restore_catalog_from_master(
+            self.catalog_path, master_path, allow_plaintext_recovery=True
         )
         self.assertEqual(restored["status"], "RESTORED_FROM_MASTER")
         self.assertTrue(restored["restored"])
@@ -484,7 +624,7 @@ class ConnectionManagerTests(unittest.TestCase):
         master_path.write_text("{invalid", encoding="utf-8")
         self.catalog_path.write_text("{still-corrupt", encoding="utf-8")
         result = ConnectionManager.restore_catalog_from_master(
-            self.catalog_path, master_path
+            self.catalog_path, master_path, allow_plaintext_recovery=True
         )
         self.assertEqual(result["status"], "MASTER_CATALOG_INVALID")
         self.assertFalse(result["restored"])

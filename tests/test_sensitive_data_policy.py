@@ -35,6 +35,26 @@ class SensitiveDataPolicyTests(unittest.TestCase):
                 self.assertFalse(result["allowed"])
                 self.assertNotIn(value, repr(result))
 
+    def test_gitlab_token_prefix_families_are_detected(self):
+        policy = SensitiveDataPolicy()
+        samples = (
+            "glpat-" + ("a" * 24),
+            "gloas-" + ("b" * 24),
+            "gldt-" + ("c" * 24),
+            "glrt-" + ("d" * 24),
+            "glcbt-" + ("e" * 24),
+            "glptt-" + ("f" * 24),
+            "glagent-" + ("g" * 24),
+            "glsoat-" + ("h" * 24),
+            "glffct-" + ("i" * 24),
+        )
+        for sample in samples:
+            with self.subTest(prefix=sample.split("-", 1)[0]):
+                result = policy.inspect({"integration_token": sample})
+                self.assertFalse(result["allowed"])
+                self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
+                self.assertNotIn(sample, repr(result))
+
     def test_clean_payload_is_allowed(self):
         result = SensitiveDataPolicy().inspect({"prompt": "A cinematic mountain landscape at dawn"})
         self.assertTrue(result["allowed"])
@@ -66,8 +86,11 @@ class SensitiveDataPolicyTests(unittest.TestCase):
         payload = {
             "providerConfig": UserDict({
                 "api_key": "opaque-value-one",
+                "api_token": "opaque-api-token-value",
                 "clientSecret": "opaque-value-two",
                 "refresh_token": "opaque-value-three",
+                "integration_token": "opaque-value-four",
+                "token": "opaque-value-five",
                 "token_env": "PROVIDER_TOKEN",
                 "secret_ref": "vault://provider/token",
                 "api_key_configured": True,
@@ -78,9 +101,10 @@ class SensitiveDataPolicyTests(unittest.TestCase):
         self.assertEqual(result["status"], "SENSITIVE_DATA_BLOCKED")
         self.assertEqual(
             {item["path"] for item in result["findings"]},
-            {"$.providerConfig.api_key", "$.providerConfig.clientSecret", "$.providerConfig.refresh_token"},
+            {"$.providerConfig.api_key", "$.providerConfig.api_token", "$.providerConfig.clientSecret", "$.providerConfig.refresh_token", "$.providerConfig.integration_token", "$.providerConfig.token"},
         )
         self.assertNotIn("opaque-value", repr(result))
+        self.assertNotIn("opaque-api-token-value", repr(result))
         self.assertNotIn("PROVIDER_TOKEN", repr(result))
 
     def test_additional_token_forms_basic_auth_private_key_and_url_credentials(self):

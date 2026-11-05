@@ -5,6 +5,7 @@ unless a separate provider-specific probe has actually succeeded.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -16,6 +17,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from .encrypted_state_store import EncryptedJSONStateStore
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .safe_numbers import finite_number
 
@@ -89,28 +91,66 @@ class ConnectionManager:
         catalog_path: str | os.PathLike[str] | None = None,
         state_path: str | os.PathLike[str] | None = None,
         secret_manager: Any | None = None,
+        *,
+        state_encryption_key_provider: Any = None,
+        state_encryption_context: str = "provider-connection-state-v1",
+        migrate_legacy_plaintext_state: bool = False,
+        catalog_encryption_key_provider: Any = None,
+        catalog_encryption_context: str = "provider-catalog-v1",
+        migrate_legacy_plaintext_catalog: bool = False,
     ) -> None:
         if secret_manager is not None and (
             not callable(getattr(secret_manager, "inspect_reference", None))
             or not callable(getattr(secret_manager, "resolve_secret", None))
         ):
             raise ValueError("secret_manager must support reference inspection and secret resolution")
+        if state_encryption_key_provider is None and migrate_legacy_plaintext_state:
+            raise ValueError("legacy state migration requires an encryption key provider")
+        if not isinstance(migrate_legacy_plaintext_catalog, bool):
+            raise ValueError("migrate_legacy_plaintext_catalog must be boolean")
+        if catalog_encryption_key_provider is None and migrate_legacy_plaintext_catalog:
+            raise ValueError("legacy catalog migration requires an encryption key provider")
         self.secret_manager = secret_manager
         self.catalog_path = Path(catalog_path) if catalog_path else self._default_catalog()
         self.state_path = Path(state_path) if state_path else DEFAULT_STATE
+        if self.catalog_path.resolve() == self.state_path.resolve():
+            raise ValueError("provider catalog and connection state must use separate files")
+        catalog_path_digest = hashlib.sha256(
+            str(self.catalog_path.resolve()).encode("utf-8")
+        ).hexdigest()[:24]
+        self.catalog_encryption_context = f"{catalog_encryption_context}:{catalog_path_digest}"
+        self.catalog_store = (
+            EncryptedJSONStateStore(
+                self.catalog_path,
+                key_provider=catalog_encryption_key_provider,
+                context=self.catalog_encryption_context,
+                migrate_legacy_plaintext=migrate_legacy_plaintext_catalog,
+            )
+            if catalog_encryption_key_provider is not None else None
+        )
+        self.state_store = (
+            EncryptedJSONStateStore(
+                self.state_path,
+                key_provider=state_encryption_key_provider,
+                context=state_encryption_context,
+                migrate_legacy_plaintext=migrate_legacy_plaintext_state,
+            )
+            if state_encryption_key_provider is not None else None
+        )
         # Constructor reads must use the same interprocess locks as writers. On
         # Windows, an unlocked read can race with atomic replacement and fail with
         # a transient sharing violation while another process registers a provider.
         catalog_lock_path = self.catalog_path.with_name(self.catalog_path.name + ".lock")
         with interprocess_file_lock(catalog_lock_path):
-            self.catalog = self._load_json(self.catalog_path)
-        self.validate_catalog_schema(self.catalog, raise_on_error=True)
+            self.catalog = self._load_catalog()
+            self.validate_catalog_schema(self.catalog, raise_on_error=True)
+            if self.catalog_store is not None and self.catalog_store.migration_required:
+                self._save_catalog(self.catalog)
         state_lock_path = self.state_path.with_name(self.state_path.name + ".lock")
         with interprocess_file_lock(state_lock_path):
-            self.state = self._load_json(
-                self.state_path,
-                default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}},
-            )
+            self._reload_state()
+            if self.state_store is not None and self.state_store.migration_required:
+                self._save()
         if not isinstance(self.state.get("providers"), dict):
             raise ValueError("Invalid connection state schema: providers must be an object")
         self._lock = threading.RLock()
@@ -130,22 +170,48 @@ class ConnectionManager:
         cls,
         catalog_path: str | os.PathLike[str] | None = None,
         master_path: str | os.PathLike[str] | None = None,
+        *,
+        catalog_encryption_key_provider: Any = None,
+        catalog_encryption_context: str = "provider-catalog-v1",
+        allow_plaintext_recovery: bool = False,
     ) -> dict[str, Any]:
-        """Restore only a missing/invalid catalog from a separately validated master copy."""
+        """Restore a catalog, preserving authenticated encryption when requested."""
+        if not isinstance(allow_plaintext_recovery, bool):
+            return {"status": "INVALID_PLAINTEXT_RECOVERY_FLAG", "restored": False}
         target = Path(catalog_path) if catalog_path is not None else DEFAULT_CATALOG
         master = Path(master_path) if master_path is not None else MASTER_CATALOG
+        target_context_digest = hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:24]
+        encrypted_store = (
+            EncryptedJSONStateStore(
+                target,
+                key_provider=catalog_encryption_key_provider,
+                context=f"{catalog_encryption_context}:{target_context_digest}",
+            )
+            if catalog_encryption_key_provider is not None else None
+        )
         if target.resolve() == master.resolve():
             return {"status": "RECOVERY_TARGET_EQUALS_MASTER", "restored": False}
         lock_path = target.with_name(target.name + ".lock")
         with interprocess_file_lock(lock_path):
+            if encrypted_store is None and not target.exists() and not allow_plaintext_recovery:
+                return {"status": "CATALOG_RECOVERY_ENCRYPTION_PROFILE_REQUIRED", "restored": False}
             if target.exists():
+                if encrypted_store is None:
+                    try:
+                        envelope = json.loads(target.read_text(encoding="utf-8"))
+                    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                        envelope = None
+                    if isinstance(envelope, dict) and envelope.get("format") == "AI_CREATOR_AGENT_ENCRYPTED_JSON_STATE":
+                        return {"status": "CATALOG_ENCRYPTION_KEY_REQUIRED", "restored": False}
                 try:
-                    current = cls._load_json(target)
+                    current = encrypted_store.read({}) if encrypted_store is not None else cls._load_json(target)
                     validation = cls.validate_catalog_schema(current)
                 except (OSError, ValueError, json.JSONDecodeError):
                     validation = {"valid": False, "errors": ["target catalog is unreadable"]}
                 if validation.get("valid") is True:
                     return {"status": "TARGET_CATALOG_VALID", "restored": False}
+                if encrypted_store is None and not allow_plaintext_recovery:
+                    return {"status": "CATALOG_RECOVERY_ENCRYPTION_PROFILE_REQUIRED", "restored": False}
             try:
                 backup = cls._load_json(master)
                 validation = cls.validate_catalog_schema(backup)
@@ -158,8 +224,11 @@ class ConnectionManager:
                     "errors": validation.get("errors", []),
                 }
             try:
-                cls._atomic_write_json(target, backup)
-            except OSError as exc:
+                if encrypted_store is not None:
+                    encrypted_store.write(backup)
+                else:
+                    cls._atomic_write_json(target, backup)
+            except (OSError, ValueError) as exc:
                 return {
                     "status": "CATALOG_RECOVERY_WRITE_FAILED",
                     "restored": False,
@@ -210,19 +279,40 @@ class ConnectionManager:
                 pass
             raise
 
+    def _load_catalog(self) -> dict[str, Any]:
+        if self.catalog_store is not None:
+            catalog = self.catalog_store.read({})
+            if not isinstance(catalog, dict):
+                raise ValueError("Invalid provider catalog: expected an object")
+            return catalog
+        return self._load_json(self.catalog_path)
+
+    def _save_catalog(self, catalog: dict[str, Any]) -> None:
+        if self.catalog_store is not None:
+            self.catalog_store.write(catalog)
+            return
+        self._atomic_write_json(self.catalog_path, catalog)
+
     def _save(self) -> None:
+        if self.state_store is not None:
+            self.state_store.write(self.state)
+            return
         self._atomic_write_json(self.state_path, self.state)
 
     def _reload_catalog(self) -> None:
-        catalog = self._load_json(self.catalog_path)
+        catalog = self._load_catalog()
         self.validate_catalog_schema(catalog, raise_on_error=True)
         self.catalog = catalog
 
     def _reload_state(self) -> None:
-        state = self._load_json(
-            self.state_path,
-            default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}},
-        )
+        default = {"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}}
+        if self.state_store is not None:
+            state = self.state_store.read(default)
+            if not self.state_path.exists():
+                self.state = state
+                return
+        else:
+            state = self._load_json(self.state_path, default=default)
         if not isinstance(state.get("providers"), dict):
             raise ValueError("Invalid connection state schema: providers must be an object")
         self.state = state
@@ -621,7 +711,7 @@ class ConnectionManager:
                     "saved": False,
                     "errors": validation.get("errors", []),
                 }
-            self._atomic_write_json(self.catalog_path, new_catalog)
+            self._save_catalog(new_catalog)
             self.catalog = new_catalog
             if not enabled:
                 # Revoke stale live/connecting state immediately. Preserve UNKNOWN
@@ -916,7 +1006,7 @@ class ConnectionManager:
                     "saved": False,
                     "errors": validation.get("errors", []),
                 }
-            self._atomic_write_json(self.catalog_path, new_catalog)
+            self._save_catalog(new_catalog)
             self.catalog = new_catalog
             return {
                 "status": "REGISTERED",
