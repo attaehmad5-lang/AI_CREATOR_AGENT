@@ -417,10 +417,13 @@ class HTTPSPrivacyProviderAdapterTests(unittest.TestCase):
             "purge_url": "https://privacy.example.test/v1/purge",
             "allowed_hosts": ["privacy.example.test"],
             "authorization_header": lambda: "Bearer deployment-managed-value",
-            "opener": opener,
         }
         options.update(kwargs)
-        return HTTPSPrivacyProviderAdapter(**options)
+        adapter = HTTPSPrivacyProviderAdapter(**options)
+        # Private transport substitution is limited to unit tests. Production
+        # callers cannot override the TLS-verifying, redirect-rejecting opener.
+        adapter._opener = opener
+        return adapter
 
     def test_documented_https_endpoint_sends_idempotency_and_sanitizes_response(self):
         response = FakeResponse(
