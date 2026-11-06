@@ -67,6 +67,39 @@ class ProviderServiceTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_provider_registry_discovery_and_metadata_reads_are_authorized(self):
+        authorization = ProviderAuthorizationManager(self.root / "registry-read-auth.json")
+        authorization.assign_role("viewer-user", "viewer")
+        authorization.assign_role("operator-user", "operator")
+        service = ProviderService(self.connections, authorization_manager=authorization)
+
+        discovered = service.discover_providers(
+            principal_id="viewer-user", category="IMAGE", enabled_only=True
+        )
+        self.assertEqual(discovered["status"], "PROVIDERS_DISCOVERED")
+        self.assertEqual([item["id"] for item in discovered["providers"]], ["image"])
+
+        metadata = service.get_provider_metadata("image", principal_id="viewer-user")
+        self.assertEqual(metadata["status"], "PROVIDER_METADATA_FOUND")
+        self.assertEqual(metadata["metadata"]["id"], "image")
+
+        self.assertTrue(authorization.set_provider_scopes(
+            "viewer-user", {"provider.read": ["another-provider"]}
+        )["saved"])
+        denied = service.get_provider_metadata("image", principal_id="viewer-user")
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(denied["authorization"]["status"], "PROVIDER_SCOPE_DENIED")
+
+    def test_provider_registry_reads_fail_closed_without_authorization_manager(self):
+        service = ProviderService(self.connections)
+        self.assertEqual(
+            service.discover_providers()["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE"
+        )
+        self.assertEqual(
+            service.get_provider_metadata("image")["status"],
+            "AUTHORIZATION_MANAGER_UNAVAILABLE",
+        )
+
     def test_runtime_adapter_lifecycle_uses_authorized_connection_registry(self):
         authorization = ProviderAuthorizationManager(self.root / "adapter-lifecycle-auth.json")
         authorization.assign_role("admin-user", "admin")
