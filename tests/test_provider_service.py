@@ -245,6 +245,78 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(all(events[i]["outcome"] == "REQUESTED" for i in range(0, 8, 2)))
         self.assertTrue(all(events[i]["outcome"] == "SUCCEEDED" for i in range(1, 8, 2)))
 
+    def test_required_audit_log_records_route_decisions(self):
+        audit = ProviderAuditLog(
+            self.root / "route-audit.json",
+            signing_key=b"route-audit-test-signing-key-at-least-32-bytes",
+        )
+        calls = []
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls.append(kwargs)
+                return {"allowed": True, "provider_id": "image", "status": "ROUTED"}
+
+        service = ProviderService(
+            self.connections, routing_manager=RoutingStub(),
+            audit_manager=audit, require_audit_logging=True,
+        )
+        result = service.route_request(
+            category="image", project_id="film",
+            request_id="route-audit-request", trace_id="f" * 32,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertTrue(result["audit_outcome_recorded"])
+        self.assertEqual(len(calls), 1)
+        events = audit.read_events()["events"]
+        self.assertEqual([event["operation"] for event in events], [
+            "provider.route", "provider.route",
+        ])
+        self.assertEqual([event["outcome"] for event in events], [
+            "REQUESTED", "SUCCEEDED",
+        ])
+        self.assertTrue(all(event["trace_id"] == "f" * 32 for event in events))
+
+    def test_required_audit_log_records_job_submit_and_cancel(self):
+        audit = ProviderAuditLog(
+            self.root / "job-audit.json",
+            signing_key=b"job-audit-test-signing-key-at-least-32-bytes",
+        )
+        authorization = ProviderAuthorizationManager(self.root / "job-audit-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        manager = ProviderJobManager(self.root / "audited-jobs.json")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=manager,
+            audit_manager=audit,
+            require_audit_logging=True,
+        )
+        trace_id = "9" * 32
+        submitted = service.submit_job(
+            job_id="audited-job",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:audited-job",
+            principal_id="creator-user",
+            trace_id=trace_id,
+        )
+        self.assertTrue(submitted["accepted"])
+        self.assertTrue(submitted["audit_outcome_recorded"])
+        self.assertEqual(submitted["job"]["trace_id"], trace_id)
+
+        cancelled = service.cancel_job(
+            job_id="audited-job", principal_id="creator-user"
+        )
+        self.assertTrue(cancelled["saved"])
+        self.assertTrue(cancelled["audit_outcome_recorded"])
+        events = audit.read_events()["events"]
+        self.assertEqual([event["operation"] for event in events], [
+            "provider.job.submit", "provider.job.submit",
+            "provider.job.cancel", "provider.job.cancel",
+        ])
+        self.assertTrue(all(event["trace_id"] == trace_id for event in events))
+
     def test_provider_registry_discovery_and_metadata_reads_are_authorized(self):
         authorization = ProviderAuthorizationManager(self.root / "registry-read-auth.json")
         authorization.assign_role("viewer-user", "viewer")
