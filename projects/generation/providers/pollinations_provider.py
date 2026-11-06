@@ -5,15 +5,17 @@ returned, or written to generated artifacts.
 """
 import base64
 import binascii
+import json
 import math
 import os
 import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from urllib.request import Request
 
-import requests
-
+from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.http_probe import ProviderPinnedHTTPSOpener
 from .atomic_output import atomic_write_bytes
 
 
@@ -39,16 +41,80 @@ class PollinationsProviderError(RuntimeError):
         self.retry_after_seconds = retry_after_seconds
 
 
+class _PinnedPollinationsResponse:
+    """Small requests-compatible response wrapper with an enforced JSON body cap."""
+
+    def __init__(self, response, max_response_bytes):
+        self._response = response
+        self.status_code = response.getcode()
+        self.headers = getattr(response, "headers", {})
+        self.max_response_bytes = max_response_bytes
+        self._payload = None
+        self._loaded = False
+
+    def json(self):
+        if not self._loaded:
+            body = self._response.read(self.max_response_bytes + 1)
+            if not isinstance(body, bytes) or len(body) > self.max_response_bytes:
+                raise ValueError("Pollinations response exceeds the size limit")
+            self._payload = json.loads(body.decode("utf-8"))
+            self._loaded = True
+        return self._payload
+
+    def close(self):
+        self._response.close()
+
+
+class _PinnedPollinationsSession:
+    """Use the shared DNS-pinned HTTPS transport for the fixed Pollinations API."""
+
+    def __init__(self, *, max_response_bytes, resolver=None):
+        self.max_response_bytes = max_response_bytes
+        self.opener = ProviderPinnedHTTPSOpener(resolver=resolver)
+
+    def post(self, url, *, headers, json, timeout):
+        if url != PollinationsProvider.endpoint:
+            raise ValueError("unsupported Pollinations generation endpoint")
+        validation = ConnectionManager.validate_endpoint(
+            url, allowed_hosts={"gen.pollinations.ai"}
+        )
+        if validation.get("valid") is not True:
+            raise ValueError("unsafe Pollinations generation endpoint")
+        body = globals()["json"].dumps(
+            json, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+        request_headers = dict(headers)
+        request_headers["Content-Type"] = "application/json"
+        request = Request(url, data=body, headers=request_headers, method="POST")
+        response = self.opener.open(request, timeout=timeout)
+        return _PinnedPollinationsResponse(response, self.max_response_bytes)
+
+
 class PollinationsProvider:
     name = "Pollinations"
     endpoint = "https://gen.pollinations.ai/v1/images/generations"
     default_model = "black-forest-labs/flux.1-schnell"
     max_response_bytes = 20 * 1024 * 1024
 
-    def __init__(self, session=None, environ=None, timeout=180):
-        self.session = session or requests
+    def __init__(self, session=None, environ=None, timeout=180, *, resolver=None):
+        if session is not None and resolver is not None:
+            raise ValueError("custom session and DNS resolver cannot be combined")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            raise ValueError("timeout must be a finite positive number")
+        try:
+            timeout_value = float(timeout)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("timeout must be a finite positive number") from None
+        if not math.isfinite(timeout_value) or not 0.1 <= timeout_value <= 300:
+            raise ValueError("timeout must be between 0.1 and 300 seconds")
         self.environ = os.environ if environ is None else environ
-        self.timeout = timeout
+        if not isinstance(self.environ, dict) and not hasattr(self.environ, "get"):
+            raise ValueError("environment must be a mapping")
+        self.timeout = timeout_value
+        self.session = session if session is not None else _PinnedPollinationsSession(
+            max_response_bytes=(self.max_response_bytes * 4 // 3) + 1024 * 1024,
+            resolver=resolver,
+        )
 
     @staticmethod
     def _image_extension(image_bytes):
@@ -113,9 +179,13 @@ class PollinationsProvider:
     def generate_image(self, prompt, output_path):
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Image prompt must be a non-empty string")
-        api_key = self.environ.get("POLLINATIONS_API_KEY", "").strip()
-        if not api_key:
-            raise RuntimeError("POLLINATIONS_API_KEY is not configured")
+        api_key = self.environ.get("POLLINATIONS_API_KEY", "")
+        if (
+            not isinstance(api_key, str) or not api_key.strip() or len(api_key) > 16384
+            or any(ord(char) < 32 or ord(char) == 127 for char in api_key)
+        ):
+            raise RuntimeError("POLLINATIONS_API_KEY is missing or invalid")
+        api_key = api_key.strip()
 
         model = self.environ.get("POLLINATIONS_IMAGE_MODEL", self.default_model).strip()
         if not model:
