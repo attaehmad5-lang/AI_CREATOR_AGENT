@@ -546,7 +546,11 @@ class ProviderRoutingManager:
                 "_route_cost": float(cost),
                 "_route_price_evidence": price_evidence,
                 "_route_credits": credit_sort,
-                "_route_latency": health_record.get("last_latency_ms", float("inf")),
+                "_route_latency": (
+                    finite_number(health_record.get("last_latency_ms"), minimum=0)
+                    if finite_number(health_record.get("last_latency_ms"), minimum=0) is not None
+                    else float("inf")
+                ),
             })
 
         confidence_status = None
