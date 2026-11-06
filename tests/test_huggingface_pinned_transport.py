@@ -84,8 +84,10 @@ class HuggingFacePinnedTransportTests(unittest.TestCase):
         sent_request, timeout = opener.calls[0]
         self.assertEqual(sent_request.full_url, request.url)
         self.assertEqual(sent_request.get_method(), "POST")
-        self.assertNotIn("authorization", {k.casefold() for k in sent_request.header_items()})
-        self.assertIn("authorization", {k.casefold() for k in sent_request.header_items()})
+        sent_headers = {k.casefold(): v for k, v in sent_request.header_items()}
+        self.assertEqual(sent_headers["authorization"], "Bearer private-token")
+        self.assertEqual(sent_headers["accept-encoding"], "identity")
+        self.assertNotIn("host", sent_headers)
         self.assertEqual(timeout, 3.0)
         self.assertEqual(opener.response.closed, True)
 
