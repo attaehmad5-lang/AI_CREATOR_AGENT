@@ -299,7 +299,7 @@ class ProviderOnboardingManager:
         )
         with self._transaction():
             record = self.data["requests"].get(provider_id)
-            if not isinstance(record, dict) or record.get("status") != "APPROVED":
+            if not isinstance(record, dict) or record.get("status") not in {"APPROVED", "PROBE_FAILED"}:
                 return {"status": "ONBOARDING_STATE_CHANGED", "verified": False}
             record["probe_status"] = probe_status
             record["probe_verified_at"] = self.clock().astimezone(timezone.utc).isoformat() if verified else None
