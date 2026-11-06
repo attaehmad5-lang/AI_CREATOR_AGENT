@@ -120,14 +120,26 @@ class ProviderService:
             raise ValueError("remote_job_adapters must be a provider-id to adapter mapping")
         self.remote_job_adapters: dict[str, Any] = {}
         for provider_id, adapter in (remote_job_adapters or {}).items():
+            submit_method = getattr(adapter, "submit_remote_job", None)
+            poll_method = getattr(adapter, "poll_remote_job", None)
+            cancel_method = getattr(adapter, "cancel_remote_job", None)
+            required_submit_keywords = ("job_id", "project_id", "payload_ref", "idempotency_key")
             if (
                 not isinstance(provider_id, str)
                 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}", provider_id)
-                or not callable(getattr(adapter, "submit_remote_job", None))
-                or not callable(getattr(adapter, "poll_remote_job", None))
+                or not callable(submit_method)
+                or not callable(poll_method)
+                or any(
+                    not self._remote_adapter_accepts_keyword(submit_method, keyword)
+                    for keyword in required_submit_keywords
+                )
+                or not self._remote_adapter_accepts_keyword(poll_method, "remote_job_id")
                 or (
-                    getattr(adapter, "cancel_remote_job", None) is not None
-                    and not callable(getattr(adapter, "cancel_remote_job", None))
+                    cancel_method is not None
+                    and (
+                        not callable(cancel_method)
+                        or not self._remote_adapter_accepts_keyword(cancel_method, "remote_job_id")
+                    )
                 )
             ):
                 raise ValueError("remote job adapter does not implement the required submit/poll contract")
