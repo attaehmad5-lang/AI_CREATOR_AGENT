@@ -285,9 +285,13 @@ class ProviderService:
             result = setter(target_principal_id, provider_scopes)
         except Exception as exc:
             return {"status": "PROVIDER_SCOPE_UPDATE_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False
-        }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        return self._audit_action_result(
+            "provider_scope_update", actor_id=actor_principal_id, tenant_id=None,
+            provider_id=None, outcome="success" if result.get("saved") is True else "failure",
+            result=result, details={"operation": "provider.access.manage"},
+        )
 
     def configure_provider(
         self,
@@ -321,10 +325,16 @@ class ProviderService:
         if not callable(configure):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
         try:
-            return configure(
+            result = configure(
                 provider_id, model=model, endpoint=endpoint,
                 probe_endpoint=probe_endpoint,
                 authentication_required=authentication_required,
+            )
+            return self._audit_action_result(
+                "provider_configuration", actor_id=principal_id, tenant_id=None,
+                provider_id=provider_id,
+                outcome="success" if isinstance(result, dict) and result.get("saved") is True else "failure",
+                result=result, details={"operation": "provider.configure"},
             )
         except Exception as exc:
             return {"status": "PROVIDER_CONFIGURATION_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
@@ -351,7 +361,13 @@ class ProviderService:
         if not callable(setter):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
         try:
-            return setter(provider_id, enabled)
+            result = setter(provider_id, enabled)
+            return self._audit_action_result(
+                "provider_enablement", actor_id=principal_id, tenant_id=None,
+                provider_id=provider_id,
+                outcome="success" if isinstance(result, dict) and result.get("saved") is True else "failure",
+                result=result, details={"operation": "provider.enable" if enabled else "provider.disable"},
+            )
         except Exception as exc:
             return {"status": "PROVIDER_ENABLEMENT_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
 
@@ -388,8 +404,12 @@ class ProviderService:
         except Exception as exc:
             return {"status": "ROLE_ASSIGNMENT_FAILED", "saved": False, "error_type": type(exc).__name__}
         if not isinstance(result, dict):
-            return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
-        return result
+            result = {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        return self._audit_action_result(
+            "role_assignment", actor_id=actor_principal_id, tenant_id=None,
+            provider_id=None, outcome="success" if result.get("saved") is True else "failure",
+            result=result, details={"operation": "provider.access.manage"},
+        )
 
     def disable_provider_principal(
         self,
@@ -418,8 +438,12 @@ class ProviderService:
         except Exception as exc:
             return {"status": "PRINCIPAL_DISABLE_FAILED", "saved": False, "error_type": type(exc).__name__}
         if not isinstance(result, dict):
-            return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
-        return result
+            result = {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        return self._audit_action_result(
+            "principal_disable", actor_id=actor_principal_id, tenant_id=None,
+            provider_id=None, outcome="success" if result.get("saved") is True else "failure",
+            result=result, details={"operation": "provider.access.manage"},
+        )
 
     def _authorize_tenant_project(
         self,
