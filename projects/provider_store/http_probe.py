@@ -358,8 +358,11 @@ class ProviderHTTPConnectivityProbe:
         if opener is not None and resolver is not None:
             raise ValueError("custom opener and DNS resolver cannot be combined")
         self.environ = os.environ if environ is None else environ
+        # Do not fall back to socket.getaddrinfo: its resolver path has no
+        # portable per-call lifetime bound. The shared opener supplies the
+        # bounded dnspython resolver and fails closed if that dependency is absent.
         self.opener = opener if opener is not None else _PinnedHTTPSOpener(
-            resolver=resolver or socket.getaddrinfo
+            resolver=resolver
         )
         self.max_response_bytes = max_response_bytes
         self.secret_manager = secret_manager
