@@ -598,6 +598,40 @@ class ProviderJobManagerTests(unittest.TestCase):
         )
         self.assertEqual(expired["status"], "DEADLINE_ALREADY_EXPIRED")
 
+    def test_graceful_stop_is_shared_across_manager_instances(self):
+        self.submit("shared-before-stop")
+        stopped = self.manager.stop_accepting()
+        self.assertFalse(stopped["accepting"])
+
+        other = ProviderJobManager(
+            self.path, max_queue_size=2, max_concurrent=1,
+            lease_seconds=10, max_attempts=2,
+            clock=lambda: self.now[0],
+        )
+        self.assertFalse(other.drain_status()["accepting"])
+        rejected = other.submit(
+            job_id="shared-rejected", project_id="film", provider_id="image",
+            payload_ref="payload:shared-rejected",
+        )
+        self.assertEqual(rejected["status"], "QUEUE_SHUTTING_DOWN")
+
+        resumed = other.resume_accepting()
+        self.assertTrue(resumed["accepting"])
+        accepted = self.manager.submit(
+            job_id="shared-after-resume", project_id="film", provider_id="image",
+            payload_ref="payload:shared-after-resume",
+        )
+        self.assertTrue(accepted["accepted"])
+
+    def test_queue_control_state_validation_rejects_inconsistent_persisted_state(self):
+        self.manager.stop_accepting()
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["control"]["accepting"] = True
+        with self.path.open("w", encoding="utf-8") as stream:
+            json.dump(persisted, stream)
+        with self.assertRaisesRegex(ValueError, "queue control state"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
     def test_graceful_stop_rejects_new_jobs_and_reports_drain(self):
         self.submit("accepted-before-stop")
         stopped = self.manager.stop_accepting()
