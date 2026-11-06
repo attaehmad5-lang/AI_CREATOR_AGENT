@@ -35,6 +35,13 @@ class ProviderRequestIdempotencyManagerTests(unittest.TestCase):
             lease_token=reserved["lease_token"],
         )
         self.assertTrue(started["saved"])
+        active = ProviderRequestIdempotencyManager(
+            self.path, lease_seconds=10, max_records=100,
+            clock=lambda: self.now,
+        ).get_status(
+            project_id="film", request_id="request-1", tenant_id="tenant-a",
+        )
+        self.assertEqual(active["state"], "STARTED")
         completed = self.manager.finalize(
             project_id="film", request_id="request-1", tenant_id="tenant-a",
             lease_token=reserved["lease_token"], outcome="completed",
