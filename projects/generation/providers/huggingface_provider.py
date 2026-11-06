@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from huggingface_hub import InferenceClient
+from projects.provider_store.huggingface_pinned_transport import install_huggingface_pinned_transport
 from .base_provider import BaseProvider
 from .atomic_output import atomic_save_image
 
@@ -12,9 +13,13 @@ class HuggingFaceProvider(BaseProvider):
         if not token:
             raise RuntimeError("HF_TOKEN is not set")
 
+        # Install the fail-closed, DNS-pinned transport before the Hub client
+        # creates its process-shared HTTP session. No requests-based SDK fallback.
+        install_huggingface_pinned_transport()
         client = InferenceClient(
             api_key=token,
-            provider="auto"
+            provider="auto",
+            timeout=180,
         )
 
         image = client.text_to_image(
