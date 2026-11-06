@@ -1768,6 +1768,54 @@ class ProviderServiceTests(unittest.TestCase):
         )
 
 
+    def test_job_idempotency_is_passed_to_manager_and_exposed_only_to_workers(self):
+        jobs = ProviderJobManager(self.root / "service-idempotency-jobs.json")
+        authorization = ProviderAuthorizationManager(
+            self.root / "service-idempotency-auth.json"
+        )
+        authorization.assign_role("idem-creator", "creator")
+        authorization.assign_role("idem-viewer", "viewer")
+        service = ProviderService(
+            self.connections, job_manager=jobs,
+            authorization_manager=authorization,
+        )
+        fingerprint = "9" * 64
+        secret_client_key = "private-client-retry-key"
+        first = service.submit_job(
+            job_id="service-idem-1", project_id="film", provider_id="image",
+            payload_ref="payload:service-idem-1", principal_id="idem-creator",
+            idempotency_key=secret_client_key,
+            request_fingerprint=fingerprint,
+        )
+        replay = service.submit_job(
+            job_id="service-idem-2", project_id="film", provider_id="image",
+            payload_ref="payload:service-idem-2", principal_id="idem-creator",
+            idempotency_key=secret_client_key,
+            request_fingerprint=fingerprint,
+        )
+        self.assertEqual(first["status"], "JOB_QUEUED")
+        self.assertEqual(replay["status"], "ALREADY_SUBMITTED")
+        self.assertEqual(replay["job"]["job_id"], "service-idem-1")
+        self.assertNotIn(secret_client_key, repr(first))
+        self.assertNotIn(secret_client_key, repr(replay))
+
+        polled = service.poll_job(
+            job_id="service-idem-1", principal_id="idem-viewer"
+        )
+        self.assertNotIn("provider_idempotency_key", polled["job"])
+        self.assertNotIn("idempotency_key_hash", polled["job"])
+        self.assertNotIn("request_fingerprint", polled["job"])
+        claimed = service.claim_next_job(
+            worker_id="worker-idem", principal_id="idem-creator"
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.assertEqual(
+            claimed["job"]["provider_idempotency_key"],
+            jobs.data["jobs"]["service-idem-1"]["idempotency_key_hash"],
+        )
+        persisted = jobs.state_path.read_text(encoding="utf-8")
+        self.assertNotIn(secret_client_key, persisted)
+
     def test_job_submission_blocks_credentialed_payload_reference_before_persisting(self):
         jobs = ProviderJobManager(self.root / "sensitive-submit-jobs.json")
         authorization = ProviderAuthorizationManager(self.root / "sensitive-submit-auth.json")
