@@ -205,6 +205,7 @@ class ProviderJobManager:
                 or not isinstance(job.get("attempts"), int) or job["attempts"] < 0
                 or isinstance(job.get("priority"), bool)
                 or not isinstance(job.get("priority"), int) or not 0 <= job["priority"] <= 100
+                or not isinstance(job.get("remote_submission_state", "NOT_SUBMITTED"), str)
                 or job.get("remote_submission_state", "NOT_SUBMITTED") not in _REMOTE_SUBMISSION_STATES
                 or (
                     job.get("remote_job_id") is not None
@@ -215,7 +216,10 @@ class ProviderJobManager:
                 )
                 or (
                     job.get("remote_status") is not None
-                    and job.get("remote_status") not in _REMOTE_JOB_STATES
+                    and (
+                        not isinstance(job.get("remote_status"), str)
+                        or job.get("remote_status") not in _REMOTE_JOB_STATES
+                    )
                 )
                 or (
                     job.get("remote_poll_after_seconds") is not None
