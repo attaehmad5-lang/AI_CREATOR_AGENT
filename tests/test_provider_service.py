@@ -109,6 +109,29 @@ class ProviderServiceTests(unittest.TestCase):
             "image-model-a",
         )
 
+    def test_submit_job_propagates_explicit_trace_id_through_service_and_poll(self):
+        job_manager = ProviderJobManager(self.root / "trace-jobs.json")
+        authorization = ProviderAuthorizationManager(self.root / "trace-service-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=job_manager,
+        )
+        trace_id = "c" * 32
+        submitted = service.submit_job(
+            job_id="service-trace-job",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:service-trace",
+            principal_id="creator-user",
+            trace_id=trace_id,
+        )
+        self.assertTrue(submitted["accepted"])
+        self.assertEqual(submitted["job"]["trace_id"], trace_id)
+        polled = service.poll_job(job_id="service-trace-job", principal_id="creator-user")
+        self.assertEqual(polled["job"]["trace_id"], trace_id)
+
     def test_provider_registry_discovery_and_metadata_reads_are_authorized(self):
         authorization = ProviderAuthorizationManager(self.root / "registry-read-auth.json")
         authorization.assign_role("viewer-user", "viewer")
