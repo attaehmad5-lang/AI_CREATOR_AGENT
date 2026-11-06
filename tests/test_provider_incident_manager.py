@@ -109,5 +109,42 @@ class ProviderIncidentManagerTests(unittest.TestCase):
         )["status"], "INVALID_INCIDENT_CODE")
 
 
+    def test_dashboard_snapshot_aggregates_and_bounds_recent_incidents(self):
+        self.manager.record(
+            provider_id="image", category="generation", severity="critical",
+            code="PROVIDER_TIMEOUT",
+        )
+        self.manager.record(
+            provider_id="image", category="billing", severity="error",
+            code="CREDITS_EXHAUSTED",
+        )
+        self.manager.record(
+            provider_id="video", category="generation", severity="warning",
+            code="REMOTE_JOB_STALLED",
+        )
+        result = self.manager.dashboard_snapshot(limit=2)
+        self.assertEqual(result["status"], "DASHBOARD_DATA_AVAILABLE")
+        summary = result["summary"]
+        self.assertEqual(summary["total_incidents"], 3)
+        self.assertEqual(summary["open_count"], 3)
+        self.assertEqual(summary["severity_counts"]["critical"], 1)
+        self.assertEqual(summary["severity_counts"]["error"], 1)
+        self.assertEqual(summary["severity_counts"]["warning"], 1)
+        self.assertEqual(summary["provider_count"], 2)
+        self.assertTrue(summary["needs_attention"])
+        self.assertEqual(len(result["recent"]), 2)
+        self.assertEqual(result["top_providers"][0]["provider_id"], "image")
+        self.assertNotIn("message", repr(result))
+        self.assertNotIn("exception", repr(result))
+
+    def test_dashboard_snapshot_rejects_invalid_bounds(self):
+        for value in (True, 0, -1, 201, "10", 1.5):
+            with self.subTest(limit=value):
+                result = self.manager.dashboard_snapshot(limit=value)
+                self.assertEqual(result["status"], "INVALID_DASHBOARD_LIMIT")
+                self.assertIsNone(result["summary"])
+                self.assertEqual(result["recent"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
