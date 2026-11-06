@@ -52,15 +52,40 @@ class ProviderMetricsManagerTests(unittest.TestCase):
         manager.record(
             provider_id="image-a", category="image", success=True, latency_ms=20,
         )
+        current[0] = self.now + timedelta(seconds=30)
+        manager.record(
+            provider_id="image-a", category="image", success=True, latency_ms=40,
+        )
         current[0] = self.now
 
         result = manager.snapshot(provider_id="image-a", window_seconds=60)
         metrics = result["metrics"]
-        self.assertEqual(metrics["sample_count"], 3)
+        self.assertEqual(metrics["sample_count"], 4)
         self.assertEqual(metrics["window_sample_count"], 2)
         self.assertEqual(metrics["throughput_per_minute"], 2.0)
         self.assertEqual(metrics["timeout_count"], 1)
-        self.assertAlmostEqual(metrics["timeout_rate"], 1 / 3)
+        self.assertAlmostEqual(metrics["timeout_rate"], 1 / 4)
+        self.assertEqual(metrics["window_timeout_count"], 1)
+        self.assertAlmostEqual(metrics["window_timeout_rate"], 0.5)
+
+    def test_window_timeout_rate_is_undefined_when_no_samples_are_in_window(self):
+        current = [self.now - timedelta(seconds=120)]
+        manager = ProviderMetricsManager(max_samples=10, clock=lambda: current[0])
+        manager.record(
+            provider_id="image-a", category="image", success=False,
+            latency_ms=30, timed_out=True,
+        )
+        current[0] = self.now
+
+        metrics = manager.snapshot(
+            provider_id="image-a", window_seconds=60
+        )["metrics"]
+        self.assertEqual(metrics["window_sample_count"], 0)
+        self.assertEqual(metrics["throughput_per_minute"], 0.0)
+        self.assertEqual(metrics["timeout_count"], 1)
+        self.assertEqual(metrics["window_timeout_count"], 0)
+        self.assertEqual(metrics["timeout_rate"], 1.0)
+        self.assertIsNone(metrics["window_timeout_rate"])
 
     def test_invalid_throughput_window_is_rejected(self):
         for value in (0, -1, float("nan"), float("inf"), True, 86_401):
