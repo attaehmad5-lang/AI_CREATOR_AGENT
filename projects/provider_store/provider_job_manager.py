@@ -485,8 +485,19 @@ class ProviderJobManager:
                 tenant_id=tenant_id, project_id=project_id,
                 provider_id=provider_id, key=idempotency_key,
             )
+            fingerprint_fields = [
+                "provider-job-request-v1",
+                tenant_id,
+                project_id,
+                provider_id,
+                payload_ref,
+                priority,
+            ]
+            # Preserve legacy fingerprints for jobs submitted before deadlines existed.
+            if normalized_deadline is not None:
+                fingerprint_fields.append(normalized_deadline)
             fingerprint_material = json.dumps(
-                ["provider-job-request-v1", tenant_id, project_id, provider_id, payload_ref, priority, normalized_deadline],
+                fingerprint_fields,
                 ensure_ascii=True,
                 separators=(",", ":"),
             )
