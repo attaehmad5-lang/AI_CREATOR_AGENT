@@ -67,6 +67,29 @@ class ProviderServiceTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_admin_can_refresh_provider_metadata_via_service_facade(self):
+        authorization = ProviderAuthorizationManager(self.root / "metadata-refresh-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        authorization.assign_role("viewer-user", "viewer")
+        service = ProviderService(self.connections, authorization_manager=authorization)
+        denied = service.refresh_provider_metadata(
+            "image", lambda provider: {}, principal_id="viewer-user"
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        refreshed = service.refresh_provider_metadata(
+            "image",
+            lambda provider: {
+                "verified": True,
+                "source_url": "https://api.example.com/v1/models",
+                "capabilities": ["image_generation"],
+                "adapter_api_version": "1.0",
+            },
+            principal_id="admin-user",
+        )
+        # The fixture intentionally has no official endpoint/host allowlist;
+        # the request therefore fails closed even for an administrator.
+        self.assertEqual(refreshed["status"], "UNTRUSTED_METADATA_SOURCE")
+
     def test_provider_registry_discovery_and_metadata_reads_are_authorized(self):
         authorization = ProviderAuthorizationManager(self.root / "registry-read-auth.json")
         authorization.assign_role("viewer-user", "viewer")
