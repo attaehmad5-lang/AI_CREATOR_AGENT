@@ -58,6 +58,81 @@ class ConnectionManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_refresh_provider_metadata_accepts_verified_official_catalog_metadata(self):
+        catalog = {
+            "version": "3.0",
+            "providers": [{
+                "id": "metadata_image", "name": "Metadata Image",
+                "category": "image", "auth_type": "API_KEY",
+                "connection_type": "API", "enabled": True,
+                "official_api_url": "https://api.example.com/v1",
+                "official_docs_url": "https://docs.example.com",
+                "allowed_hosts": ["api.example.com"],
+                "endpoint": "https://api.example.com/v1/generate",
+                "capabilities": ["image_generation"],
+            }],
+        }
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+        result = manager.refresh_provider_metadata(
+            "metadata_image",
+            lambda provider: {
+                "verified": True,
+                "source_url": "https://api.example.com/v1/models",
+                "capabilities": ["image_generation", "image_editing"],
+                "adapter_api_version": "1.1",
+                "models": [{
+                    "id": "model-a", "version": "2026-11",
+                    "capabilities": ["image_generation"],
+                }],
+                "pricing": [{
+                    "model_id": "model-a", "unit": "image",
+                    "currency": "USD", "amount": 0.025,
+                }],
+            },
+        )
+        self.assertTrue(result["refreshed"])
+        stored = manager.get_provider_metadata("metadata_image")
+        metadata = stored["provider_metadata"]
+        self.assertEqual(metadata["adapter_api_version"], "1.1")
+        self.assertEqual(metadata["models"][0]["id"], "model-a")
+        self.assertEqual(metadata["pricing"][0]["amount"], 0.025)
+        self.assertEqual(stored["endpoint"], "https://api.example.com/v1/generate")
+
+    def test_refresh_provider_metadata_rejects_untrusted_hosts_and_secret_values(self):
+        catalog = {
+            "version": "3.0",
+            "providers": [{
+                "id": "metadata_image", "name": "Metadata Image",
+                "category": "image", "auth_type": "API_KEY",
+                "connection_type": "API", "enabled": True,
+                "official_api_url": "https://api.example.com/v1",
+                "official_docs_url": "https://docs.example.com",
+                "allowed_hosts": ["api.example.com"],
+                "capabilities": ["image_generation"],
+            }],
+        }
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+        before = self.catalog_path.read_bytes()
+        untrusted = manager.refresh_provider_metadata(
+            "metadata_image",
+            lambda provider: {
+                "verified": True, "source_url": "https://evil.example/models",
+                "capabilities": ["image_generation"],
+            },
+        )
+        self.assertEqual(untrusted["status"], "UNTRUSTED_METADATA_SOURCE")
+        secret = manager.refresh_provider_metadata(
+            "metadata_image",
+            lambda provider: {
+                "verified": True, "source_url": "https://api.example.com/v1/models",
+                "capabilities": ["image_generation"], "api_key": "do-not-store",
+            },
+        )
+        self.assertEqual(secret["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
     def test_orphaned_verified_state_does_not_claim_connectivity(self):
         self.state_path.write_text(
             json.dumps({
