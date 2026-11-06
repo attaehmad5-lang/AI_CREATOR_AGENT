@@ -1,5 +1,6 @@
 import unittest
 import uuid
+from types import MappingProxyType
 from concurrent.futures import ThreadPoolExecutor
 
 from projects.provider_store.provider_request_trace import (
@@ -83,7 +84,7 @@ class ProviderRequestTraceTests(unittest.TestCase):
         self.assertEqual(injected["X-Test"], "safe")
         self.assertEqual(injected["traceparent"], context.traceparent)
         self.assertNotIn("TraceParent", injected)
-        extracted = extract_trace_context({"TRACEPARENT": context.traceparent})
+        extracted = extract_trace_context(MappingProxyType({"TRACEPARENT": context.traceparent}))
         self.assertEqual(extracted.trace_id, context.trace_id)
         self.assertEqual(extracted.parent_span_id, context.span_id)
         with self.assertRaisesRegex(ValueError, "TRACEPARENT_REQUIRED"):
