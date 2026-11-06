@@ -56,9 +56,17 @@ class ProviderAuditLog:
 
     @staticmethod
     def _valid_optional_id(value: Any) -> bool:
-        return value is None or (
-            isinstance(value, str) and _ID.fullmatch(value) is not None
+        if value is None:
+            return True
+        if not isinstance(value, str) or _ID.fullmatch(value) is None:
+            return False
+        # IDs are metadata, never a place to smuggle credential-shaped values.
+        sensitive_marker = re.search(
+            r"(?i)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|"
+            r"authorization|bearer|password|secret|private[_-]?key|credential)",
+            value,
         )
+        return sensitive_marker is None
 
     @staticmethod
     def _hash_event(event: dict[str, Any]) -> str:
