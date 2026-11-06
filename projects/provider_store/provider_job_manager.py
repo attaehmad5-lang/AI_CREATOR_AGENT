@@ -89,6 +89,7 @@ class ProviderJobManager:
         self.data: dict[str, Any] = {
             "version": "1.0", "jobs": {},
             "scheduler": {"last_project_id": None},
+            "control": {"accepting": True, "shutdown_requested_at": None},
         }
         if self.state_path.exists():
             lock_path = self.state_path.with_name(self.state_path.name + ".lock")
@@ -100,7 +101,13 @@ class ProviderJobManager:
 
     def _reload(self) -> bool:
         if not self.state_path.exists():
-            self.data = {"version": "1.0", "jobs": {}}
+            self.data = {
+                "version": "1.0", "jobs": {},
+                "scheduler": {"last_project_id": None},
+                "control": {"accepting": True, "shutdown_requested_at": None},
+            }
+            self._accepting = True
+            self._shutdown_requested_at = None
             return False
         try:
             with self.state_path.open("r", encoding="utf-8") as stream:
@@ -128,7 +135,28 @@ class ProviderJobManager:
         ):
             raise ValueError("invalid provider job scheduler state")
         loaded["scheduler"] = scheduler
-        migrated_legacy_tokens = False
+        control_migrated = "control" not in loaded
+        control = loaded.get(
+            "control", {"accepting": True, "shutdown_requested_at": None}
+        )
+        if (
+            not isinstance(control, dict)
+            or set(control) != {"accepting", "shutdown_requested_at"}
+            or not isinstance(control.get("accepting"), bool)
+            or (
+                control["accepting"] is True
+                and control.get("shutdown_requested_at") is not None
+            )
+            or (
+                control["accepting"] is False
+                and _parse_aware_timestamp(control.get("shutdown_requested_at")) is None
+            )
+        ):
+            raise ValueError("invalid provider job queue control state")
+        loaded["control"] = control
+        self._accepting = control["accepting"]
+        self._shutdown_requested_at = control["shutdown_requested_at"]
+        migrated_legacy_tokens = control_migrated
         for job_id, job in loaded["jobs"].items():
             if isinstance(job, dict) and "lease_token" in job and "lease_token_hash" not in job:
                 legacy_token = job.pop("lease_token")
@@ -261,8 +289,6 @@ class ProviderJobManager:
         tenant_id: str | None = None,
         deadline_at: str | None = None,
     ) -> dict[str, Any]:
-        if not self._accepting:
-            return {"status": "QUEUE_SHUTTING_DOWN", "accepted": False}
         now_dt = self.clock().astimezone(timezone.utc)
         normalized_deadline = None
         if deadline_at is not None:
@@ -285,6 +311,11 @@ class ProviderJobManager:
             return {"status": "INVALID_PRIORITY", "accepted": False}
         now = now_dt.isoformat()
         with self._transaction():
+            control = self.data["control"]
+            self._accepting = control["accepting"]
+            self._shutdown_requested_at = control["shutdown_requested_at"]
+            if control["accepting"] is not True:
+                return {"status": "QUEUE_SHUTTING_DOWN", "accepted": False}
             existing = self.data["jobs"].get(job_id)
             if isinstance(existing, dict):
                 if existing.get("tenant_id") != tenant_id:
@@ -531,33 +562,60 @@ class ProviderJobManager:
             }
 
     def stop_accepting(self) -> dict[str, Any]:
-        """Stop new submissions while allowing already accepted work to drain."""
-        with self._lock:
-            self._accepting = False
-            if self._shutdown_requested_at is None:
-                self._shutdown_requested_at = self.clock().astimezone(timezone.utc).isoformat()
-            return self.drain_status()
-
-    def resume_accepting(self) -> dict[str, Any]:
-        """Explicitly reopen submissions after a cancelled shutdown sequence."""
-        with self._lock:
-            self._accepting = True
-            self._shutdown_requested_at = None
-            return self.drain_status()
-
-    def drain_status(self) -> dict[str, Any]:
-        """Return bounded queue counters for a supervisor's graceful-shutdown loop."""
+        """Persist a process-shared stop signal while allowing accepted work to drain."""
         with self._transaction():
+            control = self.data["control"]
+            if control["accepting"]:
+                control["accepting"] = False
+                control["shutdown_requested_at"] = self.clock().astimezone(timezone.utc).isoformat()
+            self._accepting = False
+            self._shutdown_requested_at = control["shutdown_requested_at"]
+            self._save()
             jobs = list(self.data["jobs"].values())
             queued = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "QUEUED")
             running = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "RUNNING")
             return {
-                "status": "DRAINING" if not self._accepting else "ACCEPTING",
-                "accepting": self._accepting,
+                "status": "DRAINING", "accepting": False,
+                "queued": queued, "running": running,
+                "drained": queued == 0 and running == 0,
+                "shutdown_requested_at": self._shutdown_requested_at,
+            }
+
+    def resume_accepting(self) -> dict[str, Any]:
+        """Persist an explicit queue resume so every worker process observes it."""
+        with self._transaction():
+            control = self.data["control"]
+            control["accepting"] = True
+            control["shutdown_requested_at"] = None
+            self._accepting = True
+            self._shutdown_requested_at = None
+            self._save()
+            jobs = list(self.data["jobs"].values())
+            queued = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "QUEUED")
+            running = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "RUNNING")
+            return {
+                "status": "ACCEPTING", "accepting": True,
+                "queued": queued, "running": running,
+                "drained": queued == 0 and running == 0,
+                "shutdown_requested_at": None,
+            }
+
+    def drain_status(self) -> dict[str, Any]:
+        """Return queue counters and the process-shared graceful-shutdown state."""
+        with self._transaction():
+            control = self.data["control"]
+            self._accepting = control["accepting"]
+            self._shutdown_requested_at = control["shutdown_requested_at"]
+            jobs = list(self.data["jobs"].values())
+            queued = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "QUEUED")
+            running = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "RUNNING")
+            return {
+                "status": "DRAINING" if not control["accepting"] else "ACCEPTING",
+                "accepting": control["accepting"],
                 "queued": queued,
                 "running": running,
                 "drained": queued == 0 and running == 0,
-                "shutdown_requested_at": self._shutdown_requested_at,
+                "shutdown_requested_at": control["shutdown_requested_at"],
             }
 
     def complete(
