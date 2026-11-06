@@ -9,8 +9,8 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
-_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\\Z")
-_IDEMPOTENCY_KEY = re.compile(r"retention-delete:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\\Z")
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_IDEMPOTENCY_KEY = re.compile(r"retention-delete:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 
 
 class ProviderResourceDeletionAdapter:
@@ -38,9 +38,7 @@ class ProviderResourceDeletionAdapter:
         tenant_id: str, idempotency_key: str,
     ) -> dict[str, Any]:
         """Delete one opaque resource, returning a sanitized confirmation only."""
-        if not all(_ID.fullmatch(value) is not None for value in (
-            provider_id, resource_ref, tenant_id,
-        ) if isinstance(value, str)) or not all(
+        if not all(
             isinstance(value, str) and _ID.fullmatch(value) is not None
             for value in (provider_id, resource_ref, tenant_id)
         ):
