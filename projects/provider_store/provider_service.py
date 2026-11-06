@@ -997,7 +997,7 @@ class ProviderService:
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
-        tenant_id: str | None = None,
+        tenant_id: str | None = None, deadline_at: str | None = None,
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
@@ -1017,6 +1017,7 @@ class ProviderService:
                 "payload_ref": payload_ref,
                 "priority": priority,
                 "tenant_id": tenant_id,
+                "deadline_at": deadline_at,
             },
         })
         if rejection is not None:
@@ -1026,6 +1027,8 @@ class ProviderService:
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
                 "payload_ref": payload_ref, "priority": priority,
             }
+            if deadline_at is not None:
+                submit_args["deadline_at"] = deadline_at
             if self.tenant_isolation_manager is not None:
                 submit_args["tenant_id"] = tenant_id
             result = self.job_manager.submit(**submit_args)
@@ -1089,6 +1092,91 @@ class ProviderService:
         except Exception as exc:
             return {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+
+    def check_job_control(
+        self, *, job_id: str, worker_id: str, lease_token: str,
+        principal_id: str | None = None, tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Authorize a worker checkpoint before it continues provider activity."""
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "should_stop": True}
+        authorization = self._authorize_operation(principal_id, "provider.generate", return_decision=True)
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+            return {"status": "AUTHORIZATION_DENIED", "should_stop": True, "authorization": authorization}
+        if self.tenant_isolation_manager is not None:
+            if not isinstance(tenant_id, str) or not tenant_id.strip():
+                return {"status": "TENANT_CONTEXT_REQUIRED", "should_stop": True}
+            try:
+                existing = self.job_manager.poll(job_id=job_id, tenant_id=tenant_id)
+            except Exception as exc:
+                return {"status": "JOB_POLL_FAILED", "should_stop": True, "error_type": type(exc).__name__}
+            if not isinstance(existing, dict) or not isinstance(existing.get("job"), dict):
+                return {"status": existing.get("status", "JOB_NOT_FOUND") if isinstance(existing, dict) else "INVALID_JOB_MANAGER_RESPONSE", "should_stop": True}
+            job = existing["job"]
+            scoped = self._authorize_operation(principal_id, "provider.generate", provider_id=job.get("provider_id"))
+            if scoped is not None:
+                return {"status": "AUTHORIZATION_DENIED", "should_stop": True, "authorization": scoped}
+            tenant_error = self._authorize_tenant_project(
+                tenant_id=tenant_id, project_id=job.get("project_id"), principal_id=principal_id
+            )
+            if tenant_error is not None:
+                return {"status": tenant_error["status"], "should_stop": True}
+        try:
+            args = {"job_id": job_id, "worker_id": worker_id, "lease_token": lease_token}
+            if self.tenant_isolation_manager is not None:
+                args["tenant_id"] = tenant_id
+            result = self.job_manager.check_worker_control(**args)
+        except Exception as exc:
+            return {"status": "JOB_CONTROL_CHECK_FAILED", "should_stop": True, "error_type": type(exc).__name__}
+        return self._sanitize_job_response(result, self.sensitive_data_policy) if isinstance(result, dict) else {
+            "status": "INVALID_JOB_MANAGER_RESPONSE", "should_stop": True
+        }
+
+    def stop_job_submissions(self, *, principal_id: str | None = None) -> dict[str, Any]:
+        """Admin-authorized graceful stop: reject new jobs but allow accepted work to drain."""
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "accepting": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "accepting": False, "authorization": authorization}
+        stop = getattr(self.job_manager, "stop_accepting", None)
+        if not callable(stop):
+            return {"status": "GRACEFUL_SHUTDOWN_UNAVAILABLE", "accepting": False}
+        try:
+            result = stop()
+        except Exception as exc:
+            return {"status": "GRACEFUL_SHUTDOWN_FAILED", "accepting": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepting": False}
+
+    def job_drain_status(self, *, principal_id: str | None = None) -> dict[str, Any]:
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "drained": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "drained": False, "authorization": authorization}
+        status = getattr(self.job_manager, "drain_status", None)
+        if not callable(status):
+            return {"status": "GRACEFUL_SHUTDOWN_UNAVAILABLE", "drained": False}
+        try:
+            result = status()
+        except Exception as exc:
+            return {"status": "DRAIN_STATUS_FAILED", "drained": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "drained": False}
+
+    def resume_job_submissions(self, *, principal_id: str | None = None) -> dict[str, Any]:
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "accepting": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "accepting": False, "authorization": authorization}
+        resume = getattr(self.job_manager, "resume_accepting", None)
+        if not callable(resume):
+            return {"status": "GRACEFUL_SHUTDOWN_UNAVAILABLE", "accepting": False}
+        try:
+            result = resume()
+        except Exception as exc:
+            return {"status": "GRACEFUL_RESUME_FAILED", "accepting": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepting": False}
 
     def renew_job_lease(
         self, *, job_id: str, worker_id: str, lease_token: str,
