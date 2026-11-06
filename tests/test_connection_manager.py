@@ -195,7 +195,7 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(any("duplicate" in error for error in result["errors"]))
         self.assertTrue(any("credential value" in error for error in result["errors"]))
         self.assertTrue(any("enabled must be boolean" in error for error in result["errors"]))
-        for hosts in ([], ["https://api.example.com"], ["api..example.com"], ["api.example.com", "API.EXAMPLE.COM"], ["-bad.example"]):
+        for hosts in ([], ["https://api.example.com"], ["api..example.com"], ["api.example.com", "API.EXAMPLE.COM"], ["-bad.example"], ["*.example.com"]):
             with self.subTest(hosts=hosts):
                 invalid = ConnectionManager.validate_catalog_schema({
                     "providers": [{"id": "provider", "allowed_hosts": hosts}]
