@@ -1,6 +1,8 @@
 import json
+import socket
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -615,6 +617,87 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertEqual(opener.calls, [])
+
+    def test_default_transport_rejects_private_dns_answer_before_connect(self):
+        resolutions = []
+
+        def resolver(host, port, *, type):
+            resolutions.append((host, port, type))
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", port))
+            ]
+
+        probe = ProviderHTTPConnectivityProbe(environ={}, resolver=resolver)
+        with self.assertRaisesRegex(ValueError, "PROVIDER_ENDPOINT_RESOLVES_TO_NON_PUBLIC_ADDRESS"):
+            probe({
+                "id": "public_provider", "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertEqual(len(resolutions), 1)
+
+    def test_default_transport_rejects_mixed_public_and_private_dns_answers(self):
+        def resolver(host, port, *, type):
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port)),
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("10.0.0.9", port)),
+            ]
+
+        probe = ProviderHTTPConnectivityProbe(environ={}, resolver=resolver)
+        with self.assertRaisesRegex(ValueError, "PROVIDER_ENDPOINT_RESOLVES_TO_NON_PUBLIC_ADDRESS"):
+            probe({
+                "id": "public_provider", "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+
+    def test_default_transport_connects_to_pinned_numeric_address(self):
+        from urllib.request import Request
+        from projects.provider_store import http_probe as probe_module
+
+        connected = []
+
+        def resolver(host, port, *, type):
+            self.assertEqual(host, "api.example.com")
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port))
+            ]
+
+        class StubResponse:
+            status = 204
+            headers = {}
+
+            def read(self, amount=-1):
+                return b""
+
+            def close(self):
+                self.closed = True
+
+        def fake_request(connection, method, path, body=None, headers=None):
+            connected.append((connection.host, connection._pinned_address, method, path))
+
+        with patch.object(probe_module._PinnedHTTPSConnection, "request", fake_request), patch.object(
+            probe_module._PinnedHTTPSConnection, "getresponse", lambda connection: StubResponse()
+        ):
+            response = probe_module._PinnedHTTPSOpener(resolver=resolver).open(
+                Request("https://api.example.com/health"), timeout=2.0
+            )
+            response.close()
+
+        self.assertEqual(connected, [("api.example.com", "93.184.216.34", "GET", "/health")])
+
+    def test_probe_rejects_oversized_response_and_closes_it(self):
+        response = _Response(body=b"12345")
+        probe = ProviderHTTPConnectivityProbe(
+            environ={}, opener=_Opener(response=response), max_response_bytes=4,
+        )
+        with self.assertRaisesRegex(ValueError, "PROVIDER_PROBE_RESPONSE_TOO_LARGE"):
+            probe({
+                "id": "public_provider", "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertTrue(response.closed)
 
     def test_missing_host_allowlist_is_rejected_before_network(self):
         opener = _Opener()
