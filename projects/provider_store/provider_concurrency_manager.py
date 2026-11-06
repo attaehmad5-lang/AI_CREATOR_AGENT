@@ -304,7 +304,9 @@ class ProviderConcurrencyManager:
             yield lost
         finally:
             stop.set()
-            thread.join(timeout=max(1.0, self.heartbeat_interval * 2))
+            # Wait for any in-flight renewal to finish before the caller releases
+            # the lease, avoiding a heartbeat/release race.
+            thread.join()
 
     def get_status(self, provider_id: str, *, now: float | None = None) -> dict[str, Any]:
         if not self._valid_id(provider_id):
