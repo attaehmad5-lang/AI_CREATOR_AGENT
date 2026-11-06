@@ -1244,6 +1244,7 @@ class ProviderService:
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
         tenant_id: str | None = None, deadline_at: str | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
@@ -1264,6 +1265,7 @@ class ProviderService:
                 "priority": priority,
                 "tenant_id": tenant_id,
                 "deadline_at": deadline_at,
+                "trace_id": trace_id,
             },
         })
         if rejection is not None:
@@ -1275,6 +1277,8 @@ class ProviderService:
             }
             if deadline_at is not None:
                 submit_args["deadline_at"] = deadline_at
+            if trace_id is not None:
+                submit_args["trace_id"] = trace_id
             if self.tenant_isolation_manager is not None:
                 submit_args["tenant_id"] = tenant_id
             result = self.job_manager.submit(**submit_args)
