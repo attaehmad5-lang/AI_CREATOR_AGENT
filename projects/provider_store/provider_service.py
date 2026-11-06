@@ -298,6 +298,64 @@ class ProviderService:
             "status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False
         }
 
+    def load_provider_adapter(
+        self, provider_id: str, factory: Any, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        """Load a trusted runtime adapter through the authorized provider registry."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "provider": provider_id, "loaded": False}
+        authorization = self._authorize_operation(
+            principal_id, "provider.configure", provider_id=provider_id
+        )
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "loaded": False, "authorization": authorization,
+            }
+        if not callable(factory):
+            return {"status": "INVALID_ADAPTER_FACTORY", "provider": provider_id, "loaded": False}
+        loader = getattr(self.connection_manager, "load_provider", None)
+        if not callable(loader):
+            return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "loaded": False}
+        try:
+            result = loader(provider_id, factory)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_ADAPTER_LOAD_FAILED", "provider": provider_id,
+                "loaded": False, "error_type": type(exc).__name__,
+            }
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_ADAPTER_LOAD_RESPONSE", "provider": provider_id, "loaded": False,
+        }
+
+    def unload_provider_adapter(
+        self, provider_id: str, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        """Unload and clean up a runtime adapter through the authorized provider registry."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "provider": provider_id, "unloaded": False}
+        authorization = self._authorize_operation(
+            principal_id, "provider.configure", provider_id=provider_id
+        )
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "unloaded": False, "authorization": authorization,
+            }
+        unloader = getattr(self.connection_manager, "unload_provider", None)
+        if not callable(unloader):
+            return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "unloaded": False}
+        try:
+            result = unloader(provider_id)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_ADAPTER_UNLOAD_FAILED", "provider": provider_id,
+                "unloaded": False, "error_type": type(exc).__name__,
+            }
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_ADAPTER_UNLOAD_RESPONSE", "provider": provider_id, "unloaded": False,
+        }
+
     def configure_provider(
         self,
         provider_id: str,
