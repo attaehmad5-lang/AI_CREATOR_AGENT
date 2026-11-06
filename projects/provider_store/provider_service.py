@@ -62,6 +62,11 @@ class ProviderService:
             or not callable(getattr(provider_retention_manager, "run_due", None))
         ):
             raise ValueError("provider_retention_manager must support registration and due-deletion sweeps")
+        if provider_retention_manager is not None and (
+            data_handling_policy is None
+            or getattr(provider_retention_manager, "policy", None) is not data_handling_policy
+        ):
+            raise ValueError("provider retention and execution must share the same data-handling policy")
         resolved_secret_manager = secret_manager or getattr(connection_manager, "secret_manager", None)
         if resolved_secret_manager is not None and (
             not callable(getattr(resolved_secret_manager, "resolve_secret", None))
@@ -248,10 +253,17 @@ class ProviderService:
                     "error_type": type(exc).__name__}
         if not isinstance(result, dict) or result.get("status") != "RETENTION_SWEEP_COMPLETE":
             return {"status": "INVALID_PROVIDER_RETENTION_RESPONSE", "deleted": 0, "failed": 0}
+        deleted = result.get("deleted")
+        failed = result.get("failed")
+        if (
+            isinstance(deleted, bool) or not isinstance(deleted, int) or deleted < 0
+            or isinstance(failed, bool) or not isinstance(failed, int) or failed < 0
+        ):
+            return {"status": "INVALID_PROVIDER_RETENTION_RESPONSE", "deleted": 0, "failed": 0}
         return {
             "status": "PROVIDER_RETENTION_SWEEP_COMPLETE",
-            "deleted": result.get("deleted", 0),
-            "failed": result.get("failed", 0),
+            "deleted": deleted,
+            "failed": failed,
         }
 
     def configure_provider(
