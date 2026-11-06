@@ -776,6 +776,51 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(result["health"]["status"], "HEALTH_CHECK_UNAVAILABLE")
         self.assertEqual(calls, [])
 
+    def test_execute_routed_request_propagates_trace_id_to_adapter_and_result(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        output_path = self.root / "trace-output.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        observed = {}
+        explicit_trace_id = "d" * 32
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="trace-execute-explicit",
+            estimated_cost=0.0, output_path=str(output_path),
+            trace_id=explicit_trace_id,
+            adapter=lambda **kwargs: (
+                observed.update(kwargs) or {
+                    "started": True, "success": True, "actual_cost": 0.0,
+                    "charge_outcome": "not_incurred", "output_path": str(output_path),
+                    "latency_ms": 5.0,
+                }
+            ),
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(observed["trace_id"], explicit_trace_id)
+        self.assertEqual(result["trace_id"], explicit_trace_id)
+
+        generated = service.execute_routed_request(
+            category="image", project_id="film", request_id="trace-execute-generated",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: (
+                observed.update(kwargs) or {
+                    "started": True, "success": True, "actual_cost": 0.0,
+                    "charge_outcome": "not_incurred", "output_path": str(output_path),
+                    "latency_ms": 5.0,
+                }
+            ),
+            modality="image",
+        )
+        self.assertRegex(generated["trace_id"], r"^[0-9a-f]{32}$")
+        self.assertEqual(observed["trace_id"], generated["trace_id"])
+
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
             self.connections, cost_policy=self.cost, quota_manager=self.quota
