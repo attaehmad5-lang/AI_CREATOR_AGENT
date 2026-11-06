@@ -11,6 +11,7 @@ on:
       - task-25-feature-75-concurrency-limits-integrated
       - task-25-feature-76-multiprocess-queue-hardening
       - task-25-feature-77-remote-provider-jobs
+      - task-25-feature-78-webhook-remote-job-sync
   pull_request:
     branches:
       - main
@@ -19,6 +20,7 @@ on:
       - task-25-feature-74-idempotency-keys
       - task-25-feature-75-concurrency-limits-integrated
       - task-25-feature-76-multiprocess-queue-hardening
+      - task-25-feature-77-remote-provider-jobs
 
 permissions:
   contents: read

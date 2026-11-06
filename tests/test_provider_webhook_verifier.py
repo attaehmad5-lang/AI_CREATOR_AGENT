@@ -1,12 +1,33 @@
 """Webhook signature, timestamp, replay, and secret-safety tests."""
 import hashlib
 import hmac
+import json
+from concurrent.futures import ProcessPoolExecutor
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
 from projects.provider_store.provider_webhook_verifier import ProviderWebhookVerifier
+
+
+
+def _verify_shared_webhook_event_in_process(args):
+    path, now_iso, secret, payload, signature, timestamp, event_id = args
+    verifier = ProviderWebhookVerifier(
+        path,
+        clock=lambda: datetime.fromisoformat(now_iso),
+        max_payload_bytes=128,
+        max_events=32,
+    )
+    return verifier.verify(
+        provider_id="video",
+        payload=payload,
+        signature=signature,
+        timestamp=timestamp,
+        event_id=event_id,
+        secret=secret,
+    )["status"]
 
 
 class ProviderWebhookVerifierTests(unittest.TestCase):
@@ -130,6 +151,32 @@ class ProviderWebhookVerifierTests(unittest.TestCase):
             event_id="event-bad-time", secret=self.secret,
         )
         self.assertEqual(invalid["status"], "INVALID_WEBHOOK_TIMESTAMP")
+
+    def test_multi_process_replay_race_accepts_exactly_one_event(self):
+        secret = self.secret
+        signed = str(self.timestamp).encode("ascii") + b"." + self.payload
+        signature = "sha256=" + hmac.new(
+            secret.encode("utf-8"), signed, hashlib.sha256
+        ).hexdigest()
+        args = (
+            str(self.path),
+            self.now.isoformat(),
+            secret,
+            self.payload,
+            signature,
+            self.timestamp,
+            "cross-process-event",
+        )
+        with ProcessPoolExecutor(max_workers=6) as executor:
+            statuses = list(executor.map(
+                _verify_shared_webhook_event_in_process,
+                [args] * 6,
+            ))
+        self.assertEqual(statuses.count("WEBHOOK_VERIFIED"), 1)
+        self.assertEqual(statuses.count("WEBHOOK_REPLAY_REJECTED"), 5)
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(len(persisted["events"]), 1)
+
 
 
 if __name__ == "__main__":

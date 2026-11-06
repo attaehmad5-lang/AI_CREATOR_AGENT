@@ -129,3 +129,21 @@ Register adapters by provider ID through ProviderService(remote_job_adapters=...
 Remote submission intent is durably written before the network call. A known remote ID is stored as SUBMITTED. An exception or malformed response becomes UNKNOWN, never an automatic second unkeyed submission. A retry requires a new valid worker lease and reuses the same scoped provider idempotency digest. The active submission lease verifier is hashed at rest and removed from public job reads. RUNNING cannot regress to QUEUED, and terminal provider states release the internal worker lease after being persisted.
 
 This is an adapter contract and lifecycle integration, not proof that a specific commercial provider's remote-job API is connected. Provider-specific adapters, signature-verified webhook-to-job reconciliation, retry policy for provider rate limits, multi-host scheduling and live end-to-end tests remain separate release gates.
+
+
+## Signed remote-job callbacks — Feature #78
+
+The normalized webhook envelope is a UTF-8 JSON object with only these fields:
+
+- event: provider.job.status
+- remote_job_id: the provider's opaque job identifier
+- status: QUEUED, RUNNING, SUCCEEDED, FAILED or CANCELLED
+- poll_after_seconds: required for QUEUED/RUNNING and bounded to 1..3600
+- result_ref: required only for SUCCEEDED
+- error_code: required only for FAILED
+
+Call ProviderService.process_remote_job_webhook() with the provider ID, raw request bytes, signature, timestamp, event ID and the provider's configured signing secret. Signature, timestamp, payload size and replay checks run before decoding the payload. The parsed object is strict-schema validated and sensitive-data scanned; arbitrary provider response bodies and secret fields are not accepted.
+
+ProviderJobManager indexes remote jobs by a digest over provider ID plus remote job ID. This prevents a callback for one provider from updating a different provider's job even when two providers reuse the same opaque remote ID. Existing job state files without the index are migrated by rebuilding it from persisted submitted jobs under the store's interprocess lock. A callback only updates a matching SUBMITTED job. Terminal results clear a worker lease, duplicate terminal outcomes are idempotent, conflicting terminal outcomes and status regressions are rejected.
+
+The replay verifier and job manager currently use separate persisted state files. A verified event is recorded in the replay ledger before the job update; if the second write fails, the same event ID cannot be replayed and the job must be reconciled by a later provider poll or an operator. Production rollout should move replay deduplication and job-state application into one transactional store or provide a durable reconciliation queue. Provider-specific signature headers/rotation, ingress authentication configuration, live provider webhook tests and multi-host deployment remain release gates.

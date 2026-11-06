@@ -42,6 +42,16 @@ def _idempotency_key_digest(
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
+def _remote_job_index_key(*, provider_id: str, remote_job_id: str) -> str:
+    """Index opaque remote IDs by provider without persisting another raw identifier."""
+    material = json.dumps(
+        ["provider-remote-job-index-v1", provider_id, remote_job_id],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
 class ProviderJobManager:
     """Queue references only; hash worker leases and never persist raw payloads."""
 
@@ -84,6 +94,7 @@ class ProviderJobManager:
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {
             "version": "1.0", "jobs": {}, "idempotency_index": {},
+            "remote_job_index": {},
             "scheduler": {"last_project_id": None},
         }
         if self.state_path.exists():
@@ -98,6 +109,7 @@ class ProviderJobManager:
         if not self.state_path.exists():
             self.data = {
                 "version": "1.0", "jobs": {}, "idempotency_index": {},
+                "remote_job_index": {},
                 "scheduler": {"last_project_id": None},
             }
             return False
@@ -131,8 +143,13 @@ class ProviderJobManager:
         idempotency_index = loaded.get("idempotency_index", {})
         if not isinstance(idempotency_index, dict) or len(idempotency_index) > self.max_job_records:
             raise ValueError("invalid provider job idempotency index")
+        remote_index_missing = "remote_job_index" not in loaded
+        remote_job_index = loaded.get("remote_job_index", {})
+        if not isinstance(remote_job_index, dict) or len(remote_job_index) > self.max_job_records:
+            raise ValueError("invalid provider remote-job index")
         migrated_legacy_tokens = False
         expected_idempotency_index: dict[str, str] = {}
+        expected_remote_job_index: dict[str, str] = {}
         for job_id, job in loaded["jobs"].items():
             if isinstance(job, dict) and "lease_token" in job and "lease_token_hash" not in job:
                 legacy_token = job.pop("lease_token")
@@ -310,11 +327,22 @@ class ProviderJobManager:
                 ):
                     raise ValueError("invalid provider job idempotency record")
                 expected_idempotency_index[key_digest] = job_id
+            remote_job_id = job.get("remote_job_id")
+            if remote_job_id is not None:
+                remote_key = _remote_job_index_key(
+                    provider_id=job["provider_id"], remote_job_id=remote_job_id
+                )
+                if remote_key in expected_remote_job_index:
+                    raise ValueError("duplicate remote provider job identity")
+                expected_remote_job_index[remote_key] = job_id
         if not index_missing and idempotency_index != expected_idempotency_index:
             raise ValueError("provider job idempotency index does not match stored jobs")
+        if not remote_index_missing and remote_job_index != expected_remote_job_index:
+            raise ValueError("provider remote-job index does not match stored jobs")
         loaded["idempotency_index"] = expected_idempotency_index
+        loaded["remote_job_index"] = expected_remote_job_index
         self.data = loaded
-        return migrated_legacy_tokens or index_missing
+        return migrated_legacy_tokens or index_missing or remote_index_missing
 
     @staticmethod
     def _public_job(
@@ -895,10 +923,17 @@ class ProviderJobManager:
                 }
             if state != "SUBMITTING":
                 return {"status": "REMOTE_SUBMISSION_NOT_IN_PROGRESS", "saved": False}
+            remote_key = _remote_job_index_key(
+                provider_id=job["provider_id"], remote_job_id=remote_job_id
+            )
+            prior_job_id = self.data["remote_job_index"].get(remote_key)
+            if prior_job_id is not None and prior_job_id != job_id:
+                return {"status": "REMOTE_JOB_ID_CONFLICT", "saved": False}
             job["remote_submission_state"] = "SUBMITTED"
             job["remote_submission_worker_id"] = None
             job["remote_submission_lease_token_hash"] = None
             job["remote_job_id"] = remote_job_id
+            self.data["remote_job_index"][remote_key] = job_id
             job["remote_status"] = remote_status
             job["remote_poll_after_seconds"] = (
                 poll_after_seconds if remote_status in {"QUEUED", "RUNNING"} else None
@@ -990,6 +1025,106 @@ class ProviderJobManager:
             self._save()
             return {
                 "status": "REMOTE_JOB_TERMINAL" if remote_status in _TERMINAL else "REMOTE_JOB_PENDING",
+                "saved": True,
+                "terminal": remote_status in _TERMINAL,
+                "job": self._public_job(job),
+            }
+
+
+    def update_remote_status_from_webhook(
+        self,
+        *,
+        provider_id: str,
+        remote_job_id: str,
+        remote_status: str,
+        poll_after_seconds: int | None = None,
+        result_ref: str | None = None,
+        error_code: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply a status event only to the exact provider-owned remote job identity."""
+        if (
+            not isinstance(provider_id, str) or not _ID_RE.fullmatch(provider_id)
+            or not isinstance(remote_job_id, str) or not _REF_RE.fullmatch(remote_job_id)
+            or not isinstance(remote_status, str) or remote_status not in _REMOTE_JOB_STATES
+            or (
+                remote_status in {"QUEUED", "RUNNING"}
+                and (
+                    isinstance(poll_after_seconds, bool)
+                    or not isinstance(poll_after_seconds, int)
+                    or not 1 <= poll_after_seconds <= 3600
+                )
+            )
+            or (remote_status in _TERMINAL and poll_after_seconds is not None)
+            or (
+                remote_status == "SUCCEEDED"
+                and (not isinstance(result_ref, str) or not _REF_RE.fullmatch(result_ref))
+            )
+            or (
+                remote_status == "FAILED"
+                and (not isinstance(error_code, str) or not _ERROR_RE.fullmatch(error_code))
+            )
+            or (result_ref is not None and (
+                not isinstance(result_ref, str) or not _REF_RE.fullmatch(result_ref)
+            ))
+            or (error_code is not None and (
+                not isinstance(error_code, str) or not _ERROR_RE.fullmatch(error_code)
+            ))
+        ):
+            return {"status": "INVALID_REMOTE_WEBHOOK_STATUS", "saved": False}
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        remote_key = _remote_job_index_key(
+            provider_id=provider_id, remote_job_id=remote_job_id
+        )
+        with self._transaction():
+            job_id = self.data["remote_job_index"].get(remote_key)
+            job = self.data["jobs"].get(job_id) if isinstance(job_id, str) else None
+            if not isinstance(job, dict):
+                return {"status": "REMOTE_JOB_NOT_FOUND", "saved": False}
+            if (
+                job.get("provider_id") != provider_id
+                or job.get("remote_submission_state") != "SUBMITTED"
+                or job.get("remote_job_id") != remote_job_id
+            ):
+                return {"status": "REMOTE_JOB_IDENTITY_MISMATCH", "saved": False}
+            current = job.get("remote_status")
+            if current in _TERMINAL:
+                same_terminal = (
+                    current == remote_status
+                    and (
+                        remote_status != "SUCCEEDED"
+                        or job.get("result_ref") == result_ref
+                    )
+                    and (
+                        remote_status != "FAILED"
+                        or job.get("error_code") == error_code
+                    )
+                )
+                return {
+                    "status": "REMOTE_WEBHOOK_ALREADY_APPLIED" if same_terminal else "REMOTE_JOB_TERMINAL_CONFLICT",
+                    "saved": same_terminal,
+                    "job": self._public_job(job) if same_terminal else None,
+                }
+            if current == "RUNNING" and remote_status == "QUEUED":
+                return {"status": "REMOTE_JOB_STATUS_REGRESSION", "saved": False}
+            job["remote_status"] = remote_status
+            job["remote_poll_after_seconds"] = (
+                poll_after_seconds if remote_status in {"QUEUED", "RUNNING"} else None
+            )
+            job["remote_error_code"] = error_code if remote_status == "FAILED" else None
+            job["remote_updated_at"] = now
+            if remote_status in _TERMINAL:
+                job["status"] = remote_status
+                job["cancel_requested"] = False
+                if remote_status == "SUCCEEDED":
+                    job["result_ref"] = result_ref
+                elif remote_status == "FAILED":
+                    job["error_code"] = error_code
+                job["completed_at"] = now
+                self._clear_worker_lease(job)
+            job["updated_at"] = now
+            self._save()
+            return {
+                "status": "REMOTE_WEBHOOK_JOB_UPDATED",
                 "saved": True,
                 "terminal": remote_status in _TERMINAL,
                 "job": self._public_job(job),
