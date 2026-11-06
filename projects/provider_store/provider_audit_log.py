@@ -118,12 +118,22 @@ class ProviderAuditLog:
                 "previous_hash", "event_hash",
             }:
                 raise ValueError("audit event schema is invalid")
-            if event.get("sequence") != index or event.get("previous_hash") != previous:
+            sequence = event.get("sequence")
+            if (
+                isinstance(sequence, bool) or not isinstance(sequence, int)
+                or sequence != index or event.get("previous_hash") != previous
+            ):
                 raise ValueError("audit chain sequence is invalid")
             timestamp = event.get("timestamp")
             if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or not math.isfinite(float(timestamp)) or timestamp < 0:
                 raise ValueError("audit event timestamp is invalid")
-            if event.get("event_type") not in _EVENT_TYPES or event.get("outcome") not in {"allowed", "denied", "success", "failure", "attempted"}:
+            event_type = event.get("event_type")
+            outcome = event.get("outcome")
+            if (
+                not isinstance(event_type, str) or event_type not in _EVENT_TYPES
+                or not isinstance(outcome, str)
+                or outcome not in {"allowed", "denied", "success", "failure", "attempted"}
+            ):
                 raise ValueError("audit event classification is invalid")
             for key in ("actor_id", "tenant_id", "provider_id", "request_id", "trace_id"):
                 value = event.get(key)
@@ -171,9 +181,9 @@ class ProviderAuditLog:
         request_id: str | None = None, trace_id: str | None = None,
         outcome: str, details: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if event_type not in _EVENT_TYPES:
+        if not isinstance(event_type, str) or event_type not in _EVENT_TYPES:
             return {"saved": False, "status": "AUDIT_EVENT_TYPE_INVALID"}
-        if outcome not in {"allowed", "denied", "success", "failure", "attempted"}:
+        if not isinstance(outcome, str) or outcome not in {"allowed", "denied", "success", "failure", "attempted"}:
             return {"saved": False, "status": "AUDIT_OUTCOME_INVALID"}
         try:
             clean = {
