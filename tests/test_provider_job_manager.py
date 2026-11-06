@@ -29,6 +29,40 @@ class ProviderJobManagerTests(unittest.TestCase):
             payload_ref=f"payload:{job_id}", priority=priority,
         )
 
+    def test_job_trace_id_is_generated_persisted_and_stable_for_idempotent_retries(self):
+        submitted = self.submit("trace-job")
+        self.assertTrue(submitted["accepted"])
+        trace_id = submitted["job"]["trace_id"]
+        self.assertRegex(trace_id, r"^[0-9a-f]{32}$")
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["jobs"]["trace-job"]["trace_id"], trace_id)
+
+        duplicate = self.submit("trace-job")
+        self.assertEqual(duplicate["status"], "ALREADY_SUBMITTED")
+        self.assertEqual(duplicate["job"]["trace_id"], trace_id)
+
+        reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertEqual(reloaded.poll(job_id="trace-job")["job"]["trace_id"], trace_id)
+
+    def test_job_trace_id_validation_and_explicit_idempotency_binding(self):
+        invalid = self.manager.submit(
+            job_id="bad-trace", project_id="film", provider_id="image",
+            payload_ref="payload:bad-trace", trace_id="not-a-trace",
+        )
+        self.assertEqual(invalid["status"], "INVALID_TRACE_ID")
+
+        supplied = "a" * 32
+        created = self.manager.submit(
+            job_id="explicit-trace", project_id="film", provider_id="image",
+            payload_ref="payload:explicit-trace", trace_id=supplied,
+        )
+        self.assertEqual(created["job"]["trace_id"], supplied)
+        conflict = self.manager.submit(
+            job_id="explicit-trace", project_id="film", provider_id="image",
+            payload_ref="payload:explicit-trace", trace_id="b" * 32,
+        )
+        self.assertEqual(conflict["status"], "REQUEST_ID_CONFLICT")
+
     def test_persisted_running_job_requires_well_formed_lease_token(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
