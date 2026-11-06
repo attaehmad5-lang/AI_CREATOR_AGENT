@@ -1328,6 +1328,14 @@ class ProviderService:
                 return {"allowed": False, "status": "TENANT_CONTEXT_CONFLICT"}
             route_options["tenant_id"] = tenant_id
         tenant_id = route_options.get("tenant_id")
+        trace_context = route_options.pop("_trace_context", None)
+        if trace_context is not None and not isinstance(trace_context, ProviderRequestTraceContext):
+            return {"allowed": False, "status": "INVALID_TRACE_CONTEXT"}
+        trace_id = trace_context.trace_id if trace_context is not None else None
+        if trace_context is not None:
+            route_options["trace_id"] = trace_context.trace_id
+            route_options["span_id"] = trace_context.span_id
+            route_options["traceparent"] = trace_context.traceparent
         project_id = route_options.get("project_id")
         request_id = route_options.get("request_id")
         approvals = route_options.get("paid_approved_providers")
@@ -1344,7 +1352,6 @@ class ProviderService:
                 audit = self._record_provider_audit(
                     event_type="provider.approval.decision",
                     actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
-                    trace_id=trace_id,
                     trace_id=trace_id,
                     operation="billing.approve", outcome="DENIED",
                     reason_code="BILLING_APPROVAL_AUTHORIZATION_DENIED",
