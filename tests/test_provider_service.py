@@ -185,6 +185,66 @@ class ProviderServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "needs an audit_manager"):
             ProviderService(self.connections, require_audit_logging=True)
 
+    def test_provider_onboarding_approval_probe_and_activation_are_audited(self):
+        authorization = ProviderAuthorizationManager(self.root / "onboarding-audit-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        audit = ProviderAuditLog(
+            self.root / "onboarding-audit.json",
+            signing_key=b"onboarding-audit-test-signing-key-min32",
+        )
+        onboarding = ProviderOnboardingManager(
+            self.root / "onboarding-state.json",
+            self.connections,
+            authorize_admin=lambda principal_id: principal_id == "admin-user",
+            probe_provider=lambda manifest: {"verified": True, "status": "PROBE_OK"},
+        )
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            provider_onboarding_manager=onboarding,
+            audit_manager=audit,
+            require_audit_logging=True,
+        )
+        manifest = {
+            "id": "audit_onboard_image",
+            "name": "Audit Onboard Image",
+            "category": "image",
+            "auth_type": "API_KEY",
+            "connection_type": "API",
+            "official_api_url": "https://api.example.com/v1",
+            "official_docs_url": "https://docs.example.com/api",
+            "allowed_hosts": ["api.example.com"],
+            "capabilities": ["image_generation"],
+            "adapter_api_version": "1.0",
+            "subscription_required": True,
+            "enabled": False,
+        }
+        self.assertTrue(service.submit_provider_onboarding(
+            manifest, principal_id="admin-user"
+        )["accepted"])
+        self.assertTrue(service.approve_provider_onboarding(
+            "audit_onboard_image", principal_id="admin-user"
+        )["approved"])
+        self.assertTrue(service.verify_provider_onboarding(
+            "audit_onboard_image", principal_id="admin-user"
+        )["verified"])
+        self.assertTrue(service.activate_provider_onboarding(
+            "audit_onboard_image", principal_id="admin-user"
+        )["activated"])
+        events = audit.read_events()["events"]
+        self.assertEqual(len(events), 8)
+        self.assertEqual(
+            [events[i]["operation"] for i in range(0, 8, 2)],
+            [
+                "provider.onboarding.submit",
+                "provider.onboarding.approve",
+                "provider.onboarding.verify",
+                "provider.onboarding.activate",
+            ],
+        )
+        self.assertTrue(all(events[i]["outcome"] == "REQUESTED" for i in range(0, 8, 2)))
+        self.assertTrue(all(events[i]["outcome"] == "SUCCEEDED" for i in range(1, 8, 2)))
+
     def test_provider_registry_discovery_and_metadata_reads_are_authorized(self):
         authorization = ProviderAuthorizationManager(self.root / "registry-read-auth.json")
         authorization.assign_role("viewer-user", "viewer")
@@ -873,6 +933,67 @@ class ProviderServiceTests(unittest.TestCase):
         )
         self.assertRegex(generated["trace_id"], r"^[0-9a-f]{32}$")
         self.assertEqual(observed["trace_id"], generated["trace_id"])
+
+    def test_required_audit_log_traces_provider_generation_execution(self):
+        audit = ProviderAuditLog(
+            self.root / "generation-audit.json",
+            signing_key=b"generation-audit-test-signing-key-min-32",
+        )
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            output_validator=self.validator, cost_policy=self.cost,
+            quota_manager=self.quota, audit_manager=audit,
+            require_audit_logging=True,
+        )
+        output_path = self.root / "audited-output.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        trace_id = "e" * 32
+        observed = {}
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="audited-generation",
+            estimated_cost=0.0, output_path=str(output_path), trace_id=trace_id,
+            adapter=lambda **kwargs: (
+                observed.update(kwargs) or {
+                    "started": True, "success": True, "actual_cost": 0.0,
+                    "charge_outcome": "not_incurred",
+                    "output_path": str(output_path), "latency_ms": 4.0,
+                }
+            ),
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertTrue(result["audit_outcome_recorded"])
+        self.assertEqual(observed["trace_id"], trace_id)
+        events = audit.read_events()["events"]
+        self.assertEqual([event["outcome"] for event in events], ["REQUESTED", "SUCCEEDED"])
+        self.assertTrue(all(event["trace_id"] == trace_id for event in events))
+        self.assertTrue(all(event["request_id"] == "audited-generation" for event in events))
+
+    def test_required_audit_log_prevents_generation_when_intent_write_fails(self):
+        class FailedAudit:
+            def record(self, **kwargs):
+                return {"status": "AUDIT_STORAGE_UNAVAILABLE", "saved": False}
+
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            cost_policy=self.cost, quota_manager=self.quota,
+            audit_manager=FailedAudit(), require_audit_logging=True,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="audit-fail-generation",
+            estimated_cost=0.0, adapter=lambda **kwargs: calls.append(kwargs),
+            modality="image",
+        )
+        self.assertEqual(result["status"], "AUDIT_LOG_REQUIRED")
+        self.assertFalse(result["executed"])
+        self.assertEqual(calls, [])
 
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
         router = ProviderRoutingManager(
