@@ -1,6 +1,10 @@
 """Provider metrics aggregation and bounded-history tests."""
+import json
+import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from pathlib import Path
 
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 
@@ -53,6 +57,84 @@ class ProviderMetricsManagerTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(lambda i: self.record("image-a", i % 2 == 0, i), range(100)))
         self.assertEqual(self.manager.snapshot(provider_id="image-a")["metrics"]["sample_count"], 3)
+
+    def test_persistent_metrics_survive_restart_and_remain_bounded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "metrics.json"
+            first = ProviderMetricsManager(
+                max_samples=2, clock=lambda: self.now, state_path=state_path
+            )
+            self.assertTrue(first.record(
+                provider_id="image-a", category="image", success=True,
+                latency_ms=10, queue_wait_ms=2,
+            )["saved"])
+            self.assertTrue(first.record(
+                provider_id="image-a", category="image", success=False,
+                latency_ms=30, queue_wait_ms=6, timed_out=True,
+            )["saved"])
+            self.assertTrue(first.record(
+                provider_id="image-a", category="image", success=True,
+                latency_ms=50, queue_wait_ms=4,
+            )["saved"])
+
+            restarted = ProviderMetricsManager(
+                max_samples=2, clock=lambda: self.now, state_path=state_path
+            )
+            metrics = restarted.snapshot(provider_id="image-a")["metrics"]
+            self.assertEqual(metrics["sample_count"], 2)
+            self.assertEqual(metrics["success_count"], 1)
+            self.assertEqual(metrics["failure_count"], 1)
+            self.assertEqual(metrics["timeout_count"], 1)
+            self.assertEqual(metrics["avg_latency_ms"], 40)
+            self.assertEqual(metrics["avg_queue_wait_ms"], 5)
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(set(state), {"version", "samples"})
+            self.assertEqual(set(state["samples"][0]), {
+                "provider_id", "category", "success", "latency_ms",
+                "queue_wait_ms", "timed_out", "recorded_at",
+            })
+
+    def test_persistent_metrics_are_shared_across_concurrent_manager_instances(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "metrics.json"
+            managers = [
+                ProviderMetricsManager(max_samples=100, clock=lambda: self.now, state_path=state_path)
+                for _ in range(6)
+            ]
+
+            def write(index):
+                return managers[index % len(managers)].record(
+                    provider_id="image-a", category="image",
+                    success=index % 2 == 0, latency_ms=index,
+                    queue_wait_ms=index / 2, timed_out=index % 7 == 0,
+                )
+
+            with ThreadPoolExecutor(max_workers=12) as pool:
+                results = list(pool.map(write, range(48)))
+            self.assertTrue(all(result["saved"] is True for result in results))
+            snapshot = managers[0].snapshot(provider_id="image-a")
+            self.assertEqual(snapshot["status"], "METRICS_AVAILABLE")
+            self.assertEqual(snapshot["metrics"]["sample_count"], 48)
+            self.assertEqual(snapshot["metrics"]["success_count"], 24)
+
+    def test_persistent_metrics_reject_unapproved_payload_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "metrics.json"
+            state_path.write_text(json.dumps({
+                "version": 1,
+                "samples": [{
+                    "provider_id": "image-a",
+                    "category": "image",
+                    "success": True,
+                    "latency_ms": 10,
+                    "queue_wait_ms": 0,
+                    "timed_out": False,
+                    "recorded_at": self.now.isoformat(),
+                    "prompt": "must never be persisted",
+                }],
+            }), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                ProviderMetricsManager(state_path=state_path)
 
 
 if __name__ == "__main__":
