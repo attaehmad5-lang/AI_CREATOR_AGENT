@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from typing import Any
+from pathlib import Path
 import hashlib
 import inspect
 import re
 import time
 
 from .safe_numbers import finite_number
+from .concurrency_manager import ProviderConcurrencyManager
 from .provider_error_policy import classify_provider_error
 from .secrets_manager import SecretManagerError
 from .trace_context import TraceContext, TraceContextError
@@ -46,6 +48,7 @@ class ProviderService:
         tenant_isolation_manager: Any | None = None,
         secret_manager: Any | None = None,
         audit_log_manager: Any | None = None,
+        concurrency_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -124,6 +127,25 @@ class ProviderService:
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
         self.audit_log_manager = audit_log_manager
+        self.concurrency_manager_error: str | None = None
+        if concurrency_manager is None:
+            state_path = getattr(connection_manager, "state_path", None)
+            if isinstance(state_path, (str, Path)):
+                try:
+                    concurrency_manager = ProviderConcurrencyManager(
+                        Path(state_path).with_name("provider_concurrency.json")
+                    )
+                except Exception as exc:
+                    # Corrupt or inaccessible persisted state must not silently disable admission control.
+                    self.concurrency_manager_error = type(exc).__name__
+        if concurrency_manager is not None:
+            required_concurrency_methods = (
+                "acquire", "mark_started", "release", "set_provider_limit",
+                "get_provider_limit", "get", "reconcile", "summary",
+            )
+            if any(not callable(getattr(concurrency_manager, name, None)) for name in required_concurrency_methods):
+                raise ValueError("concurrency_manager does not implement the required lease contract")
+        self.concurrency_manager = concurrency_manager
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
@@ -1720,6 +1742,80 @@ class ProviderService:
             return default
         return value
 
+    def _concurrency_call(self, method_name: str, **kwargs: Any) -> dict[str, Any]:
+        manager = self.concurrency_manager
+        method = getattr(manager, method_name, None) if manager is not None else None
+        if not callable(method):
+            return {"status": "CONCURRENCY_MANAGER_UNAVAILABLE", "saved": False}
+        try:
+            result = method(**kwargs)
+        except Exception as exc:
+            return {
+                "status": "CONCURRENCY_MANAGER_FAILED",
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_CONCURRENCY_MANAGER_RESPONSE", "saved": False}
+        return result
+
+    def set_provider_concurrency_limit(
+        self, provider_id: str, limit: int, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        """Change a provider's admission limit through the admin authorization boundary."""
+        authorization = self._authorize_operation(
+            principal_id, "provider.access.manage", provider_id=provider_id,
+            return_decision=True,
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False}
+        return self._concurrency_call(
+            "set_provider_limit", provider_id=provider_id, limit=limit
+        )
+
+    def get_provider_concurrency_summary(
+        self, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        """Return aggregate lease counts only to an authorized provider administrator."""
+        authorization = self._authorize_operation(
+            principal_id, "provider.access.manage", return_decision=True
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+            return {"status": "AUTHORIZATION_DENIED"}
+        result = self._concurrency_call("summary")
+        if result.get("status") == "CONCURRENCY_MANAGER_UNAVAILABLE":
+            return result
+        return {"status": "SUMMARY_READY", "summary": result}
+
+    def reconcile_provider_concurrency_lease(
+        self,
+        lease_id: str,
+        *,
+        outcome: str,
+        confirmed: bool,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Admin-confirmed release of an ambiguous lease; never use an automatic TTL."""
+        authorization = self._authorize_operation(
+            principal_id, "provider.access.manage", return_decision=True
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False}
+        record = self._concurrency_call("get", lease_id=lease_id)
+        lease = record.get("lease") if isinstance(record, dict) else None
+        if record.get("status") != "FOUND" or not isinstance(lease, dict):
+            return {"status": record.get("status", "LEASE_LOOKUP_FAILED"), "saved": False}
+        if lease.get("status") == "RESERVED":
+            # The service never invokes an adapter until mark_started is durably saved.
+            if confirmed is not True or outcome != "not_running":
+                return {"status": "CONFIRMED_NOT_STARTED_REQUIRED", "saved": False}
+            return self._concurrency_call(
+                "release", lease_id=lease_id, outcome="not_started"
+            )
+        return self._concurrency_call(
+            "reconcile", lease_id=lease_id, outcome=outcome, confirmed=confirmed
+        )
+
     def execute_routed_request(
         self,
         *,
@@ -2310,6 +2406,94 @@ class ProviderService:
                 "provider": provider_id,
                 "release": released,
             }
+        concurrency_lease_id = None
+        if self.concurrency_manager_error is not None:
+            if secret_lease is not None:
+                options.pop("provider_credential_lease", None)
+                secret_lease.close()
+                secret_lease = None
+            released = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id,
+                request_id=request_id, tenant_id=tenant_id,
+            )
+            return {
+                "status": "CONCURRENCY_MANAGER_UNAVAILABLE",
+                "executed": False,
+                "provider": provider_id,
+                "release": released,
+                "error_type": self.concurrency_manager_error,
+            }
+        if self.concurrency_manager is not None:
+            admission = self._concurrency_call(
+                "acquire", provider_id=provider_id,
+                project_id=project_id, request_id=request_id,
+            )
+            if admission.get("acquired") is not True:
+                if secret_lease is not None:
+                    options.pop("provider_credential_lease", None)
+                    secret_lease.close()
+                    secret_lease = None
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                safe_status = admission.get("status")
+                if not isinstance(safe_status, str):
+                    safe_status = "CONCURRENCY_ADMISSION_REJECTED"
+                return {
+                    "status": safe_status,
+                    "executed": False,
+                    "provider": provider_id,
+                    "request_id": request_id,
+                    **trace_fields,
+                    "concurrency": admission,
+                    "release": released,
+                }
+            candidate_lease_id = admission.get("lease_id")
+            if not isinstance(candidate_lease_id, str) or not candidate_lease_id.strip():
+                lease_release = self._concurrency_call(
+                    "release", lease_id=request_id, outcome="not_started"
+                )
+                if secret_lease is not None:
+                    options.pop("provider_credential_lease", None)
+                    secret_lease.close()
+                    secret_lease = None
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "INVALID_CONCURRENCY_LEASE",
+                    "executed": False,
+                    "provider": provider_id,
+                    "concurrency_release": lease_release,
+                    "release": released,
+                }
+            concurrency_lease_id = candidate_lease_id
+            started_claim = self._concurrency_call(
+                "mark_started", lease_id=concurrency_lease_id
+            )
+            if started_claim.get("saved") is not True:
+                lease_release = self._concurrency_call(
+                    "release", lease_id=concurrency_lease_id, outcome="not_started"
+                )
+                if secret_lease is not None:
+                    options.pop("provider_credential_lease", None)
+                    secret_lease.close()
+                    secret_lease = None
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "CONCURRENCY_LEASE_START_FAILED",
+                    "executed": False,
+                    "provider": provider_id,
+                    "concurrency": started_claim,
+                    "concurrency_release": lease_release,
+                    "release": released,
+                }
+
         started_at = time.monotonic()
         try:
             adapter_result = adapter(**options)
@@ -2333,6 +2517,12 @@ class ProviderService:
                 provider_error.get("status")
                 if isinstance(provider_error, dict)
                 else "EXECUTION_OUTCOME_UNKNOWN"
+            )
+            concurrency_release = (
+                self._concurrency_call(
+                    "release", lease_id=concurrency_lease_id, outcome="unknown"
+                )
+                if concurrency_lease_id is not None else None
             )
             incident_result = None
             if (
@@ -2381,6 +2571,15 @@ class ProviderService:
                 "provider_error": provider_error,
                 "incident": incident_result,
                 "retry_decision": {"retry": False, "reason": reason},
+                "concurrency": concurrency_release,
+                "concurrency_lease_retained": (
+                    concurrency_lease_id is not None
+                    and (
+                        concurrency_release is None
+                        or concurrency_release.get("saved") is not True
+                        or concurrency_release.get("retained") is True
+                    )
+                ),
             }
         finally:
             if secret_lease is not None:
@@ -2388,6 +2587,12 @@ class ProviderService:
                 secret_lease.close()
                 secret_lease = None
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
+            concurrency_release = (
+                self._concurrency_call(
+                    "release", lease_id=concurrency_lease_id, outcome="unknown"
+                )
+                if concurrency_lease_id is not None else None
+            )
             execution_audit = self._append_provider_audit_event(
                 "ROUTED_EXECUTION",
                 outcome="UNKNOWN",
@@ -2405,6 +2610,15 @@ class ProviderService:
                 "request_id": request_id,
                 **trace_fields,
                 "reservations_retained": True,
+                "concurrency": concurrency_release,
+                "concurrency_lease_retained": (
+                    concurrency_lease_id is not None
+                    and (
+                        concurrency_release is None
+                        or concurrency_release.get("saved") is not True
+                        or concurrency_release.get("retained") is True
+                    )
+                ),
             }
         if adapter_result["started"] is False:
             if (
@@ -2420,6 +2634,12 @@ class ProviderService:
                     and adapter_result.get("actual_credit_amount") > 0
                 )
             ):
+                concurrency_release = (
+                    self._concurrency_call(
+                        "release", lease_id=concurrency_lease_id, outcome="unknown"
+                    )
+                    if concurrency_lease_id is not None else None
+                )
                 execution_audit = self._append_provider_audit_event(
                     "ROUTED_EXECUTION",
                     outcome="UNKNOWN",
@@ -2437,6 +2657,15 @@ class ProviderService:
                     "request_id": request_id,
                 **trace_fields,
                     "reservations_retained": True,
+                    "concurrency": concurrency_release,
+                    "concurrency_lease_retained": (
+                        concurrency_lease_id is not None
+                        and (
+                            concurrency_release is None
+                            or concurrency_release.get("saved") is not True
+                            or concurrency_release.get("retained") is True
+                        )
+                    ),
                 }
             execution_audit = self._append_provider_audit_event(
                 "ROUTED_EXECUTION",
@@ -2448,6 +2677,12 @@ class ProviderService:
                 metadata={"execution_started": False, "execution_success": False},
                 trace_context=trace_context,
             )
+            concurrency_release = (
+                self._concurrency_call(
+                    "release", lease_id=concurrency_lease_id, outcome="not_started"
+                )
+                if concurrency_lease_id is not None else None
+            )
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id, tenant_id=tenant_id
             )
@@ -2458,6 +2693,7 @@ class ProviderService:
                 "request_id": request_id,
                 **trace_fields,
                 "release": released,
+                "concurrency": concurrency_release,
             }
 
         accounting_required = False
@@ -2734,6 +2970,14 @@ class ProviderService:
         )
         if execution_audit is not None:
             status = "EXECUTION_AUDIT_FINALIZATION_FAILED"
+        concurrency_finalization = (
+            self._concurrency_call(
+                "release", lease_id=concurrency_lease_id, outcome="completed"
+            )
+            if concurrency_lease_id is not None else None
+        )
+        if concurrency_finalization is not None and concurrency_finalization.get("saved") is not True:
+            status = "CONCURRENCY_FINALIZATION_FAILED"
         return {
             "status": status,
             "executed": True,
@@ -2741,6 +2985,12 @@ class ProviderService:
             "provider": provider_id,
             "request_id": request_id,
             **trace_fields,
+            "concurrency": concurrency_finalization,
+            "concurrency_lease_released": (
+                concurrency_finalization.get("saved") is True
+                and concurrency_finalization.get("retained") is not True
+                if concurrency_finalization is not None else None
+            ),
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "media_integrity": media_integrity_result,
