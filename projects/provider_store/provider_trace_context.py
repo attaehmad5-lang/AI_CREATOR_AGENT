@@ -103,6 +103,10 @@ def with_provider_trace_context(method: Callable[..., Any]) -> Callable[..., Any
     @wraps(method)
     def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
         request_id = kwargs.get("request_id")
+        if request_id is None:
+            # Queue submission uses the stable job ID as its default request ID,
+            # so retrying the same job submission preserves correlation identity.
+            request_id = kwargs.get("job_id")
         traceparent = kwargs.get("traceparent")
         try:
             context = ProviderRequestTraceContext.create(
