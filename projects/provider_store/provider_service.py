@@ -1424,10 +1424,13 @@ class ProviderService:
                     "route_result": result, "side_effects_may_exist": True,
                     "audit": audit_failure,
                 }
-            if result.get("billing_mode") == "PAID_APPROVED":
+            paid_approval_applied = result.get("billing_mode") == "PAID_APPROVED"
+            paid_approval_required = result.get("status") == "PAID_APPROVAL_REQUIRED"
+            if paid_approval_applied or paid_approval_required:
                 approval_details = {
                     "operation": "paid_usage_approval_decision",
-                    "approval_status": "APPROVED",
+                    "approval_status": "APPROVED" if paid_approval_applied else "REQUIRED",
+                    "status": result.get("status") if isinstance(result.get("status"), str) else "UNKNOWN",
                 }
                 if isinstance(approval_id, str):
                     approval_details["approval_id"] = approval_id
@@ -1435,7 +1438,8 @@ class ProviderService:
                     "approval_decision", actor_id=audit_context["actor_id"],
                     tenant_id=audit_context["tenant_id"], provider_id=provider_id,
                     request_id=audit_context["request_id"], trace_id=audit_context["trace_id"],
-                    outcome="allowed", details=approval_details,
+                    outcome="allowed" if paid_approval_applied else "denied",
+                    details=approval_details,
                 )
                 if approval_failure is not None:
                     return {
