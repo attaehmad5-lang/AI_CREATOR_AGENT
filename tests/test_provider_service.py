@@ -1040,7 +1040,14 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(result["audit_outcome_recorded"])
         self.assertEqual(observed["trace_id"], trace_id)
         events = audit.read_events()["events"]
-        self.assertEqual([event["outcome"] for event in events], ["REQUESTED", "SUCCEEDED"])
+        self.assertEqual(
+            [event["operation"] for event in events],
+            ["provider.route", "provider.route", "provider.generate", "provider.generate"],
+        )
+        self.assertEqual(
+            [event["outcome"] for event in events],
+            ["REQUESTED", "SUCCEEDED", "REQUESTED", "SUCCEEDED"],
+        )
         self.assertTrue(all(event["trace_id"] == trace_id for event in events))
         self.assertTrue(all(event["request_id"] == "audited-generation" for event in events))
 
