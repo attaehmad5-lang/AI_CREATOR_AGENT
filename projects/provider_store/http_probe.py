@@ -12,6 +12,7 @@ import os
 import re
 import socket
 import ssl
+import time
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -91,13 +92,110 @@ class _PinnedResponse:
             self._connection.close()
 
 
+class ProviderDNSResolver:
+    """Resolve A/AAAA records with a bounded total DNS lifetime.
+
+    Uses the system-configured DNS servers via dnspython, but never falls back
+    to an unbounded socket.getaddrinfo call when the dependency is unavailable.
+    """
+
+    def __init__(
+        self, *, timeout_seconds: float = 2.0, lifetime_seconds: float = 4.0,
+        resolver_factory: Callable[[], Any] | None = None,
+    ) -> None:
+        for value, name, minimum, maximum in (
+            (timeout_seconds, "timeout_seconds", 0.1, 5.0),
+            (lifetime_seconds, "lifetime_seconds", 0.2, 10.0),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{name} must be a finite number")
+            if not math.isfinite(float(value)) or not minimum <= float(value) <= maximum:
+                raise ValueError(f"{name} is outside safe bounds")
+        if resolver_factory is not None and not callable(resolver_factory):
+            raise ValueError("resolver_factory must be callable")
+        self.timeout_seconds = float(timeout_seconds)
+        self.lifetime_seconds = float(lifetime_seconds)
+        self._resolver_factory = resolver_factory
+
+    def __call__(self, hostname: str, port: int, *, type: int) -> list[tuple[Any, ...]]:
+        if (
+            not isinstance(hostname, str) or not hostname or len(hostname) > 253
+            or isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535
+            or type != socket.SOCK_STREAM
+        ):
+            raise ValueError("invalid DNS resolution request")
+        try:
+            if self._resolver_factory is None:
+                import dns.exception
+                import dns.resolver
+                resolver = dns.resolver.Resolver(configure=True)
+            else:
+                resolver = self._resolver_factory()
+        except ImportError:
+            raise RuntimeError("dnspython is required for bounded provider DNS resolution") from None
+        except Exception:
+            raise OSError("provider DNS resolver configuration failed") from None
+
+        deadline = time.monotonic() + self.lifetime_seconds
+        resolver.timeout = self.timeout_seconds
+        resolver.lifetime = self.lifetime_seconds
+        results: list[tuple[Any, ...]] = []
+        for record_type in ("A", "AAAA"):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("provider DNS resolution timed out")
+            resolver.timeout = min(self.timeout_seconds, remaining)
+            try:
+                answer = resolver.resolve(
+                    hostname.rstrip(".") + ".",
+                    record_type,
+                    lifetime=remaining,
+                    search=False,
+                    raise_on_no_answer=False,
+                )
+            except Exception as exc:
+                try:
+                    import dns.exception
+                    import dns.resolver
+                    no_answer = isinstance(exc, dns.resolver.NoAnswer)
+                    timeout = isinstance(exc, dns.exception.Timeout)
+                except ImportError:
+                    no_answer = timeout = False
+                if no_answer:
+                    continue
+                if timeout:
+                    raise TimeoutError("provider DNS resolution timed out") from None
+                raise OSError("provider DNS resolution failed") from None
+            rrset = getattr(answer, "rrset", None)
+            if rrset is None:
+                continue
+            for record in rrset:
+                raw_address = getattr(record, "address", None)
+                if not isinstance(raw_address, str):
+                    raise ValueError("provider DNS response contains an invalid address")
+                try:
+                    address = ipaddress.ip_address(raw_address)
+                except ValueError:
+                    raise ValueError("provider DNS response contains an invalid address") from None
+                if address.version == 4:
+                    family = socket.AF_INET
+                    sockaddr = (address.compressed, port)
+                else:
+                    family = socket.AF_INET6
+                    sockaddr = (address.compressed, port, 0, 0)
+                results.append((family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", sockaddr))
+                if len(results) > 32:
+                    raise ValueError("provider DNS response has too many addresses")
+        return results
+
+
 class _PinnedHTTPSOpener:
     """Resolve once, reject non-public answers, then connect to a pinned IP."""
 
     def __init__(self, resolver: Callable[..., Any] | None = None) -> None:
         if resolver is not None and not callable(resolver):
             raise ValueError("resolver must be callable")
-        self._resolver = resolver if resolver is not None else socket.getaddrinfo
+        self._resolver = resolver if resolver is not None else ProviderDNSResolver()
 
     def open(self, request: Request, timeout: float) -> _PinnedResponse:
         parsed = urlsplit(request.full_url)
