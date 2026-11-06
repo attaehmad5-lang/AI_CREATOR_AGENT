@@ -1269,18 +1269,169 @@ class ProviderService:
             "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
 
-    def route_request(self, **route_options: Any) -> dict[str, Any]:
+    def route_request(
+        self, *, principal_id: str | None = None,
+        audit_context: dict[str, Any] | None = None,
+        **route_options: Any,
+    ) -> dict[str, Any]:
+        """Route through the policy manager and persist decision/approval evidence.
+
+        audit_context is an internal service-to-service value; API middleware must
+        never populate it from request JSON.
+        """
+        if audit_context is not None and not isinstance(audit_context, dict):
+            return {"allowed": False, "status": "INVALID_AUDIT_CONTEXT"}
+        actor_id = audit_context.get("principal_id", principal_id) if isinstance(audit_context, dict) else principal_id
+        tenant_id = audit_context.get("tenant_id", route_options.get("tenant_id")) if isinstance(audit_context, dict) else route_options.get("tenant_id")
+        project_id = route_options.get("project_id")
+        request_id = route_options.get("request_id")
+        approvals = route_options.get("paid_approved_providers")
+        if isinstance(approvals, (set, frozenset)) and approvals:
+            approval_auth = self._authorize_operation(actor_id, "billing.approve")
+            if approval_auth is not None:
+                result = {
+                    "allowed": False, "status": "AUTHORIZATION_DENIED",
+                    "approval": approval_auth,
+                }
+                audit = self._record_provider_audit(
+                    event_type="provider.approval.decision",
+                    actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+                    operation="billing.approve", outcome="DENIED",
+                    reason_code="BILLING_APPROVAL_AUTHORIZATION_DENIED",
+                    approved=False,
+                )
+                if audit.get("saved") is not True:
+                    result["audit_log_saved"] = False
+                    result["audit_log_status"] = "AUDIT_LOG_WRITE_FAILED"
+                return result
+            for approved_provider in sorted(approvals):
+                audit = self._record_provider_audit(
+                    event_type="provider.approval.decision",
+                    actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+                    provider_id=approved_provider, request_id=request_id,
+                    operation="billing.approve", outcome="APPROVED",
+                    reason_code="BILLING_APPROVAL_GRANTED", approved=True,
+                )
+                if audit.get("saved") is not True:
+                    return {
+                        "allowed": False, "status": "AUDIT_LOG_WRITE_FAILED",
+                        "audit": {"status": audit.get("status", "AUDIT_WRITE_FAILED")},
+                    }
+
         if self.routing_manager is None:
-            return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
-        rejection = self._sensitive_input_rejection({"route_options": route_options})
-        if rejection is not None:
-            return {"allowed": False, **rejection}
+            result = {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
+        else:
+            rejection = self._sensitive_input_rejection({"route_options": route_options})
+            if rejection is not None:
+                result = {"allowed": False, **rejection}
+            else:
+                try:
+                    routed = self.routing_manager.route(**route_options)
+                    result = routed if isinstance(routed, dict) else {
+                        "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
+                    }
+                except Exception as exc:
+                    result = {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
+
+        status = result.get("status")
+        reason_code = status if isinstance(status, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", status) else "ROUTING_RESULT_INVALID"
+        allowed = result.get("allowed") is True
+        actual_provider = result.get("provider")
+        if not isinstance(actual_provider, str):
+            actual_provider = None
+        strategy = result.get("strategy", route_options.get("strategy"))
+        if not isinstance(strategy, str):
+            strategy = None
+        estimated_cost = result.get("estimated_cost", route_options.get("estimated_cost"))
+        if isinstance(estimated_cost, bool) or not isinstance(estimated_cost, (int, float)):
+            estimated_cost = None
+        billing_mode = result.get("billing_mode")
+        if billing_mode not in {"ZERO_COST", "FREE_CREDITS", "PAID_APPROVED"}:
+            billing_mode = None
+        audit = self._record_provider_audit(
+            event_type="provider.routing.decision",
+            actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+            provider_id=actual_provider, request_id=request_id,
+            operation="provider.route",
+            outcome="ALLOWED" if allowed else "DENIED",
+            reason_code=reason_code, strategy=strategy,
+            estimated_cost=estimated_cost, billing_mode=billing_mode,
+        )
+        if audit.get("saved") is not True:
+            if allowed and actual_provider is not None and isinstance(project_id, str) and isinstance(request_id, str):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=actual_provider,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "allowed": False, "status": "AUDIT_LOG_WRITE_FAILED",
+                    "provider": actual_provider, "reservation_release": release,
+                    "reservations_retained": release.get("released") is not True,
+                }
+            return {**result, "audit_log_saved": False, "audit_log_status": "AUDIT_LOG_WRITE_FAILED"}
+
+        # When a paid option was rejected by the cost policy, preserve that explicit
+        # rejection as an approval audit event (without logging caller-provided sets).
+        decisions = result.get("prior_decisions", result.get("decisions", []))
+        if isinstance(decisions, list):
+            for decision in decisions:
+                if not isinstance(decision, dict) or decision.get("status") != "PAID_APPROVAL_REQUIRED":
+                    continue
+                candidate = decision.get("provider")
+                if not isinstance(candidate, str):
+                    continue
+                approval_audit = self._record_provider_audit(
+                    event_type="provider.approval.decision",
+                    actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+                    provider_id=candidate, request_id=request_id,
+                    operation="billing.approve", outcome="DENIED",
+                    reason_code="PAID_APPROVAL_REQUIRED", approved=False,
+                    estimated_cost=estimated_cost,
+                )
+                if approval_audit.get("saved") is not True:
+                    if allowed and actual_provider is not None and isinstance(project_id, str) and isinstance(request_id, str):
+                        release = self.release_unstarted_request(
+                            project_id=project_id, provider_id=actual_provider,
+                            request_id=request_id, tenant_id=tenant_id,
+                        )
+                        return {
+                            "allowed": False, "status": "AUDIT_LOG_WRITE_FAILED",
+                            "provider": actual_provider, "reservation_release": release,
+                            "reservations_retained": release.get("released") is not True,
+                        }
+                    return {**result, "audit_log_saved": False, "audit_log_status": "AUDIT_LOG_WRITE_FAILED"}
+        return result
+
+    def verify_provider_audit_log(self, *, principal_id: str | None) -> dict[str, Any]:
+        """Verify audit-chain integrity; only an authorized administrator may inspect it."""
+        if self.provider_audit_manager is None:
+            return {"status": "PROVIDER_AUDIT_LOG_UNAVAILABLE", "valid": False}
+        authorization = self._authorize_operation(principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "valid": False}
         try:
-            result = self.routing_manager.route(**route_options)
+            result = self.provider_audit_manager.verify()
         except Exception as exc:
-            return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
+            return {"status": "AUDIT_LOG_INTEGRITY_FAILED", "valid": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
+            "status": "INVALID_AUDIT_MANAGER_RESPONSE", "valid": False,
+        }
+
+    def read_provider_audit_events(
+        self, *, principal_id: str | None, limit: int = 1000,
+    ) -> dict[str, Any]:
+        """Read only pseudonymized, integrity-checked audit metadata."""
+        if self.provider_audit_manager is None:
+            return {"status": "PROVIDER_AUDIT_LOG_UNAVAILABLE", "events": []}
+        authorization = self._authorize_operation(principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "events": []}
+        try:
+            result = self.provider_audit_manager.read_events(limit=limit)
+        except Exception as exc:
+            return {"status": "AUDIT_LOG_READ_FAILED", "events": [], "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_AUDIT_MANAGER_RESPONSE", "events": [],
         }
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
