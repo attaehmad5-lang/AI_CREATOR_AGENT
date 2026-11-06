@@ -25,6 +25,7 @@ Persistence uses a process/thread lock, atomic same-directory replacement, fsync
 - route_request persists a routing-attempt event before invoking the routing manager and a decision event after the result. If the pre-event cannot be written, routing is not invoked. If the result event cannot be written after routing, the response explicitly reports that routing side effects may already exist.
 - Provider configuration, provider enablement, role assignment, provider-scope updates, and principal disablement emit operation-result events. Their authorization decisions are separately captured.
 - Credential rotation records an attempt and successful completion. Secret values, secret references, and rotation idempotency keys are excluded.
+- When a route is selected with the PAID_APPROVED billing mode, a separate approval_decision event records the approval status and an optional supplied approval ID. This records the approval evidence passed to the routing boundary; it does not independently prove who authorized the approval or replace an approval workflow manager.
 - read_provider_audit_events verifies the journal and requires the provider.audit.read authorization operation before returning a page.
 
 ## Privacy and event schema
