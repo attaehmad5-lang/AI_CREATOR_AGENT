@@ -149,6 +149,104 @@ class ProviderIncidentManager:
             self._save()
             return {"status": f"INCIDENT_{state}", "saved": True, "incident": dict(incident)}
 
+
+    def dashboard_snapshot(self, *, limit: int = 50) -> dict[str, Any]:
+        """Return bounded, read-only incident aggregates suitable for a dashboard.
+
+        This method exposes only the manager's normalized incident fields. It does
+        not deliver alerts, perform provider calls, or replace application-level
+        authorization at an API boundary.
+        """
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+            return {
+                "status": "INVALID_DASHBOARD_LIMIT",
+                "summary": None,
+                "recent": [],
+                "top_providers": [],
+            }
+        snapshot = self.snapshot()
+        incidents = snapshot.get("incidents", [])
+        if not isinstance(incidents, list):
+            return {
+                "status": "INCIDENT_SNAPSHOT_INVALID",
+                "summary": None,
+                "recent": [],
+                "top_providers": [],
+            }
+
+        severity_order = {"critical": 4, "error": 3, "warning": 2, "info": 1}
+        severity_counts = {
+            severity: sum(item.get("severity") == severity for item in incidents)
+            for severity in sorted(_SEVERITIES)
+        }
+        provider_summary: dict[str, dict[str, Any]] = {}
+        for item in incidents:
+            provider_id = item.get("provider_id")
+            if not isinstance(provider_id, str):
+                continue
+            aggregate = provider_summary.setdefault(provider_id, {
+                "provider_id": provider_id,
+                "total_count": 0,
+                "open_count": 0,
+                "critical_count": 0,
+            })
+            aggregate["total_count"] += 1
+            if item.get("state") in {"OPEN", "ACKNOWLEDGED"}:
+                aggregate["open_count"] += 1
+            if item.get("severity") == "critical" and item.get("state") != "RESOLVED":
+                aggregate["critical_count"] += 1
+
+        ordered = sorted(
+            incidents,
+            key=lambda item: (
+                item.get("last_seen_at", ""),
+                severity_order.get(item.get("severity"), 0),
+                item.get("incident_id", ""),
+            ),
+            reverse=True,
+        )
+        recent = [
+            {
+                "incident_id": item.get("incident_id"),
+                "provider_id": item.get("provider_id"),
+                "category": item.get("category"),
+                "severity": item.get("severity"),
+                "code": item.get("code"),
+                "state": item.get("state"),
+                "occurrences": item.get("occurrences"),
+                "last_seen_at": item.get("last_seen_at"),
+            }
+            for item in ordered[:limit]
+        ]
+        top_providers = sorted(
+            provider_summary.values(),
+            key=lambda item: (
+                -item["open_count"], -item["critical_count"],
+                -item["total_count"], item["provider_id"],
+            ),
+        )[:10]
+        counts = snapshot.get("counts", {})
+        summary = {
+            "total_incidents": len(incidents),
+            "open_count": counts.get("OPEN", 0),
+            "acknowledged_count": counts.get("ACKNOWLEDGED", 0),
+            "resolved_count": counts.get("RESOLVED", 0),
+            "severity_counts": severity_counts,
+            "provider_count": len(provider_summary),
+            "needs_attention": any(
+                item.get("state") in {"OPEN", "ACKNOWLEDGED"}
+                and item.get("severity") in {"error", "critical"}
+                for item in incidents
+            ),
+        }
+        return {
+            "status": "DASHBOARD_DATA_AVAILABLE" if incidents else "NO_INCIDENTS",
+            "summary": summary,
+            "recent": recent,
+            "top_providers": top_providers,
+            "limit": limit,
+        }
+
     def snapshot(self) -> dict[str, Any]:
         with self._transaction():
             incidents = [dict(x) for x in self.data["incidents"].values() if isinstance(x, dict)]
