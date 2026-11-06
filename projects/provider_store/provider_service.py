@@ -1720,6 +1720,9 @@ class ProviderService:
 
         if self.tenant_isolation_manager is not None:
             route_options["tenant_id"] = tenant_id
+        # tenant_id is passed explicitly as trusted middleware context; remove any
+        # copy already placed in route_options to avoid duplicate keyword binding.
+        route_options.pop("tenant_id", None)
         route = self.route_request(
             principal_id=principal_id,
             tenant_id=tenant_id,
