@@ -1,5 +1,3 @@
-import re
-import threading
 import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
