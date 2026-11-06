@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import unittest
 from pathlib import Path
@@ -144,6 +145,28 @@ class ProviderAuditLogTests(unittest.TestCase):
     def test_pagination_rejects_invalid_ranges(self):
         self.assertEqual(self.log.read_events(limit=0)["status"], "INVALID_AUDIT_PAGE")
         self.assertEqual(self.log.read_events(after_sequence=-1)["status"], "INVALID_AUDIT_PAGE")
+
+    def test_concurrent_appends_from_multiple_instances_keep_a_contiguous_chain(self):
+        managers = [
+            self.log,
+            ProviderAuditLog(self.path, integrity_key=self.key),
+        ]
+
+        def append(index):
+            manager = managers[index % len(managers)]
+            return manager.append(
+                "routing_decision", request_id=f"parallel-{index}",
+                outcome="success",
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(append, range(24)))
+        self.assertTrue(all(result["saved"] for result in results))
+        verification = self.log.verify()
+        self.assertEqual(verification["events"], 24)
+        page = self.log.read_events(limit=100)["events"]
+        self.assertEqual([event["sequence"] for event in page], list(range(1, 25)))
+        self.assertEqual(len({event["request_id"] for event in page}), 24)
 
     def test_multiple_instances_append_without_losing_prior_events(self):
         other = ProviderAuditLog(self.path, integrity_key=self.key)
