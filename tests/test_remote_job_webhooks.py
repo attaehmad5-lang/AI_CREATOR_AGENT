@@ -257,15 +257,31 @@ class RemoteJobWebhookSyncTests(unittest.TestCase):
         self.assertEqual(result["job"]["result_ref"], "asset:restored")
 
     def test_remote_job_identity_cannot_be_registered_to_two_local_jobs(self):
-        self._create_remote_job(
-            provider_id="image",
-            remote_job_id="remote-image-job-1",
+        accepted = self.jobs.submit(
             job_id="local-job-2",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:local-job-2",
+            idempotency_key="callback-key-local-job-2",
         )
-        self.assertEqual(
-            self.jobs.data["remote_job_index"],
-            next(iter(self.jobs.data["remote_job_index"].items())) and self.jobs.data["remote_job_index"],
+        self.assertEqual(accepted["status"], "JOB_QUEUED")
+        claimed = self.jobs.claim_next(worker_id="worker-local-job-2")
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        begun = self.jobs.begin_remote_submission(
+            job_id="local-job-2",
+            worker_id="worker-local-job-2",
+            lease_token=claimed["job"]["lease_token"],
         )
+        self.assertEqual(begun["status"], "REMOTE_SUBMISSION_STARTED")
+        conflict = self.jobs.record_remote_submission(
+            job_id="local-job-2",
+            worker_id="worker-local-job-2",
+            lease_token=claimed["job"]["lease_token"],
+            remote_job_id="remote-image-job-1",
+            remote_status="QUEUED",
+            poll_after_seconds=10,
+        )
+        self.assertEqual(conflict["status"], "REMOTE_JOB_ID_CONFLICT")
         self.assertEqual(len(self.jobs.data["remote_job_index"]), 1)
         self.assertEqual(
             next(iter(self.jobs.data["remote_job_index"].values())),
