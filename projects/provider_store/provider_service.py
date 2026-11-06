@@ -1314,7 +1314,6 @@ class ProviderService:
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
         tenant_id: str | None = None, idempotency_key: str | None = None,
-        request_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
@@ -1344,11 +1343,10 @@ class ProviderService:
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
                 "payload_ref": payload_ref, "priority": priority,
             }
-            if self.tenant_isolation_manager is not None:
+            if self.tenant_isolation_manager is not None or tenant_id is not None:
                 submit_args["tenant_id"] = tenant_id
-            if idempotency_key is not None or request_fingerprint is not None:
+            if idempotency_key is not None:
                 submit_args["idempotency_key"] = idempotency_key
-                submit_args["request_fingerprint"] = request_fingerprint
             result = self.job_manager.submit(**submit_args)
         except Exception as exc:
             return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
