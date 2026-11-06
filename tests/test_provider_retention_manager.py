@@ -71,6 +71,41 @@ class ProviderRetentionManagerTests(unittest.TestCase):
         )
         self.assertTrue(Path(str(self.path) + ".lock").exists())
 
+    def test_registration_rejects_invalid_metadata_before_policy_call(self):
+        class PermissivePolicy:
+            def evaluate(self, **kwargs):
+                return {
+                    "allowed": True,
+                    "policy_source": "https://provider.example/privacy",
+                }
+        manager = ProviderRetentionManager(self.path, PermissivePolicy())
+        invalid_category = manager.register(
+            resource_id="resource-1", provider_id="image", tenant_id="tenant-a",
+            resource_ref="remote-asset-1", data_categories=["credential"],
+            retention_days=1, now=1000,
+        )
+        invalid_period = manager.register(
+            resource_id="resource-1", provider_id="image", tenant_id="tenant-a",
+            resource_ref="remote-asset-1", data_categories=["user_content"],
+            retention_days=True, now=1000,
+        )
+        self.assertEqual(invalid_category["status"], "INVALID_DATA_CATEGORIES")
+        self.assertEqual(invalid_period["status"], "INVALID_RETENTION_PERIOD")
+        self.assertFalse(self.path.exists())
+
+    def test_registration_rejects_untrusted_policy_source(self):
+        class InvalidEvidencePolicy:
+            def evaluate(self, **kwargs):
+                return {"allowed": True, "policy_source": "https://provider.example/privacy?token=secret"}
+        manager = ProviderRetentionManager(self.path, InvalidEvidencePolicy())
+        result = manager.register(
+            resource_id="resource-1", provider_id="image", tenant_id="tenant-a",
+            resource_ref="remote-asset-1", data_categories=["user_content"],
+            retention_days=1, now=1000,
+        )
+        self.assertEqual(result["status"], "DATA_POLICY_EVIDENCE_INVALID")
+        self.assertFalse(self.path.exists())
+
     def test_policy_rejection_prevents_registration(self):
         result = self.register(data_categories=["credential"])
         self.assertFalse(result["saved"])
