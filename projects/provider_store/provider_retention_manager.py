@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
+
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _STATES = frozenset({"PENDING", "DELETION_FAILED", "DELETED"})
 
@@ -78,7 +80,7 @@ class ProviderRetentionManager:
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temporary, self.path)
+            atomic_replace_with_retry(temporary, self.path)
             try:
                 directory_fd = os.open(str(self.path.parent), os.O_RDONLY)
                 try:
@@ -119,7 +121,8 @@ class ProviderRetentionManager:
             "expires_at": float(current) + retention_days * 86400,
             "status": "PENDING", "attempts": 0,
         }
-        with self._lock:
+        with self._lock, interprocess_file_lock(str(self.path) + ".lock"):
+            self._state = self._load()
             existing = self._state["resources"].get(resource_id)
             if existing is not None:
                 if existing == record:
@@ -134,6 +137,17 @@ class ProviderRetentionManager:
         return {"saved": True, "status": "RETENTION_REGISTERED", "resource_id": resource_id}
 
     def run_due(
+        self, *, delete_provider_resource: Callable[..., Any],
+        now: float | None = None, limit: int = 100,
+    ) -> dict[str, Any]:
+        """Serialize due-deletion processing across workers sharing this state file."""
+        with self._lock, interprocess_file_lock(str(self.path) + ".lock"):
+            self._state = self._load()
+            return self._run_due_locked(
+                delete_provider_resource=delete_provider_resource, now=now, limit=limit,
+            )
+
+    def _run_due_locked(
         self, *, delete_provider_resource: Callable[..., Any],
         now: float | None = None, limit: int = 100,
     ) -> dict[str, Any]:
@@ -184,7 +198,8 @@ class ProviderRetentionManager:
         """Return only a tenant-scoped, non-secret status view."""
         if not self._valid_id(resource_id) or not self._valid_id(tenant_id):
             return {"status": "INVALID_RESOURCE_IDENTIFIER"}
-        with self._lock:
+        with self._lock, interprocess_file_lock(str(self.path) + ".lock"):
+            self._state = self._load()
             item = self._state["resources"].get(resource_id)
             if item is None or item["tenant_id"] != tenant_id:
                 return {"status": "RESOURCE_NOT_FOUND"}
