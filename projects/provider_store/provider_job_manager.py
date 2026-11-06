@@ -619,6 +619,57 @@ class ProviderJobManager:
             changed = True
         return changed
 
+
+    def _shutdown_status_locked(self) -> dict[str, Any]:
+        jobs = self.data.get("jobs", {})
+        counts = {
+            state: sum(
+                1 for job in jobs.values()
+                if isinstance(job, dict) and job.get("status") == state
+            )
+            for state in ("QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED")
+        }
+        draining = self.data["scheduler"].get("draining") is True
+        drained = draining and counts["RUNNING"] == 0
+        return {
+            "status": "DRAINED" if drained else ("DRAINING" if draining else "ACTIVE"),
+            "draining": draining,
+            "drained": drained,
+            "drain_requested_at": self.data["scheduler"].get("drain_requested_at"),
+            "counts": counts,
+            "pending_unclaimed": counts["QUEUED"],
+        }
+
+    def request_graceful_shutdown(self) -> dict[str, Any]:
+        """Persist a cross-process drain flag; active workers may finish normally."""
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        with self._transaction():
+            scheduler = self.data["scheduler"]
+            changed = scheduler.get("draining") is not True
+            if changed:
+                scheduler["draining"] = True
+                scheduler["drain_requested_at"] = now
+                self._save()
+            return self._shutdown_status_locked()
+
+    def resume_dispatch(self) -> dict[str, Any]:
+        """Clear the durable drain flag after an authorized operator resumes service."""
+        with self._transaction():
+            scheduler = self.data["scheduler"]
+            if scheduler.get("draining") is True:
+                scheduler["draining"] = False
+                scheduler["drain_requested_at"] = None
+                self._save()
+            return self._shutdown_status_locked()
+
+    def get_shutdown_status(self) -> dict[str, Any]:
+        """Read drain progress and apply any deadlines that have already expired."""
+        now = self.clock().astimezone(timezone.utc)
+        with self._transaction():
+            if self._reap_expired_locked(now):
+                self._save()
+            return self._shutdown_status_locked()
+
     def claim_next(self, *, worker_id: str) -> dict[str, Any]:
         if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
             return {"status": "INVALID_WORKER_ID", "job": None}
@@ -797,12 +848,18 @@ class ProviderJobManager:
             not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
         ):
             return {"status": "INVALID_TENANT_ID", "saved": False}
-        now = self.clock().astimezone(timezone.utc).isoformat()
+        now_dt = self.clock().astimezone(timezone.utc)
+        now = now_dt.isoformat()
         with self._transaction():
+            changed = self._reap_expired_locked(now_dt)
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
+                if changed:
+                    self._save()
                 return {"status": "JOB_NOT_FOUND", "saved": False}
             if job.get("tenant_id") != tenant_id:
+                if changed:
+                    self._save()
                 return {"status": "TENANT_ISOLATION_DENIED", "saved": False}
             if job.get("status") == "QUEUED":
                 job["status"] = "CANCELLED"
@@ -810,6 +867,8 @@ class ProviderJobManager:
             elif job.get("status") == "RUNNING":
                 job["cancel_requested"] = True
             else:
+                if changed:
+                    self._save()
                 return {"status": "JOB_TERMINAL", "saved": False}
             job["updated_at"] = now
             self._save()
@@ -875,6 +934,49 @@ class ProviderJobManager:
             return {
                 "status": "JOB_WORKER_CONTEXT",
                 "job": self._public_job(job, include_provider_idempotency_key=True),
+            }
+
+
+    def get_worker_control(
+        self, *, job_id: str, worker_id: str, lease_token: str
+    ) -> dict[str, Any]:
+        """Cooperative worker checkpoint for cancellation and deadline handling."""
+        if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
+            return {"status": "INVALID_JOB_ID", "stop_requested": True}
+        if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
+            return {"status": "INVALID_WORKER_ID", "stop_requested": True}
+        if not isinstance(lease_token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", lease_token):
+            return {"status": "INVALID_LEASE_TOKEN", "stop_requested": True}
+        now = self.clock().astimezone(timezone.utc)
+        with self._transaction():
+            changed = self._reap_expired_locked(now)
+            job = self.data["jobs"].get(job_id)
+            if not isinstance(job, dict):
+                if changed:
+                    self._save()
+                return {"status": "JOB_NOT_FOUND", "stop_requested": True}
+            if not self._lease_matches(job, worker_id, lease_token):
+                if changed:
+                    self._save()
+                if job.get("error_code") == "JOB_DEADLINE_EXCEEDED":
+                    return {"status": "JOB_DEADLINE_EXCEEDED", "stop_requested": True}
+                if job.get("status") == "CANCELLED":
+                    return {"status": "JOB_CANCELLED", "stop_requested": True}
+                return {"status": "JOB_LEASE_NOT_OWNED", "stop_requested": True}
+            if changed:
+                self._save()
+            deadline = _parse_aware_datetime(job.get("deadline_at"))
+            remaining = (
+                max(0.0, (deadline - now).total_seconds())
+                if deadline is not None else None
+            )
+            return {
+                "status": "WORKER_STOP_REQUESTED" if job.get("cancel_requested") is True else "WORKER_CONTINUE",
+                "stop_requested": job.get("cancel_requested") is True,
+                "cancel_requested": job.get("cancel_requested") is True,
+                "deadline_at": job.get("deadline_at"),
+                "seconds_to_deadline": remaining,
+                "dispatch_paused": self.data["scheduler"].get("draining") is True,
             }
 
     def begin_remote_submission(
@@ -1258,10 +1360,18 @@ class ProviderJobManager:
             not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
         ):
             return {"status": "INVALID_TENANT_ID", "job": None}
+        now = self.clock().astimezone(timezone.utc)
         with self._transaction():
+            changed = self._reap_expired_locked(now)
             job = self.data["jobs"].get(job_id)
             if not isinstance(job, dict):
+                if changed:
+                    self._save()
                 return {"status": "JOB_NOT_FOUND", "job": None}
             if job.get("tenant_id") != tenant_id:
+                if changed:
+                    self._save()
                 return {"status": "TENANT_ISOLATION_DENIED", "job": None}
+            if changed:
+                self._save()
             return {"status": "JOB_STATUS", "job": self._public_job(job)}
