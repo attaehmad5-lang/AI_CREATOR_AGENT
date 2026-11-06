@@ -1393,6 +1393,44 @@ class ProviderService:
         billing_mode = result.get("billing_mode")
         if billing_mode not in {"ZERO_COST", "FREE_CREDITS", "PAID_APPROVED"}:
             billing_mode = None
+        candidate_decisions = result.get("prior_decisions", result.get("decisions", []))
+        if isinstance(candidate_decisions, list):
+            for candidate_decision in candidate_decisions:
+                if not isinstance(candidate_decision, dict):
+                    continue
+                candidate_provider = candidate_decision.get("provider")
+                candidate_status = candidate_decision.get("status")
+                if (
+                    not isinstance(candidate_provider, str)
+                    or not isinstance(candidate_status, str)
+                    or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", candidate_status)
+                ):
+                    continue
+                estimates = route_options.get("estimated_costs")
+                candidate_cost = estimates.get(candidate_provider) if isinstance(estimates, dict) else None
+                if isinstance(candidate_cost, bool) or not isinstance(candidate_cost, (int, float)):
+                    candidate_cost = None
+                candidate_audit = self._record_provider_audit(
+                    event_type="provider.routing.decision",
+                    actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+                    provider_id=candidate_provider, request_id=request_id,
+                    operation="provider.route.candidate", outcome="DENIED",
+                    reason_code=candidate_status, strategy=strategy,
+                    estimated_cost=candidate_cost,
+                )
+                if candidate_audit.get("saved") is not True:
+                    if allowed and actual_provider is not None and isinstance(project_id, str) and isinstance(request_id, str):
+                        release = self.release_unstarted_request(
+                            project_id=project_id, provider_id=actual_provider,
+                            request_id=request_id, tenant_id=tenant_id,
+                        )
+                        return {
+                            "allowed": False, "status": "AUDIT_LOG_WRITE_FAILED",
+                            "provider": actual_provider, "reservation_release": release,
+                            "reservations_retained": release.get("released") is not True,
+                        }
+                    return {**result, "audit_log_saved": False, "audit_log_status": "AUDIT_LOG_WRITE_FAILED"}
+
         audit = self._record_provider_audit(
             event_type="provider.routing.decision",
             actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
