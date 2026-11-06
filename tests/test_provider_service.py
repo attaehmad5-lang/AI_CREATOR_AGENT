@@ -1934,12 +1934,21 @@ class ProviderServiceTests(unittest.TestCase):
                 "job_id": "job-privacy",
                 "lease_token": secret,
                 "lease_token_hash": digest,
+                "idempotency_key": "raw-client-retry-secret",
+                "idempotency_key_hash": "c" * 64,
+                "request_fingerprint": "d" * 64,
+                "provider_idempotency_key": "e" * 64,
             },
         })
         self.assertNotIn("lease_token", result["job"])
         self.assertNotIn("lease_token_hash", result["job"])
+        self.assertNotIn("idempotency_key", result["job"])
+        self.assertNotIn("idempotency_key_hash", result["job"])
+        self.assertNotIn("request_fingerprint", result["job"])
+        self.assertNotIn("provider_idempotency_key", result["job"])
         self.assertNotIn(secret, repr(result))
         self.assertNotIn(digest, repr(result))
+        self.assertNotIn("raw-client-retry-secret", repr(result))
 
 
     def test_cancel_response_redacts_running_worker_lease_token(self):
