@@ -31,15 +31,15 @@ Assume an attacker can submit malformed endpoint strings, operate a domain with 
 
 ### DNS and connection binding
 
-- The generic HTTPS probe resolves the allowlisted hostname before connecting.
+- The shared HTTPS transport uses dnspython with system-configured DNS servers. It queries both A and AAAA records without search-domain expansion, caps the answer set at 32 addresses, applies a 2-second per-query timeout and a 4-second total A/AAAA lifetime, and fails closed if dnspython is missing or DNS fails.
 - The complete A/AAAA answer set is inspected. A mixed public/private response fails closed; non-global and scoped IP addresses are rejected.
-- The connection is made to the selected numeric IP address, not by resolving the hostname a second time. This removes the application-level DNS check/connect gap for the probe transport.
+- The connection is made to the selected numeric IP address, not by resolving the hostname a second time. This closes the application-level DNS check/connect gap for all paths using the shared transport.
 - TLS still verifies the certificate against the original provider hostname and sends that hostname as SNI.
-- DNS answer count is bounded. A failed address attempt may move only to another address from the same already-validated DNS answer set.
+- A failed address attempt may move only to another address from the same already-validated DNS answer set. The resolver does not silently fall back to unbounded socket.getaddrinfo.
 
 ### HTTP, TLS and credential handling
 
-- The default transport is direct HTTPS and does not inherit ambient HTTP proxy configuration. A trusted custom opener is a privileged transport override and is not suitable for untrusted callers.
+- The default transport is direct HTTPS and does not inherit ambient HTTP proxy configuration. It is shared by the generic connectivity probe, provider account-balance probes, OAuth token exchanges, OIDC/JWKS retrieval, Pollinations model-pricing catalog fetches, and the Pollinations image-generation adapter. A trusted custom opener or resolver is a privileged transport override and is not suitable for untrusted callers.
 - TLS certificate verification remains enabled and the default transport requires TLS 1.2 or newer.
 - Redirects are never followed automatically. A 3xx response is an error.
 - Request timeouts and response reads are bounded. Oversized response bodies are rejected, and the response and connection are closed.
@@ -60,8 +60,8 @@ The Task 25 test workflow adds coverage for:
 
 This document is a repository-level threat model, not a review of a live deployment. The following gates remain:
 
-1. The operating-system resolver call itself does not expose a portable per-call DNS timeout through the current standard-library interface. Production deployments should use a bounded, monitored resolver implementation or enforce DNS query timeouts at the resolver/network layer.
-2. The pinned transport protects the generic connectivity probe. It does not automatically wrap every provider generation SDK, user-supplied adapter, subprocess, or third-party HTTP client. Those outbound paths still require inventory and adapter-level endpoint/e­gress enforcement.
+1. The repository resolver bounds DNS query time, but the deployment must still monitor the configured recursive resolvers, availability and DNS configuration. TLS hostname verification protects against forged DNS answers unless the provider's certificate trust is also compromised.
+2. The shared transport covers the listed repository-owned HTTP paths, but the Hugging Face InferenceClient SDK, user-supplied adapters, subprocesses and other third-party HTTP clients are not all wrapped by this transport. Those outbound paths still require inventory and adapter-level endpoint/egress enforcement.
 3. Production network egress controls should independently block loopback, private, link-local, reserved and cloud metadata ranges except for explicitly approved self-hosted services. Provider allowlists are not a replacement for firewall or cloud network policy.
 4. A trusted custom opener/resolver can change transport behavior. Only application-owned, reviewed transports should be injected; never accept these objects from API callers or project data.
 5. DNS authenticity, resolver compromise, provider account permissions, provider-side abuse handling and deployment-specific proxy/firewall rules are outside this unit's proof.
