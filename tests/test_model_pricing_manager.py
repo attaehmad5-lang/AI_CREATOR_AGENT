@@ -182,7 +182,7 @@ class ProviderModelPricingManagerTests(unittest.TestCase):
             ]
 
         from projects.provider_store import http_probe
-        with patch.object(http_probe.socket, "getaddrinfo", resolver):
+        with patch.object(http_probe, "ProviderDNSResolver", return_value=resolver):
             with self.assertRaisesRegex(ValueError, "PROVIDER_ENDPOINT_RESOLVES_TO_NON_PUBLIC_ADDRESS"):
                 ProviderModelPricingManager._http_fetch(
                     POLLINATIONS_MODELS_URL, timeout=2.0
