@@ -14,6 +14,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
@@ -52,11 +53,41 @@ class ProviderRetentionManager:
         for key, item in state["resources"].items():
             if not self._valid_id(key) or not isinstance(item, dict):
                 raise ValueError("retention resource record is invalid")
-            required = {"provider_id", "tenant_id", "resource_ref", "created_at", "expires_at", "status", "attempts"}
+            required = {
+                "provider_id", "tenant_id", "resource_ref", "data_categories",
+                "retention_days", "provider_training_use", "user_training_consent",
+                "policy_source", "created_at", "expires_at", "status", "attempts",
+            }
             if set(item) != required:
                 raise ValueError("retention resource fields are invalid")
             if not all(self._valid_id(item.get(k)) for k in ("provider_id", "tenant_id", "resource_ref")):
                 raise ValueError("retention resource identifiers are invalid")
+            categories = item.get("data_categories")
+            known_categories = {
+                "public", "user_content", "personal", "credential", "financial",
+                "health", "biometric", "confidential",
+            }
+            if (
+                not isinstance(categories, list)
+                or any(not isinstance(value, str) or value not in known_categories for value in categories)
+                or len(categories) != len(set(categories))
+            ):
+                raise ValueError("retention data categories are invalid")
+            retention_days = item.get("retention_days")
+            if isinstance(retention_days, bool) or not isinstance(retention_days, int) or not 0 <= retention_days <= 3650:
+                raise ValueError("retention period is invalid")
+            if not isinstance(item.get("provider_training_use"), bool) or not isinstance(item.get("user_training_consent"), bool):
+                raise ValueError("retention training metadata is invalid")
+            source = item.get("policy_source")
+            try:
+                parsed_source = urlsplit(source) if isinstance(source, str) else None
+            except ValueError:
+                parsed_source = None
+            if (
+                parsed_source is None or parsed_source.scheme != "https"
+                or not parsed_source.hostname or parsed_source.username or parsed_source.password
+            ):
+                raise ValueError("retention policy source is invalid")
             if item.get("status") not in _STATES:
                 raise ValueError("retention resource status is invalid")
             for field in ("created_at", "expires_at"):
@@ -66,8 +97,9 @@ class ProviderRetentionManager:
             attempts = item.get("attempts")
             if isinstance(attempts, bool) or not isinstance(attempts, int) or not 0 <= attempts <= 100000:
                 raise ValueError("retention attempts are invalid")
-            if item["expires_at"] < item["created_at"]:
-                raise ValueError("retention expiry precedes creation")
+            expected_expiry = item["created_at"] + retention_days * 86400
+            if item["expires_at"] < item["created_at"] or item["expires_at"] != expected_expiry:
+                raise ValueError("retention expiry does not match the authorized policy")
             clean[key] = dict(item)
         return {"version": 1, "resources": clean}
 
@@ -115,17 +147,33 @@ class ProviderRetentionManager:
         if not isinstance(decision, dict) or decision.get("allowed") is not True:
             status = decision.get("status") if isinstance(decision, dict) else None
             return {"saved": False, "status": "DATA_POLICY_REJECTED", "policy_status": status}
+        expires_at = float(current) + retention_days * 86400
+        if expires_at > 4102444800:
+            return {"saved": False, "status": "INVALID_RETENTION_EXPIRY"}
+        policy_source = decision.get("policy_source")
+        if not isinstance(policy_source, str):
+            return {"saved": False, "status": "DATA_POLICY_EVIDENCE_UNAVAILABLE"}
         record = {
             "provider_id": provider_id, "tenant_id": tenant_id,
-            "resource_ref": resource_ref, "created_at": float(current),
-            "expires_at": float(current) + retention_days * 86400,
-            "status": "PENDING", "attempts": 0,
+            "resource_ref": resource_ref, "data_categories": sorted(data_categories),
+            "retention_days": retention_days,
+            "provider_training_use": provider_training_use,
+            "user_training_consent": user_training_consent,
+            "policy_source": policy_source, "created_at": float(current),
+            "expires_at": expires_at, "status": "PENDING", "attempts": 0,
         }
         with self._lock, interprocess_file_lock(str(self.path) + ".lock"):
             self._state = self._load()
             existing = self._state["resources"].get(resource_id)
             if existing is not None:
-                if existing == record:
+                immutable_fields = (
+                    "provider_id", "tenant_id", "resource_ref", "data_categories",
+                    "retention_days", "provider_training_use", "user_training_consent",
+                    "policy_source",
+                )
+                if all(existing.get(field) == record[field] for field in immutable_fields):
+                    if existing.get("status") == "DELETED":
+                        return {"saved": False, "status": "RESOURCE_ALREADY_DELETED"}
                     return {"saved": True, "status": "ALREADY_REGISTERED", "resource_id": resource_id}
                 return {"saved": False, "status": "RESOURCE_ID_CONFLICT"}
             self._state["resources"][resource_id] = record
