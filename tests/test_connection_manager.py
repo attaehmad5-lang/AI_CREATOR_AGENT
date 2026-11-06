@@ -376,6 +376,52 @@ class ConnectionManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ConnectionManager(self.catalog_path, self.state_path)
 
+    def test_legacy_state_missing_metadata_uses_safe_defaults(self):
+        self.state_path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+        self.assertEqual(manager.state["version"], "1.0")
+        self.assertEqual(manager.state["policy"], "USER_CONTROLLED")
+        self.assertEqual(manager.state["providers"], {})
+
+    def test_invalid_connection_state_fields_fail_closed(self):
+        invalid_states = (
+            {"version": True, "providers": {}},
+            {"version": "latest", "providers": {}},
+            {"policy": "USER CONTROLLED", "providers": {}},
+            {"providers": {"provider": {"status": "SUCCESS"}}},
+            {"providers": {"provider": {"verified": "true"}}},
+            {"providers": {"provider": []}},
+            {"providers": {"../provider": {}}},
+            {"providers": {"provider": {"configuration": []}}},
+        )
+        for invalid in invalid_states:
+            with self.subTest(invalid=invalid):
+                self.state_path.write_text(json.dumps(invalid), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    ConnectionManager(self.catalog_path, self.state_path)
+
+    def test_json_loader_rejects_duplicate_keys_at_any_depth(self):
+        self.state_path.write_text(
+            '{"version":"1.0","providers":{},"providers":{"provider":{}}}',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid JSON"):
+            ConnectionManager(self.catalog_path, self.state_path)
+
+        duplicate_nested = self.root / "duplicate-nested.json"
+        duplicate_nested.write_text('{"outer":{"flag":true,"flag":false}}', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "Invalid JSON"):
+            ConnectionManager._load_json(duplicate_nested)
+
+    def test_json_loader_rejects_non_finite_numbers_and_oversized_files(self):
+        self.state_path.write_text('{"providers":{},"unsafe":NaN}', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "Invalid JSON"):
+            ConnectionManager(self.catalog_path, self.state_path)
+        oversized = self.root / "oversized.json"
+        oversized.write_text(" " * (4 * 1024 * 1024 + 1), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "safe size limit"):
+            ConnectionManager._load_json(oversized)
+
     def test_state_updates_preserve_existing_nonsecret_configuration(self):
         self.manager.state["providers"]["public_image"] = {
             "status": "READY", "configuration": {"model": "local-test"},
