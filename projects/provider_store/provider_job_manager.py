@@ -705,16 +705,33 @@ class ProviderJobManager:
             return {"status": "CANCEL_REQUESTED" if job["status"] == "RUNNING" else "JOB_CANCELLED", "saved": True, "job": self._public_job(job)}
 
 
-    @staticmethod
-    def _lease_matches(job: dict[str, Any], worker_id: str, lease_token: str) -> bool:
-        return (
-            job.get("status") == "RUNNING"
-            and job.get("worker_id") == worker_id
-            and isinstance(job.get("lease_token_hash"), str)
-            and secrets.compare_digest(
+    def _lease_matches(
+        self, job: dict[str, Any], worker_id: str, lease_token: str
+    ) -> bool:
+        """Match the worker capability only while its persisted lease is still live."""
+        if (
+            job.get("status") != "RUNNING"
+            or job.get("worker_id") != worker_id
+            or not isinstance(job.get("lease_token_hash"), str)
+            or not secrets.compare_digest(
                 job["lease_token_hash"], _lease_token_digest(lease_token)
             )
-        )
+        ):
+            return False
+        lease_until = job.get("lease_until")
+        try:
+            deadline = datetime.fromisoformat(lease_until) if isinstance(lease_until, str) else None
+            now = self.clock()
+            if (
+                deadline is None
+                or deadline.tzinfo is None
+                or not isinstance(now, datetime)
+                or now.tzinfo is None
+            ):
+                return False
+            return deadline.astimezone(timezone.utc) > now.astimezone(timezone.utc)
+        except (ValueError, TypeError, OverflowError):
+            return False
 
     @staticmethod
     def _clear_worker_lease(job: dict[str, Any]) -> None:
