@@ -234,11 +234,26 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.configure")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "accepted": False, "authorization": authorization}
+        audit_intent = self._audit_operation_intent(
+            "provider.onboarding.submit", principal_id=principal_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "accepted": False, **audit_intent}
         try:
             result = self.provider_onboarding_manager.submit(manifest)
         except Exception as exc:
-            return {"status": "PROVIDER_ONBOARDING_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_ONBOARDING_RESPONSE", "accepted": False}
+            result = {
+                "status": "PROVIDER_ONBOARDING_SUBMISSION_FAILED",
+                "accepted": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_ONBOARDING_RESPONSE", "accepted": False}
+        provider_id = result.get("provider_id") if isinstance(result.get("provider_id"), str) else None
+        return self._audit_operation_result(
+            result, "provider.onboarding.submit",
+            success=result.get("accepted") is True,
+            principal_id=principal_id, provider_id=provider_id,
+        )
 
     def approve_provider_onboarding(
         self, provider_id: str, *, principal_id: str | None = None
@@ -248,11 +263,26 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.configure")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "approved": False, "authorization": authorization}
+        audit_intent = self._audit_operation_intent(
+            "provider.onboarding.approve", principal_id=principal_id,
+            provider_id=provider_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "approved": False, **audit_intent}
         try:
             result = self.provider_onboarding_manager.approve(provider_id, principal_id=principal_id)
         except Exception as exc:
-            return {"status": "PROVIDER_ONBOARDING_APPROVAL_FAILED", "approved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_ONBOARDING_RESPONSE", "approved": False}
+            result = {
+                "status": "PROVIDER_ONBOARDING_APPROVAL_FAILED",
+                "approved": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_ONBOARDING_RESPONSE", "approved": False}
+        return self._audit_operation_result(
+            result, "provider.onboarding.approve",
+            success=result.get("approved") is True,
+            principal_id=principal_id, provider_id=provider_id,
+        )
 
     def verify_provider_onboarding(
         self, provider_id: str, *, principal_id: str | None = None
@@ -262,11 +292,26 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.configure")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "verified": False, "authorization": authorization}
+        audit_intent = self._audit_operation_intent(
+            "provider.onboarding.verify", principal_id=principal_id,
+            provider_id=provider_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "verified": False, **audit_intent}
         try:
             result = self.provider_onboarding_manager.verify(provider_id, principal_id=principal_id)
         except Exception as exc:
-            return {"status": "PROVIDER_ONBOARDING_PROBE_FAILED", "verified": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_ONBOARDING_RESPONSE", "verified": False}
+            result = {
+                "status": "PROVIDER_ONBOARDING_PROBE_FAILED",
+                "verified": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_ONBOARDING_RESPONSE", "verified": False}
+        return self._audit_operation_result(
+            result, "provider.onboarding.verify",
+            success=result.get("verified") is True,
+            principal_id=principal_id, provider_id=provider_id,
+        )
 
     def activate_provider_onboarding(
         self, provider_id: str, *, principal_id: str | None = None
@@ -276,11 +321,67 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.configure")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "activated": False, "authorization": authorization}
+        audit_intent = self._audit_operation_intent(
+            "provider.onboarding.activate", principal_id=principal_id,
+            provider_id=provider_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "activated": False, **audit_intent}
         try:
             result = self.provider_onboarding_manager.activate(provider_id, principal_id=principal_id)
         except Exception as exc:
-            return {"status": "PROVIDER_ONBOARDING_ACTIVATION_FAILED", "activated": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_ONBOARDING_RESPONSE", "activated": False}
+            result = {
+                "status": "PROVIDER_ONBOARDING_ACTIVATION_FAILED",
+                "activated": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_ONBOARDING_RESPONSE", "activated": False}
+        return self._audit_operation_result(
+            result, "provider.onboarding.activate",
+            success=result.get("activated") is True,
+            principal_id=principal_id, provider_id=provider_id,
+        )
+
+    def reject_provider_onboarding(
+        self, provider_id: str, *, principal_id: str | None = None,
+        reason_code: str = "ADMIN_REJECTED",
+    ) -> dict[str, Any]:
+        """Reject a pending provider onboarding request through the admin boundary."""
+        if self.provider_onboarding_manager is None:
+            return {"status": "PROVIDER_ONBOARDING_UNAVAILABLE", "rejected": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "rejected": False, "authorization": authorization}
+        rejection = self._sensitive_input_rejection({
+            "provider_onboarding_rejection": {
+                "provider_id": provider_id, "reason_code": reason_code,
+            },
+        })
+        if rejection is not None:
+            return {"rejected": False, **rejection}
+        reject = getattr(self.provider_onboarding_manager, "reject", None)
+        if not callable(reject):
+            return {"status": "PROVIDER_ONBOARDING_REJECTION_UNAVAILABLE", "rejected": False}
+        audit_intent = self._audit_operation_intent(
+            "provider.onboarding.reject", principal_id=principal_id,
+            provider_id=provider_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "rejected": False, **audit_intent}
+        try:
+            result = reject(provider_id, principal_id=principal_id, reason_code=reason_code)
+        except Exception as exc:
+            result = {
+                "status": "PROVIDER_ONBOARDING_REJECTION_FAILED",
+                "rejected": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_ONBOARDING_RESPONSE", "rejected": False}
+        return self._audit_operation_result(
+            result, "provider.onboarding.reject",
+            success=result.get("rejected") is True,
+            principal_id=principal_id, provider_id=provider_id,
+        )
 
     def provider_onboarding_status(
         self, provider_id: str, *, principal_id: str | None = None
