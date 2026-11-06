@@ -205,7 +205,8 @@ class ProviderService:
 
     def _audit_operation_result(
         self, result: dict[str, Any], operation: str, *,
-        success: bool, principal_id: str | None = None,
+        success: bool, outcome: str | None = None,
+        principal_id: str | None = None,
         provider_id: str | None = None, tenant_id: str | None = None,
         project_id: str | None = None, request_id: str | None = None,
         trace_id: str | None = None,
@@ -213,7 +214,7 @@ class ProviderService:
         if self.audit_manager is None:
             return result
         audit = self._record_provider_audit(
-            operation, "SUCCEEDED" if success else "FAILED",
+            operation, outcome or ("SUCCEEDED" if success else "FAILED"),
             principal_id=principal_id, provider_id=provider_id,
             tenant_id=tenant_id, project_id=project_id,
             request_id=request_id, trace_id=trace_id,
@@ -2260,6 +2261,26 @@ class ProviderService:
                     "provider": provider_id,
                     "release": released,
                 }
+        audit_intent = self._audit_operation_intent(
+            "provider.generate", principal_id=principal_id,
+            provider_id=provider_id, tenant_id=tenant_id,
+            project_id=project_id, request_id=request_id, trace_id=trace_id,
+        )
+        if audit_intent is not None:
+            if secret_lease is not None:
+                options.pop("provider_credential_lease", None)
+                secret_lease.close()
+                secret_lease = None
+            released = self.release_unstarted_request(
+                project_id=project_id, provider_id=provider_id,
+                request_id=request_id, tenant_id=tenant_id,
+            )
+            return {
+                "status": "AUDIT_LOG_REQUIRED", "executed": False,
+                "provider": provider_id, "request_id": request_id,
+                "trace_id": trace_id, "release": released,
+                **audit_intent,
+            }
         started_at = time.monotonic()
         try:
             adapter_result = adapter(**options)
@@ -2310,7 +2331,7 @@ class ProviderService:
                         "saved": False,
                         "error_type": type(incident_exc).__name__,
                     }
-            return {
+            return self._audit_operation_result({
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
                 "provider": provider_id,
@@ -2321,21 +2342,27 @@ class ProviderService:
                 "provider_error": provider_error,
                 "incident": incident_result,
                 "retry_decision": {"retry": False, "reason": reason},
-            }
+            }, "provider.generate", success=False, outcome="OUTCOME_UNKNOWN",
+                principal_id=principal_id, provider_id=provider_id,
+                tenant_id=tenant_id, project_id=project_id,
+                request_id=request_id, trace_id=trace_id)
         finally:
             if secret_lease is not None:
                 options.pop("provider_credential_lease", None)
                 secret_lease.close()
                 secret_lease = None
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
-            return {
+            return self._audit_operation_result({
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
                 "trace_id": trace_id,
                 "reservations_retained": True,
-            }
+            }, "provider.generate", success=False, outcome="OUTCOME_UNKNOWN",
+                principal_id=principal_id, provider_id=provider_id,
+                tenant_id=tenant_id, project_id=project_id,
+                request_id=request_id, trace_id=trace_id)
         if adapter_result["started"] is False:
             if (
                 adapter_result.get("success") is True
@@ -2350,23 +2377,29 @@ class ProviderService:
                     and adapter_result.get("actual_credit_amount") > 0
                 )
             ):
-                return {
+                return self._audit_operation_result({
                     "status": "INCONSISTENT_START_RESULT",
                     "executed": False,
                     "provider": provider_id,
                     "request_id": request_id,
                     "reservations_retained": True,
-                }
+                }, "provider.generate", success=False,
+                    principal_id=principal_id, provider_id=provider_id,
+                    tenant_id=tenant_id, project_id=project_id,
+                    request_id=request_id, trace_id=trace_id)
             released = self.release_unstarted_request(
                 project_id=project_id, provider_id=provider_id, request_id=request_id, tenant_id=tenant_id
             )
-            return {
+            return self._audit_operation_result({
                 "status": "EXECUTION_NOT_STARTED" if released.get("released") is True else "RESERVATION_RELEASE_FAILED",
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
                 "release": released,
-            }
+            }, "provider.generate", success=False, outcome="NOT_STARTED",
+                principal_id=principal_id, provider_id=provider_id,
+                tenant_id=tenant_id, project_id=project_id,
+                request_id=request_id, trace_id=trace_id)
 
         accounting_required = False
         reported_success = adapter_result.get("success")
@@ -2619,7 +2652,7 @@ class ProviderService:
             status = "EXECUTION_SUCCEEDED"
         else:
             status = "EXECUTION_FINALIZATION_PARTIAL"
-        return {
+        return self._audit_operation_result({
             "status": status,
             "executed": True,
             "provider": provider_id,
@@ -2642,7 +2675,10 @@ class ProviderService:
             "sensitive_data_scan": sensitive_data_scan,
             "data_policy": data_policy_result,
             "retry_decision": retry,
-        }
+        }, "provider.generate", success=final_success,
+            principal_id=principal_id, provider_id=provider_id,
+            tenant_id=tenant_id, project_id=project_id,
+            request_id=request_id, trace_id=trace_id)
 
     def retry_decision(self, **failure: Any) -> dict[str, Any]:
         if self.retry_policy is None:
