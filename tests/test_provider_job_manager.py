@@ -63,6 +63,43 @@ class ProviderJobManagerTests(unittest.TestCase):
         )
         self.assertEqual(conflict["status"], "REQUEST_ID_CONFLICT")
 
+    def test_claim_next_filters_jobs_by_allowed_provider_ids_before_leasing(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=5, max_concurrent=2,
+            scheduling_strategy="GLOBAL_PRIORITY",
+            clock=lambda: self.now[0],
+        )
+        manager.submit(
+            job_id="image-authorized", project_id="film", provider_id="image",
+            payload_ref="payload:image-authorized", priority=100,
+        )
+        manager.submit(
+            job_id="video-not-authorized", project_id="film", provider_id="video",
+            payload_ref="payload:video-not-authorized", priority=200,
+        )
+        claimed = manager.claim_next(
+            worker_id="worker-1", allowed_provider_ids=["image"]
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.assertEqual(claimed["job"]["provider_id"], "image")
+
+        blocked = manager.claim_next(
+            worker_id="worker-2", allowed_provider_ids=["image"]
+        )
+        self.assertEqual(blocked["status"], "NO_AUTHORIZED_PROVIDER_JOBS")
+        self.assertEqual(manager.poll(job_id="video-not-authorized")["job"]["status"], "QUEUED")
+
+    def test_claim_next_rejects_invalid_allowed_provider_filter(self):
+        manager = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        for allowed in ("image", ["../outside"], ["image", "image"], [None]):
+            with self.subTest(allowed=allowed):
+                self.assertEqual(
+                    manager.claim_next(
+                        worker_id="worker-1", allowed_provider_ids=allowed
+                    )["status"],
+                    "INVALID_ALLOWED_PROVIDER_IDS",
+                )
+
     def test_provider_specific_concurrency_limits_skip_capped_providers(self):
         manager = ProviderJobManager(
             self.path,
