@@ -786,6 +786,14 @@ class ProviderService:
         secret_ref = provider.get("secret_ref")
         if not isinstance(secret_ref, str):
             return {"status": "PROVIDER_SECRET_REFERENCE_REQUIRED", "rotated": False}
+        rotation_request_audit = self._record_provider_audit(
+            event_type="provider.credential.rotation",
+            actor_id=principal_id, tenant_id=tenant_id,
+            provider_id=provider_id, operation="provider.credentials.rotate",
+            outcome="REQUESTED", reason_code="ROTATION_REQUESTED",
+        )
+        if rotation_request_audit.get("saved") is not True:
+            return {"status": "AUDIT_LOG_WRITE_FAILED", "rotated": False}
         try:
             result = self.secret_manager.rotate_secret(
                 secret_ref,
@@ -796,8 +804,14 @@ class ProviderService:
                 tenant_id=tenant_id,
             )
         except Exception as exc:
+            failure_audit = self._record_provider_audit(
+                event_type="provider.credential.rotation",
+                actor_id=principal_id, tenant_id=tenant_id,
+                provider_id=provider_id, operation="provider.credentials.rotate",
+                outcome="FAILED", reason_code="SECRET_ROTATION_FAILED",
+            )
             return {
-                "status": "SECRET_ROTATION_FAILED",
+                "status": "SECRET_ROTATION_FAILED" if failure_audit.get("saved") is True else "AUDIT_LOG_WRITE_FAILED",
                 "rotated": False,
                 "error_type": type(exc).__name__,
             }
@@ -813,7 +827,29 @@ class ProviderService:
                 and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", candidate_status)
                 else "INVALID_ROTATION_RESPONSE"
             )
-            return {"status": safe_status, "rotated": False}
+            failure_audit = self._record_provider_audit(
+                event_type="provider.credential.rotation",
+                actor_id=principal_id, tenant_id=tenant_id,
+                provider_id=provider_id, operation="provider.credentials.rotate",
+                outcome="FAILED", reason_code=safe_status,
+            )
+            return {
+                "status": safe_status if failure_audit.get("saved") is True else "AUDIT_LOG_WRITE_FAILED",
+                "rotated": False,
+            }
+        success_audit = self._record_provider_audit(
+            event_type="provider.credential.rotation",
+            actor_id=principal_id, tenant_id=tenant_id,
+            provider_id=provider_id, operation="provider.credentials.rotate",
+            outcome="SUCCEEDED", reason_code="SECRET_ROTATED",
+            credential_backend=result.get("backend") if isinstance(result.get("backend"), str) else None,
+            credential_version_id=result.get("version_id") if isinstance(result.get("version_id"), str) else None,
+        )
+        if success_audit.get("saved") is not True:
+            return {
+                "status": "PROVIDER_SECRET_ROTATED_AUDIT_LOG_FAILED",
+                "rotated": True, "audit_log_saved": False, "provider_id": provider_id,
+            }
         return {
             "status": "PROVIDER_SECRET_ROTATED",
             "rotated": True,
