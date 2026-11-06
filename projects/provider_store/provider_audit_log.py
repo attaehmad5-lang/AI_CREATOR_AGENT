@@ -17,10 +17,10 @@ from typing import Any, Iterator
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
 _ZERO_HASH = "0" * 64
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\\Z")
-_OPERATION_RE = re.compile(r"[a-z][a-z0-9_.:-]{0,95}\\Z")
-_OUTCOME_RE = re.compile(r"[A-Z][A-Z0-9_.:-]{0,95}\\Z")
-_TRACE_RE = re.compile(r"[0-9a-f]{32}\\Z")
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
+_OPERATION_RE = re.compile(r"[a-z][a-z0-9_.:-]{0,95}\Z")
+_OUTCOME_RE = re.compile(r"[A-Z][A-Z0-9_.:-]{0,95}\Z")
+_TRACE_RE = re.compile(r"[0-9a-f]{32}\Z")
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -106,8 +106,12 @@ class ProviderAuditLog:
             not isinstance(loaded, dict)
             or set(loaded) != {"version", "key_id", "events", "head_hash"}
             or loaded.get("version") != "1.0"
-            or loaded.get("key_id") != self.key_id
-            or not isinstance(loaded.get("events"), list)
+        ):
+            raise ValueError("provider audit log schema mismatch")
+        if loaded.get("key_id") != self.key_id:
+            raise ValueError("provider audit log signing key mismatch")
+        if (
+            not isinstance(loaded.get("events"), list)
             or len(loaded["events"]) > self.max_events
             or not isinstance(loaded.get("head_hash"), str)
             or re.fullmatch(r"[0-9a-f]{64}", loaded["head_hash"]) is None
