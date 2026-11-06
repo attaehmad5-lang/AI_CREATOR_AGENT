@@ -1290,13 +1290,62 @@ class ProviderService:
         rejection = self._sensitive_input_rejection({"route_options": route_options})
         if rejection is not None:
             return {"allowed": False, **rejection}
+        request_id = route_options.get("request_id")
+        tenant_id = route_options.get("tenant_id")
+        principal_id = route_options.get("principal_id")
+        trace_id = route_options.get("trace_id")
+        audit_context = {
+            "actor_id": principal_id if isinstance(principal_id, str) else None,
+            "tenant_id": tenant_id if isinstance(tenant_id, str) else None,
+            "request_id": request_id if isinstance(request_id, str) else None,
+            "trace_id": trace_id if isinstance(trace_id, str) else None,
+            "details": {"operation": "route_request"},
+        }
+        if self.audit_log is not None:
+            audit_failure = self._record_audit(
+                "routing_decision", **audit_context, outcome="attempted",
+            )
+            if audit_failure is not None:
+                return {"allowed": False, "status": "ROUTING_AUDIT_FAILED", "audit": audit_failure}
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
-            return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
-        }
+            failure = {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
+            audit_failure = self._record_audit(
+                "routing_decision", **audit_context, outcome="failure",
+                details={"operation": "route_request", "status": "ROUTING_FAILED", "error_type": type(exc).__name__},
+            )
+            if audit_failure is not None:
+                failure["audit"] = audit_failure
+            return failure
+        if not isinstance(result, dict):
+            result = {"allowed": False, "status": "INVALID_ROUTING_RESPONSE"}
+        if self.audit_log is not None:
+            provider_id = result.get("provider") if isinstance(result.get("provider"), str) else None
+            details: dict[str, Any] = {
+                "operation": "route_request",
+                "status": result.get("status") if isinstance(result.get("status"), str) else "UNKNOWN",
+            }
+            billing_mode = result.get("billing_mode")
+            if isinstance(billing_mode, str):
+                details["billing_mode"] = billing_mode
+            estimated_cost = route_options.get("estimated_cost")
+            if isinstance(estimated_cost, (int, float)) and not isinstance(estimated_cost, bool):
+                details["estimated_cost"] = estimated_cost
+            audit_failure = self._record_audit(
+                "routing_decision", actor_id=audit_context["actor_id"],
+                tenant_id=audit_context["tenant_id"], provider_id=provider_id,
+                request_id=audit_context["request_id"], trace_id=audit_context["trace_id"],
+                outcome="allowed" if result.get("allowed") is True else "denied",
+                details=details,
+            )
+            if audit_failure is not None:
+                return {
+                    "allowed": False, "status": "ROUTING_AUDIT_PERSISTENCE_FAILED",
+                    "route_result": result, "side_effects_may_exist": True,
+                    "audit": audit_failure,
+                }
+        return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
         if self.output_validator is None:
