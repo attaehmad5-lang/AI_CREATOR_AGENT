@@ -468,7 +468,7 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(manager.submit(
             job_id="video-scoped-job", project_id="film",
             provider_id="video", payload_ref="payload:video-scoped",
-            priority=200,
+            priority=99,
         )["accepted"])
         service = ProviderService(
             self.connections,
