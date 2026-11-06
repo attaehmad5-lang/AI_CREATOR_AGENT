@@ -1,8 +1,10 @@
 import json
+import socket
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from projects.provider_store.connection_manager import ConnectionManager
 from projects.provider_store.credit_manager import ProviderCreditManager
@@ -169,6 +171,23 @@ class ProviderModelPricingManagerTests(unittest.TestCase):
             )["status"],
             "MODEL_NOT_FOUND",
         )
+
+    def test_default_pricing_transport_rejects_private_dns_before_connect(self):
+        resolutions = []
+
+        def resolver(host, port, *, type):
+            resolutions.append((host, port))
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("10.0.0.7", port))
+            ]
+
+        from projects.provider_store import http_probe
+        with patch.object(http_probe.socket, "getaddrinfo", resolver):
+            with self.assertRaisesRegex(ValueError, "PROVIDER_ENDPOINT_RESOLVES_TO_NON_PUBLIC_ADDRESS"):
+                ProviderModelPricingManager._http_fetch(
+                    POLLINATIONS_MODELS_URL, timeout=2.0
+                )
+        self.assertEqual(resolutions, [("gen.pollinations.ai", 443)])
 
     def test_http_fetch_rejects_non_official_catalog_urls_before_network_access(self):
         with self.assertRaisesRegex(ValueError, "unsupported pricing catalog URL"):
