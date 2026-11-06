@@ -145,9 +145,11 @@ class ProviderHTTPConnectivityProbe:
     def _validate_public_dns_resolution(self, hostname: str, port: int) -> list[str]:
         """Fail closed if any DNS answer is not a globally routable IP address.
 
-        This is a preflight SSRF defense. It is not a substitute for DNS-pinned
-        sockets or deployment egress filtering because a resolver can change
-        answers between this check and the HTTP client's own connection lookup.
+        The built-in default transport pins its TCP socket to one of these exact
+        validated addresses, preventing a second hostname lookup at connect time.
+        Caller-injected openers are trusted custom transports and must enforce
+        equivalent destination controls; deployment egress filtering remains
+        defense in depth.
         """
         try:
             records = self.dns_resolver(hostname, port, type=socket.SOCK_STREAM)
