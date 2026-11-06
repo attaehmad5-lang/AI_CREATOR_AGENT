@@ -5,6 +5,12 @@ import unittest
 from pathlib import Path
 
 from projects.provider_store.connection_manager import ConnectionManager
+
+def _public_dns_resolver(hostname, port, *, type=1):
+    """Deterministic public DNS answer for network-probe unit tests."""
+    return [(2, type, 6, "", ("93.184.216.34", port))]
+
+
 from projects.provider_store.provider_feature_flags import ProviderFeatureFlagManager
 from projects.provider_store.provider_incident_manager import ProviderIncidentManager
 from projects.provider_store.provider_benchmark_manager import ProviderBenchmarkManager
@@ -171,6 +177,7 @@ class ProviderServiceTests(unittest.TestCase):
         result = service.verify_http_provider(
             "huggingface", environ={"HF_TOKEN": "do-not-persist"},
             opener=opener, timeout_seconds=1.5,
+            dns_resolver=_public_dns_resolver,
         )
         self.assertTrue(result["verified"])
         self.assertEqual(result["status"], "CONNECTED")
