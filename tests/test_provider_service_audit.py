@@ -145,6 +145,24 @@ class ProviderServiceAuditIntegrationTests(unittest.TestCase):
         self.assertEqual(events[1]["request_id"], "request-1")
         self.assertEqual(events[1]["tenant_id"], "tenant-a")
 
+    def test_paid_usage_approval_decision_is_recorded_with_optional_approval_id(self):
+        router = _Router(result={
+            "allowed": True, "status": "ROUTED", "provider": "image",
+            "billing_mode": "PAID_APPROVED",
+        })
+        service = ProviderService(_Connections(), routing_manager=router, audit_log=self.log)
+        result = service.route_request(
+            request_id="paid-request-1", tenant_id="tenant-a",
+            principal_id="admin-1", approval_id="approval-42",
+            category="image", project_id="film", estimated_cost=1.25,
+        )
+        self.assertTrue(result["allowed"])
+        events = self.log.read_events(limit=10)["events"]
+        approval = next(event for event in events if event["event_type"] == "approval_decision")
+        self.assertEqual(approval["outcome"], "allowed")
+        self.assertEqual(approval["details"]["approval_status"], "APPROVED")
+        self.assertEqual(approval["details"]["approval_id"], "approval-42")
+
     def test_routing_is_not_started_when_attempt_audit_cannot_be_written(self):
         class BrokenAudit:
             def append(self, *args, **kwargs):
