@@ -8,6 +8,9 @@ from __future__ import annotations
 import math
 import os
 import re
+import socket
+from ipaddress import ip_address
+from urllib.parse import urlsplit
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -104,6 +107,7 @@ class ProviderHTTPConnectivityProbe:
         secret_manager: Any | None = None,
         tenant_id: str | None = None,
         principal_id: str | None = None,
+        dns_resolver: Any = None,
     ) -> None:
         if secret_manager is not None and not callable(getattr(secret_manager, "resolve_secret", None)):
             raise ValueError("secret_manager must support secret resolution")
@@ -126,12 +130,43 @@ class ProviderHTTPConnectivityProbe:
             raise ValueError("max_response_bytes must be an integer between 0 and 1000000")
         if opener is not None and not callable(getattr(opener, "open", None)):
             raise ValueError("opener must provide an open method")
+        if dns_resolver is not None and not callable(dns_resolver):
+            raise ValueError("dns_resolver must be callable")
+        self.dns_resolver = dns_resolver or socket.getaddrinfo
         self.environ = os.environ if environ is None else environ
         self.opener = opener or build_opener(_RejectRedirects())
         self.max_response_bytes = max_response_bytes
         self.secret_manager = secret_manager
         self.tenant_id = tenant_id
         self.principal_id = principal_id
+
+    def _validate_public_dns_resolution(self, hostname: str, port: int) -> None:
+        """Fail closed if any DNS answer is not a globally routable IP address.
+
+        This is a preflight SSRF defense. It is not a substitute for DNS-pinned
+        sockets or deployment egress filtering because a resolver can change
+        answers between this check and the HTTP client's own connection lookup.
+        """
+        try:
+            records = self.dns_resolver(hostname, port, type=socket.SOCK_STREAM)
+        except Exception:
+            raise ConnectionError("provider hostname resolution failed") from None
+        if not isinstance(records, (list, tuple)) or not records or len(records) > 64:
+            raise ConnectionError("provider hostname resolution returned no usable addresses")
+        for record in records:
+            if not isinstance(record, (tuple, list)) or len(record) < 5:
+                raise ConnectionError("provider hostname resolution returned invalid address data")
+            sockaddr = record[4]
+            if not isinstance(sockaddr, (tuple, list)) or not sockaddr or not isinstance(sockaddr[0], str):
+                raise ConnectionError("provider hostname resolution returned invalid address data")
+            try:
+                address = ip_address(sockaddr[0].split("%", 1)[0])
+            except ValueError:
+                raise ConnectionError("provider hostname resolution returned invalid address data") from None
+            if address.version == 6 and address.ipv4_mapped is not None:
+                address = address.ipv4_mapped
+            if not address.is_global:
+                raise PermissionError("provider endpoint resolved to a non-public network address")
 
     def __call__(self, provider: dict[str, Any], *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         if not isinstance(provider, dict):
@@ -156,6 +191,11 @@ class ProviderHTTPConnectivityProbe:
         )
         if not validation.get("valid"):
             raise ValueError(str(validation.get("status", "INVALID_ENDPOINT")))
+        parsed_endpoint = urlsplit(endpoint.strip())
+        self._validate_public_dns_resolution(
+            parsed_endpoint.hostname,
+            parsed_endpoint.port or (443 if parsed_endpoint.scheme == "https" else 80),
+        )
 
         headers = {
             "Accept": "application/json, */*;q=0.8",
