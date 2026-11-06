@@ -168,6 +168,23 @@ class ProviderServiceAuditIntegrationTests(unittest.TestCase):
         self.assertEqual(approval["details"]["approval_status"], "APPROVED")
         self.assertEqual(approval["details"]["approval_id"], "approval-42")
 
+    def test_missing_paid_usage_approval_is_audited_as_denied(self):
+        router = _Router(result={
+            "allowed": False, "status": "PAID_APPROVAL_REQUIRED", "provider": "image",
+        })
+        service = ProviderService(_Connections(), routing_manager=router, audit_log=self.log)
+        result = service.route_request(
+            request_id="paid-request-denied", principal_id="operator-1",
+            category="image", project_id="film", estimated_cost=2.0,
+        )
+        self.assertFalse(result["allowed"])
+        approval = next(
+            event for event in self.log.read_events(limit=10)["events"]
+            if event["event_type"] == "approval_decision"
+        )
+        self.assertEqual(approval["outcome"], "denied")
+        self.assertEqual(approval["details"]["approval_status"], "REQUIRED")
+
     def test_routing_is_not_started_when_attempt_audit_cannot_be_written(self):
         class BrokenAudit:
             def append(self, *args, **kwargs):
