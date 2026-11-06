@@ -1367,6 +1367,12 @@ class ProviderService:
         tenant_id = route_options.get("tenant_id")
         principal_id = route_options.get("principal_id")
         trace_id = route_options.get("trace_id")
+        approval_id = route_options.get("approval_id")
+        routing_options = dict(route_options)
+        # Service identity, tracing and approval metadata are audit context, not
+        # provider-routing inputs; do not forward them to the routing manager.
+        for service_only_key in ("principal_id", "trace_id", "approval_id"):
+            routing_options.pop(service_only_key, None)
         audit_context = {
             "actor_id": principal_id if isinstance(principal_id, str) else None,
             "tenant_id": tenant_id if isinstance(tenant_id, str) else None,
@@ -1381,7 +1387,7 @@ class ProviderService:
             if audit_failure is not None:
                 return {"allowed": False, "status": "ROUTING_AUDIT_FAILED", "audit": audit_failure}
         try:
-            result = self.routing_manager.route(**route_options)
+            result = self.routing_manager.route(**routing_options)
         except Exception as exc:
             failure = {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
             audit_failure = self._record_audit(
@@ -1423,7 +1429,6 @@ class ProviderService:
                     "operation": "paid_usage_approval_decision",
                     "approval_status": "APPROVED",
                 }
-                approval_id = route_options.get("approval_id")
                 if isinstance(approval_id, str):
                     approval_details["approval_id"] = approval_id
                 approval_failure = self._record_audit(
