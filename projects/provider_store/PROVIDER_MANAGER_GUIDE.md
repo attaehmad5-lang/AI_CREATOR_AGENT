@@ -93,3 +93,10 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+
+## Provider/model benchmark persistence and confidence
+
+`ProviderBenchmarkManager` remains process-local when no storage path is supplied. For a deployment whose workers share a filesystem with reliable advisory locks, an explicit `storage_path` enables restart-persistent bounded JSON history. The manager reloads under an OS-level lock for each read/write and uses same-directory atomic replacement; malformed, duplicate-key, unknown-field, oversized, or invalid-timestamp state fails closed and is not overwritten. This is not a distributed database and should not be used as a multi-host coordination guarantee.
+
+Benchmark comparisons expose a 95% Wilson interval for observed success rate, the actual quality sample count, and whether the configured minimum sample count was reached. These are indicators of uncertainty, not proof of production performance or a substitute for controlled live-provider experiments. Keep benchmark inputs to bounded provider/model IDs and numeric outcomes; never pass prompts, credentials, headers, or response bodies.
