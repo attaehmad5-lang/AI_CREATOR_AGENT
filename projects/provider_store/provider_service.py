@@ -1653,11 +1653,30 @@ class ProviderService:
         rejection = self._sensitive_input_rejection({"worker_id": worker_id})
         if rejection is not None:
             return {"job": None, **rejection}
+        audit_intent = self._audit_operation_intent(
+            "provider.job.claim", principal_id=principal_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "job": None, **audit_intent}
         try:
             result = self.job_manager.claim_next(worker_id=worker_id)
         except Exception as exc:
-            return {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+            result = {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
+        job = result.get("job") if isinstance(result.get("job"), dict) else {}
+        response = self._sanitize_job_response(result, self.sensitive_data_policy)
+        return self._audit_operation_result(
+            response, "provider.job.claim",
+            success=result.get("status") == "JOB_CLAIMED",
+            outcome="CLAIMED" if result.get("status") == "JOB_CLAIMED" else "NOT_CLAIMED",
+            principal_id=principal_id,
+            provider_id=job.get("provider_id") if isinstance(job.get("provider_id"), str) else None,
+            tenant_id=job.get("tenant_id") if isinstance(job.get("tenant_id"), str) else None,
+            project_id=job.get("project_id") if isinstance(job.get("project_id"), str) else None,
+            request_id=job.get("job_id") if isinstance(job.get("job_id"), str) else None,
+            trace_id=job.get("trace_id") if isinstance(job.get("trace_id"), str) else None,
+        )
 
     def check_job_control(
         self, *, job_id: str, worker_id: str, lease_token: str,
@@ -1761,13 +1780,17 @@ class ProviderService:
             return {"status": "JOB_LEASE_RENEWAL_FAILED", "renewed": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "renewed": False}
 
-    def complete_job(self, *, job_id: str, worker_id: str, lease_token: str, success: bool,
-                     result_ref: str | None = None, error_code: str | None = None,
-                     principal_id: str | None = None) -> dict[str, Any]:
+    def complete_job(
+        self, *, job_id: str, worker_id: str, lease_token: str, success: bool,
+        result_ref: str | None = None, error_code: str | None = None,
+        principal_id: str | None = None, tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
-        authorization = self._authorize_operation(principal_id, "provider.generate")
-        if authorization is not None:
+        authorization = self._authorize_operation(
+            principal_id, "provider.generate", provider_id="*", return_decision=True
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
             return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": authorization}
         rejection = self._sensitive_input_rejection({
             "job_completion": {
@@ -1780,14 +1803,73 @@ class ProviderService:
         })
         if rejection is not None:
             return {"saved": False, **rejection}
+        if self.tenant_isolation_manager is not None and (
+            not isinstance(tenant_id, str) or not tenant_id.strip()
+        ):
+            return {"status": "TENANT_CONTEXT_REQUIRED", "saved": False}
         try:
-            result = self.job_manager.complete(
-                job_id=job_id, worker_id=worker_id, lease_token=lease_token, success=success,
-                result_ref=result_ref, error_code=error_code,
+            existing = (
+                self.job_manager.poll(job_id=job_id, tenant_id=tenant_id)
+                if self.tenant_isolation_manager is not None
+                else self.job_manager.poll(job_id=job_id)
             )
         except Exception as exc:
-            return {"status": "JOB_COMPLETION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return self._sanitize_job_response(result, self.sensitive_data_policy) if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+            return {"status": "JOB_POLL_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(existing, dict) or not isinstance(existing.get("job"), dict):
+            return {
+                "status": existing.get("status", "JOB_NOT_FOUND") if isinstance(existing, dict) else "INVALID_JOB_MANAGER_RESPONSE",
+                "saved": False,
+            }
+        job = existing["job"]
+        provider_id = job.get("provider_id")
+        project_id = job.get("project_id")
+        trace_id = job.get("trace_id")
+        scoped_authorization = self._authorize_operation(
+            principal_id, "provider.generate", provider_id=provider_id
+        )
+        if scoped_authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False, "authorization": scoped_authorization}
+        if self.tenant_isolation_manager is not None:
+            tenant_error = self._authorize_tenant_project(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                principal_id=principal_id,
+            )
+            if tenant_error is not None:
+                return {"status": tenant_error["status"], "saved": False}
+        audit_intent = self._audit_operation_intent(
+            "provider.job.complete", principal_id=principal_id,
+            provider_id=provider_id if isinstance(provider_id, str) else None,
+            tenant_id=tenant_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+            request_id=job_id,
+            trace_id=trace_id if isinstance(trace_id, str) else None,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "saved": False, **audit_intent}
+        try:
+            result = self.job_manager.complete(
+                job_id=job_id, worker_id=worker_id, lease_token=lease_token,
+                success=success, result_ref=result_ref, error_code=error_code,
+            )
+        except Exception as exc:
+            result = {
+                "status": "JOB_COMPLETION_FAILED",
+                "saved": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        safe_result = self._sanitize_job_response(result, self.sensitive_data_policy)
+        return self._audit_operation_result(
+            safe_result, "provider.job.complete",
+            success=result.get("saved") is True,
+            principal_id=principal_id,
+            provider_id=provider_id if isinstance(provider_id, str) else None,
+            tenant_id=tenant_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+            request_id=job_id,
+            trace_id=trace_id if isinstance(trace_id, str) else None,
+        )
 
     def cancel_job(
         self, *, job_id: str, principal_id: str | None = None,
