@@ -1497,11 +1497,11 @@ class ConnectionManagerTests(unittest.TestCase):
             ConnectionManager.validate_endpoint("https://10.0.0.8")["status"],
             "NON_PUBLIC_ADDRESS_REJECTED",
         )
-        self.assertTrue(
-            ConnectionManager.validate_endpoint(
-                "https://10.0.0.8", allowed_hosts={"10.0.0.8"}
-            )["valid"]
+        private_allowlisted = ConnectionManager.validate_endpoint(
+            "https://10.0.0.8", allowed_hosts={"10.0.0.8"}
         )
+        self.assertFalse(private_allowlisted["valid"])
+        self.assertEqual(private_allowlisted["status"], "NON_PUBLIC_ADDRESS_REJECTED")
         self.assertEqual(
             ConnectionManager.validate_endpoint("http://127.0.0.1:8000")["status"],
             "HTTPS_REQUIRED",
@@ -1516,6 +1516,20 @@ class ConnectionManagerTests(unittest.TestCase):
                 "http://127.0.0.1:8000", allow_loopback_http="yes"
             )["status"],
             "INVALID_LOOPBACK_HTTP_POLICY",
+        )
+
+    def test_endpoint_host_allowlist_is_exact_and_rejects_wildcards(self):
+        self.assertEqual(
+            ConnectionManager.validate_endpoint(
+                "https://api.provider.example", allowed_hosts={"*.provider.example"}
+            )["status"],
+            "HOST_NOT_ALLOWLISTED",
+        )
+        self.assertEqual(
+            ConnectionManager.validate_endpoint(
+                "https://api.provider.example", allowed_hosts={"api.provider.example.evil"}
+            )["status"],
+            "HOST_NOT_ALLOWLISTED",
         )
 
     def test_configure_provider_rejects_secret_bearing_existing_configuration(self):
