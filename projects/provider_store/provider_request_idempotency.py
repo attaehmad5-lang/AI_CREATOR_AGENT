@@ -318,3 +318,170 @@ class ProviderRequestIdempotencyManager:
                 "result_status": record["result_status"],
                 "created_at": record["created_at"], "updated_at": record["updated_at"],
             }
+
+
+def _fingerprint_value(value: Any) -> Any:
+    """Normalize request data for hashing without persisting the source values."""
+    from collections.abc import Mapping
+
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("non-finite fingerprint value")
+        return value
+    if isinstance(value, bytes):
+        return {"bytes_sha256": hashlib.sha256(value).hexdigest(), "length": len(value)}
+    if isinstance(value, Mapping):
+        result = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or len(key) > 128:
+                raise ValueError("unsupported fingerprint mapping key")
+            result[key] = _fingerprint_value(item)
+        return {key: result[key] for key in sorted(result)}
+    if isinstance(value, (list, tuple)):
+        return [_fingerprint_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        normalized = [_fingerprint_value(item) for item in value]
+        return sorted(normalized, key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")))
+    raise ValueError("unsupported fingerprint value")
+
+
+def provider_execution_idempotent(function: Any) -> Any:
+    """Claim an execution key before service work and finalize it conservatively."""
+    from functools import wraps
+
+    @wraps(function)
+    def wrapped(service: Any, *args: Any, **kwargs: Any) -> Any:
+        manager = getattr(service, "request_idempotency_manager", None)
+        if manager is None:
+            return function(service, *args, **kwargs)
+        request_id = kwargs.get("request_id")
+        project_id = kwargs.get("project_id")
+        tenant_id = kwargs.get("tenant_id")
+        adapter = kwargs.get("adapter")
+        if not callable(getattr(manager, "reserve_request", None)) or not callable(
+            getattr(manager, "get_status", None)
+        ) or not callable(getattr(manager, "mark_started", None)) or not callable(
+            getattr(manager, "finalize", None)
+        ):
+            return {"status": "IDEMPOTENCY_MANAGER_UNAVAILABLE", "executed": False}
+        try:
+            adapter_name = (
+                f"{getattr(adapter, '__module__', '')}.{getattr(adapter, '__qualname__', type(adapter).__name__)}"
+            )
+            fingerprint_payload = {
+                "category": kwargs.get("category"),
+                "project_id": project_id,
+                "tenant_id": tenant_id,
+                "principal_id": kwargs.get("principal_id"),
+                "modality": kwargs.get("modality"),
+                "estimated_cost": kwargs.get("estimated_cost"),
+                "estimated_cost_unit": kwargs.get("estimated_cost_unit", "USD"),
+                "adapter": adapter_name,
+                "adapter_options": kwargs.get("adapter_options") or {},
+                "route_options": {
+                    key: value for key, value in kwargs.items()
+                    if key not in {
+                        "request_id", "trace_id", "traceparent", "adapter",
+                        "adapter_options", "principal_id", "tenant_id",
+                        "project_id", "category", "modality", "estimated_cost",
+                        "estimated_cost_unit",
+                    }
+                },
+            }
+            canonical = json.dumps(
+                _fingerprint_value(fingerprint_payload),
+                sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+            fingerprint = hashlib.sha256(canonical).hexdigest()
+        except (TypeError, ValueError, OverflowError):
+            return {"status": "IDEMPOTENCY_FINGERPRINT_UNSUPPORTED", "executed": False}
+
+        try:
+            reservation = manager.reserve_request(
+                project_id=project_id, request_id=request_id,
+                tenant_id=tenant_id, fingerprint=fingerprint,
+            )
+        except Exception:
+            return {"status": "IDEMPOTENCY_RESERVATION_FAILED", "executed": False}
+        if not isinstance(reservation, dict) or reservation.get("reserved") is not True:
+            status = reservation.get("status") if isinstance(reservation, dict) else None
+            return {
+                "status": status if isinstance(status, str) else "IDEMPOTENCY_RESERVATION_REJECTED",
+                "executed": False, "request_id": request_id,
+            }
+        lease_token = reservation.get("lease_token")
+        if not isinstance(lease_token, str):
+            return {"status": "IDEMPOTENCY_LEASE_INVALID", "executed": False, "request_id": request_id}
+        kwargs["_request_idempotency_lease_token"] = lease_token
+
+        try:
+            result = function(service, *args, **kwargs)
+        except Exception:
+            try:
+                current = manager.get_status(
+                    project_id=project_id, request_id=request_id, tenant_id=tenant_id,
+                )
+                state = current.get("state") if isinstance(current, dict) else None
+                if state == "STARTED":
+                    manager.finalize(
+                        project_id=project_id, request_id=request_id, tenant_id=tenant_id,
+                        lease_token=lease_token, outcome="unknown",
+                        result_status="EXECUTION_OUTCOME_UNKNOWN",
+                    )
+                elif state == "RESERVED":
+                    manager.finalize(
+                        project_id=project_id, request_id=request_id, tenant_id=tenant_id,
+                        lease_token=lease_token, outcome="not_started",
+                        result_status="EXECUTION_EXCEPTION_BEFORE_START",
+                    )
+            except Exception:
+                pass
+            raise
+
+        status = result.get("status") if isinstance(result, dict) else "INVALID_EXECUTION_RESPONSE"
+        try:
+            current = manager.get_status(
+                project_id=project_id, request_id=request_id, tenant_id=tenant_id,
+            )
+            state = current.get("state") if isinstance(current, dict) else None
+            if state == "RESERVED":
+                outcome = "not_started"
+                final_status = status if isinstance(status, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{1,79}", status) else "EXECUTION_NOT_STARTED"
+            elif state == "STARTED":
+                if status in {"EXECUTION_OUTCOME_UNKNOWN", "INCONSISTENT_START_RESULT"} or (
+                    isinstance(result, dict) and result.get("reservations_retained") is True
+                ):
+                    outcome = "unknown"
+                    final_status = status if isinstance(status, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{1,79}", status) else "EXECUTION_OUTCOME_UNKNOWN"
+                elif status in {"EXECUTION_NOT_STARTED", "RESERVATION_RELEASE_FAILED"}:
+                    outcome = "not_started"
+                    final_status = status
+                else:
+                    outcome = "completed"
+                    final_status = status if isinstance(status, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{1,79}", status) else "EXECUTION_COMPLETED"
+            else:
+                return result
+            finalized = manager.finalize(
+                project_id=project_id, request_id=request_id, tenant_id=tenant_id,
+                lease_token=lease_token, outcome=outcome, result_status=final_status,
+            )
+            if not isinstance(finalized, dict) or finalized.get("saved") is not True:
+                return {
+                    "status": "IDEMPOTENCY_FINALIZATION_FAILED",
+                    "executed": bool(state == "STARTED"),
+                    "side_effects_may_exist": state == "STARTED",
+                    "request_id": request_id,
+                    "operation_result": result if isinstance(result, dict) else {"status": "INVALID_EXECUTION_RESPONSE"},
+                }
+        except Exception:
+            return {
+                "status": "IDEMPOTENCY_FINALIZATION_FAILED",
+                "executed": True, "side_effects_may_exist": True,
+                "request_id": request_id,
+                "operation_result": result if isinstance(result, dict) else {"status": "INVALID_EXECUTION_RESPONSE"},
+            }
+        return result
+    return wrapped
