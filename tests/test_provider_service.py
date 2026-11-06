@@ -68,27 +68,45 @@ class ProviderServiceTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_admin_can_refresh_provider_metadata_via_service_facade(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"][0].update({
+            "official_api_url": "https://api.example.com/v1",
+            "official_docs_url": "https://docs.example.com/api",
+            "allowed_hosts": ["api.example.com"],
+        })
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        connections = ConnectionManager(self.catalog_path, self.state_path)
+
         authorization = ProviderAuthorizationManager(self.root / "metadata-refresh-auth.json")
         authorization.assign_role("admin-user", "admin")
         authorization.assign_role("viewer-user", "viewer")
-        service = ProviderService(self.connections, authorization_manager=authorization)
+        service = ProviderService(connections, authorization_manager=authorization)
+        calls = []
         denied = service.refresh_provider_metadata(
-            "image", lambda provider: {}, principal_id="viewer-user"
+            "image",
+            lambda provider: calls.append(provider) or {},
+            principal_id="viewer-user",
         )
         self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(calls, [])
+
         refreshed = service.refresh_provider_metadata(
             "image",
             lambda provider: {
                 "verified": True,
                 "source_url": "https://api.example.com/v1/models",
-                "capabilities": ["image_generation"],
+                "capabilities": ["image_generation", "image_editing"],
                 "adapter_api_version": "1.0",
+                "models": [{"id": "image-model-a", "version": "2026-11"}],
             },
             principal_id="admin-user",
         )
-        # The fixture intentionally has no official endpoint/host allowlist;
-        # the request therefore fails closed even for an administrator.
-        self.assertEqual(refreshed["status"], "UNTRUSTED_METADATA_SOURCE")
+        self.assertEqual(refreshed["status"], "PROVIDER_METADATA_REFRESHED")
+        self.assertTrue(refreshed["refreshed"])
+        self.assertEqual(
+            connections.get_provider_metadata("image")["provider_metadata"]["models"][0]["id"],
+            "image-model-a",
+        )
 
     def test_provider_registry_discovery_and_metadata_reads_are_authorized(self):
         authorization = ProviderAuthorizationManager(self.root / "registry-read-auth.json")
