@@ -45,10 +45,18 @@ class ProviderService:
         tenant_isolation_manager: Any | None = None,
         provider_onboarding_manager: Any | None = None,
         adapter_factory_resolver: Any | None = None,
+        audit_manager: Any | None = None,
+        require_audit_logging: bool = False,
         secret_manager: Any | None = None,
     ) -> None:
         if adapter_factory_resolver is not None and not callable(adapter_factory_resolver):
             raise ValueError("adapter_factory_resolver must be callable")
+        if not isinstance(require_audit_logging, bool):
+            raise ValueError("require_audit_logging must be boolean")
+        if audit_manager is not None and not callable(getattr(audit_manager, "record", None)):
+            raise ValueError("audit_manager must support record")
+        if require_audit_logging and audit_manager is None:
+            raise ValueError("required audit logging needs an audit_manager")
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
         if tenant_isolation_manager is not None and authorization_manager is None:
@@ -98,6 +106,7 @@ class ProviderService:
             (provider_onboarding_manager, "verify", "provider_onboarding_manager"),
             (provider_onboarding_manager, "activate", "provider_onboarding_manager"),
             (provider_onboarding_manager, "get_status", "provider_onboarding_manager"),
+            (audit_manager, "record", "audit_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -130,7 +139,92 @@ class ProviderService:
         self.provider_onboarding_manager = provider_onboarding_manager
         # Adapter constructors are application-controlled; request data cannot supply code.
         self.adapter_factory_resolver = adapter_factory_resolver
+        self.audit_manager = audit_manager
+        self.require_audit_logging = require_audit_logging
         self.secret_manager = resolved_secret_manager
+
+    def _record_provider_audit(
+        self, operation: str, outcome: str, *,
+        principal_id: str | None = None, provider_id: str | None = None,
+        tenant_id: str | None = None, project_id: str | None = None,
+        request_id: str | None = None, trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self.audit_manager is None:
+            return {"status": "AUDIT_LOG_UNAVAILABLE", "saved": False}
+        try:
+            result = self.audit_manager.record(
+                operation=operation,
+                outcome=outcome,
+                principal_id=principal_id,
+                provider_id=provider_id,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                request_id=request_id,
+                trace_id=trace_id,
+            )
+        except Exception as exc:
+            return {
+                "status": "AUDIT_LOG_WRITE_FAILED",
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict) or result.get("saved") is not True:
+            status = (
+                result.get("status")
+                if isinstance(result, dict)
+                and isinstance(result.get("status"), str)
+                and re.fullmatch(r"[A-Z][A-Z0-9_.:-]{0,95}", result["status"])
+                else "INVALID_AUDIT_LOG_RESPONSE"
+            )
+            return {"status": status, "saved": False}
+        return result
+
+    def _audit_operation_intent(
+        self, operation: str, *,
+        principal_id: str | None = None, provider_id: str | None = None,
+        tenant_id: str | None = None, project_id: str | None = None,
+        request_id: str | None = None, trace_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if self.audit_manager is None and not self.require_audit_logging:
+            return None
+        result = self._record_provider_audit(
+            operation, "REQUESTED",
+            principal_id=principal_id, provider_id=provider_id,
+            tenant_id=tenant_id, project_id=project_id,
+            request_id=request_id, trace_id=trace_id,
+        )
+        if result.get("saved") is True:
+            return None
+        if self.require_audit_logging:
+            return {
+                "status": "AUDIT_LOG_REQUIRED",
+                "saved": False,
+                "audit": result,
+            }
+        return None
+
+    def _audit_operation_result(
+        self, result: dict[str, Any], operation: str, *,
+        success: bool, principal_id: str | None = None,
+        provider_id: str | None = None, tenant_id: str | None = None,
+        project_id: str | None = None, request_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self.audit_manager is None:
+            return result
+        audit = self._record_provider_audit(
+            operation, "SUCCEEDED" if success else "FAILED",
+            principal_id=principal_id, provider_id=provider_id,
+            tenant_id=tenant_id, project_id=project_id,
+            request_id=request_id, trace_id=trace_id,
+        )
+        response = dict(result)
+        response["audit"] = audit
+        if audit.get("saved") is not True:
+            response["audit_outcome_recorded"] = False
+        else:
+            response["audit_outcome_recorded"] = True
+        return response
 
     def submit_provider_onboarding(
         self, manifest: dict[str, Any], *, principal_id: str | None = None
