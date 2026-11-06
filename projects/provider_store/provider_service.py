@@ -1307,18 +1307,20 @@ class ProviderService:
 
     def route_request(
         self, *, principal_id: str | None = None,
-        audit_context: dict[str, Any] | None = None,
+        tenant_id: str | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route through the policy manager and persist decision/approval evidence.
 
-        audit_context is an internal service-to-service value; API middleware must
-        never populate it from request JSON.
+        principal_id and tenant_id must be supplied by trusted API middleware,
+        never copied from caller-controlled request JSON.
         """
-        if audit_context is not None and not isinstance(audit_context, dict):
-            return {"allowed": False, "status": "INVALID_AUDIT_CONTEXT"}
-        actor_id = audit_context.get("principal_id", principal_id) if isinstance(audit_context, dict) else principal_id
-        tenant_id = audit_context.get("tenant_id", route_options.get("tenant_id")) if isinstance(audit_context, dict) else route_options.get("tenant_id")
+        actor_id = principal_id
+        if tenant_id is not None:
+            if "tenant_id" in route_options and route_options["tenant_id"] != tenant_id:
+                return {"allowed": False, "status": "TENANT_CONTEXT_CONFLICT"}
+            route_options["tenant_id"] = tenant_id
+        tenant_id = route_options.get("tenant_id")
         project_id = route_options.get("project_id")
         request_id = route_options.get("request_id")
         approvals = route_options.get("paid_approved_providers")
@@ -1678,7 +1680,7 @@ class ProviderService:
             route_options["tenant_id"] = tenant_id
         route = self.route_request(
             principal_id=principal_id,
-            audit_context={"principal_id": principal_id, "tenant_id": tenant_id},
+            tenant_id=tenant_id,
             category=category,
             project_id=project_id,
             request_id=request_id,
