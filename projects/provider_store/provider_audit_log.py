@@ -73,7 +73,7 @@ class ProviderAuditLog:
             not isinstance(value, str) or not value.strip() or len(value) > 200
             or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}", value.strip()) is None
             or re.search(
-                r"(?i)(?:bearer\\s+|api[_-]?key\\s*=|token\\s*=|password\\s*=|secret\\s*=|-----BEGIN [A-Z ]+PRIVATE KEY-----)",
+                r"(?i)(?:bearer\s+|api[_-]?key\s*=|token\s*=|password\s*=|secret\s*=|-----BEGIN [A-Z ]+PRIVATE KEY-----)",
                 value,
             )
         ):
@@ -104,7 +104,7 @@ class ProviderAuditLog:
                 not isinstance(value, str) or len(value) > 160
                 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,159}", value) is None
                 or re.search(
-                    r"(?i)(?:bearer\\s+|api[_-]?key\\s*=|token\\s*=|password\\s*=|secret\\s*=|-----BEGIN [A-Z ]+PRIVATE KEY-----)",
+                    r"(?i)(?:bearer\s+|api[_-]?key\s*=|token\s*=|password\s*=|secret\s*=|-----BEGIN [A-Z ]+PRIVATE KEY-----)",
                     value,
                 )
             ):
