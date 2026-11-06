@@ -317,22 +317,26 @@ class ProviderJobManager:
         with self._transaction():
             if key_digest is not None:
                 prior_job_id = self.data["idempotency_index"].get(key_digest)
-                prior = self.data["jobs"].get(prior_job_id) if isinstance(prior_job_id, str) else None
-                if not isinstance(prior, dict):
-                    return {"status": "IDEMPOTENCY_STATE_INVALID", "accepted": False}
-                same_scope = all(prior.get(key) == value for key, value in {
-                    "tenant_id": tenant_id, "project_id": project_id,
-                    "provider_id": provider_id,
-                }.items())
-                if not same_scope:
-                    return {"status": "IDEMPOTENCY_STATE_INVALID", "accepted": False}
-                if prior.get("request_fingerprint") != request_fingerprint:
-                    return {"status": "IDEMPOTENCY_KEY_CONFLICT", "accepted": False}
-                return {
-                    "status": "ALREADY_SUBMITTED", "accepted": True,
-                    "idempotency_replayed": True,
-                    "job": self._public_job(prior),
-                }
+                if prior_job_id is not None:
+                    prior = (
+                        self.data["jobs"].get(prior_job_id)
+                        if isinstance(prior_job_id, str) else None
+                    )
+                    if not isinstance(prior, dict):
+                        return {"status": "IDEMPOTENCY_STATE_INVALID", "accepted": False}
+                    same_scope = all(prior.get(key) == value for key, value in {
+                        "tenant_id": tenant_id, "project_id": project_id,
+                        "provider_id": provider_id,
+                    }.items())
+                    if not same_scope:
+                        return {"status": "IDEMPOTENCY_STATE_INVALID", "accepted": False}
+                    if prior.get("request_fingerprint") != request_fingerprint:
+                        return {"status": "IDEMPOTENCY_KEY_CONFLICT", "accepted": False}
+                    return {
+                        "status": "ALREADY_SUBMITTED", "accepted": True,
+                        "idempotency_replayed": True,
+                        "job": self._public_job(prior),
+                    }
             existing = self.data["jobs"].get(job_id)
             if isinstance(existing, dict):
                 if existing.get("tenant_id") != tenant_id:
