@@ -10,6 +10,7 @@ on:
       - task-25-feature-74-idempotency-keys
       - task-25-feature-75-concurrency-limits-integrated
       - task-25-feature-76-multiprocess-queue-hardening
+      - task-25-feature-77-remote-provider-jobs
   pull_request:
     branches:
       - main
@@ -17,6 +18,7 @@ on:
       - task-25-feature-73-current-trace-propagation
       - task-25-feature-74-idempotency-keys
       - task-25-feature-75-concurrency-limits-integrated
+      - task-25-feature-76-multiprocess-queue-hardening
 
 permissions:
   contents: read
