@@ -75,18 +75,18 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         self.assertTrue(all(0 < call[2]["lifetime"] <= 3.0 for call in calls))
 
     def test_bounded_dns_resolver_converts_timeout_to_safe_timeout_error(self):
-        import dns.exception
+        import dns.exception as dns_exceptions
 
         class TimeoutResolver:
             timeout = None
             lifetime = None
 
             def resolve(self, hostname, record_type, **kwargs):
-                raise dns.exception.Timeout
+                raise dns_exceptions.Timeout
 
-        dns = ProviderDNSResolver(resolver_factory=TimeoutResolver)
+        resolver_instance = ProviderDNSResolver(resolver_factory=TimeoutResolver)
         with self.assertRaises(TimeoutError):
-            dns("api.example.com", 443, type=socket.SOCK_STREAM)
+            resolver_instance("api.example.com", 443, type=socket.SOCK_STREAM)
 
     def test_response_cleanup_failure_does_not_mask_successful_probe(self):
         class Response:
