@@ -441,5 +441,42 @@ class RemoteProviderJobServiceTests(unittest.TestCase):
             )
 
 
+    def test_expired_worker_cannot_record_remote_submission_before_reclaim(self):
+        worker_job = self.submit_and_claim()
+        begun = self.jobs.begin_remote_submission(
+            job_id=worker_job["job_id"], worker_id="worker-1",
+            lease_token=worker_job["lease_token"],
+        )
+        self.assertEqual(begun["status"], "REMOTE_SUBMISSION_STARTED")
+        self.now[0] += timedelta(seconds=31)
+
+        late_response = self.jobs.record_remote_submission(
+            job_id=worker_job["job_id"],
+            worker_id="worker-1",
+            lease_token=worker_job["lease_token"],
+            remote_job_id="remote-job-too-late",
+            remote_status="QUEUED",
+            poll_after_seconds=10,
+        )
+        self.assertEqual(late_response["status"], "JOB_LEASE_NOT_OWNED")
+        record = self.jobs.data["jobs"]["local-job-1"]
+        self.assertNotIn("remote_job_id", record)
+        self.assertEqual(record["remote_submission_state"], "SUBMITTING")
+
+        reclaimed = self.service.claim_next_job(
+            worker_id="worker-2", principal_id="creator-1"
+        )
+        self.assertEqual(reclaimed["status"], "JOB_CLAIMED")
+        retry = self.jobs.begin_remote_submission(
+            job_id="local-job-1",
+            worker_id="worker-2",
+            lease_token=reclaimed["job"]["lease_token"],
+        )
+        self.assertEqual(retry["status"], "REMOTE_SUBMISSION_STARTED")
+        self.assertEqual(
+            self.jobs.data["jobs"]["local-job-1"]["remote_submission_attempts"], 2
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
