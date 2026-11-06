@@ -1779,19 +1779,16 @@ class ProviderServiceTests(unittest.TestCase):
             self.connections, job_manager=jobs,
             authorization_manager=authorization,
         )
-        fingerprint = "9" * 64
         secret_client_key = "private-client-retry-key"
         first = service.submit_job(
             job_id="service-idem-1", project_id="film", provider_id="image",
             payload_ref="payload:service-idem-1", principal_id="idem-creator",
-            idempotency_key=secret_client_key,
-            request_fingerprint=fingerprint,
+            idempotency_key=secret_client_key
         )
         replay = service.submit_job(
             job_id="service-idem-2", project_id="film", provider_id="image",
-            payload_ref="payload:service-idem-2", principal_id="idem-creator",
-            idempotency_key=secret_client_key,
-            request_fingerprint=fingerprint,
+            payload_ref="payload:service-idem-1", principal_id="idem-creator",
+            idempotency_key=secret_client_key
         )
         self.assertEqual(first["status"], "JOB_QUEUED")
         self.assertEqual(replay["status"], "ALREADY_SUBMITTED")
