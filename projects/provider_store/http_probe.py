@@ -13,7 +13,7 @@ from ipaddress import ip_address
 from urllib.parse import urlsplit
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, Request
 
 from .connection_manager import ConnectionManager, ProviderAuthenticationVerificationRequired
 from .safe_numbers import finite_number
