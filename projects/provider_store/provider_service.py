@@ -43,6 +43,7 @@ class ProviderService:
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
         secret_manager: Any | None = None,
+        provider_audit_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -55,6 +56,12 @@ class ProviderService:
             or not callable(getattr(identity_authenticator, "is_authenticated_principal", None))
         ):
             raise ValueError("identity_authenticator must verify tokens and identify trusted principals")
+        if provider_audit_manager is not None and (
+            not callable(getattr(provider_audit_manager, "record", None))
+            or not callable(getattr(provider_audit_manager, "verify", None))
+            or not callable(getattr(provider_audit_manager, "read_events", None))
+        ):
+            raise ValueError("provider_audit_manager must support record, verify and read_events")
         resolved_secret_manager = secret_manager or getattr(connection_manager, "secret_manager", None)
         if resolved_secret_manager is not None and (
             not callable(getattr(resolved_secret_manager, "resolve_secret", None))
@@ -118,6 +125,46 @@ class ProviderService:
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
+        self.provider_audit_manager = provider_audit_manager
+
+    def _record_provider_audit(self, **event: Any) -> dict[str, Any]:
+        """Append an allowlisted audit event without exposing payloads or secrets."""
+        if self.provider_audit_manager is None:
+            return {"status": "AUDIT_DISABLED", "saved": True}
+        try:
+            result = self.provider_audit_manager.record(**event)
+        except Exception as exc:
+            return {"status": "AUDIT_WRITE_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("saved") is not True:
+            status = result.get("status") if isinstance(result, dict) else None
+            if not isinstance(status, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", status):
+                status = "INVALID_AUDIT_MANAGER_RESPONSE"
+            return {"status": status, "saved": False}
+        return result
+
+    def _finish_authorization_decision(
+        self, decision: dict[str, Any], *, principal_id: str | None,
+        operation: str, provider_id: str | None, return_decision: bool,
+    ) -> dict[str, Any] | None:
+        if self.provider_audit_manager is not None:
+            allowed = decision.get("allowed") is True
+            reason = decision.get("status")
+            if not isinstance(reason, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", reason):
+                reason = "AUTHORIZATION_DECISION_INVALID"
+            audit = self._record_provider_audit(
+                event_type="provider.authorization.decision",
+                actor_id=principal_id,
+                provider_id=provider_id,
+                operation=operation,
+                outcome="ALLOWED" if allowed else "DENIED",
+                reason_code=reason,
+                approved=allowed if operation == "billing.approve" else None,
+            )
+            if audit.get("saved") is not True:
+                return {"allowed": False, "status": "AUTHORIZATION_AUDIT_UNAVAILABLE"}
+        if decision.get("allowed") is not True:
+            return decision
+        return decision if return_decision else None
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
@@ -159,32 +206,40 @@ class ProviderService:
             except Exception:
                 trusted_identity = False
             if trusted_identity is not True:
-                return {"allowed": False, "status": "OIDC_AUTHENTICATION_REQUIRED"}
+                return self._finish_authorization_decision(
+                    {"allowed": False, "status": "OIDC_AUTHENTICATION_REQUIRED"},
+                    principal_id=principal_id, operation=operation,
+                    provider_id=provider_id, return_decision=return_decision,
+                )
             # Convert only after the in-process capability check succeeds.
             principal_id = str(principal_id)
         if self.authorization_manager is None:
             if principal_id is not None:
-                return {"allowed": False, "status": "AUTHORIZATION_MANAGER_UNAVAILABLE"}
-            # principal_id=None is reserved for trusted in-process calls only.
-            return {"allowed": True, "status": "TRUSTED_INTERNAL"} if return_decision else None
+                decision = {"allowed": False, "status": "AUTHORIZATION_MANAGER_UNAVAILABLE"}
+            else:
+                # principal_id=None is reserved for trusted in-process calls only.
+                decision = {"allowed": True, "status": "TRUSTED_INTERNAL"}
+            return self._finish_authorization_decision(
+                decision, principal_id=principal_id, operation=operation,
+                provider_id=provider_id, return_decision=return_decision,
+            )
         try:
             authorize = self.authorization_manager.authorize
             if provider_id is not None:
                 if getattr(self.authorization_manager, "supports_provider_scopes", False) is not True:
-                    return {
-                        "allowed": False,
-                        "status": "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE",
-                    }
-                result = authorize(principal_id, operation, provider_id=provider_id)
+                    decision = {"allowed": False, "status": "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE"}
+                else:
+                    decision = authorize(principal_id, operation, provider_id=provider_id)
             else:
-                result = authorize(principal_id, operation)
+                decision = authorize(principal_id, operation)
         except Exception as exc:
-            return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
-        if not isinstance(result, dict):
-            result = {"allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"}
-        if result.get("allowed") is not True:
-            return result
-        return result if return_decision else None
+            decision = {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+        if not isinstance(decision, dict) or not isinstance(decision.get("allowed"), bool):
+            decision = {"allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"}
+        return self._finish_authorization_decision(
+            decision, principal_id=principal_id, operation=operation,
+            provider_id=provider_id, return_decision=return_decision,
+        )
 
 
     def set_provider_access_scopes(
