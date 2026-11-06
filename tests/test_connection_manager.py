@@ -1160,6 +1160,47 @@ class ConnectionManagerTests(unittest.TestCase):
         self.assertTrue(contract["valid"], contract)
         self.assertEqual(contract["adapter_api_version"], "1.0")
 
+    def test_refreshed_provider_metadata_api_version_drives_adapter_negotiation(self):
+        provider = self.manager.catalog["providers"][0]
+        provider["provider_metadata"] = {
+            "verified_at": "2026-11-06T00:00:00+00:00",
+            "adapter_api_version": "2.2",
+            "capabilities": ["image_generation"],
+            "models": [],
+            "pricing": [],
+            "source_url": "https://api.example.com/models",
+        }
+        self.manager.catalog["providers"][0] = provider
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+
+        class RefreshedProvider:
+            supported_provider_api_versions = ("1.0", "2.2")
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        negotiated = self.manager.negotiate_provider_api_version(
+            "public_image", RefreshedProvider()
+        )
+        self.assertEqual(negotiated["selected_version"], "2.2")
+        self.assertTrue(negotiated["compatible"])
+
+    def test_malformed_refreshed_provider_api_version_fails_closed(self):
+        provider = self.manager.catalog["providers"][0]
+        provider["provider_metadata"] = {"adapter_api_version": "version-two"}
+        self.manager.catalog["providers"][0] = provider
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+
+        class LegacyProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        negotiated = self.manager.negotiate_provider_api_version(
+            "public_image", LegacyProvider()
+        )
+        self.assertEqual(negotiated["status"], "INVALID_REQUIRED_ADAPTER_API_VERSION")
+        self.assertFalse(negotiated["compatible"])
+
     def test_provider_adapter_negotiates_declared_compatible_version(self):
         self.manager.catalog["providers"][0]["adapter_api_version"] = "2.1"
         self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
