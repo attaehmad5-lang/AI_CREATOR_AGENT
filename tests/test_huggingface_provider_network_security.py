@@ -2,7 +2,7 @@
 import os
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from projects.generation.providers.huggingface_provider import HuggingFaceProvider
 
@@ -11,9 +11,8 @@ class HuggingFaceProviderNetworkSecurityTests(unittest.TestCase):
     def test_pinned_transport_is_installed_before_client_creation(self):
         order = []
         image = object()
-        client = type("Client", (), {
-            "text_to_image": lambda self, prompt, model: image,
-        })()
+        client = Mock()
+        client.text_to_image.return_value = image
         with patch.dict(os.environ, {"HF_TOKEN": "test-token"}, clear=False), patch(
             "projects.generation.providers.huggingface_provider.install_huggingface_pinned_transport",
             side_effect=lambda: order.append("pinned-transport"),
