@@ -1889,18 +1889,32 @@ class ProviderService:
             "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
 
-    def route_request(self, **route_options: Any) -> dict[str, Any]:
+    def route_request(
+        self, *, audit_principal_id: str | None = None,
+        audit_tenant_id: str | None = None,
+        audit_trace_id: str | None = None,
+        **route_options: Any,
+    ) -> dict[str, Any]:
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
         rejection = self._sensitive_input_rejection({"route_options": route_options})
         if rejection is not None:
             return {"allowed": False, **rejection}
-        principal_id = route_options.get("principal_id")
+        principal_id = (
+            audit_principal_id if isinstance(audit_principal_id, str)
+            else route_options.get("principal_id")
+        )
         provider_id = route_options.get("provider_id")
-        tenant_id = route_options.get("tenant_id")
+        tenant_id = (
+            audit_tenant_id if isinstance(audit_tenant_id, str)
+            else route_options.get("tenant_id")
+        )
         project_id = route_options.get("project_id")
         request_id = route_options.get("request_id")
-        trace_id = route_options.get("trace_id")
+        trace_id = (
+            audit_trace_id if isinstance(audit_trace_id, str)
+            else route_options.get("trace_id")
+        )
         audit_intent = self._audit_operation_intent(
             "provider.route",
             principal_id=principal_id if isinstance(principal_id, str) else None,
@@ -2145,6 +2159,9 @@ class ProviderService:
         if self.tenant_isolation_manager is not None:
             route_options["tenant_id"] = tenant_id
         route = self.route_request(
+            audit_principal_id=principal_id,
+            audit_tenant_id=tenant_id,
+            audit_trace_id=trace_id,
             category=category,
             project_id=project_id,
             request_id=request_id,
@@ -2153,7 +2170,12 @@ class ProviderService:
             **route_options,
         )
         if not isinstance(route, dict) or route.get("allowed") is not True:
-            return {"status": "ROUTING_REJECTED", "executed": False, "route": route}
+            failure_status = (
+                route.get("status")
+                if isinstance(route, dict) and route.get("status") == "AUDIT_LOG_REQUIRED"
+                else "ROUTING_REJECTED"
+            )
+            return {"status": failure_status, "executed": False, "route": route}
         provider_id = route.get("provider")
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
