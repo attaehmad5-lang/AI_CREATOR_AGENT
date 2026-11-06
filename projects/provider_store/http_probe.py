@@ -161,7 +161,7 @@ class ProviderDNSResolver:
                     timeout = isinstance(exc, dns.exception.Timeout)
                 except ImportError:
                     no_answer = timeout = False
-                timeout = timeout or isinstance(exc, TimeoutError) or type(exc).__name__ in {
+                timeout = timeout or isinstance(exc, TimeoutError) or exc.__class__.__name__ in {
                     "Timeout", "LifetimeTimeout",
                 }
                 if no_answer:
