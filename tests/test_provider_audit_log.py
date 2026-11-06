@@ -63,9 +63,11 @@ class ProviderAuditLogTests(unittest.TestCase):
         self.assertEqual(denied["status"], "AUDIT_LOG_INTEGRITY_FAILURE")
 
     def test_invalid_or_secret_like_values_are_rejected_before_persistence(self):
-        invalid = self.append(provider_id="api_key:SECRET")
-        self.assertEqual(invalid["status"], "INVALID_AUDIT_IDENTIFIER")
-        self.assertFalse(self.path.exists())
+        for field in ("actor_id", "tenant_id", "project_id", "request_id", "provider_id"):
+            with self.subTest(field=field):
+                invalid = self.append(**{field: "api_key:SECRET"})
+                self.assertEqual(invalid["status"], "INVALID_AUDIT_IDENTIFIER")
+                self.assertFalse(self.path.exists())
         for event_type in ("UNKNOWN", "routing"):
             result = self.append(event_type=event_type)
             self.assertEqual(result["status"], "INVALID_AUDIT_EVENT_TYPE")
