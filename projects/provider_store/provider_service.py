@@ -1502,16 +1502,6 @@ class ProviderService:
         return result
 
 
-                            request_id=request_id, tenant_id=tenant_id,
-                        )
-                        return {
-                            "allowed": False, "status": "AUDIT_LOG_WRITE_FAILED",
-                            "provider": actual_provider, "reservation_release": release,
-                            "reservations_retained": release.get("released") is not True,
-                        }
-                    return {**result, "audit_log_saved": False, "audit_log_status": "AUDIT_LOG_WRITE_FAILED"}
-        return result
-
     def verify_provider_audit_log(self, *, principal_id: str | None) -> dict[str, Any]:
         """Verify audit-chain integrity; only an authorized administrator may inspect it."""
         if self.provider_audit_manager is None:
