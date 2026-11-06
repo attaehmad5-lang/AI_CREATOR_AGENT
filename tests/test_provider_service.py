@@ -236,7 +236,10 @@ class ProviderServiceTests(unittest.TestCase):
         health = ProviderHealthManager(health_path)
         service = ProviderService(manager, health_manager=health)
         opener = Opener()
-        result = service.verify_oauth_provider("oauth_image", OAuthStub(), opener=opener)
+        result = service.verify_oauth_provider(
+            "oauth_image", OAuthStub(), opener=opener,
+            dns_resolver=_public_dns_resolver,
+        )
         self.assertTrue(result["verified"])
         self.assertEqual(result["status"], "CONNECTED")
         self.assertEqual(opener.request_headers[0].get("authorization"), "Bearer oauth-access-secret")
