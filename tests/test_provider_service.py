@@ -317,6 +317,87 @@ class ProviderServiceTests(unittest.TestCase):
         ])
         self.assertTrue(all(event["trace_id"] == trace_id for event in events))
 
+    def test_required_audit_log_records_worker_claim_and_completion(self):
+        audit = ProviderAuditLog(
+            self.root / "worker-audit.json",
+            signing_key=b"worker-audit-test-signing-key-at-least-32-bytes",
+        )
+        authorization = ProviderAuthorizationManager(self.root / "worker-audit-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        manager = ProviderJobManager(self.root / "worker-audited-jobs.json")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=manager,
+            audit_manager=audit,
+            require_audit_logging=True,
+        )
+        trace_id = "8" * 32
+        submitted = service.submit_job(
+            job_id="worker-audit-job", project_id="film",
+            provider_id="image", payload_ref="payload:worker-audit",
+            principal_id="creator-user", trace_id=trace_id,
+        )
+        self.assertTrue(submitted["accepted"])
+
+        claimed = service.claim_next_job(
+            worker_id="worker-a", principal_id="creator-user"
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.assertTrue(claimed["audit_outcome_recorded"])
+        token = claimed["job"]["lease_token"]
+        completed = service.complete_job(
+            job_id="worker-audit-job", worker_id="worker-a",
+            lease_token=token, success=True, result_ref="asset:worker-audit",
+            principal_id="creator-user",
+        )
+        self.assertEqual(completed["status"], "JOB_COMPLETED")
+        self.assertTrue(completed["audit_outcome_recorded"])
+        events = audit.read_events()["events"]
+        self.assertEqual(
+            [event["operation"] for event in events],
+            [
+                "provider.job.submit", "provider.job.submit",
+                "provider.job.claim", "provider.job.claim",
+                "provider.job.complete", "provider.job.complete",
+            ],
+        )
+        self.assertTrue(all(event["trace_id"] == trace_id for event in events))
+
+    def test_required_audit_log_records_job_queue_stop_and_resume(self):
+        audit = ProviderAuditLog(
+            self.root / "queue-control-audit.json",
+            signing_key=b"queue-control-audit-key-at-least-32-bytes",
+        )
+        authorization = ProviderAuthorizationManager(self.root / "queue-control-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        manager = ProviderJobManager(self.root / "queue-control-jobs.json")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=manager,
+            audit_manager=audit,
+            require_audit_logging=True,
+        )
+        stopped = service.stop_job_submissions(principal_id="admin-user")
+        resumed = service.resume_job_submissions(principal_id="admin-user")
+        self.assertFalse(stopped["accepting"])
+        self.assertTrue(stopped["audit_outcome_recorded"])
+        self.assertTrue(resumed["accepting"])
+        self.assertTrue(resumed["audit_outcome_recorded"])
+        events = audit.read_events()["events"]
+        self.assertEqual(
+            [event["operation"] for event in events],
+            [
+                "provider.job.stop_submissions", "provider.job.stop_submissions",
+                "provider.job.resume_submissions", "provider.job.resume_submissions",
+            ],
+        )
+        self.assertEqual(
+            [event["outcome"] for event in events],
+            ["REQUESTED", "STOPPED", "REQUESTED", "RESUMED"],
+        )
+
     def test_provider_registry_discovery_and_metadata_reads_are_authorized(self):
         authorization = ProviderAuthorizationManager(self.root / "registry-read-auth.json")
         authorization.assign_role("viewer-user", "viewer")
