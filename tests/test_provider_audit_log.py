@@ -55,6 +55,18 @@ class ProviderAuditLogTests(unittest.TestCase):
             "AUDIT_INTEGRITY_FAILURE",
         )
 
+    def test_malformed_unhashable_event_type_is_reported_as_integrity_failure(self):
+        self.path.write_text(
+            json.dumps({"version": 1, "events": [{
+                "sequence": 1, "timestamp": 1.0, "event_type": [],
+                "actor_id": None, "tenant_id": None, "provider_id": None,
+                "request_id": None, "trace_id": None, "outcome": "success",
+                "details": {}, "previous_hash": "0" * 64, "event_hash": "0" * 64,
+            }]}),
+            encoding="utf-8",
+        )
+        self.assertEqual(self.log.verify()["status"], "AUDIT_INTEGRITY_FAILURE")
+
     def test_previous_hash_tampering_is_detected(self):
         self.log.append("routing_decision", outcome="attempted")
         self.log.append("routing_decision", outcome="success")
