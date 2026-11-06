@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+import hashlib
 import inspect
 import re
 import time
@@ -43,6 +44,8 @@ class ProviderService:
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
         secret_manager: Any | None = None,
+        provider_retention_manager: Any | None = None,
+        provider_deletion_adapter: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -55,6 +58,20 @@ class ProviderService:
             or not callable(getattr(identity_authenticator, "is_authenticated_principal", None))
         ):
             raise ValueError("identity_authenticator must verify tokens and identify trusted principals")
+        if provider_retention_manager is not None and (
+            not callable(getattr(provider_retention_manager, "register", None))
+            or not callable(getattr(provider_retention_manager, "run_due", None))
+        ):
+            raise ValueError("provider_retention_manager must support registration and due-deletion sweeps")
+        if provider_retention_manager is not None and (
+            data_handling_policy is None
+            or getattr(provider_retention_manager, "policy", None) is not data_handling_policy
+        ):
+            raise ValueError("provider retention and execution must share the same data-handling policy")
+        if provider_deletion_adapter is not None and not callable(
+            getattr(provider_deletion_adapter, "delete_resource", None)
+        ):
+            raise ValueError("provider_deletion_adapter must support delete_resource")
         resolved_secret_manager = secret_manager or getattr(connection_manager, "secret_manager", None)
         if resolved_secret_manager is not None and (
             not callable(getattr(resolved_secret_manager, "resolve_secret", None))
@@ -118,6 +135,8 @@ class ProviderService:
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
+        self.provider_retention_manager = provider_retention_manager
+        self.provider_deletion_adapter = provider_deletion_adapter
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
@@ -217,6 +236,55 @@ class ProviderService:
             return {"status": "PROVIDER_SCOPE_UPDATE_FAILED", "saved": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {
             "status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False
+        }
+
+    def run_provider_retention_sweep(
+        self, *, principal_id: str | None, delete_provider_resource: Any | None = None,
+        now: float | None = None, limit: int = 100,
+    ) -> dict[str, Any]:
+        """Run due provider-resource deletion only through an admin service boundary.
+
+        A configured ProviderResourceDeletionAdapter is preferred. The optional
+        callback remains for trusted, server-side maintenance wiring only; API
+        handlers must never accept a callback or arbitrary deletion function from
+        client input.
+        """
+        if self.provider_retention_manager is None:
+            return {"status": "PROVIDER_RETENTION_MANAGER_UNAVAILABLE", "deleted": 0, "failed": 0}
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "deleted": 0, "failed": 0}
+        authorization = self._authorize_operation(principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "deleted": 0, "failed": 0}
+        configured_delete = (
+            getattr(self.provider_deletion_adapter, "delete_resource", None)
+            if self.provider_deletion_adapter is not None else None
+        )
+        delete_fn = configured_delete if callable(configured_delete) else delete_provider_resource
+        if not callable(delete_fn):
+            return {"status": "PROVIDER_DELETION_ADAPTER_UNAVAILABLE", "deleted": 0, "failed": 0}
+        try:
+            result = self.provider_retention_manager.run_due(
+                delete_provider_resource=delete_fn, now=now, limit=limit,
+            )
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_RETENTION_SWEEP_FAILED", "deleted": 0, "failed": 0,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict) or result.get("status") != "RETENTION_SWEEP_COMPLETE":
+            return {"status": "INVALID_PROVIDER_RETENTION_RESPONSE", "deleted": 0, "failed": 0}
+        deleted = result.get("deleted")
+        failed = result.get("failed")
+        if (
+            isinstance(deleted, bool) or not isinstance(deleted, int) or deleted < 0
+            or isinstance(failed, bool) or not isinstance(failed, int) or failed < 0
+        ):
+            return {"status": "INVALID_PROVIDER_RETENTION_RESPONSE", "deleted": 0, "failed": 0}
+        return {
+            "status": "PROVIDER_RETENTION_SWEEP_COMPLETE",
+            "deleted": deleted,
+            "failed": failed,
         }
 
     def configure_provider(
@@ -778,6 +846,7 @@ class ProviderService:
         max_response_bytes: int = 4096,
         principal_id: str | None = None,
         tenant_id: str | None = None,
+        dns_resolver: Any = None,
     ) -> dict[str, Any]:
         """Verify a configured allowlisted HTTPS endpoint using the built-in safe probe.
 
@@ -797,6 +866,7 @@ class ProviderService:
                 environ=environ,
                 opener=opener,
                 max_response_bytes=max_response_bytes,
+                dns_resolver=dns_resolver,
                 secret_manager=self.secret_manager,
                 tenant_id=tenant_id,
                 principal_id=principal_id,
@@ -826,6 +896,7 @@ class ProviderService:
         opener: Any = None,
         max_response_bytes: int = 4096,
         principal_id: str | None = None,
+        dns_resolver: Any = None,
     ) -> dict[str, Any]:
         """Verify a provider using an access token held only by an OAuth manager in memory.
 
@@ -880,6 +951,7 @@ class ProviderService:
             opener=opener,
             max_response_bytes=max_response_bytes,
             principal_id=principal_id,
+            dns_resolver=dns_resolver,
         )
 
     def verify_manual_provider(
@@ -1292,6 +1364,11 @@ class ProviderService:
             return {"status": "INVALID_PROJECT_ID", "executed": False}
         if not self._valid_amount(estimated_cost):
             return {"status": "INVALID_COST_AMOUNT", "executed": False}
+        if self.provider_retention_manager is not None and (
+            not isinstance(tenant_id, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", tenant_id) is None
+        ):
+            return {"status": "TENANT_CONTEXT_REQUIRED", "executed": False}
 
         degraded_mode_state = None
         if self.degraded_mode_manager is not None:
@@ -1843,6 +1920,25 @@ class ProviderService:
                         else "INVALID_QUALITY_POLICY_RESPONSE"
                     )
 
+        retention_result = None
+        if final_success and self.provider_retention_manager is not None:
+            resource_ref = adapter_result.get("provider_resource_ref")
+            if not isinstance(resource_ref, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", resource_ref) is None:
+                retention_result = {"saved": False, "status": "PROVIDER_RESOURCE_REFERENCE_REQUIRED"}
+            else:
+                resource_id = hashlib.sha256(
+                    (provider_id + "\\0" + tenant_id + "\\0" + request_id).encode("utf-8")
+                ).hexdigest()
+                try:
+                    retention_result = self.provider_retention_manager.register(
+                        resource_id=resource_id, provider_id=provider_id, tenant_id=tenant_id,
+                        resource_ref=resource_ref, data_categories=data_categories,
+                        retention_days=retention_days, provider_training_use=provider_training_use,
+                        user_training_consent=user_training_consent,
+                    )
+                except Exception as exc:
+                    retention_result = {"saved": False, "status": "PROVIDER_RETENTION_REGISTRATION_FAILED",
+                                        "error_type": type(exc).__name__}
         error_code = self._safe_error_code(
             adapter_result.get("error_code"),
             quality_error or output_error or ("PROVIDER_EXECUTION_FAILED" if not final_success else "PROVIDER_EXECUTION_SUCCEEDED"),
@@ -2006,6 +2102,8 @@ class ProviderService:
             status = "EXECUTION_SUCCEEDED"
         else:
             status = "EXECUTION_FINALIZATION_PARTIAL"
+        if final_success and isinstance(retention_result, dict) and retention_result.get("saved") is not True:
+            status = "EXECUTION_RETENTION_REGISTRATION_FAILED"
         return {
             "status": status,
             "executed": True,
@@ -2027,6 +2125,10 @@ class ProviderService:
             "feature_flag": feature_flag_result,
             "sensitive_data_scan": sensitive_data_scan,
             "data_policy": data_policy_result,
+            "retention": retention_result,
+            "retention_enforcement_pending": bool(
+                final_success and isinstance(retention_result, dict) and retention_result.get("saved") is not True
+            ),
             "retry_decision": retry,
         }
 
