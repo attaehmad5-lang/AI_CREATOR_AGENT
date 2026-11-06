@@ -375,5 +375,70 @@ class RemoteProviderJobServiceTests(unittest.TestCase):
             )
 
 
+    def test_public_job_reads_redact_remote_submission_worker_and_lease_hash(self):
+        worker_job = self.submit_and_claim()
+        started = self.jobs.begin_remote_submission(
+            job_id=worker_job["job_id"], worker_id="worker-1",
+            lease_token=worker_job["lease_token"],
+        )
+        self.assertEqual(started["status"], "REMOTE_SUBMISSION_STARTED")
+        persisted = self.jobs.data["jobs"]["local-job-1"]
+        self.assertRegex(
+            persisted["remote_submission_lease_token_hash"], r"^[0-9a-f]{64}$"
+        )
+        public = self.jobs.poll(job_id="local-job-1")
+        self.assertEqual(public["status"], "JOB_STATUS")
+        self.assertNotIn(
+            "remote_submission_lease_token_hash", public["job"]
+        )
+        self.assertNotIn("remote_submission_worker_id", public["job"])
+
+    def test_remote_status_cannot_regress_from_running_to_queued(self):
+        worker_job = self.submit_and_claim()
+        self.service.submit_remote_job(
+            job_id=worker_job["job_id"], worker_id="worker-1",
+            lease_token=worker_job["lease_token"], principal_id="creator-1",
+        )
+        self.adapter.poll_responses = [
+            {"status": "RUNNING", "poll_after_seconds": 15},
+            {"status": "QUEUED", "poll_after_seconds": 10},
+        ]
+        running = self.service.poll_remote_job(
+            job_id="local-job-1", worker_id="worker-1",
+            lease_token=worker_job["lease_token"], principal_id="creator-1",
+        )
+        self.assertEqual(running["status"], "REMOTE_JOB_PENDING")
+        regressed = self.service.poll_remote_job(
+            job_id="local-job-1", worker_id="worker-1",
+            lease_token=worker_job["lease_token"], principal_id="creator-1",
+        )
+        self.assertEqual(regressed["status"], "REMOTE_JOB_STATUS_REGRESSION")
+        self.assertEqual(
+            self.jobs.data["jobs"]["local-job-1"]["remote_status"], "RUNNING"
+        )
+
+    def test_corrupt_remote_submission_lease_hash_fails_closed_on_reload(self):
+        worker_job = self.submit_and_claim()
+        self.assertEqual(
+            self.jobs.begin_remote_submission(
+                job_id=worker_job["job_id"], worker_id="worker-1",
+                lease_token=worker_job["lease_token"],
+            )["status"],
+            "REMOTE_SUBMISSION_STARTED",
+        )
+        persisted = json.loads(self.jobs_path.read_text(encoding="utf-8"))
+        persisted["jobs"]["local-job-1"]["remote_submission_lease_token_hash"] = "not-a-digest"
+        self.jobs_path.write_text(json.dumps(persisted), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "provider job record"):
+            ProviderJobManager(
+                self.jobs_path,
+                max_queue_size=8,
+                max_concurrent=2,
+                lease_seconds=30,
+                max_attempts=3,
+                clock=lambda: self.now[0],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
