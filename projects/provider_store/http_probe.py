@@ -94,10 +94,10 @@ class _PinnedResponse:
 class _PinnedHTTPSOpener:
     """Resolve once, reject non-public answers, then connect to a pinned IP."""
 
-    def __init__(self, resolver: Callable[..., Any] = socket.getaddrinfo) -> None:
-        if not callable(resolver):
+    def __init__(self, resolver: Callable[..., Any] | None = None) -> None:
+        if resolver is not None and not callable(resolver):
             raise ValueError("resolver must be callable")
-        self._resolver = resolver
+        self._resolver = resolver if resolver is not None else socket.getaddrinfo
 
     def open(self, request: Request, timeout: float) -> _PinnedResponse:
         parsed = urlsplit(request.full_url)
