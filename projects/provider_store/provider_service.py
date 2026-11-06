@@ -1638,6 +1638,8 @@ class ProviderService:
         if self.tenant_isolation_manager is not None:
             route_options["tenant_id"] = tenant_id
         route = self.route_request(
+            principal_id=principal_id,
+            audit_context={"principal_id": principal_id, "tenant_id": tenant_id},
             category=category,
             project_id=project_id,
             request_id=request_id,
