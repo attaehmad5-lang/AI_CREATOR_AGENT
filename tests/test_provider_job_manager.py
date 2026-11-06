@@ -820,18 +820,104 @@ class ProviderJobManagerTests(unittest.TestCase):
         control = self.manager.get_worker_control(
             job_id="running-deadline", worker_id="worker-1", lease_token=token
         )
-        self.assertEqual(control["status"], "JOB_DEADLINE_EXCEEDED")
+        self.assertEqual(control["status"], "WORKER_STOP_REQUESTED")
         self.assertTrue(control["stop_requested"])
+        self.assertEqual(
+            self.manager.data["jobs"]["running-deadline"]["status"], "RUNNING"
+        )
         late = self.manager.complete(
             job_id="running-deadline", worker_id="worker-1",
             lease_token=token, success=True, result_ref="asset:too-late",
         )
-        self.assertFalse(late["saved"])
-        self.assertEqual(
-            self.manager.data["jobs"]["running-deadline"]["status"], "FAILED"
-        )
-        self.assertNotIn("result_ref", self.manager.data["jobs"]["running-deadline"])
+        self.assertTrue(late["saved"])
+        self.assertEqual(late["job"]["status"], "FAILED")
+        self.assertEqual(late["job"]["error_code"], "JOB_DEADLINE_EXCEEDED")
+        self.assertNotIn("result_ref", late["job"])
 
+
+    def test_deadline_cancellation_preserves_known_remote_job_until_provider_confirms(self):
+        deadline = self.now[0] + timedelta(seconds=3)
+        accepted = self.manager.submit(
+            job_id="remote-deadline", project_id="film", provider_id="image",
+            payload_ref="payload:remote-deadline",
+            idempotency_key="remote-deadline-key",
+            deadline_at=deadline.isoformat(),
+        )
+        self.assertEqual(accepted["status"], "JOB_QUEUED")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        token = claimed["job"]["lease_token"]
+        self.assertEqual(
+            self.manager.begin_remote_submission(
+                job_id="remote-deadline", worker_id="worker-1", lease_token=token
+            )["status"],
+            "REMOTE_SUBMISSION_STARTED",
+        )
+        self.assertEqual(
+            self.manager.record_remote_submission(
+                job_id="remote-deadline",
+                worker_id="worker-1",
+                lease_token=token,
+                remote_job_id="provider-job-123",
+                remote_status="RUNNING",
+                poll_after_seconds=10,
+            )["status"],
+            "REMOTE_JOB_SUBMITTED",
+        )
+        self.now[0] += timedelta(seconds=4)
+        control = self.manager.get_worker_control(
+            job_id="remote-deadline", worker_id="worker-1", lease_token=token
+        )
+        self.assertEqual(control["status"], "WORKER_STOP_REQUESTED")
+        record = self.manager.data["jobs"]["remote-deadline"]
+        self.assertEqual(record["status"], "RUNNING")
+        self.assertTrue(record["cancel_requested"])
+        self.assertEqual(record["remote_job_id"], "provider-job-123")
+
+        # A confirmed provider-side cancellation is the point where local capacity is released.
+        cancelled = self.manager.confirm_remote_cancellation(
+            job_id="remote-deadline", remote_job_id="provider-job-123"
+        )
+        self.assertEqual(cancelled["status"], "REMOTE_JOB_CANCELLED")
+        self.assertEqual(cancelled["job"]["status"], "CANCELLED")
+        self.assertIsNone(cancelled["job"]["worker_id"])
+
+    def test_expired_remote_worker_lease_requeues_for_cancellation_not_resubmission(self):
+        deadline = self.now[0] + timedelta(seconds=2)
+        self.manager.submit(
+            job_id="remote-reclaim", project_id="film", provider_id="image",
+            payload_ref="payload:remote-reclaim",
+            idempotency_key="remote-reclaim-key",
+            deadline_at=deadline.isoformat(),
+        )
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        token = claimed["job"]["lease_token"]
+        self.manager.begin_remote_submission(
+            job_id="remote-reclaim", worker_id="worker-1", lease_token=token
+        )
+        self.manager.record_remote_submission(
+            job_id="remote-reclaim", worker_id="worker-1",
+            lease_token=token, remote_job_id="remote-reclaim-123",
+            remote_status="RUNNING", poll_after_seconds=10,
+        )
+        self.now[0] += timedelta(seconds=11)
+        status = self.manager.get_shutdown_status()
+        self.assertEqual(status["counts"]["QUEUED"], 1)
+        queued = self.manager.data["jobs"]["remote-reclaim"]
+        self.assertEqual(queued["status"], "QUEUED")
+        self.assertTrue(queued["cancel_requested"])
+        self.assertEqual(queued["remote_job_id"], "remote-reclaim-123")
+
+        reclaimed = self.manager.claim_next(worker_id="worker-2")
+        self.assertEqual(reclaimed["status"], "JOB_CLAIMED")
+        self.assertEqual(reclaimed["job"]["job_id"], "remote-reclaim")
+        self.assertEqual(
+            self.manager.get_worker_control(
+                job_id="remote-reclaim",
+                worker_id="worker-2",
+                lease_token=reclaimed["job"]["lease_token"],
+            )["status"],
+            "WORKER_STOP_REQUESTED",
+        )
     def test_worker_control_exposes_cooperative_cancel_and_deadline_state(self):
         deadline = self.now[0] + timedelta(minutes=2)
         self.manager.submit(
