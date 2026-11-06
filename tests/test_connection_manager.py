@@ -68,6 +68,7 @@ class ConnectionManagerTests(unittest.TestCase):
                 "official_api_url": "https://api.example.com/v1",
                 "official_docs_url": "https://docs.example.com",
                 "allowed_hosts": ["api.example.com"],
+                "subscription_required": True,
                 "endpoint": "https://api.example.com/v1/generate",
                 "capabilities": ["image_generation"],
             }],
@@ -109,6 +110,7 @@ class ConnectionManagerTests(unittest.TestCase):
                 "official_api_url": "https://api.example.com/v1",
                 "official_docs_url": "https://docs.example.com",
                 "allowed_hosts": ["api.example.com"],
+                "subscription_required": True,
                 "capabilities": ["image_generation"],
             }],
         }
