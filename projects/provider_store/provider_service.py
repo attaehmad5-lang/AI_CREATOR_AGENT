@@ -43,8 +43,11 @@ class ProviderService:
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
         provider_onboarding_manager: Any | None = None,
+        adapter_factory_resolver: Any | None = None,
         secret_manager: Any | None = None,
     ) -> None:
+        if adapter_factory_resolver is not None and not callable(adapter_factory_resolver):
+            raise ValueError("adapter_factory_resolver must be callable")
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
         if tenant_isolation_manager is not None and authorization_manager is None:
@@ -124,6 +127,8 @@ class ProviderService:
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
         self.provider_onboarding_manager = provider_onboarding_manager
+        # Adapter constructors are application-controlled; request data cannot supply code.
+        self.adapter_factory_resolver = adapter_factory_resolver
         self.secret_manager = resolved_secret_manager
 
     def submit_provider_onboarding(
@@ -382,9 +387,9 @@ class ProviderService:
         return {"status": "PROVIDER_METADATA_FOUND", "provider": provider_id, "metadata": metadata}
 
     def load_provider_adapter(
-        self, provider_id: str, factory: Any, *, principal_id: str | None = None
+        self, provider_id: str, *, principal_id: str | None = None
     ) -> dict[str, Any]:
-        """Load a trusted runtime adapter through the authorized provider registry."""
+        """Load an adapter resolved only by the trusted application registry."""
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "provider": provider_id, "loaded": False}
         authorization = self._authorize_operation(
@@ -395,13 +400,34 @@ class ProviderService:
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
                 "loaded": False, "authorization": authorization,
             }
-        if not callable(factory):
-            return {"status": "INVALID_ADAPTER_FACTORY", "provider": provider_id, "loaded": False}
+        if self.adapter_factory_resolver is None:
+            return {"status": "ADAPTER_FACTORY_RESOLVER_UNAVAILABLE", "provider": provider_id, "loaded": False}
+        getter = getattr(self.connection_manager, "get_provider_metadata", None)
         loader = getattr(self.connection_manager, "load_provider", None)
-        if not callable(loader):
+        if not callable(getter) or not callable(loader):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "loaded": False}
         try:
-            result = loader(provider_id, factory)
+            metadata = getter(provider_id)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_METADATA_LOOKUP_FAILED", "provider": provider_id,
+                "loaded": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(metadata, dict):
+            return {"status": "NOT_FOUND", "provider": provider_id, "loaded": False}
+        if metadata.get("enabled") is not True:
+            return {"status": "DISABLED", "provider": provider_id, "loaded": False}
+        try:
+            adapter = self.adapter_factory_resolver(provider_id, dict(metadata))
+        except Exception as exc:
+            return {
+                "status": "ADAPTER_FACTORY_RESOLUTION_FAILED", "provider": provider_id,
+                "loaded": False, "error_type": type(exc).__name__,
+            }
+        if adapter is None:
+            return {"status": "ADAPTER_FACTORY_RESOLUTION_FAILED", "provider": provider_id, "loaded": False}
+        try:
+            result = loader(provider_id, lambda _metadata: adapter)
         except Exception as exc:
             return {
                 "status": "PROVIDER_ADAPTER_LOAD_FAILED", "provider": provider_id,
