@@ -73,19 +73,19 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         )
         self.assertEqual(result, {"ok": True, "http_status": 204})
 
-    def test_public_https_probe_uses_timeout_and_bounds_response_read(self):
+    def test_public_https_probe_uses_timeout_and_rejects_oversized_response(self):
         opener = _Opener(_Response(body=b"x" * 5000))
         probe = ProviderHTTPConnectivityProbe(opener=opener, max_response_bytes=16)
-        result = probe(
-            {
-                "id": "public_provider",
-                "auth_type": "NONE",
-                "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
-            },
-            timeout_seconds=2.5,
-        )
-        self.assertEqual(result, {"ok": True, "http_status": 200})
+        with self.assertRaisesRegex(ValueError, "PROVIDER_PROBE_RESPONSE_TOO_LARGE"):
+            probe(
+                {
+                    "id": "public_provider",
+                    "auth_type": "NONE",
+                    "allowed_hosts": ["api.example.com"],
+                    "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
+                },
+                timeout_seconds=2.5,
+            )
         self.assertEqual(opener.calls[0][1], 2.5)
         self.assertEqual(opener.calls[0][0].get_method(), "GET")
         self.assertEqual(len(opener.response.body), 5000)
