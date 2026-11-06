@@ -801,6 +801,14 @@ class ProviderService:
         secret_ref = provider.get("secret_ref")
         if not isinstance(secret_ref, str):
             return {"status": "PROVIDER_SECRET_REFERENCE_REQUIRED", "rotated": False}
+        if self.audit_log is not None:
+            audit_failure = self._record_audit(
+                "credential_rotation", actor_id=principal_id,
+                tenant_id=tenant_id, provider_id=provider_id,
+                outcome="attempted", details={"operation": "provider.credentials.rotate"},
+            )
+            if audit_failure is not None:
+                return {"status": "CREDENTIAL_ROTATION_AUDIT_FAILED", "rotated": False, "audit": audit_failure}
         try:
             result = self.secret_manager.rotate_secret(
                 secret_ref,
@@ -829,6 +837,16 @@ class ProviderService:
                 else "INVALID_ROTATION_RESPONSE"
             )
             return {"status": safe_status, "rotated": False}
+        audit_failure = self._record_audit(
+            "credential_rotation", actor_id=principal_id,
+            tenant_id=tenant_id, provider_id=provider_id,
+            outcome="success", details={"operation": "provider.credentials.rotate", "status": "PROVIDER_SECRET_ROTATED"},
+        )
+        if audit_failure is not None:
+            return {
+                "status": "CREDENTIAL_ROTATED_AUDIT_PERSISTENCE_FAILED",
+                "rotated": True, "audit": audit_failure,
+            }
         return {
             "status": "PROVIDER_SECRET_ROTATED",
             "rotated": True,
