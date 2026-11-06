@@ -867,7 +867,19 @@ class ConnectionManager:
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "compatible": False}
-        expected = provider.get("adapter_api_version", "1.0")
+        expected = provider.get("adapter_api_version")
+        if expected is None:
+            refreshed_metadata = provider.get("provider_metadata")
+            expected = (
+                refreshed_metadata.get("adapter_api_version")
+                if isinstance(refreshed_metadata, dict) else "1.0"
+            )
+        if not isinstance(expected, str) or not _ADAPTER_API_VERSION_RE.fullmatch(expected):
+            return {
+                "status": "INVALID_REQUIRED_ADAPTER_API_VERSION",
+                "provider": provider_id,
+                "compatible": False,
+            }
         try:
             declared = getattr(instance, "supported_provider_api_versions", None)
             if declared is None:
