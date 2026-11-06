@@ -61,6 +61,7 @@ class ProviderConcurrencyManagerTests(unittest.TestCase):
 
     def test_lease_renewal_and_release_are_idempotent(self):
         lease = self.acquire()
+        self.now += 1
         renewed = self.manager.renew(lease["lease_token"])
         self.assertTrue(renewed["renewed"])
         self.assertGreater(renewed["expires_at"], lease["expires_at"])
