@@ -46,6 +46,7 @@ class _Router:
 
     def route(self, **kwargs):
         self.calls += 1
+        self.last_kwargs = dict(kwargs)
         return dict(self.result)
 
 
@@ -145,6 +146,9 @@ class ProviderServiceAuditIntegrationTests(unittest.TestCase):
         self.assertEqual(events[1]["provider_id"], "image")
         self.assertEqual(events[1]["request_id"], "request-1")
         self.assertEqual(events[1]["tenant_id"], "tenant-a")
+        self.assertNotIn("principal_id", router.last_kwargs)
+        self.assertNotIn("trace_id", router.last_kwargs)
+        self.assertNotIn("approval_id", router.last_kwargs)
 
     def test_paid_usage_approval_decision_is_recorded_with_optional_approval_id(self):
         router = _Router(result={
