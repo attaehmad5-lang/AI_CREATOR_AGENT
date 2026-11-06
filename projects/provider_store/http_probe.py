@@ -15,7 +15,7 @@ import ssl
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request
+from urllib.request import Request
 
 from .connection_manager import ConnectionManager, ProviderAuthenticationVerificationRequired
 from .safe_numbers import finite_number
@@ -38,13 +38,6 @@ class ProviderHTTPStatusError(ConnectionError):
         super().__init__(f"provider returned HTTP {status_code}")
 
 
-class _RejectRedirects(HTTPRedirectHandler):
-    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
-        # Redirect targets are never followed automatically; callers must configure
-        # the final endpoint explicitly and pass the host allowlist again.
-        return None
-
-
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     """HTTPS connection that connects to a prevalidated numeric address.
 
@@ -64,7 +57,12 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         raw = socket.socket(self._pinned_family, socket.SOCK_STREAM)
         try:
             raw.settimeout(self.timeout)
-            raw.connect((self._pinned_address, self.port))
+            target = (
+                (self._pinned_address, self.port, 0, 0)
+                if self._pinned_family == socket.AF_INET6
+                else (self._pinned_address, self.port)
+            )
+            raw.connect(target)
             self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
         except Exception:
             raw.close()
@@ -111,6 +109,8 @@ class _PinnedHTTPSOpener:
             resolved = self._resolver(hostname, port, type=socket.SOCK_STREAM)
         except Exception:
             raise URLError("provider endpoint DNS resolution failed") from None
+        if not isinstance(resolved, (list, tuple)) or not resolved or len(resolved) > 32:
+            raise ValueError("PROVIDER_ENDPOINT_DNS_RESPONSE_INVALID")
         targets: list[tuple[int, str]] = []
         seen: set[tuple[int, str]] = set()
         for record in resolved:
