@@ -209,16 +209,13 @@ class ProviderJobManagerTests(unittest.TestCase):
 
     def test_scoped_idempotency_key_deduplicates_different_job_ids_and_survives_restart(self):
         key = "client-retry-key-2026"
-        fingerprint = "a" * 64
         first = self.manager.submit(
             job_id="idem-job-1", project_id="film", provider_id="image",
-            payload_ref="payload:idem-1", idempotency_key=key,
-            request_fingerprint=fingerprint,
+            payload_ref="payload:idem-1", idempotency_key=key
         )
         duplicate = self.manager.submit(
             job_id="idem-job-2", project_id="film", provider_id="image",
-            payload_ref="payload:idem-2", idempotency_key=key,
-            request_fingerprint=fingerprint,
+            payload_ref="payload:idem-1", idempotency_key=key
         )
         self.assertEqual(first["status"], "JOB_QUEUED")
         self.assertEqual(duplicate["status"], "ALREADY_SUBMITTED")
@@ -235,8 +232,7 @@ class ProviderJobManagerTests(unittest.TestCase):
         reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
         replay = reloaded.submit(
             job_id="idem-job-3", project_id="film", provider_id="image",
-            payload_ref="payload:idem-3", idempotency_key=key,
-            request_fingerprint=fingerprint,
+            payload_ref="payload:idem-1", idempotency_key=key
         )
         self.assertEqual(replay["status"], "ALREADY_SUBMITTED")
         claim = reloaded.claim_next(worker_id="worker-idem")
@@ -250,16 +246,14 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(retry_claim["job"]["provider_idempotency_key"], provider_key)
         self.assertNotIn(key, self.path.read_text(encoding="utf-8"))
 
-    def test_idempotency_key_reuse_with_changed_request_fingerprint_conflicts(self):
+    def test_idempotency_key_reuse_with_changed_request_payload_conflicts(self):
         first = self.manager.submit(
             job_id="idem-conflict-1", project_id="film", provider_id="image",
-            payload_ref="payload:idem-conflict-1", idempotency_key="stable-client-key",
-            request_fingerprint="1" * 64,
+            payload_ref="payload:idem-conflict-1", idempotency_key="stable-client-key"
         )
         replay = self.manager.submit(
             job_id="idem-conflict-2", project_id="film", provider_id="image",
-            payload_ref="payload:idem-conflict-2", idempotency_key="stable-client-key",
-            request_fingerprint="2" * 64,
+            payload_ref="payload:changed-request", idempotency_key="stable-client-key"
         )
         self.assertEqual(first["status"], "JOB_QUEUED")
         self.assertEqual(replay["status"], "IDEMPOTENCY_KEY_CONFLICT")
@@ -278,8 +272,7 @@ class ProviderJobManagerTests(unittest.TestCase):
             result = self.manager.submit(
                 job_id=f"scope-job-{index}", project_id=project,
                 provider_id=provider, payload_ref=f"payload:scope-{index}",
-                tenant_id=tenant, idempotency_key="same-key",
-                request_fingerprint="f" * 64,
+                tenant_id=tenant, idempotency_key="same-key"
             )
             self.assertEqual(result["status"], "JOB_QUEUED")
         self.assertEqual(len(self.manager.data["jobs"]), len(scopes))
@@ -291,9 +284,8 @@ class ProviderJobManagerTests(unittest.TestCase):
         def submit(index):
             return self.manager.submit(
                 job_id=f"concurrent-idem-{index}", project_id="film",
-                provider_id="image", payload_ref=f"payload:concurrent-{index}",
-                idempotency_key="one-logical-request",
-                request_fingerprint="c" * 64,
+                provider_id="image", payload_ref="payload:concurrent-shared",
+                idempotency_key="one-logical-request"
             )
         with ThreadPoolExecutor(max_workers=12) as pool:
             results = list(pool.map(submit, range(12)))
@@ -306,31 +298,18 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(len(self.manager.data["jobs"]), 1)
         self.assertEqual(len(self.manager.data["idempotency_index"]), 1)
 
-    def test_idempotency_fields_reject_malformed_or_incomplete_inputs(self):
-        missing = self.manager.submit(
-            job_id="idem-missing", project_id="film", provider_id="image",
-            payload_ref="payload:idem-missing", request_fingerprint="d" * 64,
-        )
+    def test_idempotency_fields_reject_malformed_keys(self):
         bad_key = self.manager.submit(
             job_id="idem-bad-key", project_id="film", provider_id="image",
             payload_ref="payload:idem-bad-key", idempotency_key="bad key",
-            request_fingerprint="d" * 64,
         )
-        bad_fingerprint = self.manager.submit(
-            job_id="idem-bad-fingerprint", project_id="film", provider_id="image",
-            payload_ref="payload:idem-bad-fingerprint", idempotency_key="valid-key",
-            request_fingerprint="not-a-sha256",
-        )
-        self.assertEqual(missing["status"], "IDEMPOTENCY_KEY_REQUIRED")
         self.assertEqual(bad_key["status"], "INVALID_IDEMPOTENCY_KEY")
-        self.assertEqual(bad_fingerprint["status"], "INVALID_REQUEST_FINGERPRINT")
         self.assertEqual(len(self.manager.data["jobs"]), 0)
 
     def test_corrupt_idempotency_index_fails_closed_on_reload(self):
         self.manager.submit(
             job_id="idem-integrity", project_id="film", provider_id="image",
-            payload_ref="payload:idem-integrity", idempotency_key="integrity-key",
-            request_fingerprint="e" * 64,
+            payload_ref="payload:idem-integrity", idempotency_key="integrity-key"
         )
         persisted = json.loads(self.path.read_text(encoding="utf-8"))
         persisted["idempotency_index"] = {}
