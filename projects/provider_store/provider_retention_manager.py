@@ -139,6 +139,20 @@ class ProviderRetentionManager:
         current = time.time() if now is None else now
         if isinstance(current, bool) or not isinstance(current, (int, float)) or not 0 <= current <= 4102444800:
             return {"saved": False, "status": "INVALID_TIMESTAMP"}
+        known_categories = {
+            "public", "user_content", "personal", "credential", "financial",
+            "health", "biometric", "confidential",
+        }
+        if (
+            not isinstance(data_categories, (list, tuple))
+            or any(not isinstance(value, str) or value not in known_categories for value in data_categories)
+            or len(data_categories) != len(set(data_categories))
+        ):
+            return {"saved": False, "status": "INVALID_DATA_CATEGORIES"}
+        if isinstance(retention_days, bool) or not isinstance(retention_days, int) or not 0 <= retention_days <= 3650:
+            return {"saved": False, "status": "INVALID_RETENTION_PERIOD"}
+        if not isinstance(provider_training_use, bool) or not isinstance(user_training_consent, bool):
+            return {"saved": False, "status": "INVALID_TRAINING_CONSENT"}
         decision = self.policy.evaluate(
             provider_id=provider_id, data_categories=data_categories,
             retention_days=retention_days, provider_training_use=provider_training_use,
@@ -153,6 +167,20 @@ class ProviderRetentionManager:
         policy_source = decision.get("policy_source")
         if not isinstance(policy_source, str):
             return {"saved": False, "status": "DATA_POLICY_EVIDENCE_UNAVAILABLE"}
+        try:
+            parsed_policy_source = urlsplit(policy_source)
+        except ValueError:
+            parsed_policy_source = None
+        if (
+            parsed_policy_source is None
+            or parsed_policy_source.scheme != "https"
+            or not parsed_policy_source.hostname
+            or parsed_policy_source.username
+            or parsed_policy_source.password
+            or parsed_policy_source.query
+            or parsed_policy_source.fragment
+        ):
+            return {"saved": False, "status": "DATA_POLICY_EVIDENCE_INVALID"}
         record = {
             "provider_id": provider_id, "tenant_id": tenant_id,
             "resource_ref": resource_ref, "data_categories": sorted(data_categories),
