@@ -499,7 +499,10 @@ class ProviderJobManagerTests(unittest.TestCase):
             },
         }), encoding="utf-8")
         manager = ProviderJobManager(self.path, clock=lambda: self.now[0])
-        self.assertEqual(manager.data["scheduler"], {"last_project_id": None})
+        self.assertEqual(
+            manager.data["scheduler"],
+            {"last_project_id": None, "draining": False, "drain_requested_at": None},
+        )
         claimed = manager.claim_next(worker_id="worker-1")
         self.assertEqual(claimed["status"], "JOB_CLAIMED")
         persisted = json.loads(self.path.read_text(encoding="utf-8"))
@@ -739,6 +742,354 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(len(running), concurrent_limit)
         self.assertEqual(len(queued), 12 - concurrent_limit)
         self.assertEqual(len({job["worker_id"] for job in running}), concurrent_limit)
+
+
+    def test_deadline_requires_timezone_and_must_be_in_the_future(self):
+        self.assertEqual(
+            self.manager.submit(
+                job_id="naive-deadline", project_id="film", provider_id="image",
+                payload_ref="payload:naive", deadline_at="2026-10-16T12:01:00",
+            )["status"],
+            "INVALID_DEADLINE",
+        )
+        self.assertEqual(
+            self.manager.submit(
+                job_id="expired-deadline", project_id="film", provider_id="image",
+                payload_ref="payload:expired",
+                deadline_at=self.now[0].isoformat(),
+            )["status"],
+            "DEADLINE_ALREADY_EXPIRED",
+        )
+        self.assertNotIn("naive-deadline", self.manager.data["jobs"])
+        self.assertNotIn("expired-deadline", self.manager.data["jobs"])
+
+    def test_deadline_is_persisted_normalized_and_bound_to_idempotency_fingerprint(self):
+        deadline = self.now[0] + timedelta(minutes=5)
+        first = self.manager.submit(
+            job_id="deadline-job-1", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-1",
+            idempotency_key="deadline-key-001",
+            deadline_at=deadline.isoformat(),
+        )
+        self.assertEqual(first["status"], "JOB_QUEUED")
+        self.assertEqual(
+            first["job"]["deadline_at"],
+            deadline.astimezone(timezone.utc).isoformat(),
+        )
+        replay_with_changed_deadline = self.manager.submit(
+            job_id="deadline-job-2", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-1",
+            idempotency_key="deadline-key-001",
+            deadline_at=(deadline + timedelta(seconds=1)).isoformat(),
+        )
+        self.assertEqual(
+            replay_with_changed_deadline["status"], "IDEMPOTENCY_KEY_CONFLICT"
+        )
+        restored = ProviderJobManager(
+            self.path, max_queue_size=2, max_concurrent=1,
+            lease_seconds=10, max_attempts=2, clock=lambda: self.now[0],
+        )
+        self.assertEqual(
+            restored.data["jobs"]["deadline-job-1"]["deadline_at"],
+            deadline.isoformat(),
+        )
+
+    def test_queued_job_expiring_before_claim_is_failed_and_not_dispatched(self):
+        deadline = self.now[0] + timedelta(seconds=2)
+        accepted = self.manager.submit(
+            job_id="queued-deadline", project_id="film", provider_id="image",
+            payload_ref="payload:queued-deadline",
+            deadline_at=deadline.isoformat(),
+        )
+        self.assertEqual(accepted["status"], "JOB_QUEUED")
+        self.now[0] += timedelta(seconds=3)
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(claimed["status"], "QUEUE_EMPTY")
+        job = self.manager.data["jobs"]["queued-deadline"]
+        self.assertEqual(job["status"], "FAILED")
+        self.assertEqual(job["error_code"], "JOB_DEADLINE_EXCEEDED")
+        self.assertIsNone(job.get("worker_id"))
+
+    def test_running_job_deadline_revokes_worker_and_prevents_late_success(self):
+        deadline = self.now[0] + timedelta(seconds=4)
+        self.manager.submit(
+            job_id="running-deadline", project_id="film", provider_id="image",
+            payload_ref="payload:running-deadline",
+            deadline_at=deadline.isoformat(),
+        )
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        token = claimed["job"]["lease_token"]
+        self.now[0] += timedelta(seconds=5)
+        control = self.manager.get_worker_control(
+            job_id="running-deadline", worker_id="worker-1", lease_token=token
+        )
+        self.assertEqual(control["status"], "WORKER_STOP_REQUESTED")
+        self.assertTrue(control["stop_requested"])
+        self.assertEqual(
+            self.manager.data["jobs"]["running-deadline"]["status"], "RUNNING"
+        )
+        late = self.manager.complete(
+            job_id="running-deadline", worker_id="worker-1",
+            lease_token=token, success=True, result_ref="asset:too-late",
+        )
+        self.assertTrue(late["saved"])
+        self.assertEqual(late["job"]["status"], "FAILED")
+        self.assertEqual(late["job"]["error_code"], "JOB_DEADLINE_EXCEEDED")
+        self.assertNotIn("result_ref", late["job"])
+
+
+    def test_deadline_cancellation_preserves_known_remote_job_until_provider_confirms(self):
+        deadline = self.now[0] + timedelta(seconds=3)
+        accepted = self.manager.submit(
+            job_id="remote-deadline", project_id="film", provider_id="image",
+            payload_ref="payload:remote-deadline",
+            idempotency_key="remote-deadline-key",
+            deadline_at=deadline.isoformat(),
+        )
+        self.assertEqual(accepted["status"], "JOB_QUEUED")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        token = claimed["job"]["lease_token"]
+        self.assertEqual(
+            self.manager.begin_remote_submission(
+                job_id="remote-deadline", worker_id="worker-1", lease_token=token
+            )["status"],
+            "REMOTE_SUBMISSION_STARTED",
+        )
+        self.assertEqual(
+            self.manager.record_remote_submission(
+                job_id="remote-deadline",
+                worker_id="worker-1",
+                lease_token=token,
+                remote_job_id="provider-job-123",
+                remote_status="RUNNING",
+                poll_after_seconds=10,
+            )["status"],
+            "REMOTE_JOB_SUBMITTED",
+        )
+        self.now[0] += timedelta(seconds=4)
+        control = self.manager.get_worker_control(
+            job_id="remote-deadline", worker_id="worker-1", lease_token=token
+        )
+        self.assertEqual(control["status"], "WORKER_STOP_REQUESTED")
+        record = self.manager.data["jobs"]["remote-deadline"]
+        self.assertEqual(record["status"], "RUNNING")
+        self.assertTrue(record["cancel_requested"])
+        self.assertEqual(record["remote_job_id"], "provider-job-123")
+
+        # A confirmed provider-side cancellation is the point where local capacity is released.
+        cancelled = self.manager.confirm_remote_cancellation(
+            job_id="remote-deadline", remote_job_id="provider-job-123"
+        )
+        self.assertEqual(cancelled["status"], "REMOTE_JOB_CANCELLED")
+        self.assertEqual(cancelled["job"]["status"], "CANCELLED")
+        self.assertIsNone(cancelled["job"]["worker_id"])
+
+    def test_expired_remote_worker_lease_requeues_for_cancellation_not_resubmission(self):
+        deadline = self.now[0] + timedelta(seconds=2)
+        self.manager.submit(
+            job_id="remote-reclaim", project_id="film", provider_id="image",
+            payload_ref="payload:remote-reclaim",
+            idempotency_key="remote-reclaim-key",
+            deadline_at=deadline.isoformat(),
+        )
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        token = claimed["job"]["lease_token"]
+        self.manager.begin_remote_submission(
+            job_id="remote-reclaim", worker_id="worker-1", lease_token=token
+        )
+        self.manager.record_remote_submission(
+            job_id="remote-reclaim", worker_id="worker-1",
+            lease_token=token, remote_job_id="remote-reclaim-123",
+            remote_status="RUNNING", poll_after_seconds=10,
+        )
+        self.now[0] += timedelta(seconds=11)
+        status = self.manager.get_shutdown_status()
+        self.assertEqual(status["counts"]["QUEUED"], 1)
+        queued = self.manager.data["jobs"]["remote-reclaim"]
+        self.assertEqual(queued["status"], "QUEUED")
+        self.assertTrue(queued["cancel_requested"])
+        self.assertEqual(queued["remote_job_id"], "remote-reclaim-123")
+
+        reclaimed = self.manager.claim_next(worker_id="worker-2")
+        self.assertEqual(reclaimed["status"], "JOB_CLAIMED")
+        self.assertEqual(reclaimed["job"]["job_id"], "remote-reclaim")
+        self.assertEqual(
+            self.manager.get_worker_control(
+                job_id="remote-reclaim",
+                worker_id="worker-2",
+                lease_token=reclaimed["job"]["lease_token"],
+            )["status"],
+            "WORKER_STOP_REQUESTED",
+        )
+    def test_worker_control_exposes_cooperative_cancel_and_deadline_state(self):
+        deadline = self.now[0] + timedelta(minutes=2)
+        self.manager.submit(
+            job_id="cooperative-job", project_id="film", provider_id="image",
+            payload_ref="payload:cooperative", deadline_at=deadline.isoformat(),
+        )
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        token = claimed["job"]["lease_token"]
+        before = self.manager.get_worker_control(
+            job_id="cooperative-job", worker_id="worker-1", lease_token=token
+        )
+        self.assertEqual(before["status"], "WORKER_CONTINUE")
+        self.assertFalse(before["stop_requested"])
+        self.assertEqual(before["deadline_at"], deadline.isoformat())
+        self.assertGreater(before["seconds_to_deadline"], 0)
+
+        cancellation = self.manager.cancel(job_id="cooperative-job")
+        self.assertEqual(cancellation["status"], "CANCEL_REQUESTED")
+        after = self.manager.get_worker_control(
+            job_id="cooperative-job", worker_id="worker-1", lease_token=token
+        )
+        self.assertEqual(after["status"], "WORKER_STOP_REQUESTED")
+        self.assertTrue(after["stop_requested"])
+        completed = self.manager.complete(
+            job_id="cooperative-job", worker_id="worker-1",
+            lease_token=token, success=True, result_ref="asset:discarded",
+        )
+        self.assertEqual(completed["job"]["status"], "CANCELLED")
+        self.assertNotIn("result_ref", completed["job"])
+
+    def test_graceful_shutdown_blocks_new_admission_and_claims_until_resumed(self):
+        self.assertEqual(self.submit("shutdown-running", priority=75)["status"], "JOB_QUEUED")
+        self.assertEqual(self.submit("shutdown-queued", priority=50)["status"], "JOB_QUEUED")
+        running = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(running["job"]["job_id"], "shutdown-running")
+
+        requested = self.manager.request_graceful_shutdown()
+        self.assertEqual(requested["status"], "DRAINING")
+        self.assertEqual(requested["counts"]["RUNNING"], 1)
+        original_requested_at = requested["drain_requested_at"]
+        repeated = self.manager.request_graceful_shutdown()
+        self.assertEqual(repeated["drain_requested_at"], original_requested_at)
+
+        blocked_claim = self.manager.claim_next(worker_id="worker-2")
+        self.assertEqual(blocked_claim["status"], "SERVICE_DRAINING")
+        blocked_submit = self.submit("shutdown-rejected")
+        self.assertEqual(blocked_submit["status"], "SERVICE_DRAINING")
+        status = self.manager.get_shutdown_status()
+        self.assertEqual(status["status"], "DRAINING")
+        self.assertEqual(status["counts"]["QUEUED"], 1)
+        self.assertEqual(status["counts"]["RUNNING"], 1)
+
+        self.manager.complete(
+            job_id="shutdown-running",
+            worker_id="worker-1",
+            lease_token=running["job"]["lease_token"],
+            success=True,
+            result_ref="asset:shutdown-complete",
+        )
+        drained = self.manager.get_shutdown_status()
+        self.assertEqual(drained["status"], "DRAINED")
+        self.assertTrue(drained["drained"])
+        self.assertEqual(drained["pending_unclaimed"], 1)
+
+        resumed = self.manager.resume_dispatch()
+        self.assertEqual(resumed["status"], "ACTIVE")
+        next_job = self.manager.claim_next(worker_id="worker-2")
+        self.assertEqual(next_job["status"], "JOB_CLAIMED")
+        self.assertEqual(next_job["job"]["job_id"], "shutdown-queued")
+
+    def test_graceful_drain_state_is_shared_by_other_manager_instances(self):
+        self.submit("cross-instance-job")
+        self.manager.request_graceful_shutdown()
+        other = ProviderJobManager(
+            self.path, max_queue_size=2, max_concurrent=1,
+            lease_seconds=10, max_attempts=2, clock=lambda: self.now[0],
+        )
+        self.assertEqual(other.get_shutdown_status()["status"], "DRAINED")
+        self.assertEqual(
+            other.claim_next(worker_id="worker-other")["status"],
+            "SERVICE_DRAINING",
+        )
+
+    def test_legacy_scheduler_state_migrates_to_active_dispatch(self):
+        self.submit("legacy-scheduler-job")
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["scheduler"] = {"last_project_id": None}
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        restored = ProviderJobManager(
+            self.path, max_queue_size=2, max_concurrent=1,
+            lease_seconds=10, max_attempts=2, clock=lambda: self.now[0],
+        )
+        self.assertFalse(restored.data["scheduler"]["draining"])
+        self.assertIsNone(restored.data["scheduler"]["drain_requested_at"])
+        self.assertEqual(
+            restored.claim_next(worker_id="worker-legacy")["status"],
+            "JOB_CLAIMED",
+        )
+
+    def test_malformed_persisted_deadline_and_drain_state_fail_closed(self):
+        self.submit("bad-deadline-state")
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["jobs"]["bad-deadline-state"]["deadline_at"] = "no-timezone"
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "provider job record"):
+            ProviderJobManager(
+                self.path, max_queue_size=2, max_concurrent=1,
+                lease_seconds=10, max_attempts=2, clock=lambda: self.now[0],
+            )
+
+        persisted["jobs"]["bad-deadline-state"].pop("deadline_at")
+        persisted["scheduler"] = {
+            "last_project_id": None,
+            "draining": True,
+            "drain_requested_at": "2026-10-16T12:00:00",
+        }
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "scheduler drain state"):
+            ProviderJobManager(
+                self.path, max_queue_size=2, max_concurrent=1,
+                lease_seconds=10, max_attempts=2, clock=lambda: self.now[0],
+            )
+
+
+    def test_pre_deadline_idempotency_fingerprint_remains_replay_compatible(self):
+        accepted = self.manager.submit(
+            job_id="legacy-idempotency-job",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:legacy-idempotency",
+            idempotency_key="legacy-idempotency-key",
+        )
+        self.assertEqual(accepted["status"], "JOB_QUEUED")
+        legacy_material = json.dumps(
+            [
+                "provider-job-request-v1",
+                None,
+                "film",
+                "image",
+                "payload:legacy-idempotency",
+                50,
+            ],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        legacy_fingerprint = hashlib.sha256(
+            legacy_material.encode("utf-8")
+        ).hexdigest()
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["jobs"]["legacy-idempotency-job"]["request_fingerprint"] = legacy_fingerprint
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        restored = ProviderJobManager(
+            self.path,
+            max_queue_size=2,
+            max_concurrent=1,
+            lease_seconds=10,
+            max_attempts=2,
+            clock=lambda: self.now[0],
+        )
+        replay = restored.submit(
+            job_id="different-local-id",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:legacy-idempotency",
+            idempotency_key="legacy-idempotency-key",
+        )
+        self.assertEqual(replay["status"], "ALREADY_SUBMITTED")
+        self.assertTrue(replay["idempotency_replayed"])
+        self.assertEqual(replay["job"]["job_id"], "legacy-idempotency-job")
 
 
 if __name__ == "__main__":

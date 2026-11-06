@@ -147,3 +147,20 @@ Call ProviderService.process_remote_job_webhook() with the provider ID, raw requ
 ProviderJobManager indexes remote jobs by a digest over provider ID plus remote job ID. This prevents a callback for one provider from updating a different provider's job even when two providers reuse the same opaque remote ID. Existing job state files without the index are migrated by rebuilding it from persisted submitted jobs under the store's interprocess lock. A callback only updates a matching SUBMITTED job. Terminal results clear a worker lease, duplicate terminal outcomes are idempotent, conflicting terminal outcomes and status regressions are rejected.
 
 The replay verifier and job manager currently use separate persisted state files. A verified event is recorded in the replay ledger before the job update; if the second write fails, the same event ID cannot be replayed and the job must be reconciled by a later provider poll or an operator. Production rollout should move replay deduplication and job-state application into one transactional store or provide a durable reconciliation queue. Provider-specific signature headers/rotation, ingress authentication configuration, live provider webhook tests and multi-host deployment remain release gates.
+
+
+## Deadlines, cancellation and graceful shutdown — Feature #79
+
+Submit a job with an absolute timezone-aware ISO-8601 deadline:
+
+`ProviderService.submit_job(..., deadline_at="2026-11-06T13:00:00+00:00")`
+
+The deadline is stored in UTC, included in the idempotency request fingerprint and returned in the public job record. Naive timestamps, malformed values and deadlines already elapsed at admission are rejected. A queued job whose deadline expires is marked FAILED with `JOB_DEADLINE_EXCEEDED` before it can be claimed.
+
+For running work, deadline expiry sets a cooperative `cancel_requested` signal. Workers should periodically call `ProviderService.get_worker_job_control(job_id, worker_id, lease_token, principal_id)`. The checkpoint reports whether the worker must stop, the deadline and remaining seconds. Lease renewal is refused after the stop signal. A worker completing after its deadline cannot publish a success result; its local job ends as FAILED / `JOB_DEADLINE_EXCEEDED`.
+
+Remote work needs special care: the local record must not forget a provider job that may still be running or billable. Deadline/cancel requests preserve the remote job identity and pending cancellation state. Workers/operators can use the remote cancellation API and the local record is released only after provider cancellation or another terminal state is confirmed. If a worker lease expires while a remote outcome may still exist, the job is requeued for cleanup/reconciliation, not blindly submitted again.
+
+For service-wide drain, an authorized administrator calls `ProviderService.request_graceful_shutdown(principal_id=...)`. The state is persisted under the queue's interprocess lock, so all manager processes sharing that state directory stop accepting new jobs and new worker claims. Already-running jobs may complete or be cancelled. `get_job_shutdown_status()` returns running/queued/terminal counts and ACTIVE/DRAINING/DRAINED state. Once operations are ready to resume, an authorized administrator calls `resume_job_dispatch(principal_id=...)`.
+
+This manager does not send OS signals, forcibly terminate Python processes, or control a container/orchestrator lifecycle. Worker loops must poll the control checkpoint and the deployment's SIGTERM/pre-stop hook must request drain, wait for the DRAINED state within its configured grace period, then stop the process. Multi-host coordination still requires a shared transactional queue/store and tested lock semantics.
