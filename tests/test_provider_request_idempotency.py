@@ -143,6 +143,21 @@ class ProviderRequestIdempotencyManagerTests(unittest.TestCase):
         result = self.reserve()
         self.assertEqual(result["status"], "IDEMPOTENCY_STATE_INVALID")
 
+    def test_timestamp_inputs_must_be_numeric_and_monotonic(self):
+        self.assertEqual(
+            self.manager.reserve_request(
+                project_id="film", request_id="bad-time",
+                fingerprint=self.fingerprint, now="1000",
+            )["status"],
+            "INVALID_IDEMPOTENCY_TIMESTAMP",
+        )
+        reserved = self.reserve()
+        backwards = self.manager.mark_started(
+            project_id="film", request_id="request-1", tenant_id="tenant-a",
+            lease_token=reserved["lease_token"], now=999,
+        )
+        self.assertEqual(backwards["status"], "INVALID_IDEMPOTENCY_TIMESTAMP")
+
     def test_invalid_identity_fingerprint_and_capacity_are_rejected(self):
         self.assertEqual(
             self.manager.reserve_request(
