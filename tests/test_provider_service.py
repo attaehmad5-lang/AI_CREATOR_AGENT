@@ -2502,9 +2502,22 @@ class ProviderServiceTests(unittest.TestCase):
             lease_token=claimed["job"]["lease_token"],
             principal_id="creator-1",
         )
-        self.assertEqual(expired["status"], "JOB_DEADLINE_EXCEEDED")
+        self.assertEqual(expired["status"], "WORKER_STOP_REQUESTED")
         self.assertTrue(expired["stop_requested"])
-        self.assertEqual(jobs.data["jobs"]["service-deadline-job"]["status"], "FAILED")
+        self.assertEqual(
+            jobs.data["jobs"]["service-deadline-job"]["status"], "RUNNING"
+        )
+        completed = service.complete_job(
+            job_id="service-deadline-job",
+            worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"],
+            success=True,
+            result_ref="asset:late-output",
+            principal_id="creator-1",
+        )
+        self.assertEqual(completed["job"]["status"], "FAILED")
+        self.assertEqual(completed["job"]["error_code"], "JOB_DEADLINE_EXCEEDED")
+        self.assertNotIn("result_ref", completed["job"])
 
     def test_graceful_shutdown_controls_require_admin_and_are_observable(self):
         jobs = ProviderJobManager(
