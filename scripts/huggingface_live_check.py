@@ -8,9 +8,11 @@ from __future__ import annotations
 import importlib
 import os
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
+from urllib.request import Request
+
+from projects.provider_store.connection_manager import ConnectionManager
+from projects.provider_store.http_probe import ProviderPinnedHTTPSOpener
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -19,21 +21,42 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 
 def verify_token(token: str) -> None:
-    request = urllib.request.Request(
-        "https://huggingface.co/api/whoami-v2",
-        headers={"Authorization": f"Bearer {token}"},
+    endpoint = "https://huggingface.co/api/whoami-v2"
+    validation = ConnectionManager.validate_endpoint(
+        endpoint, allowed_hosts={"huggingface.co"},
+    )
+    if validation.get("valid") is not True:
+        raise RuntimeError("Hugging Face identity endpoint failed host-policy validation")
+    request = Request(
+        endpoint,
+        headers={"Authorization": f"Bearer {token}", "Accept-Encoding": "identity"},
         method="GET",
     )
+    response = None
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            if response.status != 200:
-                raise RuntimeError(f"Hugging Face identity check returned HTTP {response.status}")
-    except urllib.error.HTTPError as exc:
-        if exc.code in (401, 403):
-            raise RuntimeError("Hugging Face rejected the token (unauthorized/forbidden)") from None
-        raise RuntimeError(f"Hugging Face identity check returned HTTP {exc.code}") from None
-    except (urllib.error.URLError, TimeoutError) as exc:
+        response = ProviderPinnedHTTPSOpener().open(request, timeout=15)
+        status = response.getcode()
+        if status in (401, 403):
+            raise RuntimeError("Hugging Face rejected the token (unauthorized/forbidden)")
+        if 300 <= status < 400:
+            raise RuntimeError("Hugging Face identity check redirect was rejected")
+        if status != 200:
+            raise RuntimeError(f"Hugging Face identity check returned HTTP {status}")
+        body = response.read(64 * 1024 + 1)
+        if not isinstance(body, bytes) or len(body) > 64 * 1024:
+            raise RuntimeError("Hugging Face identity response exceeded the size limit")
+    except TimeoutError:
+        raise RuntimeError("Hugging Face network check timed out") from None
+    except RuntimeError:
+        raise
+    except Exception as exc:
         raise RuntimeError(f"Hugging Face network check failed: {type(exc).__name__}") from None
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
 
 
 def main() -> int:
