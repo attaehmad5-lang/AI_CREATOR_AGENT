@@ -106,6 +106,17 @@ class ProviderAuditLogTests(unittest.TestCase):
         )
         self.assertNotIn("private-value", self.path.read_text(encoding="utf-8"))
 
+    def test_model_labels_with_spaces_are_supported_without_relaxing_secret_checks(self):
+        result = self.log.append(
+            "provider_configuration", outcome="success",
+            details={"operation": "provider.configure", "model": "Stable Diffusion XL"},
+        )
+        self.assertTrue(result["saved"])
+        self.assertEqual(
+            self.log.read_events(limit=1)["events"][0]["details"]["model"],
+            "Stable Diffusion XL",
+        )
+
     def test_event_types_and_outcomes_are_allowlisted(self):
         self.assertEqual(
             self.log.append("unknown_event", outcome="success")["status"],
