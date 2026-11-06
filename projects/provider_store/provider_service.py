@@ -298,6 +298,35 @@ class ProviderService:
             "status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False
         }
 
+    def refresh_provider_metadata(
+        self, provider_id: str, fetch_metadata: Any, *,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Refresh trusted provider metadata only through an admin-scoped operation."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "provider": provider_id, "refreshed": False}
+        authorization = self._authorize_operation(
+            principal_id, "provider.configure", provider_id=provider_id
+        )
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "refreshed": False, "authorization": authorization,
+            }
+        refresh = getattr(self.connection_manager, "refresh_provider_metadata", None)
+        if not callable(refresh):
+            return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "refreshed": False}
+        try:
+            result = refresh(provider_id, fetch_metadata)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_METADATA_REFRESH_FAILED", "provider": provider_id,
+                "refreshed": False, "error_type": type(exc).__name__,
+            }
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_METADATA_REFRESH_RESPONSE", "provider": provider_id, "refreshed": False,
+        }
+
     def discover_providers(
         self, *, principal_id: str | None = None, category: str | None = None,
         capability: str | None = None, enabled_only: bool = False,
