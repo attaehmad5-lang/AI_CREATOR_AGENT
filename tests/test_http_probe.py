@@ -47,6 +47,32 @@ class _Opener:
 
 
 class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
+    def test_default_transport_pins_socket_to_first_validated_dns_address(self):
+        from unittest.mock import patch
+
+        response = _Response()
+        pinned_opener = _Opener(response)
+        records = [
+            (2, 1, 6, "", ("93.184.216.34", 443)),
+            (2, 1, 6, "", ("1.1.1.1", 443)),
+        ]
+        probe = ProviderHTTPConnectivityProbe(
+            dns_resolver=lambda hostname, port, type=1: records,
+        )
+        with patch(
+            "projects.provider_store.http_probe.build_pinned_https_opener",
+            return_value=pinned_opener,
+        ) as build:
+            result = probe({
+                "id": "public_provider",
+                "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertTrue(result["ok"])
+        self.assertEqual(build.call_args.args[0], "93.184.216.34")
+        self.assertEqual(len(pinned_opener.calls), 1)
+
     def test_response_cleanup_failure_does_not_mask_successful_probe(self):
         class Response:
             status = 204
