@@ -2240,5 +2240,76 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(service.validate_output("missing.png", modality="image")["status"], "OUTPUT_VALIDATOR_UNAVAILABLE")
 
 
+    def test_job_deadline_and_worker_checkpoint_are_exposed_through_service(self):
+        jobs = ProviderJobManager(self.root / "deadline-service-jobs.json")
+        authorization = ProviderAuthorizationManager(self.root / "deadline-service-auth.json")
+        authorization.assign_role("job-worker", "creator")
+        service = ProviderService(
+            self.connections, job_manager=jobs,
+            authorization_manager=authorization,
+        )
+        accepted = service.submit_job(
+            job_id="deadline-service-job", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-service",
+            deadline_at="2099-01-01T00:00:00+00:00",
+            principal_id="job-worker",
+        )
+        self.assertEqual(accepted["status"], "JOB_QUEUED")
+        claimed = service.claim_next_job(
+            worker_id="deadline-worker", principal_id="job-worker",
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        lease = claimed["job"]["lease_token"]
+        checkpoint = service.check_job_control(
+            job_id="deadline-service-job", worker_id="deadline-worker",
+            lease_token=lease, principal_id="job-worker",
+        )
+        self.assertEqual(checkpoint["status"], "WORKER_CONTINUE")
+        self.assertFalse(checkpoint["should_stop"])
+        service.cancel_job(job_id="deadline-service-job", principal_id="job-worker")
+        cancelled = service.check_job_control(
+            job_id="deadline-service-job", worker_id="deadline-worker",
+            lease_token=lease, principal_id="job-worker",
+        )
+        self.assertEqual(cancelled["status"], "JOB_CANCELLED")
+        self.assertTrue(cancelled["should_stop"])
+
+    def test_graceful_job_shutdown_is_admin_controlled_and_drains_existing_work(self):
+        jobs = ProviderJobManager(self.root / "graceful-service-jobs.json")
+        authorization = ProviderAuthorizationManager(self.root / "graceful-service-auth.json")
+        authorization.assign_role("job-admin", "admin")
+        authorization.assign_role("job-creator", "creator")
+        service = ProviderService(
+            self.connections, job_manager=jobs,
+            authorization_manager=authorization,
+        )
+        accepted = service.submit_job(
+            job_id="before-stop", project_id="film", provider_id="image",
+            payload_ref="payload:before-stop", principal_id="job-creator",
+        )
+        self.assertTrue(accepted["accepted"])
+        denied = service.stop_job_submissions(principal_id="job-creator")
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        stopped = service.stop_job_submissions(principal_id="job-admin")
+        self.assertFalse(stopped["accepting"])
+        rejected = service.submit_job(
+            job_id="after-stop", project_id="film", provider_id="image",
+            payload_ref="payload:after-stop", principal_id="job-creator",
+        )
+        self.assertEqual(rejected["status"], "QUEUE_SHUTTING_DOWN")
+        self.assertFalse(service.job_drain_status(principal_id="job-admin")["drained"])
+        claimed = service.claim_next_job(
+            worker_id="drain-worker", principal_id="job-creator",
+        )
+        completed = service.complete_job(
+            job_id="before-stop", worker_id="drain-worker",
+            lease_token=claimed["job"]["lease_token"], success=True,
+            result_ref="asset:drained", principal_id="job-creator",
+        )
+        self.assertEqual(completed["job"]["status"], "SUCCEEDED")
+        self.assertTrue(service.job_drain_status(principal_id="job-admin")["drained"])
+        self.assertTrue(service.resume_job_submissions(principal_id="job-admin")["accepting"])
+
+
 if __name__ == "__main__":
     unittest.main()
