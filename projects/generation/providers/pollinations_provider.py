@@ -5,7 +5,7 @@ returned, or written to generated artifacts.
 """
 import base64
 import binascii
-import json
+import json as jsonlib
 import math
 import os
 import re
@@ -57,7 +57,7 @@ class _PinnedPollinationsResponse:
             body = self._response.read(self.max_response_bytes + 1)
             if not isinstance(body, bytes) or len(body) > self.max_response_bytes:
                 raise ValueError("Pollinations response exceeds the size limit")
-            self._payload = json.loads(body.decode("utf-8"))
+            self._payload = jsonlib.loads(body.decode("utf-8"))
             self._loaded = True
         return self._payload
 
@@ -80,7 +80,7 @@ class _PinnedPollinationsSession:
         )
         if validation.get("valid") is not True:
             raise ValueError("unsafe Pollinations generation endpoint")
-        body = globals()["json"].dumps(
+        body = jsonlib.dumps(
             json, ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8")
         request_headers = dict(headers)
