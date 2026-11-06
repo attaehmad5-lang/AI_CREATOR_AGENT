@@ -1,4 +1,5 @@
 import base64
+import socket
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -39,6 +40,22 @@ class FakeSession:
 
 
 class PollinationsProviderTests(unittest.TestCase):
+    def test_default_generation_transport_rejects_private_dns_before_connect(self):
+        resolutions = []
+
+        def resolver(host, port, *, type):
+            resolutions.append((host, port))
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", port))
+            ]
+
+        provider = PollinationsProvider(
+            environ={"POLLINATIONS_API_KEY": "private-token"}, resolver=resolver,
+        )
+        with self.assertRaisesRegex(ValueError, "PROVIDER_ENDPOINT_RESOLVES_TO_NON_PUBLIC_ADDRESS"):
+            provider.generate_image("prompt", "unused.png")
+        self.assertEqual(resolutions, [("gen.pollinations.ai", 443)])
+
     def test_sends_bearer_key_and_writes_png_with_matching_extension(self):
         response = FakeResponse({"data": [{"b64_json": base64.b64encode(PNG).decode()}]})
         session = FakeSession(response)
