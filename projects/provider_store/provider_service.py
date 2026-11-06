@@ -1767,7 +1767,6 @@ class ProviderService:
             request_id=request_id,
             category=category,
             project_id=project_id,
-            request_id=request_id,
             estimated_cost=estimated_cost,
             estimated_cost_unit=estimated_cost_unit,
             **route_options,
