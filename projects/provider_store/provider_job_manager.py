@@ -429,9 +429,23 @@ class ProviderJobManager:
             changed = True
         return changed
 
-    def claim_next(self, *, worker_id: str) -> dict[str, Any]:
+    def claim_next(
+        self, *, worker_id: str,
+        allowed_provider_ids: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
         if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
             return {"status": "INVALID_WORKER_ID", "job": None}
+        if allowed_provider_ids is not None and (
+            not isinstance(allowed_provider_ids, (list, tuple))
+            or len(allowed_provider_ids) > 10_000
+            or any(
+                not isinstance(provider_id, str) or not _ID_RE.fullmatch(provider_id)
+                for provider_id in allowed_provider_ids
+            )
+            or len(set(allowed_provider_ids)) != len(allowed_provider_ids)
+        ):
+            return {"status": "INVALID_ALLOWED_PROVIDER_IDS", "job": None}
+        allowed_set = set(allowed_provider_ids) if allowed_provider_ids is not None else None
         now = self.clock().astimezone(timezone.utc)
         with self._transaction():
             changed = self._reap_expired_locked(now)
@@ -452,6 +466,20 @@ class ProviderJobManager:
                 if changed:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
+            if allowed_set is not None:
+                authorized_queued = [
+                    candidate for candidate in queued
+                    if candidate.get("provider_id") in allowed_set
+                ]
+                if not authorized_queued:
+                    if changed:
+                        self._save()
+                    return {
+                        "status": "NO_AUTHORIZED_PROVIDER_JOBS",
+                        "job": None,
+                        "queued": len(queued),
+                    }
+                queued = authorized_queued
 
             running_by_provider: dict[str, int] = {}
             for running_job in running_jobs:
