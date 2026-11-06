@@ -11,6 +11,7 @@ from projects.provider_store.provider_benchmark_manager import ProviderBenchmark
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
+from projects.provider_store.provider_onboarding_manager import ProviderOnboardingManager
 from projects.provider_store.provider_slo_manager import ProviderSLOManager
 from projects.provider_store.provider_degraded_mode import ProviderDegradedModeManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
@@ -2310,6 +2311,65 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(service.job_drain_status(principal_id="job-admin")["drained"])
         self.assertTrue(service.resume_job_submissions(principal_id="job-admin")["accepting"])
 
+
+    def test_provider_onboarding_service_requires_admin_approval_and_successful_probe(self):
+        authorization = ProviderAuthorizationManager(self.root / "onboarding-service-auth.json")
+        authorization.assign_role("onboarding-creator", "creator")
+        authorization.assign_role("onboarding-admin", "admin")
+        onboarding = ProviderOnboardingManager(
+            self.root / "onboarding-service-state.json",
+            self.connections,
+            authorize_admin=lambda principal_id: authorization.authorize(
+                principal_id, "provider.configure"
+            ),
+            probe_provider=lambda manifest: {"verified": True, "status": "PROBE_OK"},
+        )
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            provider_onboarding_manager=onboarding,
+        )
+        manifest = {
+            "id": "service_onboarded_image",
+            "name": "Service Onboarded Image",
+            "category": "image",
+            "auth_type": "API_KEY",
+            "connection_type": "API",
+            "official_api_url": "https://api.onboard.example/v1",
+            "official_docs_url": "https://docs.onboard.example/api",
+            "allowed_hosts": ["api.onboard.example"],
+            "capabilities": ["image_generation"],
+            "adapter_api_version": "1.0",
+            "subscription_required": True,
+            "enabled": False,
+        }
+        denied = service.submit_provider_onboarding(
+            manifest, principal_id="onboarding-creator"
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        submitted = service.submit_provider_onboarding(
+            manifest, principal_id="onboarding-admin"
+        )
+        self.assertTrue(submitted["accepted"])
+        approved = service.approve_provider_onboarding(
+            "service_onboarded_image", principal_id="onboarding-admin"
+        )
+        self.assertTrue(approved["approved"])
+        verified = service.verify_provider_onboarding(
+            "service_onboarded_image", principal_id="onboarding-admin"
+        )
+        self.assertTrue(verified["verified"])
+        activated = service.activate_provider_onboarding(
+            "service_onboarded_image", principal_id="onboarding-admin"
+        )
+        self.assertTrue(activated["activated"])
+        provider = self.connections.get_provider("service_onboarded_image")
+        self.assertIsNotNone(provider)
+        self.assertFalse(provider["enabled"])
+        status = service.provider_onboarding_status(
+            "service_onboarded_image", principal_id="onboarding-creator"
+        )
+        self.assertEqual(status["onboarding_status"], "ACTIVE")
 
 if __name__ == "__main__":
     unittest.main()
