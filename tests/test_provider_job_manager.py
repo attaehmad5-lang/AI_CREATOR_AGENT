@@ -229,7 +229,10 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertNotIn("request_fingerprint", public)
         self.assertNotIn("provider_idempotency_key", public)
 
-        reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        reloaded = ProviderJobManager(
+            self.path, lease_seconds=10, max_attempts=2,
+            clock=lambda: self.now[0],
+        )
         replay = reloaded.submit(
             job_id="idem-job-3", project_id="film", provider_id="image",
             payload_ref="payload:idem-1", idempotency_key=key
@@ -261,6 +264,10 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(len(self.manager.data["jobs"]), 1)
 
     def test_idempotency_keys_are_isolated_by_tenant_project_and_provider(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=1,
+            clock=lambda: self.now[0],
+        )
         scopes = [
             (None, "film-a", "image"),
             (None, "film-b", "image"),
@@ -269,15 +276,15 @@ class ProviderJobManagerTests(unittest.TestCase):
             ("tenant-b", "film-a", "image"),
         ]
         for index, (tenant, project, provider) in enumerate(scopes):
-            result = self.manager.submit(
+            result = manager.submit(
                 job_id=f"scope-job-{index}", project_id=project,
                 provider_id=provider, payload_ref=f"payload:scope-{index}",
                 tenant_id=tenant, idempotency_key="same-key"
             )
             self.assertEqual(result["status"], "JOB_QUEUED")
-        self.assertEqual(len(self.manager.data["jobs"]), len(scopes))
+        self.assertEqual(len(manager.data["jobs"]), len(scopes))
         self.assertEqual(
-            len(self.manager.data["idempotency_index"]), len(scopes)
+            len(manager.data["idempotency_index"]), len(scopes)
         )
 
     def test_concurrent_same_key_submissions_create_exactly_one_job(self):
