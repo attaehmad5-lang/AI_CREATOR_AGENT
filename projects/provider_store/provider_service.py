@@ -1937,6 +1937,120 @@ class ProviderService:
             "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
 
+
+    def process_remote_job_webhook(
+        self,
+        *,
+        provider_id: str,
+        payload: bytes,
+        signature: str,
+        timestamp: int | str,
+        event_id: str,
+        secret: str,
+    ) -> dict[str, Any]:
+        """Verify, validate and apply a signed provider job-status event exactly once."""
+        verified = self.verify_webhook(
+            provider_id=provider_id,
+            payload=payload,
+            signature=signature,
+            timestamp=timestamp,
+            event_id=event_id,
+            secret=secret,
+        )
+        if not isinstance(verified, dict) or verified.get("verified") is not True:
+            return verified if isinstance(verified, dict) else {
+                "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE",
+            }
+        try:
+            decoded = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+            return {
+                "verified": True,
+                "accepted": False,
+                "status": "WEBHOOK_PAYLOAD_INVALID",
+                "event_id": verified.get("event_id"),
+            }
+        allowed_fields = {
+            "event", "remote_job_id", "status", "poll_after_seconds",
+            "result_ref", "error_code",
+        }
+        if (
+            not isinstance(decoded, dict)
+            or set(decoded).difference(allowed_fields)
+            or decoded.get("event") != "provider.job.status"
+            or not isinstance(decoded.get("remote_job_id"), str)
+            or not isinstance(decoded.get("status"), str)
+        ):
+            return {
+                "verified": True,
+                "accepted": False,
+                "status": "WEBHOOK_EVENT_SCHEMA_INVALID",
+                "event_id": verified.get("event_id"),
+            }
+        rejection = self._sensitive_input_rejection({
+            "provider_job_webhook": decoded,
+            "provider_id": provider_id,
+        })
+        if rejection is not None:
+            return {
+                "verified": True,
+                "accepted": False,
+                "event_id": verified.get("event_id"),
+                **rejection,
+            }
+        safe_event = self._validate_remote_job_adapter_response({
+            key: value for key, value in decoded.items()
+            if key != "event"
+        })
+        if safe_event is None:
+            return {
+                "verified": True,
+                "accepted": False,
+                "status": "WEBHOOK_REMOTE_JOB_STATUS_INVALID",
+                "event_id": verified.get("event_id"),
+            }
+        if self.job_manager is None or not callable(
+            getattr(self.job_manager, "update_remote_status_from_webhook", None)
+        ):
+            return {
+                "verified": True,
+                "accepted": False,
+                "status": "REMOTE_JOB_WEBHOOK_SYNC_UNAVAILABLE",
+                "event_id": verified.get("event_id"),
+            }
+        try:
+            updated = self.job_manager.update_remote_status_from_webhook(
+                provider_id=provider_id,
+                remote_job_id=safe_event["remote_job_id"],
+                remote_status=safe_event["status"],
+                poll_after_seconds=safe_event["poll_after_seconds"],
+                result_ref=safe_event.get("result_ref"),
+                error_code=safe_event.get("error_code"),
+            )
+        except Exception as exc:
+            return {
+                "verified": True,
+                "accepted": False,
+                "status": "REMOTE_JOB_WEBHOOK_UPDATE_FAILED",
+                "event_id": verified.get("event_id"),
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(updated, dict):
+            return {
+                "verified": True,
+                "accepted": False,
+                "status": "INVALID_REMOTE_JOB_WEBHOOK_MANAGER_RESPONSE",
+                "event_id": verified.get("event_id"),
+            }
+        result = {
+            "verified": True,
+            "accepted": updated.get("saved") is True,
+            "event_id": verified.get("event_id"),
+            "payload_sha256": verified.get("payload_sha256"),
+            **updated,
+        }
+        return self._sanitize_job_response(result, self.sensitive_data_policy)
+
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         audit_actor = route_options.pop("_audit_actor_principal_id", None)
         trace_context = route_options.pop("_trace_context", None)
