@@ -1666,9 +1666,15 @@ class ProviderService:
     def claim_next_job(self, *, worker_id: str, principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
-        authorization = self._authorize_operation(principal_id, "provider.generate")
-        if authorization is not None:
-            return {"status": "AUTHORIZATION_DENIED", "job": None, "authorization": authorization}
+        authorization = self._authorize_operation(
+            principal_id, "provider.generate", provider_id="*", return_decision=True
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+            return {
+                "status": "AUTHORIZATION_DENIED",
+                "job": None,
+                "authorization": authorization,
+            }
         rejection = self._sensitive_input_rejection({"worker_id": worker_id})
         if rejection is not None:
             return {"job": None, **rejection}
@@ -1689,6 +1695,18 @@ class ProviderService:
                 }
             if not isinstance(providers, list) or any(not isinstance(item, dict) for item in providers):
                 return {"status": "INVALID_PROVIDER_REGISTRY_RESPONSE", "job": None}
+            scoped_provider_ids = authorization.get("allowed_provider_ids")
+            if scoped_provider_ids is not None and (
+                not isinstance(scoped_provider_ids, list)
+                or len(scoped_provider_ids) > 10_000
+                or any(
+                    not isinstance(provider_id, str)
+                    or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}", provider_id) is None
+                    for provider_id in scoped_provider_ids
+                )
+                or len(set(scoped_provider_ids)) != len(scoped_provider_ids)
+            ):
+                return {"status": "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE", "job": None}
             allowed_provider_ids = []
             for provider in providers:
                 provider_id = provider.get("id")
