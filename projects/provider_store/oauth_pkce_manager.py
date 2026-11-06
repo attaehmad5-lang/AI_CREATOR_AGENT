@@ -17,15 +17,11 @@ import time
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import Request
 
 from .connection_manager import ConnectionManager
+from .http_probe import ProviderPinnedHTTPSOpener
 from .safe_numbers import finite_number
-
-
-class _RejectOAuthRedirects(HTTPRedirectHandler):
-    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
-        return None
 
 
 class ProviderOAuthPKCEManager:
@@ -41,11 +37,16 @@ class ProviderOAuthPKCEManager:
         clock: Callable[[], float] | None = None,
         state_ttl_seconds: int = 600,
         max_response_bytes: int = 64 * 1024,
+        resolver: Callable[..., Any] | None = None,
     ) -> None:
         if environ is not None and not isinstance(environ, dict):
             raise ValueError("environ must be a mapping")
         if opener is not None and not callable(getattr(opener, "open", None)):
             raise ValueError("opener must provide an open method")
+        if resolver is not None and not callable(resolver):
+            raise ValueError("resolver must be callable")
+        if opener is not None and resolver is not None:
+            raise ValueError("custom opener and resolver cannot be combined")
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         if not isinstance(state_ttl_seconds, int) or isinstance(state_ttl_seconds, bool) or not 60 <= state_ttl_seconds <= 1800:
@@ -53,7 +54,7 @@ class ProviderOAuthPKCEManager:
         if not isinstance(max_response_bytes, int) or isinstance(max_response_bytes, bool) or not 256 <= max_response_bytes <= 1_000_000:
             raise ValueError("max_response_bytes must be between 256 and 1000000")
         self.environ = environ
-        self.opener = opener or build_opener(_RejectOAuthRedirects())
+        self.opener = opener if opener is not None else ProviderPinnedHTTPSOpener(resolver=resolver)
         self.clock = clock or time.time
         self.state_ttl_seconds = state_ttl_seconds
         self.max_response_bytes = max_response_bytes
