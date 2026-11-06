@@ -541,16 +541,15 @@ class ProviderRoutingManager:
             if cost == 0 and provider.get("zero_cost_allowed") is not True:
                 decisions.append({"provider": provider_id, "status": "ZERO_COST_NOT_VERIFIED"})
                 continue
+            route_latency = finite_number(
+                health_record.get("last_latency_ms"), minimum=0
+            )
             candidates.append({
                 **provider,
                 "_route_cost": float(cost),
                 "_route_price_evidence": price_evidence,
                 "_route_credits": credit_sort,
-                "_route_latency": (
-                    finite_number(health_record.get("last_latency_ms"), minimum=0)
-                    if finite_number(health_record.get("last_latency_ms"), minimum=0) is not None
-                    else float("inf")
-                ),
+                "_route_latency": route_latency if route_latency is not None else float("inf"),
             })
 
         confidence_status = None
