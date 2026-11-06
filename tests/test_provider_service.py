@@ -14,6 +14,7 @@ from projects.provider_store.provider_job_manager import ProviderJobManager
 from projects.provider_store.provider_slo_manager import ProviderSLOManager
 from projects.provider_store.provider_degraded_mode import ProviderDegradedModeManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
+from projects.provider_store.provider_retention_manager import ProviderRetentionManager
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
 from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
@@ -2233,6 +2234,115 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.assertEqual(result["degraded_mode"]["status"], "INVALID_DEGRADED_MODE_STATE")
         self.assertEqual(called, [])
+
+    def test_retention_manager_is_wired_to_successful_provider_execution(self):
+        policy = ProviderDataHandlingPolicy({
+            "image": {
+                "allowed_categories": ["user_content"],
+                "max_retention_days": 30,
+                "training_use_allowed": False,
+                "source_url": "https://provider.example/privacy",
+            }
+        })
+        retention = ProviderRetentionManager(self.root / "service-retention.json", policy)
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        class Validator:
+            def validate_file(self, path, *, modality):
+                return {"valid": True, "status": "VALID"}
+
+        service = ProviderService(
+            self.connections, routing_manager=RoutingStub(), output_validator=Validator(),
+            data_handling_policy=policy, provider_retention_manager=retention,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="retention-request-1",
+            estimated_cost=0.0, modality="image", tenant_id="tenant-a", retention_days=1,
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": "provider-output.png",
+                "provider_resource_ref": "opaque-provider-resource-1",
+            },
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertTrue(result["retention"]["saved"])
+        self.assertFalse(result["retention_enforcement_pending"])
+        self.assertEqual(
+            retention.get_status(result["retention"]["resource_id"], tenant_id="tenant-a")["deletion_status"],
+            "PENDING",
+        )
+
+    def test_retention_manager_marks_execution_when_provider_reference_is_missing(self):
+        policy = ProviderDataHandlingPolicy({
+            "image": {
+                "allowed_categories": ["user_content"],
+                "max_retention_days": 30,
+                "training_use_allowed": False,
+                "source_url": "https://provider.example/privacy",
+            }
+        })
+        retention = ProviderRetentionManager(self.root / "missing-ref-retention.json", policy)
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                return {"allowed": True, "provider": "image", "billing_mode": "ZERO_COST"}
+
+        class Validator:
+            def validate_file(self, path, *, modality):
+                return {"valid": True, "status": "VALID"}
+
+        service = ProviderService(
+            self.connections, routing_manager=RoutingStub(), output_validator=Validator(),
+            data_handling_policy=policy, provider_retention_manager=retention,
+        )
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="retention-missing-ref",
+            estimated_cost=0.0, modality="image", tenant_id="tenant-a",
+            adapter=lambda **kwargs: {
+                "started": True, "success": True, "actual_cost": 0.0,
+                "charge_outcome": "not_incurred", "output_path": "provider-output.png",
+            },
+        )
+        self.assertEqual(result["status"], "EXECUTION_RETENTION_REGISTRATION_FAILED")
+        self.assertTrue(result["retention_enforcement_pending"])
+        self.assertEqual(result["retention"]["status"], "PROVIDER_RESOURCE_REFERENCE_REQUIRED")
+
+    def test_retention_sweep_requires_admin_service_authorization(self):
+        policy = ProviderDataHandlingPolicy({
+            "image": {
+                "allowed_categories": ["user_content"],
+                "max_retention_days": 30,
+                "training_use_allowed": False,
+                "source_url": "https://provider.example/privacy",
+            }
+        })
+        retention = ProviderRetentionManager(self.root / "sweep-retention.json", policy)
+        self.assertTrue(retention.register(
+            resource_id="sweep-resource", provider_id="image", tenant_id="tenant-a",
+            resource_ref="opaque-sweep-resource", data_categories=["user_content"],
+            retention_days=0, now=100,
+        )["saved"])
+        authorization = ProviderAuthorizationManager(self.root / "retention-sweep-auth.json")
+        authorization.assign_role("retention-admin", "admin")
+        authorization.assign_role("retention-operator", "operator")
+        service = ProviderService(
+            self.connections, authorization_manager=authorization,
+            provider_retention_manager=retention,
+        )
+        denied = service.run_provider_retention_sweep(
+            delete_provider_resource=lambda **kwargs: self.fail("unauthorized deletion"),
+            principal_id="retention-operator", now=101,
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        completed = service.run_provider_retention_sweep(
+            delete_provider_resource=lambda **kwargs: True,
+            principal_id="retention-admin", now=101,
+        )
+        self.assertEqual(completed["status"], "PROVIDER_RETENTION_SWEEP_COMPLETE")
+        self.assertEqual(completed["deleted"], 1)
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
