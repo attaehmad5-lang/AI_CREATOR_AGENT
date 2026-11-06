@@ -24,6 +24,9 @@ MODULE_DIR = Path(__file__).resolve().parent
 DEFAULT_CATALOG = MODULE_DIR / "provider_catalog.json"
 MASTER_CATALOG = MODULE_DIR / "provider_catalog_master.json"
 DEFAULT_STATE = MODULE_DIR / "connection_state.json"
+_MAX_CONFIG_BYTES = 4 * 1024 * 1024
+_MAX_STATE_PROVIDERS = 10000
+_STATE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\\Z")
 
 
 class ProviderAuthenticationVerificationRequired(PermissionError):
@@ -111,8 +114,9 @@ class ConnectionManager:
                 self.state_path,
                 default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}},
             )
-        if not isinstance(self.state.get("providers"), dict):
-            raise ValueError("Invalid connection state schema: providers must be an object")
+        self.state.setdefault("version", "1.0")
+        self.state.setdefault("policy", "USER_CONTROLLED")
+        self.validate_connection_state_schema(self.state, raise_on_error=True)
         self._lock = threading.RLock()
         # Runtime instances are intentionally process-local and never serialized.
         self._loaded_providers: dict[str, Any] = {}
@@ -171,16 +175,97 @@ class ConnectionManager:
                 "provider_count": validation.get("provider_count", 0),
             }
 
+    @classmethod
+    def validate_connection_state_schema(
+        cls, state: Any, *, raise_on_error: bool = False
+    ) -> dict[str, Any]:
+        """Validate persisted connection state while accepting legacy safe defaults."""
+        errors: list[str] = []
+        provider_count = 0
+        if not isinstance(state, dict):
+            errors.append("connection state must be an object")
+        else:
+            version = state.get("version", "1.0")
+            if (
+                not isinstance(version, (str, int, float))
+                or isinstance(version, bool)
+                or not re.fullmatch(r"\\d+(?:\\.\\d+){0,2}", str(version))
+            ):
+                errors.append("connection state version must be a numeric version")
+            policy = state.get("policy", "USER_CONTROLLED")
+            if (
+                not isinstance(policy, str)
+                or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", policy)
+            ):
+                errors.append("connection state policy must be a safe policy identifier")
+            providers = state.get("providers")
+            if not isinstance(providers, dict):
+                errors.append("connection state providers must be an object")
+            elif len(providers) > _MAX_STATE_PROVIDERS:
+                errors.append("connection state contains too many provider records")
+            else:
+                provider_count = len(providers)
+                for provider_id, record in providers.items():
+                    if not isinstance(provider_id, str) or not _STATE_ID_RE.fullmatch(provider_id):
+                        errors.append("connection state contains an invalid provider identifier")
+                        continue
+                    if not isinstance(record, dict):
+                        errors.append(f"connection state record for {provider_id} must be an object")
+                        continue
+                    status = record.get("status")
+                    if status is not None and (
+                        not isinstance(status, str) or status not in cls.VALID_STATES
+                    ):
+                        errors.append(f"connection state record for {provider_id} has an invalid status")
+                    if "verified" in record and not isinstance(record["verified"], bool):
+                        errors.append(f"connection state record for {provider_id} verified must be boolean")
+                    if "configuration" in record and not isinstance(record["configuration"], dict):
+                        errors.append(f"connection state record for {provider_id} configuration must be an object")
+        result = {"valid": not errors, "errors": errors, "provider_count": provider_count}
+        if errors and raise_on_error:
+            raise ValueError("Invalid connection state schema: " + "; ".join(errors))
+        return result
+
     @staticmethod
     def _load_json(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Load bounded JSON and reject duplicate keys/non-finite numbers at every depth."""
         if not path.exists():
             if default is not None:
-                return json.loads(json.dumps(default))
+                return json.loads(json.dumps(default, allow_nan=False))
             raise FileNotFoundError(f"Required provider catalog not found: {path}")
         try:
-            with path.open("r", encoding="utf-8") as stream:
-                data = json.load(stream)
-        except json.JSONDecodeError as exc:
+            with path.open("rb") as stream:
+                raw = stream.read(_MAX_CONFIG_BYTES + 1)
+            if len(raw) > _MAX_CONFIG_BYTES:
+                raise ValueError("Configuration file exceeds safe size limit")
+            decoded = raw.decode("utf-8")
+
+            def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                result: dict[str, Any] = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError("Duplicate JSON object key")
+                    result[key] = value
+                return result
+
+            def parse_finite_float(value: str) -> float:
+                number = float(value)
+                if not math.isfinite(number):
+                    raise ValueError("Non-finite JSON number")
+                return number
+
+            def reject_constant(value: str) -> None:
+                raise ValueError("Non-finite JSON number")
+
+            data = json.loads(
+                decoded,
+                object_pairs_hook=reject_duplicate_keys,
+                parse_float=parse_finite_float,
+                parse_constant=reject_constant,
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError, RecursionError) as exc:
+            if isinstance(exc, ValueError) and str(exc) == "Configuration file exceeds safe size limit":
+                raise
             raise ValueError(f"Invalid JSON in {path.name}") from exc
         if not isinstance(data, dict):
             raise ValueError(f"Expected a JSON object in {path.name}")
@@ -223,8 +308,9 @@ class ConnectionManager:
             self.state_path,
             default={"version": "1.0", "policy": "USER_CONTROLLED", "providers": {}},
         )
-        if not isinstance(state.get("providers"), dict):
-            raise ValueError("Invalid connection state schema: providers must be an object")
+        state.setdefault("version", "1.0")
+        state.setdefault("policy", "USER_CONTROLLED")
+        self.validate_connection_state_schema(state, raise_on_error=True)
         self.state = state
 
     @contextmanager
