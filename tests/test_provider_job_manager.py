@@ -75,7 +75,7 @@ class ProviderJobManagerTests(unittest.TestCase):
         )
         video_submission = manager.submit(
             job_id="video-not-authorized", project_id="film", provider_id="video",
-            payload_ref="payload:video-not-authorized", priority=200,
+            payload_ref="payload:video-not-authorized", priority=99,
         )
         self.assertTrue(image_submission["accepted"], image_submission)
         self.assertTrue(video_submission["accepted"], video_submission)
