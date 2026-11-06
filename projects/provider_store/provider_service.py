@@ -1761,7 +1761,9 @@ class ProviderService:
             if concurrency_lease_token is not None:
                 with self.concurrency_manager.maintain_lease(concurrency_lease_token) as lease_lost:
                     adapter_result = adapter(**options)
-                    concurrency_lease_lost = lease_lost.is_set()
+                # The heartbeat thread is joined on context exit; inspect its
+                # final state only after no renewal can race this read.
+                concurrency_lease_lost = lease_lost.is_set()
             else:
                 adapter_result = adapter(**options)
         except Exception as exc:
