@@ -8,7 +8,7 @@ import re
 import tempfile
 import threading
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -250,7 +250,10 @@ class ProviderMetricsManager:
         return ordered[index]
 
     def snapshot(
-        self, *, provider_id: str | None = None, category: str | None = None
+        self, *,
+        provider_id: str | None = None,
+        category: str | None = None,
+        window_seconds: float = 300.0,
     ) -> dict[str, Any]:
         if provider_id is not None and (
             not isinstance(provider_id, str) or not provider_id.strip()
@@ -260,6 +263,16 @@ class ProviderMetricsManager:
             not isinstance(category, str) or not category.strip()
         ):
             return {"status": "INVALID_CATEGORY", "metrics": None}
+        window = finite_number(window_seconds, minimum=0)
+        if window is None or window <= 0 or window > 86_400:
+            return {"status": "INVALID_METRIC_WINDOW", "metrics": None}
+        try:
+            current_time = self.clock()
+            if not isinstance(current_time, datetime) or current_time.tzinfo is None:
+                return {"status": "INVALID_METRIC_CLOCK", "metrics": None}
+            current_time = current_time.astimezone(timezone.utc)
+        except Exception:
+            return {"status": "INVALID_METRIC_CLOCK", "metrics": None}
         try:
             if self.state_path is None:
                 with self._lock:
@@ -285,20 +298,35 @@ class ProviderMetricsManager:
                     "timeout_count": 0, "success_rate": None,
                     "avg_latency_ms": None, "p50_latency_ms": None,
                     "p95_latency_ms": None, "avg_queue_wait_ms": None,
+                    "window_sample_count": 0, "throughput_per_minute": 0.0,
+                    "timeout_rate": None, "window_seconds": float(window),
                 },
             }
+        window_start = current_time - timedelta(seconds=float(window))
+        window_samples = [
+            item for item in samples
+            if (
+                (recorded_at := self._parse_timestamp(item["recorded_at"])) is not None
+                and window_start <= recorded_at <= current_time
+            )
+        ]
         latencies = [item["latency_ms"] for item in samples]
         waits = [item["queue_wait_ms"] for item in samples]
         success_count = sum(item["success"] for item in samples)
+        timeout_count = sum(item["timed_out"] for item in samples)
         metrics = {
             "sample_count": len(samples),
             "success_count": success_count,
             "failure_count": len(samples) - success_count,
-            "timeout_count": sum(item["timed_out"] for item in samples),
+            "timeout_count": timeout_count,
+            "timeout_rate": timeout_count / len(samples),
             "success_rate": success_count / len(samples),
             "avg_latency_ms": sum(latencies) / len(latencies),
             "p50_latency_ms": self._percentile(latencies, 0.50),
             "p95_latency_ms": self._percentile(latencies, 0.95),
             "avg_queue_wait_ms": sum(waits) / len(waits),
+            "window_sample_count": len(window_samples),
+            "throughput_per_minute": len(window_samples) / (float(window) / 60.0),
+            "window_seconds": float(window),
         }
         return {"status": "METRICS_AVAILABLE", "metrics": metrics}
