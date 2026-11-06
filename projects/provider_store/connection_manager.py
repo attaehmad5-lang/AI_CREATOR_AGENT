@@ -601,6 +601,198 @@ class ConnectionManager:
             safe[key] = value
         return safe
 
+    def refresh_provider_metadata(
+        self, provider_id: str, fetch_metadata: Any
+    ) -> dict[str, Any]:
+        """Refresh an allowlisted metadata subset from a verified official HTTPS source.
+
+        The injected fetcher is trusted application code. It receives only the
+        secret-filtered provider view; returned fields are schema checked before
+        an atomic catalog update. This method never changes credentials, routing,
+        endpoints, enablement, or connection-health state.
+        """
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER_ID", "refreshed": False}
+        if not callable(fetch_metadata):
+            return {"status": "INVALID_METADATA_FETCHER", "provider": provider_id, "refreshed": False}
+        provider = self.get_provider_metadata(provider_id)
+        if provider is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "refreshed": False}
+        try:
+            result = fetch_metadata(dict(provider))
+        except Exception as exc:
+            return {
+                "status": "METADATA_FETCH_FAILED", "provider": provider_id,
+                "refreshed": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_METADATA_RESPONSE", "provider": provider_id, "refreshed": False}
+        if self._contains_credential_value_field(result):
+            return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id, "refreshed": False}
+        allowed_fields = {
+            "verified", "source_url", "capabilities", "adapter_api_version",
+            "models", "pricing",
+        }
+        if set(result) - allowed_fields or result.get("verified") is not True:
+            return {"status": "UNVERIFIED_OR_UNKNOWN_METADATA_FIELDS", "provider": provider_id, "refreshed": False}
+
+        source_url = result.get("source_url")
+        if not isinstance(source_url, str) or not 1 <= len(source_url) <= 2048:
+            return {"status": "INVALID_METADATA_SOURCE", "provider": provider_id, "refreshed": False}
+        try:
+            parsed_source = urlsplit(source_url)
+            source_port = parsed_source.port
+        except ValueError:
+            return {"status": "INVALID_METADATA_SOURCE", "provider": provider_id, "refreshed": False}
+        source_host = parsed_source.hostname.casefold().rstrip(".") if parsed_source.hostname else None
+        official_hosts = set()
+        for field in ("official_api_url", "official_docs_url"):
+            raw = provider.get(field)
+            if isinstance(raw, str):
+                try:
+                    host = urlsplit(raw).hostname
+                except ValueError:
+                    host = None
+                if host:
+                    official_hosts.add(host.casefold().rstrip("."))
+        allowed_hosts = provider.get("allowed_hosts")
+        if isinstance(allowed_hosts, list):
+            official_hosts.update(
+                item.casefold().rstrip(".") for item in allowed_hosts
+                if isinstance(item, str)
+            )
+        if (
+            parsed_source.scheme != "https" or not source_host
+            or parsed_source.username is not None or parsed_source.password is not None
+            or parsed_source.query or parsed_source.fragment
+            or source_host not in official_hosts
+        ):
+            return {"status": "UNTRUSTED_METADATA_SOURCE", "provider": provider_id, "refreshed": False}
+
+        capabilities = result.get("capabilities")
+        if (
+            not isinstance(capabilities, list) or not 1 <= len(capabilities) <= 100
+            or any(
+                not isinstance(item, str)
+                or re.fullmatch(r"[a-z][a-z0-9_]{0,79}", item) is None
+                for item in capabilities
+            )
+            or len(set(capabilities)) != len(capabilities)
+        ):
+            return {"status": "INVALID_METADATA_CAPABILITIES", "provider": provider_id, "refreshed": False}
+
+        adapter_version = result.get("adapter_api_version", provider.get("adapter_api_version", "1.0"))
+        if not isinstance(adapter_version, str) or not _ADAPTER_API_VERSION_RE.fullmatch(adapter_version):
+            return {"status": "INVALID_METADATA_API_VERSION", "provider": provider_id, "refreshed": False}
+
+        models = result.get("models", [])
+        if not isinstance(models, list) or len(models) > 256:
+            return {"status": "INVALID_METADATA_MODELS", "provider": provider_id, "refreshed": False}
+        safe_models: list[dict[str, Any]] = []
+        model_ids: set[str] = set()
+        for model in models:
+            if (
+                not isinstance(model, dict)
+                or set(model) - {"id", "version", "capabilities", "deprecated"}
+                or not isinstance(model.get("id"), str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}", model["id"]) is None
+                or model["id"] in model_ids
+            ):
+                return {"status": "INVALID_METADATA_MODELS", "provider": provider_id, "refreshed": False}
+            model_ids.add(model["id"])
+            item: dict[str, Any] = {"id": model["id"]}
+            version = model.get("version")
+            if version is not None:
+                if not isinstance(version, str) or not 1 <= len(version) <= 200 or any(ord(ch) < 32 for ch in version):
+                    return {"status": "INVALID_METADATA_MODELS", "provider": provider_id, "refreshed": False}
+                item["version"] = version
+            model_capabilities = model.get("capabilities", [])
+            if (
+                not isinstance(model_capabilities, list)
+                or any(not isinstance(value, str) or value not in capabilities for value in model_capabilities)
+                or len(set(model_capabilities)) != len(model_capabilities)
+            ):
+                return {"status": "INVALID_METADATA_MODELS", "provider": provider_id, "refreshed": False}
+            if model_capabilities:
+                item["capabilities"] = list(model_capabilities)
+            deprecated = model.get("deprecated", False)
+            if not isinstance(deprecated, bool):
+                return {"status": "INVALID_METADATA_MODELS", "provider": provider_id, "refreshed": False}
+            item["deprecated"] = deprecated
+            safe_models.append(item)
+
+        pricing = result.get("pricing", [])
+        units = {"request", "image", "video_second", "audio_second", "token_1k", "character_1k", "minute"}
+        if not isinstance(pricing, list) or len(pricing) > 512:
+            return {"status": "INVALID_METADATA_PRICING", "provider": provider_id, "refreshed": False}
+        safe_pricing: list[dict[str, Any]] = []
+        seen_prices: set[tuple[str, str]] = set()
+        for price in pricing:
+            if (
+                not isinstance(price, dict)
+                or set(price) != {"model_id", "unit", "currency", "amount"}
+                or not isinstance(price.get("model_id"), str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}", price["model_id"]) is None
+                or not isinstance(price.get("unit"), str) or price["unit"] not in units
+                or not isinstance(price.get("currency"), str) or re.fullmatch(r"[A-Z]{3}", price["currency"]) is None
+                or isinstance(price.get("amount"), bool)
+                or not isinstance(price.get("amount"), (int, float))
+                or not math.isfinite(float(price["amount"]))
+                or not 0 <= float(price["amount"]) <= 1_000_000_000
+            ):
+                return {"status": "INVALID_METADATA_PRICING", "provider": provider_id, "refreshed": False}
+            price_key = (price["model_id"], price["unit"])
+            if price_key in seen_prices or (model_ids and price["model_id"] not in model_ids):
+                return {"status": "INVALID_METADATA_PRICING", "provider": provider_id, "refreshed": False}
+            seen_prices.add(price_key)
+            safe_pricing.append({
+                "model_id": price["model_id"], "unit": price["unit"],
+                "currency": price["currency"], "amount": float(price["amount"]),
+            })
+
+        metadata = {
+            "source_url": source_url,
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "capabilities": list(capabilities),
+            "adapter_api_version": adapter_version,
+            "models": safe_models,
+            "pricing": safe_pricing,
+        }
+        with self._catalog_transaction():
+            providers = self._list_providers_unlocked()
+            index = next((i for i, item in enumerate(providers) if item.get("id") == provider_id), None)
+            if index is None:
+                return {"status": "NOT_FOUND", "provider": provider_id, "refreshed": False}
+            current = providers[index]
+            current_hosts = set()
+            current_allowed = current.get("allowed_hosts")
+            if isinstance(current_allowed, list):
+                current_hosts.update(item.casefold().rstrip(".") for item in current_allowed if isinstance(item, str))
+            for field in ("official_api_url", "official_docs_url"):
+                raw = current.get(field)
+                if isinstance(raw, str):
+                    try:
+                        host = urlsplit(raw).hostname
+                    except ValueError:
+                        host = None
+                    if host:
+                        current_hosts.add(host.casefold().rstrip("."))
+            if source_host not in current_hosts:
+                return {"status": "METADATA_SOURCE_CHANGED_DURING_REFRESH", "provider": provider_id, "refreshed": False}
+            updated = [dict(item) for item in providers]
+            updated[index]["provider_metadata"] = metadata
+            new_catalog = dict(self.catalog)
+            new_catalog["providers"] = updated
+            validation = self.validate_catalog_schema(new_catalog)
+            if validation.get("valid") is not True:
+                return {"status": "INVALID_REFRESHED_CATALOG", "provider": provider_id, "refreshed": False}
+            self._atomic_write_json(self.catalog_path, new_catalog)
+            self.catalog = new_catalog
+        return {
+            "status": "PROVIDER_METADATA_REFRESHED", "provider": provider_id,
+            "refreshed": True, "provider_metadata": metadata,
+        }
+
     def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
         """Serialize enable/disable with runtime load/unload to avoid lifecycle races."""
         with self._lock:
