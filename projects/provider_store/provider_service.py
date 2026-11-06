@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 import inspect
 import re
+import secrets
 import time
 
 from .safe_numbers import finite_number
@@ -1594,6 +1595,7 @@ class ProviderService:
         request_id: str,
         estimated_cost: float,
         adapter: Any,
+        trace_id: str | None = None,
         modality: str,
         principal_id: str | None = None,
         tenant_id: str | None = None,
@@ -1624,6 +1626,14 @@ class ProviderService:
             return {"status": "INVALID_MANAGED_CREDENTIAL_POLICY", "executed": False}
         if not isinstance(request_id, str) or not request_id.strip():
             return {"status": "INVALID_REQUEST_ID", "executed": False}
+        if trace_id is None:
+            trace_id = secrets.token_hex(16)
+        elif (
+            not isinstance(trace_id, str)
+            or re.fullmatch(r"[0-9a-f]{32}", trace_id) is None
+            or trace_id == "0" * 32
+        ):
+            return {"status": "INVALID_TRACE_ID", "executed": False}
         if not isinstance(category, str) or not category.strip():
             return {"status": "INVALID_CATEGORY", "executed": False}
         if not isinstance(project_id, str) or not project_id.strip():
@@ -1900,6 +1910,7 @@ class ProviderService:
         options = dict(adapter_options or {})
         options["provider_id"] = provider_id
         options["request_id"] = request_id
+        options["trace_id"] = trace_id
         secret_lease = None
         if use_managed_credential:
             try:
@@ -2042,6 +2053,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                "trace_id": trace_id,
                 "reservations_retained": True,
                 "error_type": type(exc).__name__,
                 "provider_error": provider_error,
@@ -2059,6 +2071,7 @@ class ProviderService:
                 "executed": False,
                 "provider": provider_id,
                 "request_id": request_id,
+                "trace_id": trace_id,
                 "reservations_retained": True,
             }
         if adapter_result["started"] is False:
@@ -2349,6 +2362,7 @@ class ProviderService:
             "executed": True,
             "provider": provider_id,
             "request_id": request_id,
+            "trace_id": trace_id,
             "billing_mode": route.get("billing_mode"),
             "output": output_validation,
             "media_integrity": media_integrity_result,
