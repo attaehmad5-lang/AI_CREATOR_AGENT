@@ -205,7 +205,21 @@ class ProviderServiceAuditTests(unittest.TestCase):
     def test_execute_routed_request_propagates_one_trace_across_routing_adapter_and_audit(self):
         self.authorization.assign_role("trace-admin", "admin")
         router = RoutingStub()
-        service = self.service(router=router)
+
+        class ReservationStub:
+            def commit(self, **kwargs):
+                return {"status": "ALREADY_COMMITTED", "committed": True}
+
+            def release(self, **kwargs):
+                return {"status": "RESERVATION_NOT_FOUND", "released": False}
+
+        service = ProviderService(
+            self.connections,
+            routing_manager=router,
+            authorization_manager=self.authorization,
+            quota_manager=ReservationStub(),
+            provider_audit_manager=self.audit,
+        )
         adapter_calls = []
         parent = "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
 
