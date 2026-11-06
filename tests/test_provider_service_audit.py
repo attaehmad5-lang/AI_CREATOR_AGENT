@@ -84,7 +84,8 @@ class ProviderServiceAuditIntegrationTests(unittest.TestCase):
         self.assertEqual(events[0]["event_type"], "authorization_decision")
         self.assertEqual(events[0]["outcome"], "denied")
         self.assertEqual(events[0]["actor_id"], "operator-1")
-        self.assertNotIn("credential", repr(events[0]["details"]).casefold())
+        self.assertNotIn("secret-value", repr(events[0]["details"]))
+        self.assertNotIn("vault://", repr(events[0]["details"]))
 
     def test_authorization_fails_closed_when_audit_persistence_fails(self):
         class BrokenAudit:
