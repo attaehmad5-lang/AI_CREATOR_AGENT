@@ -528,5 +528,94 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.poll(job_id="missing")["status"], "JOB_NOT_FOUND")
 
 
+    def test_queued_job_deadline_expires_before_worker_claim(self):
+        deadline = (self.now[0] + timedelta(seconds=5)).isoformat()
+        result = self.manager.submit(
+            job_id="deadline-queued", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-queued", deadline_at=deadline,
+        )
+        self.assertTrue(result["accepted"])
+        self.now[0] += timedelta(seconds=6)
+        self.assertEqual(self.manager.claim_next(worker_id="worker-1")["status"], "QUEUE_EMPTY")
+        job = self.manager.poll(job_id="deadline-queued")["job"]
+        self.assertEqual(job["status"], "FAILED")
+        self.assertEqual(job["error_code"], "JOB_DEADLINE_EXCEEDED")
+
+    def test_running_job_deadline_stops_worker_and_clears_lease(self):
+        deadline = (self.now[0] + timedelta(seconds=5)).isoformat()
+        self.manager.submit(
+            job_id="deadline-running", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-running", deadline_at=deadline,
+        )
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(
+            self.manager.check_worker_control(
+                job_id="deadline-running", worker_id="worker-1",
+                lease_token=claimed["job"]["lease_token"],
+            )["status"],
+            "WORKER_CONTINUE",
+        )
+        self.now[0] += timedelta(seconds=6)
+        stopped = self.manager.check_worker_control(
+            job_id="deadline-running", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"],
+        )
+        self.assertEqual(stopped["status"], "JOB_DEADLINE_EXCEEDED")
+        self.assertTrue(stopped["should_stop"])
+        persisted = self.manager.poll(job_id="deadline-running")["job"]
+        self.assertEqual(persisted["status"], "FAILED")
+        self.assertIsNone(persisted["worker_id"])
+
+    def test_worker_checkpoint_finalizes_cooperative_cancellation(self):
+        self.submit("cancel-checkpoint")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(
+            self.manager.cancel(job_id="cancel-checkpoint")["status"],
+            "CANCEL_REQUESTED",
+        )
+        stopped = self.manager.check_worker_control(
+            job_id="cancel-checkpoint", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"],
+        )
+        self.assertEqual(stopped["status"], "JOB_CANCELLED")
+        self.assertTrue(stopped["should_stop"])
+        self.assertEqual(
+            self.manager.poll(job_id="cancel-checkpoint")["job"]["status"],
+            "CANCELLED",
+        )
+
+    def test_invalid_deadlines_fail_closed(self):
+        for invalid in ("2026-10-16T12:00:00", "not-a-date", "x" * 65):
+            result = self.manager.submit(
+                job_id="invalid-deadline", project_id="film", provider_id="image",
+                payload_ref="payload:invalid-deadline", deadline_at=invalid,
+            )
+            self.assertEqual(result["status"], "INVALID_DEADLINE")
+        expired = self.manager.submit(
+            job_id="already-expired", project_id="film", provider_id="image",
+            payload_ref="payload:already-expired",
+            deadline_at=(self.now[0] - timedelta(seconds=1)).isoformat(),
+        )
+        self.assertEqual(expired["status"], "DEADLINE_ALREADY_EXPIRED")
+
+    def test_graceful_stop_rejects_new_jobs_and_reports_drain(self):
+        self.submit("accepted-before-stop")
+        stopped = self.manager.stop_accepting()
+        self.assertFalse(stopped["accepting"])
+        self.assertEqual(stopped["queued"], 1)
+        self.assertEqual(self.manager.submit(
+            job_id="rejected-after-stop", project_id="film", provider_id="image",
+            payload_ref="payload:rejected-after-stop",
+        )["status"], "QUEUE_SHUTTING_DOWN")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        result = self.manager.complete(
+            job_id="accepted-before-stop", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"], success=True,
+            result_ref="asset:drained",
+        )
+        self.assertTrue(result["saved"])
+        self.assertTrue(self.manager.drain_status()["drained"])
+        self.assertTrue(self.manager.resume_accepting()["accepting"])
+
 if __name__ == "__main__":
     unittest.main()
