@@ -252,7 +252,8 @@ class ProviderJobManager:
                 or (
                     job.get("remote_submission_state", "NOT_SUBMITTED") == "SUBMITTING"
                     and (
-                        job.get("remote_submission_worker_id") is None
+                        job.get("remote_submission_attempts", 0) < 1
+                        or job.get("remote_submission_worker_id") is None
                         or job.get("remote_submission_lease_token_hash") is None
                         or job.get("remote_job_id") is not None
                         or job.get("remote_status") is not None
@@ -326,6 +327,8 @@ class ProviderJobManager:
         public_job = dict(job)
         public_job.pop("lease_token_hash", None)
         public_job.pop("lease_token", None)
+        public_job.pop("remote_submission_lease_token_hash", None)
+        public_job.pop("remote_submission_worker_id", None)
         key_digest = public_job.pop("idempotency_key_hash", None)
         public_job.pop("request_fingerprint", None)
         if lease_token is not None:
@@ -949,6 +952,9 @@ class ProviderJobManager:
                 or job.get("remote_job_id") != remote_job_id
             ):
                 return {"status": "REMOTE_JOB_IDENTITY_MISMATCH", "saved": False}
+            current_remote_status = job.get("remote_status")
+            if current_remote_status == "RUNNING" and remote_status == "QUEUED":
+                return {"status": "REMOTE_JOB_STATUS_REGRESSION", "saved": False}
             job["remote_status"] = remote_status
             job["remote_poll_after_seconds"] = (
                 poll_after_seconds if remote_status in {"QUEUED", "RUNNING"} else None
