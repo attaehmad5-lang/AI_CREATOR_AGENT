@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import tempfile
 import threading
 from collections import deque
@@ -18,6 +19,11 @@ _PROVIDER_ID_MAX = 128
 _CATEGORY_MAX = 64
 _MAX_PERSISTED_SAMPLES = 100_000
 _MAX_STATE_BYTES = 32 * 1024 * 1024
+_LABEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\\Z")
+_SECRET_MARKER_RE = re.compile(
+    r"(?i)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|bearer|"
+    r"password|secret|private[_-]?key|credential|jwt)"
+)
 _SAMPLE_FIELDS = frozenset({
     "provider_id", "category", "success", "latency_ms",
     "queue_wait_ms", "timed_out", "recorded_at",
@@ -83,21 +89,25 @@ class ProviderMetricsManager:
             return None
         return parsed.astimezone(timezone.utc)
 
+    @staticmethod
+    def _valid_label(value: Any, *, max_length: int) -> bool:
+        return (
+            isinstance(value, str)
+            and value == value.strip()
+            and len(value) <= max_length
+            and _LABEL_RE.fullmatch(value) is not None
+            and _SECRET_MARKER_RE.search(value) is None
+        )
+
     @classmethod
     def _validate_sample(cls, item: Any) -> dict[str, Any]:
         if not isinstance(item, dict) or set(item) != _SAMPLE_FIELDS:
             raise ValueError("invalid provider metrics sample schema")
         provider_id = item.get("provider_id")
         category = item.get("category")
-        if (
-            not isinstance(provider_id, str) or not provider_id.strip()
-            or len(provider_id) > _PROVIDER_ID_MAX
-        ):
+        if not cls._valid_label(provider_id, max_length=_PROVIDER_ID_MAX):
             raise ValueError("invalid provider metrics provider ID")
-        if (
-            not isinstance(category, str) or not category.strip()
-            or len(category) > _CATEGORY_MAX
-        ):
+        if not cls._valid_label(category, max_length=_CATEGORY_MAX):
             raise ValueError("invalid provider metrics category")
         if not isinstance(item.get("success"), bool) or not isinstance(item.get("timed_out"), bool):
             raise ValueError("invalid provider metrics flags")
@@ -185,9 +195,9 @@ class ProviderMetricsManager:
         queue_wait_ms: float = 0.0,
         timed_out: bool = False,
     ) -> dict[str, Any]:
-        if not isinstance(provider_id, str) or not provider_id.strip() or len(provider_id) > _PROVIDER_ID_MAX:
+        if not self._valid_label(provider_id, max_length=_PROVIDER_ID_MAX):
             return {"status": "INVALID_PROVIDER_ID", "saved": False}
-        if not isinstance(category, str) or not category.strip() or len(category) > _CATEGORY_MAX:
+        if not self._valid_label(category, max_length=_CATEGORY_MAX):
             return {"status": "INVALID_CATEGORY", "saved": False}
         if not isinstance(success, bool) or not isinstance(timed_out, bool):
             return {"status": "INVALID_METRIC_FLAGS", "saved": False}
