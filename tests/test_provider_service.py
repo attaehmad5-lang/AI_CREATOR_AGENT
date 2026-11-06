@@ -15,6 +15,7 @@ from projects.provider_store.provider_slo_manager import ProviderSLOManager
 from projects.provider_store.provider_degraded_mode import ProviderDegradedModeManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
 from projects.provider_store.provider_retention_manager import ProviderRetentionManager
+from projects.provider_store.provider_resource_deletion_adapter import ProviderResourceDeletionAdapter
 from projects.provider_store.sensitive_data_policy import SensitiveDataPolicy
 from projects.provider_store.provider_authorization import ProviderAuthorizationManager
 from projects.provider_store.project_policy_manager import ProviderProjectPolicyManager
@@ -2328,21 +2329,60 @@ class ProviderServiceTests(unittest.TestCase):
         authorization = ProviderAuthorizationManager(self.root / "retention-sweep-auth.json")
         authorization.assign_role("retention-admin", "admin")
         authorization.assign_role("retention-operator", "operator")
+        deletion_calls = []
+        deletion_adapter = ProviderResourceDeletionAdapter({
+            "image": lambda **kwargs: deletion_calls.append(kwargs) or {"deleted": True},
+        })
         service = ProviderService(
             self.connections, authorization_manager=authorization,
             data_handling_policy=policy, provider_retention_manager=retention,
+            provider_deletion_adapter=deletion_adapter,
         )
         denied = service.run_provider_retention_sweep(
-            delete_provider_resource=lambda **kwargs: self.fail("unauthorized deletion"),
             principal_id="retention-operator", now=101,
         )
         self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(deletion_calls, [])
         completed = service.run_provider_retention_sweep(
-            delete_provider_resource=lambda **kwargs: True,
             principal_id="retention-admin", now=101,
         )
         self.assertEqual(completed["status"], "PROVIDER_RETENTION_SWEEP_COMPLETE")
         self.assertEqual(completed["deleted"], 1)
+        self.assertEqual(len(deletion_calls), 1)
+        self.assertEqual(deletion_calls[0]["tenant_id"], "tenant-a")
+        self.assertEqual(
+            deletion_calls[0]["idempotency_key"], "retention-delete:sweep-resource"
+        )
+
+    def test_retention_sweep_fails_closed_without_provider_deletion_adapter(self):
+        policy = ProviderDataHandlingPolicy({
+            "image": {
+                "allowed_categories": ["user_content"],
+                "max_retention_days": 30,
+                "training_use_allowed": False,
+                "source_url": "https://provider.example/privacy",
+            }
+        })
+        retention = ProviderRetentionManager(self.root / "missing-deleter.json", policy)
+        self.assertTrue(retention.register(
+            resource_id="pending-resource", provider_id="image", tenant_id="tenant-a",
+            resource_ref="opaque-resource", data_categories=["user_content"],
+            retention_days=0, now=100,
+        )["saved"])
+        authorization = ProviderAuthorizationManager(self.root / "missing-deleter-auth.json")
+        authorization.assign_role("retention-admin", "admin")
+        service = ProviderService(
+            self.connections, authorization_manager=authorization,
+            data_handling_policy=policy, provider_retention_manager=retention,
+        )
+        result = service.run_provider_retention_sweep(
+            principal_id="retention-admin", now=101,
+        )
+        self.assertEqual(result["status"], "PROVIDER_DELETION_ADAPTER_UNAVAILABLE")
+        self.assertEqual(
+            retention.get_status("pending-resource", tenant_id="tenant-a")["deletion_status"],
+            "PENDING",
+        )
 
     def test_unavailable_optional_managers_fail_with_explicit_status(self):
         service = ProviderService(self.connections)
