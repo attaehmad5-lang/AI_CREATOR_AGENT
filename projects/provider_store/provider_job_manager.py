@@ -21,6 +21,8 @@ _ERROR_RE = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
 _IDEMPOTENCY_KEY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~:-]{0,127}\Z")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 _TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED"}
+_REMOTE_SUBMISSION_STATES = {"NOT_SUBMITTED", "SUBMITTING", "UNKNOWN", "SUBMITTED"}
+_REMOTE_JOB_STATES = {"QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"}
 
 
 def _lease_token_digest(token: str) -> str:
@@ -203,6 +205,96 @@ class ProviderJobManager:
                 or not isinstance(job.get("attempts"), int) or job["attempts"] < 0
                 or isinstance(job.get("priority"), bool)
                 or not isinstance(job.get("priority"), int) or not 0 <= job["priority"] <= 100
+                or not isinstance(job.get("remote_submission_state", "NOT_SUBMITTED"), str)
+                or job.get("remote_submission_state", "NOT_SUBMITTED") not in _REMOTE_SUBMISSION_STATES
+                or (
+                    job.get("remote_job_id") is not None
+                    and (
+                        not isinstance(job.get("remote_job_id"), str)
+                        or not _REF_RE.fullmatch(job["remote_job_id"])
+                    )
+                )
+                or (
+                    job.get("remote_status") is not None
+                    and (
+                        not isinstance(job.get("remote_status"), str)
+                        or job.get("remote_status") not in _REMOTE_JOB_STATES
+                    )
+                )
+                or (
+                    job.get("remote_poll_after_seconds") is not None
+                    and (
+                        isinstance(job.get("remote_poll_after_seconds"), bool)
+                        or not isinstance(job.get("remote_poll_after_seconds"), int)
+                        or not 1 <= job["remote_poll_after_seconds"] <= 3600
+                    )
+                )
+                or (
+                    job.get("remote_submission_attempts", 0) is None
+                    or isinstance(job.get("remote_submission_attempts", 0), bool)
+                    or not isinstance(job.get("remote_submission_attempts", 0), int)
+                    or not 0 <= job.get("remote_submission_attempts", 0) <= 1_000_000
+                )
+                or (
+                    job.get("remote_submission_worker_id") is not None
+                    and (
+                        not isinstance(job.get("remote_submission_worker_id"), str)
+                        or not _ID_RE.fullmatch(job["remote_submission_worker_id"])
+                    )
+                )
+                or (
+                    job.get("remote_submission_lease_token_hash") is not None
+                    and (
+                        not isinstance(job.get("remote_submission_lease_token_hash"), str)
+                        or not _SHA256_RE.fullmatch(job["remote_submission_lease_token_hash"])
+                    )
+                )
+                or (
+                    job.get("remote_submission_state", "NOT_SUBMITTED") == "SUBMITTING"
+                    and (
+                        job.get("remote_submission_attempts", 0) < 1
+                        or job.get("remote_submission_worker_id") is None
+                        or job.get("remote_submission_lease_token_hash") is None
+                        or job.get("remote_job_id") is not None
+                        or job.get("remote_status") is not None
+                    )
+                )
+                or (
+                    job.get("remote_submission_state", "NOT_SUBMITTED") == "UNKNOWN"
+                    and (
+                        job.get("remote_submission_worker_id") is not None
+                        or job.get("remote_submission_lease_token_hash") is not None
+                        or job.get("remote_job_id") is not None
+                        or job.get("remote_status") is not None
+                    )
+                )
+                or (
+                    job.get("remote_submission_state", "NOT_SUBMITTED") == "SUBMITTED"
+                    and (
+                        job.get("remote_submission_worker_id") is not None
+                        or job.get("remote_submission_lease_token_hash") is not None
+                        or job.get("remote_job_id") is None
+                        or not isinstance(job.get("remote_status"), str)
+                        or job.get("remote_status") not in _REMOTE_JOB_STATES
+                        or (
+                            job.get("remote_status") in {"QUEUED", "RUNNING"}
+                            and job.get("remote_poll_after_seconds") is None
+                        )
+                        or (
+                            job.get("remote_status") in _TERMINAL
+                            and job.get("remote_poll_after_seconds") is not None
+                        )
+                    )
+                )
+                or (
+                    job.get("remote_submission_state", "NOT_SUBMITTED") == "NOT_SUBMITTED"
+                    and (
+                        job.get("remote_submission_worker_id") is not None
+                        or job.get("remote_submission_lease_token_hash") is not None
+                        or job.get("remote_job_id") is not None
+                        or job.get("remote_status") is not None
+                    )
+                )
             ):
                 raise ValueError("invalid provider job record")
             key_digest = job.get("idempotency_key_hash")
@@ -235,6 +327,8 @@ class ProviderJobManager:
         public_job = dict(job)
         public_job.pop("lease_token_hash", None)
         public_job.pop("lease_token", None)
+        public_job.pop("remote_submission_lease_token_hash", None)
+        public_job.pop("remote_submission_worker_id", None)
         key_digest = public_job.pop("idempotency_key_hash", None)
         public_job.pop("request_fingerprint", None)
         if lease_token is not None:
@@ -609,6 +703,333 @@ class ProviderJobManager:
             job["updated_at"] = now
             self._save()
             return {"status": "CANCEL_REQUESTED" if job["status"] == "RUNNING" else "JOB_CANCELLED", "saved": True, "job": self._public_job(job)}
+
+
+    def _lease_matches(
+        self, job: dict[str, Any], worker_id: str, lease_token: str
+    ) -> bool:
+        """Match the worker capability only while its persisted lease is still live."""
+        if (
+            job.get("status") != "RUNNING"
+            or job.get("worker_id") != worker_id
+            or not isinstance(job.get("lease_token_hash"), str)
+            or not secrets.compare_digest(
+                job["lease_token_hash"], _lease_token_digest(lease_token)
+            )
+        ):
+            return False
+        lease_until = job.get("lease_until")
+        try:
+            deadline = datetime.fromisoformat(lease_until) if isinstance(lease_until, str) else None
+            now = self.clock()
+            if (
+                deadline is None
+                or deadline.tzinfo is None
+                or not isinstance(now, datetime)
+                or now.tzinfo is None
+            ):
+                return False
+            return deadline.astimezone(timezone.utc) > now.astimezone(timezone.utc)
+        except (ValueError, TypeError, OverflowError):
+            return False
+
+    @staticmethod
+    def _clear_worker_lease(job: dict[str, Any]) -> None:
+        job["worker_id"] = None
+        job["lease_token_hash"] = None
+        job["lease_until"] = None
+
+    def get_worker_job(
+        self, *, job_id: str, worker_id: str, lease_token: str
+    ) -> dict[str, Any]:
+        """Return worker-only context after verifying the live lease capability."""
+        if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
+            return {"status": "INVALID_JOB_ID", "job": None}
+        if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
+            return {"status": "INVALID_WORKER_ID", "job": None}
+        if not isinstance(lease_token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", lease_token):
+            return {"status": "INVALID_LEASE_TOKEN", "job": None}
+        now = self.clock().astimezone(timezone.utc)
+        with self._transaction():
+            changed = self._reap_expired_locked(now)
+            job = self.data["jobs"].get(job_id)
+            if not isinstance(job, dict):
+                if changed:
+                    self._save()
+                return {"status": "JOB_NOT_FOUND", "job": None}
+            if not self._lease_matches(job, worker_id, lease_token):
+                if changed:
+                    self._save()
+                return {"status": "JOB_LEASE_NOT_OWNED", "job": None}
+            return {
+                "status": "JOB_WORKER_CONTEXT",
+                "job": self._public_job(job, include_provider_idempotency_key=True),
+            }
+
+    def begin_remote_submission(
+        self, *, job_id: str, worker_id: str, lease_token: str
+    ) -> dict[str, Any]:
+        """Persist intent before calling a provider; retries require the same hashed key."""
+        if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
+            return {"status": "INVALID_JOB_ID", "saved": False}
+        if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
+            return {"status": "INVALID_WORKER_ID", "saved": False}
+        if not isinstance(lease_token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", lease_token):
+            return {"status": "INVALID_LEASE_TOKEN", "saved": False}
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        with self._transaction():
+            job = self.data["jobs"].get(job_id)
+            if not isinstance(job, dict):
+                return {"status": "JOB_NOT_FOUND", "saved": False}
+            if not self._lease_matches(job, worker_id, lease_token):
+                return {"status": "JOB_LEASE_NOT_OWNED", "saved": False}
+            if not isinstance(job.get("idempotency_key_hash"), str):
+                return {"status": "REMOTE_PROVIDER_IDEMPOTENCY_REQUIRED", "saved": False}
+            state = job.get("remote_submission_state", "NOT_SUBMITTED")
+            if state == "SUBMITTED":
+                return {
+                    "status": "REMOTE_JOB_ALREADY_SUBMITTED",
+                    "saved": False,
+                    "remote_job_id": job.get("remote_job_id"),
+                    "remote_status": job.get("remote_status"),
+                }
+            current_lease_hash = _lease_token_digest(lease_token)
+            if (
+                state == "SUBMITTING"
+                and job.get("remote_submission_lease_token_hash") == current_lease_hash
+            ):
+                # This same lease already issued the remote call. Never issue it twice.
+                return {"status": "REMOTE_SUBMISSION_IN_PROGRESS", "saved": False}
+            # A reclaimed worker lease can safely retry with the same provider idempotency digest.
+            job["remote_submission_state"] = "SUBMITTING"
+            job["remote_submission_worker_id"] = worker_id
+            job["remote_submission_lease_token_hash"] = current_lease_hash
+            job["remote_submission_attempts"] = job.get("remote_submission_attempts", 0) + 1
+            job["remote_updated_at"] = now
+            job.pop("remote_error_code", None)
+            job["updated_at"] = now
+            self._save()
+            return {
+                "status": "REMOTE_SUBMISSION_STARTED",
+                "saved": True,
+                "attempt": job["remote_submission_attempts"],
+            }
+
+    def record_remote_submission_unknown(
+        self, *, job_id: str, worker_id: str, lease_token: str,
+        error_code: str = "REMOTE_SUBMISSION_UNKNOWN",
+    ) -> dict[str, Any]:
+        if (
+            not isinstance(error_code, str)
+            or not _ERROR_RE.fullmatch(error_code)
+            or not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
+            or not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id)
+            or not isinstance(lease_token, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", lease_token)
+        ):
+            return {"status": "INVALID_REMOTE_SUBMISSION_STATE", "saved": False}
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        with self._transaction():
+            job = self.data["jobs"].get(job_id)
+            if not isinstance(job, dict):
+                return {"status": "JOB_NOT_FOUND", "saved": False}
+            if not self._lease_matches(job, worker_id, lease_token):
+                return {"status": "JOB_LEASE_NOT_OWNED", "saved": False}
+            if job.get("remote_submission_state") != "SUBMITTING":
+                return {"status": "REMOTE_SUBMISSION_NOT_IN_PROGRESS", "saved": False}
+            job["remote_submission_state"] = "UNKNOWN"
+            job["remote_submission_worker_id"] = None
+            job["remote_submission_lease_token_hash"] = None
+            job["remote_error_code"] = error_code
+            job["remote_updated_at"] = now
+            job["updated_at"] = now
+            self._save()
+            return {"status": "REMOTE_SUBMISSION_UNKNOWN", "saved": True}
+
+    def record_remote_submission(
+        self, *, job_id: str, worker_id: str, lease_token: str,
+        remote_job_id: str, remote_status: str,
+        poll_after_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        if (
+            not isinstance(remote_job_id, str) or not _REF_RE.fullmatch(remote_job_id)
+            or not isinstance(remote_status, str)
+            or remote_status not in _REMOTE_JOB_STATES
+            or (
+                remote_status in {"QUEUED", "RUNNING"}
+                and (
+                    isinstance(poll_after_seconds, bool)
+                    or not isinstance(poll_after_seconds, int)
+                    or not 1 <= poll_after_seconds <= 3600
+                )
+            )
+            or (
+                remote_status in _TERMINAL
+                and poll_after_seconds is not None
+                and (
+                    isinstance(poll_after_seconds, bool)
+                    or not isinstance(poll_after_seconds, int)
+                    or not 1 <= poll_after_seconds <= 3600
+                )
+            )
+            or not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
+            or not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id)
+            or not isinstance(lease_token, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", lease_token)
+        ):
+            return {"status": "INVALID_REMOTE_JOB_RESPONSE", "saved": False}
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        with self._transaction():
+            job = self.data["jobs"].get(job_id)
+            if not isinstance(job, dict):
+                return {"status": "JOB_NOT_FOUND", "saved": False}
+            if not self._lease_matches(job, worker_id, lease_token):
+                return {"status": "JOB_LEASE_NOT_OWNED", "saved": False}
+            state = job.get("remote_submission_state", "NOT_SUBMITTED")
+            if state == "SUBMITTED":
+                same = job.get("remote_job_id") == remote_job_id
+                return {
+                    "status": "REMOTE_JOB_ALREADY_SUBMITTED" if same else "REMOTE_JOB_ID_CONFLICT",
+                    "saved": same,
+                    "remote_job_id": job.get("remote_job_id"),
+                }
+            if state != "SUBMITTING":
+                return {"status": "REMOTE_SUBMISSION_NOT_IN_PROGRESS", "saved": False}
+            job["remote_submission_state"] = "SUBMITTED"
+            job["remote_submission_worker_id"] = None
+            job["remote_submission_lease_token_hash"] = None
+            job["remote_job_id"] = remote_job_id
+            job["remote_status"] = remote_status
+            job["remote_poll_after_seconds"] = (
+                poll_after_seconds if remote_status in {"QUEUED", "RUNNING"} else None
+            )
+            job["remote_error_code"] = None
+            job["remote_updated_at"] = now
+            job["updated_at"] = now
+            self._save()
+            return {
+                "status": "REMOTE_JOB_SUBMITTED",
+                "saved": True,
+                "remote_job_id": remote_job_id,
+                "remote_status": remote_status,
+                "poll_after_seconds": job["remote_poll_after_seconds"],
+            }
+
+    def update_remote_status(
+        self, *, job_id: str, worker_id: str, lease_token: str,
+        remote_job_id: str, remote_status: str,
+        poll_after_seconds: int | None = None,
+        result_ref: str | None = None,
+        error_code: str | None = None,
+    ) -> dict[str, Any]:
+        if (
+            not isinstance(remote_job_id, str) or not _REF_RE.fullmatch(remote_job_id)
+            or not isinstance(remote_status, str)
+            or remote_status not in _REMOTE_JOB_STATES
+            or not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
+            or not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id)
+            or not isinstance(lease_token, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", lease_token)
+            or (
+                remote_status in {"QUEUED", "RUNNING"}
+                and (
+                    isinstance(poll_after_seconds, bool)
+                    or not isinstance(poll_after_seconds, int)
+                    or not 1 <= poll_after_seconds <= 3600
+                )
+            )
+            or (
+                remote_status == "SUCCEEDED"
+                and (not isinstance(result_ref, str) or not _REF_RE.fullmatch(result_ref))
+            )
+            or (
+                remote_status == "FAILED"
+                and (
+                    not isinstance(error_code, str)
+                    or not _ERROR_RE.fullmatch(error_code)
+                )
+            )
+            or (result_ref is not None and (
+                not isinstance(result_ref, str) or not _REF_RE.fullmatch(result_ref)
+            ))
+            or (error_code is not None and (
+                not isinstance(error_code, str) or not _ERROR_RE.fullmatch(error_code)
+            ))
+        ):
+            return {"status": "INVALID_REMOTE_JOB_STATUS", "saved": False}
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        with self._transaction():
+            job = self.data["jobs"].get(job_id)
+            if not isinstance(job, dict):
+                return {"status": "JOB_NOT_FOUND", "saved": False}
+            if not self._lease_matches(job, worker_id, lease_token):
+                return {"status": "JOB_LEASE_NOT_OWNED", "saved": False}
+            if (
+                job.get("remote_submission_state") != "SUBMITTED"
+                or job.get("remote_job_id") != remote_job_id
+            ):
+                return {"status": "REMOTE_JOB_IDENTITY_MISMATCH", "saved": False}
+            current_remote_status = job.get("remote_status")
+            if current_remote_status == "RUNNING" and remote_status == "QUEUED":
+                return {"status": "REMOTE_JOB_STATUS_REGRESSION", "saved": False}
+            job["remote_status"] = remote_status
+            job["remote_poll_after_seconds"] = (
+                poll_after_seconds if remote_status in {"QUEUED", "RUNNING"} else None
+            )
+            job["remote_error_code"] = error_code if remote_status == "FAILED" else None
+            job["remote_updated_at"] = now
+            if remote_status in _TERMINAL:
+                job["status"] = remote_status
+                if remote_status == "SUCCEEDED":
+                    job["result_ref"] = result_ref
+                elif remote_status == "FAILED":
+                    job["error_code"] = error_code
+                job["completed_at"] = now
+                self._clear_worker_lease(job)
+            job["updated_at"] = now
+            self._save()
+            return {
+                "status": "REMOTE_JOB_TERMINAL" if remote_status in _TERMINAL else "REMOTE_JOB_PENDING",
+                "saved": True,
+                "terminal": remote_status in _TERMINAL,
+                "job": self._public_job(job),
+            }
+
+    def confirm_remote_cancellation(
+        self, *, job_id: str, remote_job_id: str, tenant_id: str | None = None
+    ) -> dict[str, Any]:
+        if (
+            not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
+            or not isinstance(remote_job_id, str) or not _REF_RE.fullmatch(remote_job_id)
+            or (tenant_id is not None and (
+                not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+            ))
+        ):
+            return {"status": "INVALID_REMOTE_CANCELLATION", "saved": False}
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        with self._transaction():
+            job = self.data["jobs"].get(job_id)
+            if not isinstance(job, dict):
+                return {"status": "JOB_NOT_FOUND", "saved": False}
+            if job.get("tenant_id") != tenant_id:
+                return {"status": "TENANT_ISOLATION_DENIED", "saved": False}
+            if (
+                job.get("remote_submission_state") != "SUBMITTED"
+                or job.get("remote_job_id") != remote_job_id
+            ):
+                return {"status": "REMOTE_JOB_IDENTITY_MISMATCH", "saved": False}
+            if job.get("status") in _TERMINAL:
+                return {"status": "JOB_TERMINAL", "saved": False}
+            job["status"] = "CANCELLED"
+            job["remote_status"] = "CANCELLED"
+            job["remote_poll_after_seconds"] = None
+            job["cancel_requested"] = False
+            job["completed_at"] = now
+            job["remote_updated_at"] = now
+            job["updated_at"] = now
+            self._clear_worker_lease(job)
+            self._save()
+            return {"status": "REMOTE_JOB_CANCELLED", "saved": True, "job": self._public_job(job)}
 
     def poll(
         self, *, job_id: str, tenant_id: str | None = None

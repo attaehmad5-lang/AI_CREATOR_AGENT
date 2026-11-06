@@ -49,6 +49,7 @@ class ProviderService:
         secret_manager: Any | None = None,
         audit_log_manager: Any | None = None,
         concurrency_manager: Any | None = None,
+        remote_job_adapters: dict[str, Any] | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -115,6 +116,34 @@ class ProviderService:
         self.data_handling_policy = data_handling_policy
         self.webhook_verifier = webhook_verifier
         self.job_manager = job_manager
+        if remote_job_adapters is not None and not isinstance(remote_job_adapters, dict):
+            raise ValueError("remote_job_adapters must be a provider-id to adapter mapping")
+        self.remote_job_adapters: dict[str, Any] = {}
+        for provider_id, adapter in (remote_job_adapters or {}).items():
+            submit_method = getattr(adapter, "submit_remote_job", None)
+            poll_method = getattr(adapter, "poll_remote_job", None)
+            cancel_method = getattr(adapter, "cancel_remote_job", None)
+            required_submit_keywords = ("job_id", "project_id", "payload_ref", "idempotency_key")
+            if (
+                not isinstance(provider_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}", provider_id)
+                or not callable(submit_method)
+                or not callable(poll_method)
+                or any(
+                    not self._remote_adapter_accepts_keyword(submit_method, keyword)
+                    for keyword in required_submit_keywords
+                )
+                or not self._remote_adapter_accepts_keyword(poll_method, "remote_job_id")
+                or (
+                    cancel_method is not None
+                    and (
+                        not callable(cancel_method)
+                        or not self._remote_adapter_accepts_keyword(cancel_method, "remote_job_id")
+                    )
+                )
+            ):
+                raise ValueError("remote job adapter does not implement the required submit/poll contract")
+            self.remote_job_adapters[provider_id] = adapter
         self.metrics_manager = metrics_manager
         self.quality_policy = quality_policy
         self.benchmark_manager = benchmark_manager
@@ -1284,7 +1313,8 @@ class ProviderService:
 
         safe_job = dict(job)
         for protected_field in (
-            "lease_token", "lease_token_hash", "idempotency_key",
+            "lease_token", "lease_token_hash", "remote_submission_lease_token_hash",
+            "remote_submission_worker_id", "idempotency_key",
             "idempotency_key_hash", "request_fingerprint",
             "provider_idempotency_key",
         ):
@@ -1526,6 +1556,354 @@ class ProviderService:
         except Exception as exc:
             return {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
         return self._sanitize_job_response(result, self.sensitive_data_policy) if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+
+
+    @staticmethod
+    def _remote_adapter_accepts_keyword(method: Any, keyword: str) -> bool:
+        try:
+            signature = inspect.signature(method)
+        except (TypeError, ValueError):
+            return False
+        return keyword in signature.parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+
+    @staticmethod
+    def _validate_remote_job_adapter_response(result: Any) -> dict[str, Any] | None:
+        """Whitelist remote-job fields; never return provider response bodies or secrets."""
+        if not isinstance(result, dict):
+            return None
+        remote_job_id = result.get("remote_job_id")
+        status = result.get("status")
+        if (
+            not isinstance(remote_job_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}", remote_job_id)
+            or not isinstance(status, str)
+            or status not in {"QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"}
+        ):
+            return None
+        poll_after = result.get("poll_after_seconds")
+        if status in {"QUEUED", "RUNNING"}:
+            if (
+                isinstance(poll_after, bool)
+                or not isinstance(poll_after, int)
+                or not 1 <= poll_after <= 3600
+            ):
+                return None
+        elif poll_after is not None:
+            return None
+        result_ref = result.get("result_ref")
+        error_code = result.get("error_code")
+        if status == "SUCCEEDED":
+            if (
+                not isinstance(result_ref, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}", result_ref)
+                or error_code is not None
+            ):
+                return None
+        elif status == "FAILED":
+            if (
+                not isinstance(error_code, str)
+                or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", error_code)
+                or result_ref is not None
+            ):
+                return None
+        elif result_ref is not None or error_code is not None:
+            return None
+        safe = {"remote_job_id": remote_job_id, "status": status, "poll_after_seconds": poll_after}
+        if status == "SUCCEEDED":
+            safe["result_ref"] = result_ref
+        if status == "FAILED":
+            safe["error_code"] = error_code
+        return safe
+
+    def submit_remote_job(
+        self, *, job_id: str, worker_id: str, lease_token: str,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Submit a claimed job exactly through an idempotent provider adapter."""
+        if self.job_manager is None or not callable(getattr(self.job_manager, "get_worker_job", None)):
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "submitted": False}
+        try:
+            context = self.job_manager.get_worker_job(
+                job_id=job_id, worker_id=worker_id, lease_token=lease_token
+            )
+        except Exception as exc:
+            return {"status": "JOB_WORKER_CONTEXT_FAILED", "submitted": False, "error_type": type(exc).__name__}
+        if not isinstance(context, dict) or context.get("status") != "JOB_WORKER_CONTEXT" or not isinstance(context.get("job"), dict):
+            return {
+                "status": context.get("status", "JOB_LEASE_NOT_OWNED") if isinstance(context, dict) else "INVALID_JOB_MANAGER_RESPONSE",
+                "submitted": False,
+            }
+        job = context["job"]
+        provider_id = job.get("provider_id")
+        authorization = self._authorize_operation(
+            principal_id, "provider.generate", provider_id=provider_id
+        )
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "submitted": False}
+        if self.tenant_isolation_manager is not None:
+            tenant_error = self._authorize_tenant_project(
+                tenant_id=job.get("tenant_id"),
+                project_id=job.get("project_id"),
+                principal_id=principal_id,
+            )
+            if tenant_error is not None:
+                return {"status": tenant_error["status"], "submitted": False}
+        rejection = self._sensitive_input_rejection({
+            "remote_job_submission": {
+                "job_id": job_id, "worker_id": worker_id,
+                "provider_id": provider_id, "project_id": job.get("project_id"),
+                "payload_ref": job.get("payload_ref"),
+            },
+        })
+        if rejection is not None:
+            return {"submitted": False, **rejection}
+        adapter = self.remote_job_adapters.get(provider_id)
+        submit = getattr(adapter, "submit_remote_job", None) if adapter is not None else None
+        required_keywords = ("job_id", "project_id", "payload_ref", "idempotency_key")
+        if not callable(submit) or any(
+            not self._remote_adapter_accepts_keyword(submit, keyword)
+            for keyword in required_keywords
+        ):
+            return {"status": "REMOTE_PROVIDER_IDEMPOTENCY_CONTRACT_REQUIRED", "submitted": False}
+        idempotency_key = job.get("provider_idempotency_key")
+        if not isinstance(idempotency_key, str) or not re.fullmatch(r"[0-9a-f]{64}", idempotency_key):
+            return {"status": "REMOTE_PROVIDER_IDEMPOTENCY_REQUIRED", "submitted": False}
+        try:
+            started = self.job_manager.begin_remote_submission(
+                job_id=job_id, worker_id=worker_id, lease_token=lease_token
+            )
+        except Exception as exc:
+            return {"status": "REMOTE_SUBMISSION_STATE_FAILED", "submitted": False, "error_type": type(exc).__name__}
+        if not isinstance(started, dict):
+            return {"status": "INVALID_REMOTE_SUBMISSION_STATE", "submitted": False}
+        if started.get("status") == "REMOTE_JOB_ALREADY_SUBMITTED":
+            return {
+                "status": "REMOTE_JOB_ALREADY_SUBMITTED",
+                "submitted": False,
+                "remote_job_id": started.get("remote_job_id"),
+                "remote_status": started.get("remote_status"),
+            }
+        if started.get("saved") is not True:
+            return {"status": started.get("status", "REMOTE_SUBMISSION_REJECTED"), "submitted": False}
+        try:
+            remote_result = submit(
+                job_id=job_id,
+                project_id=job["project_id"],
+                payload_ref=job["payload_ref"],
+                idempotency_key=idempotency_key,
+            )
+        except Exception as exc:
+            try:
+                self.job_manager.record_remote_submission_unknown(
+                    job_id=job_id, worker_id=worker_id, lease_token=lease_token,
+                    error_code="REMOTE_SUBMISSION_EXCEPTION",
+                )
+            except Exception:
+                pass
+            return {
+                "status": "REMOTE_SUBMISSION_OUTCOME_UNKNOWN",
+                "submitted": False,
+                "retry_requires_same_idempotency_key": True,
+                "error_type": type(exc).__name__,
+            }
+        safe_remote = self._validate_remote_job_adapter_response(remote_result)
+        if safe_remote is None:
+            try:
+                self.job_manager.record_remote_submission_unknown(
+                    job_id=job_id, worker_id=worker_id, lease_token=lease_token,
+                    error_code="REMOTE_SUBMISSION_RESPONSE_INVALID",
+                )
+            except Exception:
+                pass
+            return {
+                "status": "REMOTE_SUBMISSION_RESPONSE_INVALID",
+                "submitted": False,
+                "retry_requires_same_idempotency_key": True,
+            }
+        try:
+            saved = self.job_manager.record_remote_submission(
+                job_id=job_id, worker_id=worker_id, lease_token=lease_token,
+                remote_job_id=safe_remote["remote_job_id"],
+                remote_status=safe_remote["status"],
+                poll_after_seconds=safe_remote["poll_after_seconds"],
+            )
+        except Exception as exc:
+            return {"status": "REMOTE_SUBMISSION_PERSISTENCE_FAILED", "submitted": False, "error_type": type(exc).__name__}
+        if not isinstance(saved, dict) or saved.get("saved") is not True:
+            return {
+                "status": saved.get("status", "REMOTE_SUBMISSION_PERSISTENCE_FAILED") if isinstance(saved, dict) else "INVALID_REMOTE_SUBMISSION_STATE",
+                "submitted": False,
+            }
+        if safe_remote["status"] in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+            try:
+                saved = self.job_manager.update_remote_status(
+                    job_id=job_id, worker_id=worker_id, lease_token=lease_token,
+                    remote_job_id=safe_remote["remote_job_id"],
+                    remote_status=safe_remote["status"],
+                    result_ref=safe_remote.get("result_ref"),
+                    error_code=safe_remote.get("error_code"),
+                )
+            except Exception as exc:
+                return {"status": "REMOTE_JOB_FINALIZATION_FAILED", "submitted": False, "error_type": type(exc).__name__}
+        return self._sanitize_job_response(saved, self.sensitive_data_policy) if isinstance(saved, dict) else {
+            "status": "INVALID_JOB_MANAGER_RESPONSE", "submitted": False,
+        }
+
+    def poll_remote_job(
+        self, *, job_id: str, worker_id: str, lease_token: str,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Poll one known remote job while holding the internal worker lease."""
+        if self.job_manager is None or not callable(getattr(self.job_manager, "get_worker_job", None)):
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
+        try:
+            context = self.job_manager.get_worker_job(
+                job_id=job_id, worker_id=worker_id, lease_token=lease_token
+            )
+        except Exception as exc:
+            return {"status": "JOB_WORKER_CONTEXT_FAILED", "job": None, "error_type": type(exc).__name__}
+        if not isinstance(context, dict) or context.get("status") != "JOB_WORKER_CONTEXT" or not isinstance(context.get("job"), dict):
+            return {
+                "status": context.get("status", "JOB_LEASE_NOT_OWNED") if isinstance(context, dict) else "INVALID_JOB_MANAGER_RESPONSE",
+                "job": None,
+            }
+        job = context["job"]
+        provider_id = job.get("provider_id")
+        authorization = self._authorize_operation(
+            principal_id, "provider.generate", provider_id=provider_id
+        )
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "job": None}
+        if self.tenant_isolation_manager is not None:
+            tenant_error = self._authorize_tenant_project(
+                tenant_id=job.get("tenant_id"),
+                project_id=job.get("project_id"),
+                principal_id=principal_id,
+            )
+            if tenant_error is not None:
+                return {"status": tenant_error["status"], "job": None}
+        remote_job_id = job.get("remote_job_id")
+        if job.get("remote_submission_state") != "SUBMITTED" or not isinstance(remote_job_id, str):
+            return {"status": "REMOTE_JOB_NOT_SUBMITTED", "job": None}
+        adapter = self.remote_job_adapters.get(provider_id)
+        poll = getattr(adapter, "poll_remote_job", None) if adapter is not None else None
+        if not callable(poll) or not self._remote_adapter_accepts_keyword(poll, "remote_job_id"):
+            return {"status": "REMOTE_POLL_ADAPTER_UNAVAILABLE", "job": None}
+        if callable(getattr(self.job_manager, "renew_lease", None)):
+            try:
+                renewed = self.job_manager.renew_lease(
+                    job_id=job_id, worker_id=worker_id, lease_token=lease_token
+                )
+            except Exception as exc:
+                return {"status": "JOB_LEASE_RENEWAL_FAILED", "job": None, "error_type": type(exc).__name__}
+            if not isinstance(renewed, dict) or renewed.get("renewed") is not True:
+                return {"status": "JOB_LEASE_NOT_OWNED", "job": None}
+        try:
+            remote_result = poll(remote_job_id=remote_job_id)
+        except Exception as exc:
+            return {
+                "status": "REMOTE_POLL_OUTCOME_UNKNOWN",
+                "job": None,
+                "error_type": type(exc).__name__,
+            }
+        safe_remote = self._validate_remote_job_adapter_response({
+            **remote_result,
+            "remote_job_id": remote_job_id,
+        } if isinstance(remote_result, dict) else remote_result)
+        if safe_remote is None:
+            return {"status": "REMOTE_POLL_RESPONSE_INVALID", "job": None}
+        try:
+            updated = self.job_manager.update_remote_status(
+                job_id=job_id, worker_id=worker_id, lease_token=lease_token,
+                remote_job_id=remote_job_id,
+                remote_status=safe_remote["status"],
+                poll_after_seconds=safe_remote["poll_after_seconds"],
+                result_ref=safe_remote.get("result_ref"),
+                error_code=safe_remote.get("error_code"),
+            )
+        except Exception as exc:
+            return {"status": "REMOTE_POLL_PERSISTENCE_FAILED", "job": None, "error_type": type(exc).__name__}
+        return self._sanitize_job_response(updated, self.sensitive_data_policy) if isinstance(updated, dict) else {
+            "status": "INVALID_JOB_MANAGER_RESPONSE", "job": None,
+        }
+
+    def cancel_remote_job(
+        self, *, job_id: str, principal_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Cancel a provider job only after provider confirmation; preserve unknown outcomes."""
+        if self.job_manager is None:
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "saved": False}
+        if self.tenant_isolation_manager is not None and (
+            not isinstance(tenant_id, str) or not tenant_id.strip()
+        ):
+            return {"status": "TENANT_CONTEXT_REQUIRED", "saved": False}
+        try:
+            existing = (
+                self.job_manager.poll(job_id=job_id, tenant_id=tenant_id)
+                if self.tenant_isolation_manager is not None
+                else self.job_manager.poll(job_id=job_id)
+            )
+        except Exception as exc:
+            return {"status": "JOB_POLL_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(existing, dict) or not isinstance(existing.get("job"), dict):
+            return {
+                "status": existing.get("status", "JOB_NOT_FOUND") if isinstance(existing, dict) else "INVALID_JOB_MANAGER_RESPONSE",
+                "saved": False,
+            }
+        job = existing["job"]
+        provider_id = job.get("provider_id")
+        authorization = self._authorize_operation(
+            principal_id, "provider.generate", provider_id=provider_id,
+            return_decision=True,
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+            return {"status": "AUTHORIZATION_DENIED", "saved": False}
+        if self.tenant_isolation_manager is not None:
+            tenant_error = self._authorize_tenant_project(
+                tenant_id=tenant_id, project_id=job.get("project_id"),
+                principal_id=principal_id,
+            )
+            if tenant_error is not None:
+                return {"status": tenant_error["status"], "saved": False}
+        if job.get("status") in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+            return {"status": "JOB_TERMINAL", "saved": False}
+        submission_state = job.get("remote_submission_state", "NOT_SUBMITTED")
+        if submission_state == "NOT_SUBMITTED":
+            return self.cancel_job(
+                job_id=job_id, principal_id=principal_id, tenant_id=tenant_id
+            )
+        if submission_state != "SUBMITTED" or not isinstance(job.get("remote_job_id"), str):
+            return {"status": "REMOTE_SUBMISSION_OUTCOME_UNKNOWN", "saved": False}
+        adapter = self.remote_job_adapters.get(provider_id)
+        cancel = getattr(adapter, "cancel_remote_job", None) if adapter is not None else None
+        if not callable(cancel) or not self._remote_adapter_accepts_keyword(cancel, "remote_job_id"):
+            return {"status": "REMOTE_CANCELLATION_UNSUPPORTED", "saved": False}
+        try:
+            remote_result = cancel(remote_job_id=job["remote_job_id"])
+        except Exception as exc:
+            return {
+                "status": "REMOTE_CANCEL_OUTCOME_UNKNOWN",
+                "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(remote_result, dict):
+            return {"status": "REMOTE_CANCEL_RESPONSE_INVALID", "saved": False}
+        if remote_result.get("status") != "CANCELLED":
+            return {"status": "REMOTE_CANCEL_PENDING", "saved": False}
+        try:
+            result = self.job_manager.confirm_remote_cancellation(
+                job_id=job_id, remote_job_id=job["remote_job_id"],
+                tenant_id=tenant_id if self.tenant_isolation_manager is not None else job.get("tenant_id"),
+            )
+        except Exception as exc:
+            return {"status": "REMOTE_CANCELLATION_PERSISTENCE_FAILED", "saved": False, "error_type": type(exc).__name__}
+        return self._sanitize_job_response(result, self.sensitive_data_policy) if isinstance(result, dict) else {
+            "status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False,
+        }
 
     def verify_webhook(
         self,

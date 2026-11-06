@@ -114,3 +114,18 @@ Use ProviderService.set_provider_concurrency_limit() and ProviderService.reconci
 The persistent ProviderJobManager serializes submissions and worker claims through one interprocess lock protecting its state file. Its backpressure limit counts queued jobs, while the worker concurrency limit counts RUNNING jobs. The process-level regression suite starts concurrent submitters and claimers against one shared state path and verifies that neither queue admission nor worker claims exceed the configured limits.
 
 This proves coordination among processes on a host that share the same filesystem and lock semantics. It does not claim multi-host distributed coordination, network-filesystem lock correctness, horizontal autoscaling, or production-grade broker durability. Use a transactional shared database or dedicated queue broker, plus sustained load and failover testing, before treating those deployment properties as verified.
+
+
+## Remote provider jobs and polling — Feature #77
+
+A provider adapter may implement three explicit methods:
+
+- submit_remote_job(job_id, project_id, payload_ref, idempotency_key) — must accept the stable provider idempotency digest.
+- poll_remote_job(remote_job_id) — returns only a whitelisted remote ID/status, plus a bounded next-poll delay for QUEUED/RUNNING, a safe result reference for SUCCEEDED, or a safe error code for FAILED.
+- cancel_remote_job(remote_job_id) — optional; the local job is marked CANCELLED only after the provider confirms CANCELLED.
+
+Register adapters by provider ID through ProviderService(remote_job_adapters=...). The service validates the internal worker lease, then checks provider.generate authorization and tenant/project ownership before any provider call. Provider responses are reduced to an explicit safe-field allowlist; response bodies, arbitrary metadata and provider secrets are not persisted or returned.
+
+Remote submission intent is durably written before the network call. A known remote ID is stored as SUBMITTED. An exception or malformed response becomes UNKNOWN, never an automatic second unkeyed submission. A retry requires a new valid worker lease and reuses the same scoped provider idempotency digest. The active submission lease verifier is hashed at rest and removed from public job reads. RUNNING cannot regress to QUEUED, and terminal provider states release the internal worker lease after being persisted.
+
+This is an adapter contract and lifecycle integration, not proof that a specific commercial provider's remote-job API is connected. Provider-specific adapters, signature-verified webhook-to-job reconciliation, retry policy for provider rate limits, multi-host scheduling and live end-to-end tests remain separate release gates.
