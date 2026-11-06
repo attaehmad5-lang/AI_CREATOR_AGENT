@@ -602,9 +602,13 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(released, ["modality-release"])
 
     def test_fresh_health_gate_allows_measured_healthy_provider(self):
+        service = self._modality_service(
+            health_manager=self.health, retry_policy=self.retry,
+            output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
+        )
         self.health.record_result("image", success=True, latency_ms=25)
         calls = []
-        result = self.service.execute_routed_request(
+        result = service.execute_routed_request(
             category="image", project_id="film", request_id="fresh-health-allowed",
             estimated_cost=0.0, modality="image",
             adapter=lambda **kwargs: calls.append(kwargs) or {
@@ -618,10 +622,14 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_fresh_health_gate_rejects_unhealthy_provider_before_adapter(self):
+        service = self._modality_service(
+            health_manager=self.health, retry_policy=self.retry,
+            output_validator=self.validator, cost_policy=self.cost, quota_manager=self.quota,
+        )
         for _ in range(3):
             self.health.record_result("image", success=False, error_code="SIMULATED_OUTAGE")
         calls = []
-        result = self.service.execute_routed_request(
+        result = service.execute_routed_request(
             category="image", project_id="film", request_id="fresh-health-unhealthy",
             estimated_cost=0.0, modality="image",
             adapter=lambda **kwargs: calls.append(kwargs),
