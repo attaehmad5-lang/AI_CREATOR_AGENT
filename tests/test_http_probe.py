@@ -1,11 +1,13 @@
 import json
+import socket
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from urllib.error import HTTPError
 
 from projects.provider_store.connection_manager import ConnectionManager
-from projects.provider_store.http_probe import ProviderHTTPConnectivityProbe
+from projects.provider_store.http_probe import ProviderDNSResolver, ProviderHTTPConnectivityProbe
 
 
 class _Response:
@@ -42,6 +44,50 @@ class _Opener:
 
 
 class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
+    def test_bounded_dns_resolver_returns_both_address_families_and_uses_lifetime(self):
+        calls = []
+
+        class FakeResolver:
+            timeout = None
+            lifetime = None
+
+            def resolve(self, hostname, record_type, **kwargs):
+                calls.append((hostname, record_type, kwargs))
+                address = "93.184.216.34" if record_type == "A" else "2606:2800:220:1:248:1893:25c8:1946"
+                return type("Answer", (), {
+                    "rrset": [type("Record", (), {"address": address})()]
+                })()
+
+        instance = FakeResolver()
+        dns = ProviderDNSResolver(
+            timeout_seconds=1.0, lifetime_seconds=3.0,
+            resolver_factory=lambda: instance,
+        )
+        records = dns("api.example.com", 443, type=socket.SOCK_STREAM)
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0][0], socket.AF_INET)
+        self.assertEqual(records[1][0], socket.AF_INET6)
+        self.assertEqual(instance.timeout, 1.0)
+        self.assertEqual(instance.lifetime, 3.0)
+        self.assertEqual([call[0] for call in calls], ["api.example.com.", "api.example.com."])
+        self.assertEqual([call[1] for call in calls], ["A", "AAAA"])
+        self.assertTrue(all(call[2]["search"] is False for call in calls))
+        self.assertTrue(all(0 < call[2]["lifetime"] <= 3.0 for call in calls))
+
+    def test_bounded_dns_resolver_converts_timeout_to_safe_timeout_error(self):
+        import dns.exception as dns_exceptions
+
+        class TimeoutResolver:
+            timeout = None
+            lifetime = None
+
+            def resolve(self, hostname, record_type, **kwargs):
+                raise dns_exceptions.Timeout
+
+        resolver_instance = ProviderDNSResolver(resolver_factory=TimeoutResolver)
+        with self.assertRaises(TimeoutError):
+            resolver_instance("api.example.com", 443, type=socket.SOCK_STREAM)
+
     def test_response_cleanup_failure_does_not_mask_successful_probe(self):
         class Response:
             status = 204
@@ -71,19 +117,19 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
         )
         self.assertEqual(result, {"ok": True, "http_status": 204})
 
-    def test_public_https_probe_uses_timeout_and_bounds_response_read(self):
+    def test_public_https_probe_uses_timeout_and_rejects_oversized_response(self):
         opener = _Opener(_Response(body=b"x" * 5000))
         probe = ProviderHTTPConnectivityProbe(opener=opener, max_response_bytes=16)
-        result = probe(
-            {
-                "id": "public_provider",
-                "auth_type": "NONE",
-                "allowed_hosts": ["api.example.com"],
-                "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
-            },
-            timeout_seconds=2.5,
-        )
-        self.assertEqual(result, {"ok": True, "http_status": 200})
+        with self.assertRaisesRegex(ValueError, "PROVIDER_PROBE_RESPONSE_TOO_LARGE"):
+            probe(
+                {
+                    "id": "public_provider",
+                    "auth_type": "NONE",
+                    "allowed_hosts": ["api.example.com"],
+                    "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
+                },
+                timeout_seconds=2.5,
+            )
         self.assertEqual(opener.calls[0][1], 2.5)
         self.assertEqual(opener.calls[0][0].get_method(), "GET")
         self.assertEqual(len(opener.response.body), 5000)
@@ -615,6 +661,122 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
                 "configuration": {"endpoint": "https://api.example.com/health", "authentication_required": True},
             })
         self.assertEqual(opener.calls, [])
+
+    def test_default_transport_rejects_private_dns_answer_before_connect(self):
+        resolutions = []
+
+        def resolver(host, port, *, type):
+            resolutions.append((host, port, type))
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", port))
+            ]
+
+        probe = ProviderHTTPConnectivityProbe(environ={}, resolver=resolver)
+        with self.assertRaisesRegex(ValueError, "PROVIDER_ENDPOINT_RESOLVES_TO_NON_PUBLIC_ADDRESS"):
+            probe({
+                "id": "public_provider", "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertEqual(len(resolutions), 1)
+
+    def test_default_transport_rejects_mixed_public_and_private_dns_answers(self):
+        def resolver(host, port, *, type):
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port)),
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("10.0.0.9", port)),
+            ]
+
+        probe = ProviderHTTPConnectivityProbe(environ={}, resolver=resolver)
+        with self.assertRaisesRegex(ValueError, "PROVIDER_ENDPOINT_RESOLVES_TO_NON_PUBLIC_ADDRESS"):
+            probe({
+                "id": "public_provider", "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+
+    def test_default_transport_connects_to_pinned_numeric_address(self):
+        from urllib.request import Request
+        from projects.provider_store import http_probe as probe_module
+
+        connected = []
+
+        def resolver(host, port, *, type):
+            self.assertEqual(host, "api.example.com")
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port))
+            ]
+
+        class StubResponse:
+            status = 204
+            headers = {}
+
+            def read(self, amount=-1):
+                return b""
+
+            def close(self):
+                self.closed = True
+
+        def fake_request(connection, method, path, body=None, headers=None):
+            connected.append((connection.host, connection._pinned_address, method, path))
+
+        with patch.object(probe_module._PinnedHTTPSConnection, "request", fake_request), patch.object(
+            probe_module._PinnedHTTPSConnection, "getresponse", lambda connection: StubResponse()
+        ):
+            response = probe_module._PinnedHTTPSOpener(resolver=resolver).open(
+                Request("https://api.example.com/health"), timeout=2.0
+            )
+            response.close()
+
+        self.assertEqual(connected, [("api.example.com", "93.184.216.34", "GET", "/health")])
+
+    def test_pinned_transport_rejects_redirect_without_following_it(self):
+        from projects.provider_store import http_probe as probe_module
+
+        class RedirectResponse:
+            status = 302
+            headers = {"Location": "https://evil.example/collect"}
+            closed = False
+
+            def read(self, amount=-1):
+                raise AssertionError("redirect body must not be consumed")
+
+            def close(self):
+                self.closed = True
+
+        response_stub = RedirectResponse()
+
+        def resolver(host, port, **kwargs):
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port))
+            ]
+
+        with patch.object(
+            probe_module._PinnedHTTPSConnection, "request", lambda *args, **kwargs: None
+        ), patch.object(
+            probe_module._PinnedHTTPSConnection, "getresponse", lambda connection: response_stub
+        ):
+            probe = ProviderHTTPConnectivityProbe(environ={}, resolver=resolver)
+            with self.assertRaisesRegex(ConnectionError, "redirected"):
+                probe({
+                    "id": "public_provider", "auth_type": "NONE",
+                    "allowed_hosts": ["api.example.com"],
+                    "configuration": {"endpoint": "https://api.example.com/health"},
+                })
+        self.assertTrue(response_stub.closed)
+
+    def test_probe_rejects_oversized_response_and_closes_it(self):
+        response = _Response(body=b"12345")
+        probe = ProviderHTTPConnectivityProbe(
+            environ={}, opener=_Opener(response=response), max_response_bytes=4,
+        )
+        with self.assertRaisesRegex(ValueError, "PROVIDER_PROBE_RESPONSE_TOO_LARGE"):
+            probe({
+                "id": "public_provider", "auth_type": "NONE",
+                "allowed_hosts": ["api.example.com"],
+                "configuration": {"endpoint": "https://api.example.com/health"},
+            })
+        self.assertTrue(response.closed)
 
     def test_missing_host_allowlist_is_rejected_before_network(self):
         opener = _Opener()

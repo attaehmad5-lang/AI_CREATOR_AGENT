@@ -148,6 +148,9 @@ class ProviderRoutingManager:
         free_credits: dict[str, float] | None = None,
         request_id: str | None = None,
         tenant_id: str | None = None,
+        trace_id: str | None = None,
+        span_id: str | None = None,
+        traceparent: str | None = None,
         paid_approved_providers: set[str] | frozenset[str] | None = None,
         excluded_providers: set[str] | frozenset[str] | None = None,
         allowed_provider_ids: set[str] | frozenset[str] | None = None,
@@ -171,6 +174,18 @@ class ProviderRoutingManager:
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}", tenant_id)
         ):
             return {"allowed": False, "status": "INVALID_TENANT_ID"}
+        if any(value is not None for value in (trace_id, span_id, traceparent)):
+            if (
+                not isinstance(trace_id, str) or not re.fullmatch(r"[0-9a-f]{32}", trace_id)
+                or trace_id == "0" * 32
+                or not isinstance(span_id, str) or not re.fullmatch(r"[0-9a-f]{16}", span_id)
+                or span_id == "0" * 16
+                or not isinstance(traceparent, str)
+                or not re.fullmatch(r"00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}", traceparent)
+                or traceparent.split("-")[1] != trace_id
+                or traceparent.split("-")[2] != span_id
+            ):
+                return {"allowed": False, "status": "INVALID_TRACE_CONTEXT"}
         if required_region is not None and (
             not isinstance(required_region, str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{1,31}", required_region)
@@ -836,6 +851,12 @@ class ProviderRoutingManager:
                 "health_verified": self.health_manager is not None,
                 "prior_decisions": decisions,
             }
+            if trace_id is not None:
+                result.update({
+                    "trace_id": trace_id,
+                    "span_id": span_id,
+                    "traceparent": traceparent,
+                })
             if provider.get("_route_price_evidence") is not None:
                 result["model_price_evidence"] = provider["_route_price_evidence"]
             if confidence_status is not None:
@@ -860,7 +881,7 @@ class ProviderRoutingManager:
                 result["request_id"] = request_id
             return result
 
-        return {
+        failure_result = {
             "allowed": False,
             "status": "NO_POLICY_COMPLIANT_PROVIDER",
             "category": category.strip(),
@@ -871,6 +892,13 @@ class ProviderRoutingManager:
             "required_region": required_region,
             "decisions": decisions,
         }
+        if trace_id is not None:
+            failure_result.update({
+                "trace_id": trace_id,
+                "span_id": span_id,
+                "traceparent": traceparent,
+            })
+        return failure_result
 
     def select_fallback(
         self,

@@ -1,4 +1,5 @@
 import json
+import socket
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError
@@ -72,6 +73,25 @@ class ProviderOAuthPKCEManagerTests(unittest.TestCase):
         }
         args.update(overrides)
         return manager.begin_authorization(**args)
+
+    def test_default_oauth_transport_rejects_private_dns_before_connect(self):
+        resolutions = []
+
+        def resolver(host, port, *, type):
+            resolutions.append((host, port))
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", port))
+            ]
+
+        manager = ProviderOAuthPKCEManager(environ=self.environ, resolver=resolver)
+        result = manager._post_form(
+            self.token_url, self.allowed_hosts,
+            {"grant_type": "authorization_code", "code": "authorization-code"},
+            timeout_seconds=2.0,
+        )
+        self.assertEqual(result["status"], "OAUTH_TOKEN_REQUEST_FAILED")
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertEqual(resolutions, [("login.example.com", 443)])
 
     def test_pollinations_helper_uses_official_pkce_endpoints_and_scopes(self):
         manager = ProviderOAuthPKCEManager(

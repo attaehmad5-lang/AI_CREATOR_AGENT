@@ -37,7 +37,12 @@ class ProviderCreditManager:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {"version": "1.0", "providers": {}, "reservations": {}, "usage": {}}
-        self._reload_state()
+        # Constructor reads use the same process lock as all subsequent state
+        # transactions. Without it, Windows can deny an unlocked read while a
+        # peer process atomically replaces the shared credit snapshot.
+        lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+        with interprocess_file_lock(lock_path):
+            self._reload_state()
 
     def _reload_state(self) -> None:
         """Reload current credit snapshots while holding the interprocess lock."""

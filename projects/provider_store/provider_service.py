@@ -9,6 +9,7 @@ import time
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
 from .secrets_manager import SecretManagerError
+from .provider_trace_context import ProviderRequestTraceContext, with_provider_trace_context
 
 
 class ProviderService:
@@ -43,6 +44,7 @@ class ProviderService:
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
         secret_manager: Any | None = None,
+        provider_audit_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -55,6 +57,12 @@ class ProviderService:
             or not callable(getattr(identity_authenticator, "is_authenticated_principal", None))
         ):
             raise ValueError("identity_authenticator must verify tokens and identify trusted principals")
+        if provider_audit_manager is not None and (
+            not callable(getattr(provider_audit_manager, "record", None))
+            or not callable(getattr(provider_audit_manager, "verify", None))
+            or not callable(getattr(provider_audit_manager, "read_events", None))
+        ):
+            raise ValueError("provider_audit_manager must support record, verify and read_events")
         resolved_secret_manager = secret_manager or getattr(connection_manager, "secret_manager", None)
         if resolved_secret_manager is not None and (
             not callable(getattr(resolved_secret_manager, "resolve_secret", None))
@@ -118,6 +126,49 @@ class ProviderService:
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
+        self.provider_audit_manager = provider_audit_manager
+
+    def _record_provider_audit(self, **event: Any) -> dict[str, Any]:
+        """Append an allowlisted audit event without exposing payloads or secrets."""
+        if self.provider_audit_manager is None:
+            return {"status": "AUDIT_DISABLED", "saved": True}
+        try:
+            result = self.provider_audit_manager.record(**event)
+        except Exception as exc:
+            return {"status": "AUDIT_WRITE_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("saved") is not True:
+            status = result.get("status") if isinstance(result, dict) else None
+            if not isinstance(status, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", status):
+                status = "INVALID_AUDIT_MANAGER_RESPONSE"
+            return {"status": status, "saved": False}
+        return result
+
+    def _finish_authorization_decision(
+        self, decision: dict[str, Any], *, principal_id: str | None,
+        operation: str, provider_id: str | None, return_decision: bool,
+        tenant_id: str | None = None, trace_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if self.provider_audit_manager is not None:
+            allowed = decision.get("allowed") is True
+            reason = decision.get("status")
+            if not isinstance(reason, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", reason):
+                reason = "AUTHORIZATION_DECISION_INVALID"
+            audit = self._record_provider_audit(
+                event_type="provider.authorization.decision",
+                actor_id=principal_id,
+                tenant_id=tenant_id,
+                trace_id=trace_id,
+                provider_id=provider_id,
+                operation=operation,
+                outcome="ALLOWED" if allowed else "DENIED",
+                reason_code=reason,
+                approved=allowed if operation == "billing.approve" else None,
+            )
+            if audit.get("saved") is not True:
+                return {"allowed": False, "status": "AUTHORIZATION_AUDIT_UNAVAILABLE"}
+        if decision.get("allowed") is not True:
+            return decision
+        return decision if return_decision else None
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
@@ -152,6 +203,8 @@ class ProviderService:
         *,
         provider_id: str | None = None,
         return_decision: bool = False,
+        tenant_id: str | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any] | None:
         if self.identity_authenticator is not None:
             try:
@@ -159,32 +212,40 @@ class ProviderService:
             except Exception:
                 trusted_identity = False
             if trusted_identity is not True:
-                return {"allowed": False, "status": "OIDC_AUTHENTICATION_REQUIRED"}
+                return self._finish_authorization_decision(
+                    {"allowed": False, "status": "OIDC_AUTHENTICATION_REQUIRED"},
+                    principal_id=principal_id, operation=operation,
+                    provider_id=provider_id, return_decision=return_decision, tenant_id=tenant_id, trace_id=trace_id,
+                )
             # Convert only after the in-process capability check succeeds.
             principal_id = str(principal_id)
         if self.authorization_manager is None:
             if principal_id is not None:
-                return {"allowed": False, "status": "AUTHORIZATION_MANAGER_UNAVAILABLE"}
-            # principal_id=None is reserved for trusted in-process calls only.
-            return {"allowed": True, "status": "TRUSTED_INTERNAL"} if return_decision else None
+                decision = {"allowed": False, "status": "AUTHORIZATION_MANAGER_UNAVAILABLE"}
+            else:
+                # principal_id=None is reserved for trusted in-process calls only.
+                decision = {"allowed": True, "status": "TRUSTED_INTERNAL"}
+            return self._finish_authorization_decision(
+                decision, principal_id=principal_id, operation=operation,
+                provider_id=provider_id, return_decision=return_decision, tenant_id=tenant_id, trace_id=trace_id,
+            )
         try:
             authorize = self.authorization_manager.authorize
             if provider_id is not None:
                 if getattr(self.authorization_manager, "supports_provider_scopes", False) is not True:
-                    return {
-                        "allowed": False,
-                        "status": "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE",
-                    }
-                result = authorize(principal_id, operation, provider_id=provider_id)
+                    decision = {"allowed": False, "status": "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE"}
+                else:
+                    decision = authorize(principal_id, operation, provider_id=provider_id)
             else:
-                result = authorize(principal_id, operation)
+                decision = authorize(principal_id, operation)
         except Exception as exc:
-            return {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
-        if not isinstance(result, dict):
-            result = {"allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"}
-        if result.get("allowed") is not True:
-            return result
-        return result if return_decision else None
+            decision = {"allowed": False, "status": "AUTHORIZATION_CHECK_FAILED", "error_type": type(exc).__name__}
+        if not isinstance(decision, dict) or not isinstance(decision.get("allowed"), bool):
+            decision = {"allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"}
+        return self._finish_authorization_decision(
+            decision, principal_id=principal_id, operation=operation,
+            provider_id=provider_id, return_decision=return_decision, tenant_id=tenant_id, trace_id=trace_id,
+        )
 
 
     def set_provider_access_scopes(
@@ -709,7 +770,8 @@ class ProviderService:
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_REQUIRED", "rotated": False}
         authorization = self._authorize_operation(
-            principal_id, "provider.credentials.rotate", provider_id=provider_id
+            principal_id, "provider.credentials.rotate", provider_id=provider_id,
+            tenant_id=tenant_id,
         )
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "rotated": False}
@@ -731,6 +793,14 @@ class ProviderService:
         secret_ref = provider.get("secret_ref")
         if not isinstance(secret_ref, str):
             return {"status": "PROVIDER_SECRET_REFERENCE_REQUIRED", "rotated": False}
+        rotation_request_audit = self._record_provider_audit(
+            event_type="provider.credential.rotation",
+            actor_id=principal_id, tenant_id=tenant_id,
+            provider_id=provider_id, operation="provider.credentials.rotate",
+            outcome="REQUESTED", reason_code="ROTATION_REQUESTED",
+        )
+        if rotation_request_audit.get("saved") is not True:
+            return {"status": "AUDIT_LOG_WRITE_FAILED", "rotated": False}
         try:
             result = self.secret_manager.rotate_secret(
                 secret_ref,
@@ -741,8 +811,14 @@ class ProviderService:
                 tenant_id=tenant_id,
             )
         except Exception as exc:
+            failure_audit = self._record_provider_audit(
+                event_type="provider.credential.rotation",
+                actor_id=principal_id, tenant_id=tenant_id,
+                provider_id=provider_id, operation="provider.credentials.rotate",
+                outcome="FAILED", reason_code="SECRET_ROTATION_FAILED",
+            )
             return {
-                "status": "SECRET_ROTATION_FAILED",
+                "status": "SECRET_ROTATION_FAILED" if failure_audit.get("saved") is True else "AUDIT_LOG_WRITE_FAILED",
                 "rotated": False,
                 "error_type": type(exc).__name__,
             }
@@ -758,7 +834,29 @@ class ProviderService:
                 and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", candidate_status)
                 else "INVALID_ROTATION_RESPONSE"
             )
-            return {"status": safe_status, "rotated": False}
+            failure_audit = self._record_provider_audit(
+                event_type="provider.credential.rotation",
+                actor_id=principal_id, tenant_id=tenant_id,
+                provider_id=provider_id, operation="provider.credentials.rotate",
+                outcome="FAILED", reason_code=safe_status,
+            )
+            return {
+                "status": safe_status if failure_audit.get("saved") is True else "AUDIT_LOG_WRITE_FAILED",
+                "rotated": False,
+            }
+        success_audit = self._record_provider_audit(
+            event_type="provider.credential.rotation",
+            actor_id=principal_id, tenant_id=tenant_id,
+            provider_id=provider_id, operation="provider.credentials.rotate",
+            outcome="SUCCEEDED", reason_code="SECRET_ROTATED",
+            credential_backend=result.get("backend") if isinstance(result.get("backend"), str) else None,
+            credential_version_id=result.get("version_id") if isinstance(result.get("version_id"), str) else None,
+        )
+        if success_audit.get("saved") is not True:
+            return {
+                "status": "PROVIDER_SECRET_ROTATED_AUDIT_LOG_FAILED",
+                "rotated": True, "audit_log_saved": False, "provider_id": provider_id,
+            }
         return {
             "status": "PROVIDER_SECRET_ROTATED",
             "rotated": True,
@@ -994,14 +1092,22 @@ class ProviderService:
             }
         return None
 
+    @with_provider_trace_context
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
-        tenant_id: str | None = None,
+        tenant_id: str | None = None, request_id: str | None = None,
+        traceparent: str | None = None,
+        _trace_context: ProviderRequestTraceContext | None = None,
     ) -> dict[str, Any]:
+        if not isinstance(_trace_context, ProviderRequestTraceContext):
+            return {"status": "INVALID_TRACE_CONTEXT", "accepted": False}
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
-        authorization = self._authorize_operation(principal_id, "provider.generate", provider_id=provider_id)
+        authorization = self._authorize_operation(
+            principal_id, "provider.generate", provider_id=provider_id,
+            tenant_id=tenant_id, trace_id=_trace_context.trace_id,
+        )
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "accepted": False, "authorization": authorization}
         tenant_error = self._authorize_tenant_project(
@@ -1025,6 +1131,9 @@ class ProviderService:
             submit_args = {
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
                 "payload_ref": payload_ref, "priority": priority,
+                "request_id": _trace_context.request_id,
+                "trace_id": _trace_context.trace_id,
+                "traceparent": _trace_context.traceparent,
             }
             if self.tenant_isolation_manager is not None:
                 submit_args["tenant_id"] = tenant_id
@@ -1214,18 +1323,230 @@ class ProviderService:
             "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
 
-    def route_request(self, **route_options: Any) -> dict[str, Any]:
+    @with_provider_trace_context
+    def route_request(
+        self, *, principal_id: str | None = None,
+        tenant_id: str | None = None,
+        request_id: str | None = None,
+        traceparent: str | None = None,
+        _trace_context: ProviderRequestTraceContext | None = None,
+        **route_options: Any,
+    ) -> dict[str, Any]:
+        """Route through the policy manager and persist decision/approval evidence.
+
+        principal_id and tenant_id must be supplied by trusted API middleware,
+        never copied from caller-controlled request JSON.
+        """
+        if not isinstance(_trace_context, ProviderRequestTraceContext):
+            return {"allowed": False, "status": "INVALID_TRACE_CONTEXT"}
+        actor_id = principal_id
+        if request_id is not None:
+            route_options["request_id"] = request_id
+        if tenant_id is not None:
+            if "tenant_id" in route_options and route_options["tenant_id"] != tenant_id:
+                return {"allowed": False, "status": "TENANT_CONTEXT_CONFLICT"}
+            route_options["tenant_id"] = tenant_id
+        tenant_id = route_options.get("tenant_id")
+        trace_id = _trace_context.trace_id
+        route_options["trace_id"] = _trace_context.trace_id
+        route_options["span_id"] = _trace_context.span_id
+        route_options["traceparent"] = _trace_context.traceparent
+        project_id = route_options.get("project_id")
+        request_id = route_options.get("request_id")
+        approvals = route_options.get("paid_approved_providers")
+        if (
+            isinstance(approvals, (set, frozenset)) and approvals
+            and all(isinstance(value, str) for value in approvals)
+        ):
+            approval_auth = self._authorize_operation(actor_id, "billing.approve", tenant_id=tenant_id, trace_id=trace_id)
+            if approval_auth is not None:
+                result = {
+                    "allowed": False, "status": "AUTHORIZATION_DENIED",
+                    "approval": approval_auth,
+                }
+                audit = self._record_provider_audit(
+                    event_type="provider.approval.decision",
+                    actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+                    trace_id=trace_id,
+                    operation="billing.approve", outcome="DENIED",
+                    reason_code="BILLING_APPROVAL_AUTHORIZATION_DENIED",
+                    approved=False,
+                )
+                if audit.get("saved") is not True:
+                    result["audit_log_saved"] = False
+                    result["audit_log_status"] = "AUDIT_LOG_WRITE_FAILED"
+                return result
+            for approved_provider in sorted(approvals):
+                audit = self._record_provider_audit(
+                    event_type="provider.approval.decision",
+                    actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+                    trace_id=trace_id,
+                    provider_id=approved_provider, request_id=request_id,
+                    operation="billing.approve", outcome="APPROVED",
+                    reason_code="BILLING_APPROVAL_GRANTED", approved=True,
+                )
+                if audit.get("saved") is not True:
+                    return {
+                        "allowed": False, "status": "AUDIT_LOG_WRITE_FAILED",
+                        "audit": {"status": audit.get("status", "AUDIT_WRITE_FAILED")},
+                    }
+
         if self.routing_manager is None:
-            return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
-        rejection = self._sensitive_input_rejection({"route_options": route_options})
-        if rejection is not None:
-            return {"allowed": False, **rejection}
+            result = {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
+        else:
+            rejection = self._sensitive_input_rejection({"route_options": route_options})
+            if rejection is not None:
+                result = {"allowed": False, **rejection}
+            else:
+                try:
+                    routed = self.routing_manager.route(**route_options)
+                    result = routed if isinstance(routed, dict) else {
+                        "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
+                    }
+                except Exception as exc:
+                    result = {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
+
+        status = result.get("status")
+        reason_code = status if isinstance(status, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", status) else "ROUTING_RESULT_INVALID"
+        allowed = result.get("allowed") is True
+        actual_provider = result.get("provider")
+        if not isinstance(actual_provider, str):
+            actual_provider = None
+        strategy = result.get("strategy", route_options.get("strategy"))
+        if not isinstance(strategy, str):
+            strategy = None
+        estimated_cost = result.get("estimated_cost", route_options.get("estimated_cost"))
+        if isinstance(estimated_cost, bool) or not isinstance(estimated_cost, (int, float)):
+            estimated_cost = None
+        billing_mode = result.get("billing_mode")
+        if billing_mode not in {"ZERO_COST", "FREE_CREDITS", "PAID_APPROVED"}:
+            billing_mode = None
+        candidate_decisions = result.get("prior_decisions", result.get("decisions", []))
+        if isinstance(candidate_decisions, list):
+            for candidate_decision in candidate_decisions:
+                if not isinstance(candidate_decision, dict):
+                    continue
+                candidate_provider = candidate_decision.get("provider")
+                candidate_status = candidate_decision.get("status")
+                if (
+                    not isinstance(candidate_provider, str)
+                    or not isinstance(candidate_status, str)
+                    or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", candidate_status)
+                ):
+                    continue
+                estimates = route_options.get("estimated_costs")
+                candidate_cost = estimates.get(candidate_provider) if isinstance(estimates, dict) else None
+                if isinstance(candidate_cost, bool) or not isinstance(candidate_cost, (int, float)):
+                    candidate_cost = None
+                candidate_audit = self._record_provider_audit(
+                    event_type="provider.routing.decision",
+                    actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+                    trace_id=trace_id,
+                    provider_id=candidate_provider, request_id=request_id,
+                    operation="provider.route.candidate", outcome="DENIED",
+                    reason_code=candidate_status, strategy=strategy,
+                    estimated_cost=candidate_cost,
+                )
+                if candidate_audit.get("saved") is not True:
+                    if allowed and actual_provider is not None and isinstance(project_id, str) and isinstance(request_id, str):
+                        release = self.release_unstarted_request(
+                            project_id=project_id, provider_id=actual_provider,
+                            request_id=request_id, tenant_id=tenant_id,
+                        )
+                        return {
+                            "allowed": False, "status": "AUDIT_LOG_WRITE_FAILED",
+                            "provider": actual_provider, "reservation_release": release,
+                            "reservations_retained": release.get("released") is not True,
+                        }
+                    return {**result, "audit_log_saved": False, "audit_log_status": "AUDIT_LOG_WRITE_FAILED"}
+
+        audit = self._record_provider_audit(
+            event_type="provider.routing.decision",
+            actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+            trace_id=trace_id,
+            provider_id=actual_provider, request_id=request_id,
+            operation="provider.route",
+            outcome="ALLOWED" if allowed else "DENIED",
+            reason_code=reason_code, strategy=strategy,
+            estimated_cost=estimated_cost, billing_mode=billing_mode,
+        )
+        if audit.get("saved") is not True:
+            if allowed and actual_provider is not None and isinstance(project_id, str) and isinstance(request_id, str):
+                release = self.release_unstarted_request(
+                    project_id=project_id, provider_id=actual_provider,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "allowed": False, "status": "AUDIT_LOG_WRITE_FAILED",
+                    "provider": actual_provider, "reservation_release": release,
+                    "reservations_retained": release.get("released") is not True,
+                }
+            return {**result, "audit_log_saved": False, "audit_log_status": "AUDIT_LOG_WRITE_FAILED"}
+
+        # When a paid option was rejected by the cost policy, preserve that explicit
+        # rejection as an approval audit event (without logging caller-provided sets).
+        decisions = result.get("prior_decisions", result.get("decisions", []))
+        if isinstance(decisions, list):
+            for decision in decisions:
+                if not isinstance(decision, dict) or decision.get("status") != "PAID_APPROVAL_REQUIRED":
+                    continue
+                candidate = decision.get("provider")
+                if not isinstance(candidate, str):
+                    continue
+                approval_audit = self._record_provider_audit(
+                    event_type="provider.approval.decision",
+                    actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+                    trace_id=trace_id,
+                    provider_id=candidate, request_id=request_id,
+                    operation="billing.approve", outcome="DENIED",
+                    reason_code="PAID_APPROVAL_REQUIRED", approved=False,
+                    estimated_cost=estimated_cost,
+                )
+                if approval_audit.get("saved") is not True:
+                    if allowed and actual_provider is not None and isinstance(project_id, str) and isinstance(request_id, str):
+                        release = self.release_unstarted_request(
+                            project_id=project_id, provider_id=actual_provider,
+                            request_id=request_id, tenant_id=tenant_id,
+                        )
+                        return {
+                            "allowed": False, "status": "AUDIT_LOG_WRITE_FAILED",
+                            "provider": actual_provider, "reservation_release": release,
+                            "reservations_retained": release.get("released") is not True,
+                        }
+                    return {**result, "audit_log_saved": False, "audit_log_status": "AUDIT_LOG_WRITE_FAILED"}
+        return result
+
+
+    def verify_provider_audit_log(self, *, principal_id: str | None) -> dict[str, Any]:
+        """Verify audit-chain integrity; only an authorized administrator may inspect it."""
+        if self.provider_audit_manager is None:
+            return {"status": "PROVIDER_AUDIT_LOG_UNAVAILABLE", "valid": False}
+        authorization = self._authorize_operation(principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "valid": False}
         try:
-            result = self.routing_manager.route(**route_options)
+            result = self.provider_audit_manager.verify()
         except Exception as exc:
-            return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
+            return {"status": "AUDIT_LOG_INTEGRITY_FAILED", "valid": False, "error_type": type(exc).__name__}
         return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
+            "status": "INVALID_AUDIT_MANAGER_RESPONSE", "valid": False,
+        }
+
+    def read_provider_audit_events(
+        self, *, principal_id: str | None, limit: int = 1000,
+    ) -> dict[str, Any]:
+        """Read only pseudonymized, integrity-checked audit metadata."""
+        if self.provider_audit_manager is None:
+            return {"status": "PROVIDER_AUDIT_LOG_UNAVAILABLE", "events": []}
+        authorization = self._authorize_operation(principal_id, "provider.access.manage")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "events": []}
+        try:
+            result = self.provider_audit_manager.read_events(limit=limit)
+        except Exception as exc:
+            return {"status": "AUDIT_LOG_READ_FAILED", "events": [], "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_AUDIT_MANAGER_RESPONSE", "events": [],
         }
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
@@ -1248,12 +1569,13 @@ class ProviderService:
             return default
         return value
 
+    @with_provider_trace_context
     def execute_routed_request(
         self,
         *,
         category: str,
         project_id: str,
-        request_id: str,
+        request_id: str | None = None,
         estimated_cost: float,
         adapter: Any,
         modality: str,
@@ -1271,6 +1593,8 @@ class ProviderService:
         require_fresh_health_check: bool = False,
         health_stale_after_seconds: float = 300.0,
         health_max_latency_ms: float | None = None,
+        traceparent: str | None = None,
+        _trace_context: ProviderRequestTraceContext | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route and invoke one adapter attempt, validate output, then account safely.
@@ -1278,6 +1602,8 @@ class ProviderService:
         This method deliberately does not auto-retry: after an adapter exception, it
         may be impossible to know whether a paid/credit-consuming request started.
         """
+        if not isinstance(_trace_context, ProviderRequestTraceContext):
+            return {"status": "INVALID_TRACE_CONTEXT", "executed": False}
         if not callable(adapter):
             return {"status": "INVALID_ADAPTER", "executed": False}
         if not isinstance(adapter_options, (dict, type(None))):
@@ -1385,7 +1711,8 @@ class ProviderService:
                 }
 
         authorization = self._authorize_operation(
-            principal_id, "provider.generate", provider_id="*", return_decision=True
+            principal_id, "provider.generate", provider_id="*", return_decision=True,
+            tenant_id=tenant_id, trace_id=_trace_context.trace_id,
         )
         if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
             return {
@@ -1431,10 +1758,15 @@ class ProviderService:
 
         if self.tenant_isolation_manager is not None:
             route_options["tenant_id"] = tenant_id
+        # tenant_id is passed explicitly as trusted middleware context; remove any
+        # copy already placed in route_options to avoid duplicate keyword binding.
+        route_options.pop("tenant_id", None)
         route = self.route_request(
+            principal_id=principal_id,
+            tenant_id=tenant_id,
+            request_id=request_id,
             category=category,
             project_id=project_id,
-            request_id=request_id,
             estimated_cost=estimated_cost,
             estimated_cost_unit=estimated_cost_unit,
             **route_options,
@@ -1445,7 +1777,8 @@ class ProviderService:
         if not isinstance(provider_id, str) or not provider_id.strip():
             return {"status": "INVALID_ROUTE_PROVIDER", "executed": False, "route": route}
         scoped_authorization = self._authorize_operation(
-            principal_id, "provider.generate", provider_id=provider_id
+            principal_id, "provider.generate", provider_id=provider_id,
+            tenant_id=tenant_id, trace_id=_trace_context.trace_id,
         )
         if scoped_authorization is not None:
             release = self.release_unstarted_request(
@@ -1560,8 +1893,12 @@ class ProviderService:
                 }
 
         options = dict(adapter_options or {})
+        adapter_trace_context = _trace_context.child()
         options["provider_id"] = provider_id
         options["request_id"] = request_id
+        options["trace_id"] = adapter_trace_context.trace_id
+        options["span_id"] = adapter_trace_context.span_id
+        options["traceparent"] = adapter_trace_context.traceparent
         secret_lease = None
         if use_managed_credential:
             try:

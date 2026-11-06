@@ -8,6 +8,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import math
 from typing import Any, Callable
+from urllib.request import Request
+
+from .http_probe import ProviderPinnedHTTPSOpener
 
 
 POLLINATIONS_MODELS_URL = "https://gen.pollinations.ai/v1/models"
@@ -72,38 +75,34 @@ class ProviderModelPricingManager:
 
     @staticmethod
     def _http_fetch(url: str, *, timeout: float) -> Any:
-        # The endpoint is fixed and public. No secret, account token or user input
-        # is included in the request. Redirects are rejected to keep the trust
-        # boundary on the official API host.
+        # Fixed public endpoint; no credentials or user-controlled URL are sent.
+        # The shared transport pins a validated public DNS answer to the socket,
+        # verifies TLS against the hostname and never follows redirects.
         if url != POLLINATIONS_MODELS_URL:
             raise ValueError("unsupported pricing catalog URL")
         import json
-        import requests
 
-        # Stream and cap the body before buffering it. Content-Length is only an
-        # early rejection hint; the running byte counter is the authoritative cap.
-        with requests.get(
-            url,
-            timeout=timeout,
-            allow_redirects=False,
-            stream=True,
-            headers={"Accept": "application/json"},
-        ) as response:
-            if 300 <= response.status_code < 400:
+        request = Request(
+            url, headers={"Accept": "application/json"}, method="GET",
+        )
+        response = ProviderPinnedHTTPSOpener().open(request, timeout=timeout)
+        try:
+            status = response.getcode()
+            if 300 <= status < 400:
                 raise ValueError("pricing catalog redirect rejected")
-            response.raise_for_status()
-            declared_length = response.headers.get("Content-Length")
+            if status != 200:
+                raise ValueError("pricing catalog HTTP request failed")
+            headers = getattr(response, "headers", None)
+            declared_length = headers.get("Content-Length") if headers is not None else None
             if declared_length is not None:
-                if not declared_length.isdigit() or int(declared_length) > MAX_CATALOG_BYTES:
+                if not isinstance(declared_length, str) or not declared_length.isdigit() or int(declared_length) > MAX_CATALOG_BYTES:
                     raise ValueError("pricing catalog exceeds size limit")
-            body = bytearray()
-            for chunk in response.iter_content(chunk_size=64 * 1024):
-                if not chunk:
-                    continue
-                body.extend(chunk)
-                if len(body) > MAX_CATALOG_BYTES:
-                    raise ValueError("pricing catalog exceeds size limit")
-        return json.loads(body)
+            body = response.read(MAX_CATALOG_BYTES + 1)
+            if not isinstance(body, bytes) or len(body) > MAX_CATALOG_BYTES:
+                raise ValueError("pricing catalog exceeds size limit")
+            return json.loads(body)
+        finally:
+            response.close()
 
     @staticmethod
     def _catalog_rows(payload: Any) -> list[dict[str, Any]]:

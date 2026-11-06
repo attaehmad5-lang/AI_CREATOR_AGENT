@@ -177,6 +177,29 @@ class ProviderJobManager:
                         or not _ID_RE.fullmatch(job.get("tenant_id"))
                     )
                 )
+                or (
+                    job.get("request_id") is not None
+                    and (
+                        not isinstance(job.get("request_id"), str)
+                        or not _ID_RE.fullmatch(job.get("request_id"))
+                    )
+                )
+                or (
+                    job.get("trace_id") is not None
+                    and (
+                        not isinstance(job.get("trace_id"), str)
+                        or not re.fullmatch(r"[0-9a-f]{32}", job.get("trace_id"))
+                        or job.get("trace_id") == "0" * 32
+                        or not isinstance(job.get("traceparent"), str)
+                        or not re.fullmatch(r"00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}", job.get("traceparent"))
+                        or job["traceparent"].split("-")[1] != job["trace_id"]
+                        or job["traceparent"].split("-")[2] == "0" * 16
+                    )
+                )
+                or (
+                    job.get("trace_id") is None
+                    and job.get("traceparent") is not None
+                )
                 or isinstance(job.get("attempts"), bool)
                 or not isinstance(job.get("attempts"), int) or job["attempts"] < 0
                 or isinstance(job.get("priority"), bool)
@@ -235,6 +258,9 @@ class ProviderJobManager:
         payload_ref: str,
         priority: int = 50,
         tenant_id: str | None = None,
+        request_id: str | None = None,
+        trace_id: str | None = None,
+        traceparent: str | None = None,
     ) -> dict[str, Any]:
         for value, name in ((job_id, "job_id"), (project_id, "project_id"), (provider_id, "provider_id")):
             if not isinstance(value, str) or not _ID_RE.fullmatch(value):
@@ -247,6 +273,21 @@ class ProviderJobManager:
             return {"status": "INVALID_TENANT_ID", "accepted": False}
         if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
             return {"status": "INVALID_PRIORITY", "accepted": False}
+        if request_id is not None and (
+            not isinstance(request_id, str) or not _ID_RE.fullmatch(request_id)
+        ):
+            return {"status": "INVALID_REQUEST_ID", "accepted": False}
+        trace_fields = (trace_id, traceparent)
+        if any(value is not None for value in trace_fields):
+            if (
+                not isinstance(trace_id, str) or not re.fullmatch(r"[0-9a-f]{32}", trace_id)
+                or trace_id == "0" * 32
+                or not isinstance(traceparent, str)
+                or not re.fullmatch(r"00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}", traceparent)
+                or traceparent.split("-")[1] != trace_id
+                or traceparent.split("-")[2] == "0" * 16
+            ):
+                return {"status": "INVALID_TRACE_CONTEXT", "accepted": False}
         now = self.clock().astimezone(timezone.utc).isoformat()
         with self._transaction():
             existing = self.data["jobs"].get(job_id)
@@ -257,6 +298,22 @@ class ProviderJobManager:
                     "project_id": project_id, "provider_id": provider_id,
                     "payload_ref": payload_ref, "priority": priority,
                 }.items())
+                for field, value in (
+                    ("request_id", request_id),
+                    ("trace_id", trace_id),
+                    ("traceparent", traceparent),
+                ):
+                    if value is not None and existing.get(field) not in (None, value):
+                        same = False
+                if same:
+                    # Backfill correlation metadata on a pre-tracing queued job
+                    # without creating a second job or changing its stable identity.
+                    if request_id is not None:
+                        existing.setdefault("request_id", request_id)
+                    if trace_id is not None:
+                        existing.setdefault("trace_id", trace_id)
+                        existing.setdefault("traceparent", traceparent)
+                    self._save()
                 return {
                     "status": "ALREADY_SUBMITTED" if same else "REQUEST_ID_CONFLICT",
                     "accepted": same,
@@ -282,6 +339,11 @@ class ProviderJobManager:
             }
             if tenant_id is not None:
                 job["tenant_id"] = tenant_id
+            if request_id is not None:
+                job["request_id"] = request_id
+            if trace_id is not None:
+                job["trace_id"] = trace_id
+                job["traceparent"] = traceparent
             self.data["jobs"][job_id] = job
             self._save()
             return {"status": "JOB_QUEUED", "accepted": True, "job": self._public_job(job)}

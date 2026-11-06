@@ -5,12 +5,18 @@ an endpoint supports generation or that a provider has available credits.
 """
 from __future__ import annotations
 
+import http.client
+import ipaddress
 import math
 import os
 import re
-from typing import Any
+import socket
+import ssl
+import time
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.parse import urlsplit
+from urllib.request import Request
 
 from .connection_manager import ConnectionManager, ProviderAuthenticationVerificationRequired
 from .safe_numbers import finite_number
@@ -33,11 +39,231 @@ class ProviderHTTPStatusError(ConnectionError):
         super().__init__(f"provider returned HTTP {status_code}")
 
 
-class _RejectRedirects(HTTPRedirectHandler):
-    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
-        # Redirect targets are never followed automatically; callers must configure
-        # the final endpoint explicitly and pass the host allowlist again.
-        return None
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS connection that connects to a prevalidated numeric address.
+
+    TLS certificate validation and SNI still use the original provider hostname.
+    This closes the DNS check/connect gap that would otherwise permit rebinding.
+    """
+
+    def __init__(
+        self, hostname: str, port: int, address: str, family: int, *,
+        timeout: float, context: ssl.SSLContext,
+    ) -> None:
+        super().__init__(hostname, port=port, timeout=timeout, context=context)
+        self._pinned_address = address
+        self._pinned_family = family
+
+    def connect(self) -> None:
+        raw = socket.socket(self._pinned_family, socket.SOCK_STREAM)
+        try:
+            raw.settimeout(self.timeout)
+            target = (
+                (self._pinned_address, self.port, 0, 0)
+                if self._pinned_family == socket.AF_INET6
+                else (self._pinned_address, self.port)
+            )
+            raw.connect(target)
+            self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+        except Exception:
+            raw.close()
+            raise
+
+
+class _PinnedResponse:
+    """Expose the small urllib-style response surface used by this probe."""
+
+    def __init__(self, response: Any, connection: _PinnedHTTPSConnection) -> None:
+        self._response = response
+        self._connection = connection
+        self.headers = response.headers
+        self.status = response.status
+
+    def getcode(self) -> int:
+        return self.status
+
+    def read(self, amount: int = -1) -> bytes:
+        return self._response.read(amount)
+
+    def close(self) -> None:
+        try:
+            self._response.close()
+        finally:
+            self._connection.close()
+
+
+class ProviderDNSResolver:
+    """Resolve A/AAAA records with a bounded total DNS lifetime.
+
+    Uses the system-configured DNS servers via dnspython, but never falls back
+    to an unbounded socket.getaddrinfo call when the dependency is unavailable.
+    """
+
+    def __init__(
+        self, *, timeout_seconds: float = 2.0, lifetime_seconds: float = 4.0,
+        resolver_factory: Callable[[], Any] | None = None,
+    ) -> None:
+        for value, name, minimum, maximum in (
+            (timeout_seconds, "timeout_seconds", 0.1, 5.0),
+            (lifetime_seconds, "lifetime_seconds", 0.2, 10.0),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{name} must be a finite number")
+            if not math.isfinite(float(value)) or not minimum <= float(value) <= maximum:
+                raise ValueError(f"{name} is outside safe bounds")
+        if resolver_factory is not None and not callable(resolver_factory):
+            raise ValueError("resolver_factory must be callable")
+        self.timeout_seconds = float(timeout_seconds)
+        self.lifetime_seconds = float(lifetime_seconds)
+        self._resolver_factory = resolver_factory
+
+    def __call__(self, hostname: str, port: int, *, type: int) -> list[tuple[Any, ...]]:
+        if (
+            not isinstance(hostname, str) or not hostname or len(hostname) > 253
+            or isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535
+            or type != socket.SOCK_STREAM
+        ):
+            raise ValueError("invalid DNS resolution request")
+        try:
+            if self._resolver_factory is None:
+                import dns.exception
+                import dns.resolver
+                resolver = dns.resolver.Resolver(configure=True)
+            else:
+                resolver = self._resolver_factory()
+        except ImportError:
+            raise RuntimeError("dnspython is required for bounded provider DNS resolution") from None
+        except Exception:
+            raise OSError("provider DNS resolver configuration failed") from None
+
+        deadline = time.monotonic() + self.lifetime_seconds
+        resolver.timeout = self.timeout_seconds
+        resolver.lifetime = self.lifetime_seconds
+        results: list[tuple[Any, ...]] = []
+        for record_type in ("A", "AAAA"):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("provider DNS resolution timed out")
+            resolver.timeout = min(self.timeout_seconds, remaining)
+            try:
+                answer = resolver.resolve(
+                    hostname.rstrip(".") + ".",
+                    record_type,
+                    lifetime=remaining,
+                    search=False,
+                    raise_on_no_answer=False,
+                )
+            except Exception as exc:
+                try:
+                    import dns.exception
+                    import dns.resolver
+                    no_answer = isinstance(exc, dns.resolver.NoAnswer)
+                    timeout = isinstance(exc, dns.exception.Timeout)
+                except ImportError:
+                    no_answer = timeout = False
+                timeout = timeout or isinstance(exc, TimeoutError) or exc.__class__.__name__ in {
+                    "Timeout", "LifetimeTimeout",
+                }
+                if no_answer:
+                    continue
+                if timeout:
+                    raise TimeoutError("provider DNS resolution timed out") from None
+                raise OSError("provider DNS resolution failed") from None
+            rrset = getattr(answer, "rrset", None)
+            if rrset is None:
+                continue
+            for record in rrset:
+                raw_address = getattr(record, "address", None)
+                if not isinstance(raw_address, str):
+                    raise ValueError("provider DNS response contains an invalid address")
+                try:
+                    address = ipaddress.ip_address(raw_address)
+                except ValueError:
+                    raise ValueError("provider DNS response contains an invalid address") from None
+                if address.version == 4:
+                    family = socket.AF_INET
+                    sockaddr = (address.compressed, port)
+                else:
+                    family = socket.AF_INET6
+                    sockaddr = (address.compressed, port, 0, 0)
+                results.append((family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", sockaddr))
+                if len(results) > 32:
+                    raise ValueError("provider DNS response has too many addresses")
+        return results
+
+
+class _PinnedHTTPSOpener:
+    """Resolve once, reject non-public answers, then connect to a pinned IP."""
+
+    def __init__(self, resolver: Callable[..., Any] | None = None) -> None:
+        if resolver is not None and not callable(resolver):
+            raise ValueError("resolver must be callable")
+        self._resolver = resolver if resolver is not None else ProviderDNSResolver()
+
+    def open(self, request: Request, timeout: float) -> _PinnedResponse:
+        parsed = urlsplit(request.full_url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ValueError("HTTPS_REQUIRED")
+        hostname = parsed.hostname.casefold().rstrip(".")
+        port = parsed.port or 443
+        try:
+            resolved = self._resolver(hostname, port, type=socket.SOCK_STREAM)
+        except Exception:
+            raise URLError("provider endpoint DNS resolution failed") from None
+        if not isinstance(resolved, (list, tuple)) or not resolved or len(resolved) > 32:
+            raise ValueError("PROVIDER_ENDPOINT_DNS_RESPONSE_INVALID")
+        targets: list[tuple[int, str]] = []
+        seen: set[tuple[int, str]] = set()
+        for record in resolved:
+            if not isinstance(record, tuple) or len(record) < 5:
+                raise ValueError("PROVIDER_ENDPOINT_DNS_RESPONSE_INVALID")
+            family, _socktype, _proto, _canonname, sockaddr = record
+            if family not in {socket.AF_INET, socket.AF_INET6} or not isinstance(sockaddr, tuple) or not sockaddr:
+                continue
+            raw_address = sockaddr[0]
+            if not isinstance(raw_address, str) or "%" in raw_address:
+                raise ValueError("PROVIDER_ENDPOINT_DNS_ADDRESS_INVALID")
+            try:
+                address = ipaddress.ip_address(raw_address)
+            except ValueError:
+                raise ValueError("PROVIDER_ENDPOINT_DNS_ADDRESS_INVALID") from None
+            # Reject the entire DNS answer if even one record is non-public. This
+            # prevents mixed public/private answer sets from becoming a fallback.
+            if not address.is_global:
+                raise ValueError("PROVIDER_ENDPOINT_RESOLVES_TO_NON_PUBLIC_ADDRESS")
+            target = (family, address.compressed)
+            if target not in seen:
+                seen.add(target)
+                targets.append(target)
+        if not targets:
+            raise ValueError("PROVIDER_ENDPOINT_DNS_RESOLUTION_EMPTY")
+
+        path = parsed.path or "/"
+        if parsed.query:
+            path += "?" + parsed.query
+        headers = dict(request.header_items())
+        last_error: Exception | None = None
+        for family, address in targets:
+            context = ssl.create_default_context()
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            connection = _PinnedHTTPSConnection(
+                hostname, port, address, family, timeout=timeout, context=context,
+            )
+            try:
+                connection.request(request.get_method(), path, body=request.data, headers=headers)
+                response = connection.getresponse()
+                return _PinnedResponse(response, connection)
+            except (OSError, TimeoutError, http.client.HTTPException) as exc:
+                connection.close()
+                last_error = exc
+        if last_error is not None:
+            raise URLError(last_error) from None
+        raise URLError("provider endpoint is unreachable") from None
+
+
+# Shared outbound HTTPS transport for provider auth, account and catalog adapters.
+# Keep the underscored alias for the focused transport regression tests.
+ProviderPinnedHTTPSOpener = _PinnedHTTPSOpener
 
 
 class ProviderHTTPConnectivityProbe:
@@ -104,6 +330,7 @@ class ProviderHTTPConnectivityProbe:
         secret_manager: Any | None = None,
         tenant_id: str | None = None,
         principal_id: str | None = None,
+        resolver: Callable[..., Any] | None = None,
     ) -> None:
         if secret_manager is not None and not callable(getattr(secret_manager, "resolve_secret", None)):
             raise ValueError("secret_manager must support secret resolution")
@@ -126,8 +353,17 @@ class ProviderHTTPConnectivityProbe:
             raise ValueError("max_response_bytes must be an integer between 0 and 1000000")
         if opener is not None and not callable(getattr(opener, "open", None)):
             raise ValueError("opener must provide an open method")
+        if resolver is not None and not callable(resolver):
+            raise ValueError("resolver must be callable")
+        if opener is not None and resolver is not None:
+            raise ValueError("custom opener and DNS resolver cannot be combined")
         self.environ = os.environ if environ is None else environ
-        self.opener = opener or build_opener(_RejectRedirects())
+        # Do not fall back to socket.getaddrinfo: its resolver path has no
+        # portable per-call lifetime bound. The shared opener supplies the
+        # bounded dnspython resolver and fails closed if that dependency is absent.
+        self.opener = opener if opener is not None else _PinnedHTTPSOpener(
+            resolver=resolver
+        )
         self.max_response_bytes = max_response_bytes
         self.secret_manager = secret_manager
         self.tenant_id = tenant_id
@@ -286,9 +522,24 @@ class ProviderHTTPConnectivityProbe:
                 raise
             try:
                 status = response.getcode() if callable(getattr(response, "getcode", None)) else getattr(response, "status", None)
-                if not isinstance(status, int) or not 200 <= status < 300:
-                    raise ConnectionError("provider did not return a successful HTTP status")
-                response.read(self.max_response_bytes + 1)
+                if not isinstance(status, int):
+                    raise ConnectionError("provider returned an invalid HTTP status")
+                if status in {401, 403}:
+                    raise ProviderHTTPAuthError(status)
+                if 300 <= status < 400:
+                    raise ConnectionError("provider endpoint redirected; redirects are not followed")
+                if not 200 <= status < 300:
+                    headers_obj = getattr(response, "headers", None)
+                    retry_after = headers_obj.get("Retry-After") if headers_obj is not None else None
+                    if (
+                        not isinstance(retry_after, str) or len(retry_after) > 128
+                        or any(ord(char) < 32 or ord(char) == 127 for char in retry_after)
+                    ):
+                        retry_after = None
+                    raise ProviderHTTPStatusError(status, retry_after)
+                response_body = response.read(self.max_response_bytes + 1)
+                if not isinstance(response_body, (bytes, bytearray)) or len(response_body) > self.max_response_bytes:
+                    raise ValueError("PROVIDER_PROBE_RESPONSE_TOO_LARGE")
                 result = {"ok": True, "http_status": status}
                 if credentialed_auth:
                     result["authentication_verified"] = True

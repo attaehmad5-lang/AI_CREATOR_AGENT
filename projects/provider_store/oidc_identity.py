@@ -18,6 +18,7 @@ import urllib.request
 from typing import Any, Callable
 
 from .provider_authorization import _PRINCIPAL_RE
+from .http_probe import ProviderPinnedHTTPSOpener
 
 
 class OIDCAuthenticationError(ValueError):
@@ -41,11 +42,6 @@ class AuthenticatedPrincipal(str):
         return value
 
 
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
-        return None
-
-
 class OIDCJWKSResolver:
     """Bounded HTTPS JWKS resolver with an exact hostname allowlist and cache."""
 
@@ -58,9 +54,14 @@ class OIDCJWKSResolver:
         cache_ttl_seconds: int = 300,
         max_response_bytes: int = 1_048_576,
         opener: Any | None = None,
+        resolver: Callable[..., Any] | None = None,
     ) -> None:
         parsed = urllib.parse.urlsplit(jwks_uri) if isinstance(jwks_uri, str) else None
         hosts = {host.lower().rstrip(".") for host in allowed_hosts if isinstance(host, str)}
+        if resolver is not None and not callable(resolver):
+            raise ValueError("JWKS resolver must be callable")
+        if opener is not None and resolver is not None:
+            raise ValueError("custom opener and resolver cannot be combined")
         if (
             parsed is None or parsed.scheme != "https" or not parsed.hostname
             or parsed.username is not None or parsed.password is not None
@@ -82,9 +83,8 @@ class OIDCJWKSResolver:
         self.timeout_seconds = float(timeout_seconds)
         self.cache_ttl_seconds = cache_ttl_seconds
         self.max_response_bytes = max_response_bytes
-        self._opener = opener or urllib.request.build_opener(
-            _NoRedirectHandler(),
-            urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+        self._opener = opener if opener is not None else ProviderPinnedHTTPSOpener(
+            resolver=resolver
         )
         self._lock = threading.RLock()
         self._keys: list[dict[str, Any]] = []
