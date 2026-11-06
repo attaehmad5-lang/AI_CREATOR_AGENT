@@ -1477,21 +1477,38 @@ class ProviderService:
         }
 
     @staticmethod
-    def _sanitize_job_response(result: dict[str, Any], sensitive_data_policy: Any | None = None) -> dict[str, Any]:
-        """Redact worker-only lease tokens and fail closed on sensitive stored job data.
+    def _sanitize_job_response(
+        result: dict[str, Any],
+        sensitive_data_policy: Any | None = None,
+        *,
+        include_worker_lease: bool = False,
+    ) -> dict[str, Any]:
+        """Redact lease capabilities except for the one-time worker claim response.
 
-        Claim responses are intentionally excluded: only the worker claiming a job
-        receives its lease token. Status, completion, submission and cancellation
-        responses must never disclose that capability to ordinary API callers.
+        The worker token is excluded from sensitive-data scanning because it is a
+        short-lived capability that must be delivered to the authenticated worker.
+        Every other public/status/submit/poll/complete/cancel response hides it.
         """
+        if not isinstance(include_worker_lease, bool):
+            return {"status": "INVALID_LEASE_RESPONSE_POLICY", "job": None}
         safe_result = dict(result)
         job = safe_result.get("job")
         if not isinstance(job, dict):
             return safe_result
 
         safe_job = dict(job)
-        safe_job.pop("lease_token", None)
+        lease_token = safe_job.pop("lease_token", None)
         safe_job.pop("lease_token_hash", None)
+        if include_worker_lease:
+            if (
+                result.get("status") != "JOB_CLAIMED"
+                or not isinstance(lease_token, str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", lease_token)
+            ):
+                return {
+                    "status": "INVALID_WORKER_LEASE_RESPONSE",
+                    "job": None,
+                }
         if sensitive_data_policy is not None:
             try:
                 scan = sensitive_data_policy.inspect(safe_job)
@@ -1513,6 +1530,8 @@ class ProviderService:
                         "blocked_categories": [],
                     },
                 }
+        if include_worker_lease:
+            safe_job["lease_token"] = lease_token
         safe_result["job"] = safe_job
         return safe_result
 
@@ -1721,7 +1740,11 @@ class ProviderService:
         if not isinstance(result, dict):
             result = {"status": "INVALID_JOB_MANAGER_RESPONSE", "job": None}
         job = result.get("job") if isinstance(result.get("job"), dict) else {}
-        response = self._sanitize_job_response(result, self.sensitive_data_policy)
+        response = self._sanitize_job_response(
+            result, self.sensitive_data_policy, include_worker_lease=True
+        )
+        if response.get("status") == "INVALID_WORKER_LEASE_RESPONSE":
+            return response
         return self._audit_operation_result(
             response, "provider.job.claim",
             success=result.get("status") == "JOB_CLAIMED",
