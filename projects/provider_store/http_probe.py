@@ -160,6 +160,11 @@ class _PinnedHTTPSOpener:
         raise URLError("provider endpoint is unreachable") from None
 
 
+# Shared outbound HTTPS transport for provider auth, account and catalog adapters.
+# Keep the underscored alias for the focused transport regression tests.
+ProviderPinnedHTTPSOpener = _PinnedHTTPSOpener
+
+
 class ProviderHTTPConnectivityProbe:
     """Perform a bounded HTTPS GET against a validated, explicitly configured endpoint."""
 
