@@ -93,3 +93,11 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+## Provider metrics and bounded-window throughput
+
+`ProviderMetricsManager` keeps a bounded sample history and reports success/failure/timeout counts, success rate, latency percentiles, and average queue wait. By default the history is in-process. A deployment may pass `state_path` to opt into a versioned JSON file that is reloaded under an OS-level interprocess lock and replaced atomically. All workers using that file must share a filesystem with reliable advisory-lock semantics and use a consistent retention configuration; this file backend is not a distributed database.
+
+`snapshot(provider_id=..., category=..., window_seconds=300)` also reports `window_sample_count`, `throughput_per_minute`, and `timeout_rate`. Throughput is an observed sample rate over the requested window, not a cumulative request counter. Because sample history is bounded, the rate can undercount when the retention cap is saturated. Production dashboards and SLOs should use a deployment-wide metrics backend with cumulative counters/histograms and verified export/retention policies.
+
+Metrics samples contain only bounded provider/category labels, booleans, timings, and timestamps. The schema rejects extra fields; prompts, request payloads, headers, credentials, provider response bodies, and arbitrary metadata must never be passed to this manager.
