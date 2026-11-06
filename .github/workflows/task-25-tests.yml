@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install runtime and JWT cryptography dependencies
-        run: python -m pip install requests pyjwt cryptography "dnspython>=2.7,<3"
+        run: python -m pip install requests pyjwt cryptography -r projects/provider_store/requirements-network-security.txt
       - name: Compile provider modules and tests
         run: python -m compileall -q projects/provider_store projects/generation/providers tests
       - name: Validate provider JSON catalogs
