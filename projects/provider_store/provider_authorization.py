@@ -22,7 +22,7 @@ ROLE_PERMISSIONS = {
         "provider.read", "provider.verify", "provider.generate",
         "provider.configure", "provider.enable", "provider.disable",
         "provider.credentials.rotate", "provider.policy.simulate", "provider.access.manage",
-        "billing.approve",
+        "billing.approve", "provider.audit.read",
     }),
 }
 KNOWN_OPERATIONS = frozenset().union(*ROLE_PERMISSIONS.values())

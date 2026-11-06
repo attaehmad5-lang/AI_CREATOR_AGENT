@@ -102,6 +102,16 @@ class ProviderAuthorizationManagerTests(unittest.TestCase):
             self.assertFalse(result["allowed"])
             self.assertEqual(result["status"], "ACCESS_DENIED")
 
+    def test_audit_read_is_an_explicit_admin_only_permission(self):
+        self.manager.assign_role("admin-1", "admin")
+        self.manager.assign_role("operator-1", "operator")
+        self.assertTrue(
+            self.manager.authorize("admin-1", "provider.audit.read")["allowed"]
+        )
+        denied = self.manager.authorize("operator-1", "provider.audit.read")
+        self.assertFalse(denied["allowed"])
+        self.assertEqual(denied["status"], "ACCESS_DENIED")
+
     def test_last_active_admin_cannot_be_disabled_or_demoted(self):
         self.manager.assign_role("admin-1", "admin")
         self.assertEqual(
