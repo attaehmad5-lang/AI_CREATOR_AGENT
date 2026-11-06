@@ -106,6 +106,33 @@ class HuggingFacePinnedTransportTests(unittest.TestCase):
                     transport.handle_request(RequestStub(url))
                 self.assertEqual(opener.calls, [])
 
+    def test_sensitive_query_parameter_is_rejected_before_network(self):
+        opener = FakeOpener()
+        transport = self.transport(opener)
+        with self.assertRaisesRegex(ValueError, "HUGGINGFACE_CREDENTIAL_IN_QUERY_REJECTED"):
+            transport.handle_request(RequestStub(
+                "https://router.huggingface.co/path?access_token=private"
+            ))
+        self.assertEqual(opener.calls, [])
+
+    def test_real_huggingface_httpx_transport_contract_is_supported(self):
+        try:
+            from huggingface_hub.utils import httpx as hub_httpx
+        except ImportError:
+            self.skipTest("huggingface_hub is not installed in this test environment")
+        transport_type = pinned.build_pinned_httpx_transport(
+            hub_httpx, opener_factory=FakeOpener,
+        )
+        transport = transport_type()
+        client = hub_httpx.Client(
+            transport=transport, follow_redirects=False, timeout=3.0,
+        )
+        try:
+            self.assertFalse(client.follow_redirects)
+            self.assertIs(client._transport, transport)
+        finally:
+            client.close()
+
     def test_redirect_is_rejected_and_response_is_closed(self):
         response = FakeHTTPResponse(
             status=302, headers={"Location": "https://evil.example/collect"}
