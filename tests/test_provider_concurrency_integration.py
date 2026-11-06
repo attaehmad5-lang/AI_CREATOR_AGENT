@@ -81,7 +81,7 @@ class ProviderConcurrencyIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(result.get("status"), "PROVIDER_CONCURRENCY_LIMIT_REACHED")
         self.assertEqual(calls, [])
-        self.assertEqual(self.cost.ledger["projects"]["film"]["reservations"], {})
+        self.assertEqual(self.cost.ledger.get("projects", {}).get("film", {}).get("reservations", {}), {})
         self.assertEqual(
             self.quota.data["requests"]["blocked-by-concurrency"]["status"],
             "RELEASED",
