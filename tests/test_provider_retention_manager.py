@@ -43,6 +43,34 @@ class ProviderRetentionManagerTests(unittest.TestCase):
         restored = ProviderRetentionManager(self.path, self.manager.policy)
         self.assertEqual(restored.get_status("resource-1", tenant_id="tenant-a")["deletion_status"], "PENDING")
 
+    def test_registration_retry_is_idempotent_and_does_not_extend_expiry(self):
+        first = self.register()
+        original_expiry = self.manager.get_status("resource-1", tenant_id="tenant-a")["expires_at"]
+        retry = self.register(now=2000)
+        self.assertTrue(first["saved"])
+        self.assertEqual(retry["status"], "ALREADY_REGISTERED")
+        self.assertEqual(
+            self.manager.get_status("resource-1", tenant_id="tenant-a")["expires_at"],
+            original_expiry,
+        )
+
+    def test_multiple_manager_instances_reload_shared_locked_state(self):
+        other = ProviderRetentionManager(self.path, self.manager.policy)
+        self.register()
+        status = other.get_status("resource-1", tenant_id="tenant-a")
+        self.assertEqual(status["deletion_status"], "PENDING")
+        result = other.register(
+            resource_id="resource-2", provider_id="image", tenant_id="tenant-b",
+            resource_ref="remote-asset-2", data_categories=["public"],
+            retention_days=1, now=1000,
+        )
+        self.assertTrue(result["saved"])
+        self.assertEqual(
+            self.manager.get_status("resource-2", tenant_id="tenant-b")["status"],
+            "RETENTION_STATUS",
+        )
+        self.assertTrue(Path(str(self.path) + ".lock").exists())
+
     def test_policy_rejection_prevents_registration(self):
         result = self.register(data_categories=["credential"])
         self.assertFalse(result["saved"])
