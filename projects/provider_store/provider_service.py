@@ -43,6 +43,7 @@ class ProviderService:
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
         secret_manager: Any | None = None,
+        audit_log: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -118,6 +119,53 @@ class ProviderService:
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
+        if audit_log is not None and not callable(getattr(audit_log, "append", None)):
+            raise ValueError("audit_log must support append")
+        self.audit_log = audit_log
+
+    def _record_audit(
+        self, event_type: str, *, actor_id: str | None = None,
+        tenant_id: str | None = None, provider_id: str | None = None,
+        request_id: str | None = None, trace_id: str | None = None,
+        outcome: str, details: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if self.audit_log is None:
+            return None
+        try:
+            result = self.audit_log.append(
+                event_type, actor_id=actor_id, tenant_id=tenant_id,
+                provider_id=provider_id, request_id=request_id, trace_id=trace_id,
+                outcome=outcome, details=details,
+            )
+        except Exception as exc:
+            return {"saved": False, "status": "AUDIT_LOG_WRITE_FAILED", "error_type": type(exc).__name__}
+        if not isinstance(result, dict) or result.get("saved") is not True:
+            return result if isinstance(result, dict) else {
+                "saved": False, "status": "INVALID_AUDIT_LOG_RESPONSE"
+            }
+        return None
+
+    def _audit_action_result(
+        self, event_type: str, *, actor_id: str | None, tenant_id: str | None,
+        provider_id: str | None, outcome: str, result: Any,
+        request_id: str | None = None, details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        status = result.get("status") if isinstance(result, dict) else None
+        audit_failure = self._record_audit(
+            event_type, actor_id=actor_id, tenant_id=tenant_id,
+            provider_id=provider_id, request_id=request_id,
+            outcome=outcome,
+            details={**(details or {}), **({"status": status} if isinstance(status, str) else {})},
+        )
+        if audit_failure is not None:
+            return {
+                "status": "AUDIT_LOG_WRITE_FAILED", "saved": False,
+                "operation_result": result if isinstance(result, dict) else {"status": "INVALID_OPERATION_RESPONSE"},
+                "audit": audit_failure,
+            }
+        return result if isinstance(result, dict) else {
+            "status": "INVALID_OPERATION_RESPONSE", "saved": False
+        }
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
