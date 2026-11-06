@@ -146,17 +146,7 @@ class ProviderServiceTests(unittest.TestCase):
         authorization = ProviderAuthorizationManager(self.root / "adapter-lifecycle-auth.json")
         authorization.assign_role("admin-user", "admin")
         authorization.assign_role("operator-user", "operator")
-        service = ProviderService(self.connections, authorization_manager=authorization)
-
         factory_calls = []
-        denied = service.load_provider_adapter(
-            "image",
-            lambda metadata: factory_calls.append(metadata) or object(),
-            principal_id="operator-user",
-        )
-        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
-        self.assertEqual(factory_calls, [])
-        self.assertIsNone(self.connections.get_loaded_provider("image"))
 
         class ImageAdapter:
             def __init__(self):
@@ -169,10 +159,19 @@ class ProviderServiceTests(unittest.TestCase):
                 self.closed = True
 
         adapter = ImageAdapter()
-        loaded = service.load_provider_adapter(
-            "image", lambda metadata: factory_calls.append(metadata) or adapter,
-            principal_id="admin-user",
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            adapter_factory_resolver=lambda provider_id, metadata: (
+                factory_calls.append((provider_id, metadata)) or adapter
+            ),
         )
+        denied = service.load_provider_adapter("image", principal_id="operator-user")
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(factory_calls, [])
+        self.assertIsNone(self.connections.get_loaded_provider("image"))
+
+        loaded = service.load_provider_adapter("image", principal_id="admin-user")
         self.assertEqual(loaded["status"], "LOADED")
         self.assertIs(self.connections.get_loaded_provider("image"), adapter)
         self.assertEqual(len(factory_calls), 1)
@@ -182,11 +181,19 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(adapter.closed)
         self.assertIsNone(self.connections.get_loaded_provider("image"))
 
+    def test_runtime_adapter_lifecycle_requires_trusted_factory_resolver(self):
+        authorization = ProviderAuthorizationManager(self.root / "missing-adapter-resolver-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        service = ProviderService(self.connections, authorization_manager=authorization)
+        result = service.load_provider_adapter("image", principal_id="admin-user")
+        self.assertEqual(result["status"], "ADAPTER_FACTORY_RESOLVER_UNAVAILABLE")
+        self.assertFalse(result["loaded"])
+
     def test_runtime_adapter_lifecycle_fails_closed_without_authorization_manager(self):
         service = ProviderService(self.connections)
         calls = []
         loaded = service.load_provider_adapter(
-            "image", lambda metadata: calls.append(metadata), principal_id="admin-user"
+            "image", principal_id="admin-user"
         )
         unloaded = service.unload_provider_adapter("image", principal_id="admin-user")
         self.assertEqual(loaded["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
