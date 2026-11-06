@@ -195,6 +195,74 @@ class ProviderAuditLog:
         }
         return hmac.new(self._key, self._canonical(material), hashlib.sha256).hexdigest()
 
+    @staticmethod
+    def _valid_loaded_event(event: Any) -> bool:
+        required = {
+            "event_id", "occurred_at", "event_type", "actor_ref", "tenant_ref",
+            "project_ref", "provider_id", "request_ref", "operation", "outcome",
+            "reason_code", "strategy", "estimated_cost", "billing_mode",
+            "approved", "credential_backend", "credential_version_ref",
+        }
+        if not isinstance(event, dict) or set(event) != required:
+            return False
+        if not isinstance(event.get("event_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", event["event_id"]):
+            return False
+        if event.get("event_type") not in _EVENT_TYPES:
+            return False
+        timestamp = event.get("occurred_at")
+        try:
+            parsed_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00")) if isinstance(timestamp, str) else None
+        except ValueError:
+            parsed_time = None
+        if parsed_time is None or parsed_time.tzinfo is None:
+            return False
+        for field in ("actor_ref", "tenant_ref", "project_ref", "request_ref", "credential_version_ref"):
+            value = event.get(field)
+            if value is not None and (
+                not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+            ):
+                return False
+        provider_id = event.get("provider_id")
+        if provider_id is not None and (
+            not isinstance(provider_id, str) or not _PROVIDER_RE.fullmatch(provider_id)
+        ):
+            return False
+        operation = event.get("operation")
+        if operation is not None and (
+            not isinstance(operation, str)
+            or not re.fullmatch(r"[a-z][a-z0-9_.-]{0,95}", operation)
+        ):
+            return False
+        for field in ("outcome", "reason_code"):
+            value = event.get(field)
+            if not isinstance(value, str) or not _CODE_RE.fullmatch(value):
+                return False
+        strategy = event.get("strategy")
+        if strategy is not None and (
+            not isinstance(strategy, str)
+            or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,47}", strategy)
+        ):
+            return False
+        cost = event.get("estimated_cost")
+        if cost is not None and (
+            isinstance(cost, bool) or not isinstance(cost, (int, float))
+            or not math.isfinite(float(cost)) or not 0 <= cost <= 1e12
+        ):
+            return False
+        billing_mode = event.get("billing_mode")
+        if billing_mode is not None and billing_mode not in _BILLING_MODES:
+            return False
+        approved = event.get("approved")
+        if approved is not None and not isinstance(approved, bool):
+            return False
+        backend = event.get("credential_backend")
+        if backend is not None and (
+            not isinstance(backend, str) or not 1 <= len(backend) <= 128
+            or any(ord(char) < 33 or ord(char) == 127 for char in backend)
+        ):
+            return False
+        return True
+
     def _read_verified(self) -> tuple[list[dict[str, Any]], str]:
         if self.path.is_symlink() or self.lock_path.is_symlink():
             raise ValueError("provider audit path must not be a symbolic link")
@@ -225,7 +293,7 @@ class ProviderAuditLog:
                 or not isinstance(envelope.get("sequence"), int)
                 or envelope["sequence"] != len(records) + 1
                 or envelope.get("previous_mac") != previous
-                or not isinstance(envelope.get("event"), dict)
+                or not self._valid_loaded_event(envelope.get("event"))
                 or not isinstance(envelope.get("mac"), str)
                 or not re.fullmatch(r"[0-9a-f]{64}", envelope["mac"])
             ):
