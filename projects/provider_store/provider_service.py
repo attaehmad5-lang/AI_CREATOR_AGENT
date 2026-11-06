@@ -9,6 +9,7 @@ import time
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
 from .secrets_manager import SecretManagerError
+from .provider_request_trace import trace_provider_request, validate_request_id
 
 
 class ProviderService:
@@ -1220,13 +1221,19 @@ class ProviderService:
         rejection = self._sensitive_input_rejection({"route_options": route_options})
         if rejection is not None:
             return {"allowed": False, **rejection}
+        routing_options = dict(route_options)
+        trace_id = routing_options.pop("trace_id", None)
+        routing_options.pop("traceparent", None)
         try:
-            result = self.routing_manager.route(**route_options)
+            result = self.routing_manager.route(**routing_options)
         except Exception as exc:
             return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
-        }
+        if not isinstance(result, dict):
+            return {"allowed": False, "status": "INVALID_ROUTING_RESPONSE"}
+        if isinstance(trace_id, str):
+            result = dict(result)
+            result.setdefault("trace_id", trace_id)
+        return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
         if self.output_validator is None:
@@ -1248,12 +1255,13 @@ class ProviderService:
             return default
         return value
 
+    @trace_provider_request
     def execute_routed_request(
         self,
         *,
         category: str,
         project_id: str,
-        request_id: str,
+        request_id: str | None = None,
         estimated_cost: float,
         adapter: Any,
         modality: str,
@@ -1284,7 +1292,7 @@ class ProviderService:
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
         if not isinstance(use_managed_credential, bool):
             return {"status": "INVALID_MANAGED_CREDENTIAL_POLICY", "executed": False}
-        if not isinstance(request_id, str) or not request_id.strip():
+        if not validate_request_id(request_id):
             return {"status": "INVALID_REQUEST_ID", "executed": False}
         if not isinstance(category, str) or not category.strip():
             return {"status": "INVALID_CATEGORY", "executed": False}
