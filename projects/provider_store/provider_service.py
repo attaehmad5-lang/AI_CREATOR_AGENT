@@ -492,13 +492,24 @@ class ProviderService:
         setter = getattr(self.authorization_manager, "set_provider_scopes", None)
         if not callable(setter):
             return {"status": "AUTHORIZATION_SCOPE_MANAGER_UNAVAILABLE", "saved": False}
+        audit_intent = self._audit_operation_intent(
+            "provider.access.set_scopes", principal_id=actor_principal_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "saved": False, **audit_intent}
         try:
             result = setter(target_principal_id, provider_scopes)
         except Exception as exc:
-            return {"status": "PROVIDER_SCOPE_UPDATE_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False
-        }
+            result = {
+                "status": "PROVIDER_SCOPE_UPDATE_FAILED",
+                "saved": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        return self._audit_operation_result(
+            result, "provider.access.set_scopes", success=result.get("saved") is True,
+            principal_id=actor_principal_id,
+        )
 
     def refresh_provider_metadata(
         self, provider_id: str, fetch_metadata: Any, *,
@@ -800,13 +811,25 @@ class ProviderService:
         assign = getattr(self.authorization_manager, "assign_role", None)
         if not callable(assign):
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        audit_intent = self._audit_operation_intent(
+            "provider.access.assign_role", principal_id=actor_principal_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "saved": False, **audit_intent}
         try:
             result = assign(target_principal_id, role, enabled=enabled)
         except Exception as exc:
-            return {"status": "ROLE_ASSIGNMENT_FAILED", "saved": False, "error_type": type(exc).__name__}
+            result = {
+                "status": "ROLE_ASSIGNMENT_FAILED",
+                "saved": False, "error_type": type(exc).__name__,
+            }
         if not isinstance(result, dict):
-            return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
-        return result
+            result = {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        return self._audit_operation_result(
+            result, "provider.access.assign_role",
+            success=result.get("saved") is True,
+            principal_id=actor_principal_id,
+        )
 
     def disable_provider_principal(
         self,
@@ -830,13 +853,25 @@ class ProviderService:
         disable = getattr(self.authorization_manager, "disable_principal", None)
         if not callable(disable):
             return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "saved": False}
+        audit_intent = self._audit_operation_intent(
+            "provider.access.disable_principal", principal_id=actor_principal_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "saved": False, **audit_intent}
         try:
             result = disable(target_principal_id)
         except Exception as exc:
-            return {"status": "PRINCIPAL_DISABLE_FAILED", "saved": False, "error_type": type(exc).__name__}
+            result = {
+                "status": "PRINCIPAL_DISABLE_FAILED",
+                "saved": False, "error_type": type(exc).__name__,
+            }
         if not isinstance(result, dict):
-            return {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
-        return result
+            result = {"status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False}
+        return self._audit_operation_result(
+            result, "provider.access.disable_principal",
+            success=result.get("saved") is True,
+            principal_id=actor_principal_id,
+        )
 
     def _authorize_tenant_project(
         self,
@@ -1534,6 +1569,13 @@ class ProviderService:
         })
         if rejection is not None:
             return {"accepted": False, **rejection}
+        audit_intent = self._audit_operation_intent(
+            "provider.job.submit", principal_id=principal_id,
+            provider_id=provider_id, tenant_id=tenant_id,
+            project_id=project_id, request_id=job_id, trace_id=trace_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "accepted": False, **audit_intent}
         try:
             submit_args = {
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
@@ -1547,8 +1589,18 @@ class ProviderService:
                 submit_args["tenant_id"] = tenant_id
             result = self.job_manager.submit(**submit_args)
         except Exception as exc:
-            return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
-        return self._sanitize_job_response(result, self.sensitive_data_policy) if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
+            result = {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepted": False}
+        safe_result = self._sanitize_job_response(result, self.sensitive_data_policy)
+        job = result.get("job") if isinstance(result.get("job"), dict) else {}
+        resolved_trace = job.get("trace_id") if isinstance(job.get("trace_id"), str) else trace_id
+        return self._audit_operation_result(
+            safe_result, "provider.job.submit", success=result.get("accepted") is True,
+            principal_id=principal_id, provider_id=provider_id,
+            tenant_id=tenant_id, project_id=project_id,
+            request_id=job_id, trace_id=resolved_trace,
+        )
 
     def poll_job(
         self, *, job_id: str, principal_id: str | None = None,
@@ -1777,12 +1829,33 @@ class ProviderService:
                 )
                 if tenant_error is not None:
                     return {"status": tenant_error["status"], "saved": False}
-                result = self.job_manager.cancel(job_id=job_id, tenant_id=tenant_id)
-            else:
-                result = self.job_manager.cancel(job_id=job_id)
+            provider_id = job.get("provider_id") if isinstance(job.get("provider_id"), str) else None
+            project_id = job.get("project_id") if isinstance(job.get("project_id"), str) else None
+            trace_id = job.get("trace_id") if isinstance(job.get("trace_id"), str) else None
+            audit_intent = self._audit_operation_intent(
+                "provider.job.cancel", principal_id=principal_id,
+                provider_id=provider_id, tenant_id=tenant_id,
+                project_id=project_id, request_id=job_id, trace_id=trace_id,
+            )
+            if audit_intent is not None:
+                return {"status": "AUDIT_LOG_REQUIRED", "saved": False, **audit_intent}
+            result = (
+                self.job_manager.cancel(job_id=job_id, tenant_id=tenant_id)
+                if self.tenant_isolation_manager is not None
+                else self.job_manager.cancel(job_id=job_id)
+            )
         except Exception as exc:
-            return {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return self._sanitize_job_response(result, self.sensitive_data_policy) if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+            result = {"status": "JOB_CANCELLATION_FAILED", "saved": False, "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_JOB_MANAGER_RESPONSE", "saved": False}
+        safe_result = self._sanitize_job_response(result, self.sensitive_data_policy)
+        return self._audit_operation_result(
+            safe_result, "provider.job.cancel", success=result.get("saved") is True,
+            principal_id=principal_id,
+            provider_id=provider_id if "provider_id" in locals() else None,
+            tenant_id=tenant_id, project_id=project_id if "project_id" in locals() else None,
+            request_id=job_id, trace_id=trace_id if "trace_id" in locals() else None,
+        )
 
     def verify_webhook(
         self,
@@ -1822,13 +1895,42 @@ class ProviderService:
         rejection = self._sensitive_input_rejection({"route_options": route_options})
         if rejection is not None:
             return {"allowed": False, **rejection}
+        principal_id = route_options.get("principal_id")
+        provider_id = route_options.get("provider_id")
+        tenant_id = route_options.get("tenant_id")
+        project_id = route_options.get("project_id")
+        request_id = route_options.get("request_id")
+        trace_id = route_options.get("trace_id")
+        audit_intent = self._audit_operation_intent(
+            "provider.route",
+            principal_id=principal_id if isinstance(principal_id, str) else None,
+            provider_id=provider_id if isinstance(provider_id, str) else None,
+            tenant_id=tenant_id if isinstance(tenant_id, str) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            request_id=request_id if isinstance(request_id, str) else None,
+            trace_id=trace_id if isinstance(trace_id, str) else None,
+        )
+        if audit_intent is not None:
+            return {"allowed": False, "status": "AUDIT_LOG_REQUIRED", **audit_intent}
         try:
             result = self.routing_manager.route(**route_options)
         except Exception as exc:
-            return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
-        }
+            result = {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
+        if not isinstance(result, dict):
+            result = {"allowed": False, "status": "INVALID_ROUTING_RESPONSE"}
+        selected_provider = result.get("provider_id")
+        selected_provider = selected_provider if isinstance(selected_provider, str) else (
+            provider_id if isinstance(provider_id, str) else None
+        )
+        return self._audit_operation_result(
+            result, "provider.route", success=result.get("allowed") is True,
+            principal_id=principal_id if isinstance(principal_id, str) else None,
+            provider_id=selected_provider,
+            tenant_id=tenant_id if isinstance(tenant_id, str) else None,
+            project_id=project_id if isinstance(project_id, str) else None,
+            request_id=request_id if isinstance(request_id, str) else None,
+            trace_id=trace_id if isinstance(trace_id, str) else None,
+        )
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
         if self.output_validator is None:
