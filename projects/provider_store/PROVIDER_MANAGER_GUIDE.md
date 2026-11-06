@@ -93,3 +93,8 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+
+## ProviderService observability integration
+
+Optional `structured_logger` and `trace_manager` dependencies can be injected into `ProviderService`. The service emits allowlisted JSON events and bounded spans around provider verification and routed execution. Observability backends are non-fatal: logging/tracing failures never change routing, provider, billing or quota outcomes. The service does not attach prompts, adapter payloads, credentials or raw exception messages to these events. The injected managers default to `None`, preserving existing behavior. Trace recording is process-local; production deployments still need an approved exporter/collector, sampling, retention and background-queue propagation.

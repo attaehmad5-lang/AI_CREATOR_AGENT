@@ -43,6 +43,8 @@ class ProviderService:
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
         secret_manager: Any | None = None,
+        structured_logger: Any | None = None,
+        trace_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -88,10 +90,14 @@ class ProviderService:
             (degraded_mode_manager, "evaluate", "degraded_mode_manager"),
             (degraded_mode_manager, "get_state", "degraded_mode_manager"),
             (tenant_isolation_manager, "authorize_project", "tenant_isolation_manager"),
+            (structured_logger, "emit", "structured_logger"),
+            (trace_manager, "start_span", "trace_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
                 raise ValueError(f"{label} does not support {method}")
+        if trace_manager is not None and not callable(getattr(trace_manager, "finish_span", None)):
+            raise ValueError("trace_manager does not support finish_span")
         self.connection_manager = connection_manager
         self.routing_manager = routing_manager
         self.health_manager = health_manager
@@ -118,6 +124,8 @@ class ProviderService:
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
+        self.structured_logger = structured_logger
+        self.trace_manager = trace_manager
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
@@ -650,7 +658,88 @@ class ProviderService:
             response["error_type"] = error_type
         return response
 
+
+    def _start_observability_span(self, event: str, traceparent: str | None = None) -> dict[str, Any] | None:
+        if self.trace_manager is None:
+            return None
+        try:
+            result = self.trace_manager.start_span(event, traceparent=traceparent)
+        except Exception:
+            return None
+        return result if isinstance(result, dict) and result.get("status") == "SPAN_STARTED" else None
+
+    def _finish_observability_span(
+        self, span: dict[str, Any] | None, *, outcome: str, duration_ms: float
+    ) -> None:
+        if span is None or self.trace_manager is None:
+            return
+        try:
+            self.trace_manager.finish_span(span, outcome=outcome, duration_ms=duration_ms)
+        except Exception:
+            return
+
+    def _emit_observability_event(
+        self, event: str, *, status: str, outcome: str, duration_ms: float,
+        provider_id: Any = None, request_id: Any = None,
+        category: Any = None, error_code: Any = None,
+    ) -> None:
+        if self.structured_logger is None:
+            return
+        try:
+            self.structured_logger.emit(
+                event,
+                provider_id=provider_id if isinstance(provider_id, str) else None,
+                request_id=request_id if isinstance(request_id, str) else None,
+                category=category if isinstance(category, str) else None,
+                status=status if isinstance(status, str) else "UNKNOWN",
+                outcome=outcome,
+                duration_ms=duration_ms,
+                error_code=error_code if isinstance(error_code, str) else None,
+            )
+        except Exception:
+            return
+
     def verify_provider(
+        self, provider_id: str, probe: Any, *, timeout_seconds: float = 5.0,
+        environ: dict[str, str] | None = None, principal_id: str | None = None,
+        traceparent: str | None = None,
+    ) -> dict[str, Any]:
+        started = time.monotonic()
+        span = self._start_observability_span("provider.verify", traceparent)
+        try:
+            result = self._verify_provider_impl(
+                provider_id, probe, timeout_seconds=timeout_seconds,
+                environ=environ, principal_id=principal_id,
+            )
+        except Exception as exc:
+            duration = max(0.0, (time.monotonic() - started) * 1000.0)
+            self._finish_observability_span(span, outcome="ERROR", duration_ms=duration)
+            self._emit_observability_event(
+                "provider.verify", status="VERIFY_RAISED", outcome="ERROR",
+                duration_ms=duration, provider_id=provider_id,
+                error_code=type(exc).__name__,
+            )
+            raise
+        connection = result.get("connection", {}) if isinstance(result, dict) else {}
+        candidate = finite_number(
+            connection.get("latency_ms"), minimum=0
+        ) if isinstance(connection, dict) else None
+        duration = candidate if candidate is not None else max(
+            0.0, (time.monotonic() - started) * 1000.0
+        )
+        verified = isinstance(result, dict) and result.get("verified") is True
+        status = result.get("status", "UNKNOWN") if isinstance(result, dict) else "INVALID_RESULT"
+        self._finish_observability_span(
+            span, outcome="OK" if verified else "ERROR", duration_ms=duration
+        )
+        self._emit_observability_event(
+            "provider.verify", status=status if isinstance(status, str) else "UNKNOWN",
+            outcome="OK" if verified else "ERROR", duration_ms=duration,
+            provider_id=provider_id, error_code=None if verified else status,
+        )
+        return result
+
+    def _verify_provider_impl(
         self,
         provider_id: str,
         probe: Any,
@@ -1248,7 +1337,64 @@ class ProviderService:
             return default
         return value
 
+
     def execute_routed_request(
+        self, *, category: str, project_id: str, request_id: str,
+        estimated_cost: float, adapter: Any, modality: str,
+        principal_id: str | None = None, tenant_id: str | None = None,
+        data_categories: tuple[str, ...] | list[str] = ("user_content",),
+        retention_days: int = 0, provider_training_use: bool = False,
+        user_training_consent: bool = False, output_path: Any = None,
+        estimated_cost_unit: str = "USD", adapter_options: dict[str, Any] | None = None,
+        require_modality_binding: bool = False, use_managed_credential: bool = False,
+        require_fresh_health_check: bool = False,
+        health_stale_after_seconds: float = 300.0,
+        health_max_latency_ms: float | None = None,
+        traceparent: str | None = None, **route_options: Any,
+    ) -> dict[str, Any]:
+        """Run provider execution with non-fatal, secret-safe logs and bounded trace spans."""
+        started = time.monotonic()
+        span = self._start_observability_span("provider.execute", traceparent)
+        try:
+            result = self._execute_routed_request_impl(
+                category=category, project_id=project_id, request_id=request_id,
+                estimated_cost=estimated_cost, adapter=adapter, modality=modality,
+                principal_id=principal_id, tenant_id=tenant_id,
+                data_categories=data_categories, retention_days=retention_days,
+                provider_training_use=provider_training_use,
+                user_training_consent=user_training_consent, output_path=output_path,
+                estimated_cost_unit=estimated_cost_unit, adapter_options=adapter_options,
+                require_modality_binding=require_modality_binding,
+                use_managed_credential=use_managed_credential,
+                require_fresh_health_check=require_fresh_health_check,
+                health_stale_after_seconds=health_stale_after_seconds,
+                health_max_latency_ms=health_max_latency_ms, **route_options,
+            )
+        except Exception as exc:
+            duration = max(0.0, (time.monotonic() - started) * 1000.0)
+            self._finish_observability_span(span, outcome="ERROR", duration_ms=duration)
+            self._emit_observability_event(
+                "provider.execute", status="EXECUTION_RAISED", outcome="ERROR",
+                duration_ms=duration, request_id=request_id, category=category,
+                error_code=type(exc).__name__,
+            )
+            raise
+        duration = max(0.0, (time.monotonic() - started) * 1000.0)
+        status = result.get("status", "UNKNOWN") if isinstance(result, dict) else "INVALID_RESULT"
+        succeeded = isinstance(result, dict) and status == "EXECUTION_SUCCEEDED"
+        provider_id = result.get("provider") if isinstance(result, dict) else None
+        self._finish_observability_span(
+            span, outcome="OK" if succeeded else "ERROR", duration_ms=duration
+        )
+        self._emit_observability_event(
+            "provider.execute", status=status if isinstance(status, str) else "UNKNOWN",
+            outcome="OK" if succeeded else "ERROR", duration_ms=duration,
+            provider_id=provider_id, request_id=request_id, category=category,
+            error_code=None if succeeded else status,
+        )
+        return result
+
+    def _execute_routed_request_impl(
         self,
         *,
         category: str,
