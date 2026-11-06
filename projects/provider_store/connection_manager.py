@@ -21,6 +21,7 @@ from .safe_numbers import finite_number
 
 
 MODULE_DIR = Path(__file__).resolve().parent
+_ADAPTER_API_VERSION_RE = re.compile(r"(?:0|[1-9][0-9]{0,3})\\.(?:0|[1-9][0-9]{0,3})\\Z")
 DEFAULT_CATALOG = MODULE_DIR / "provider_catalog.json"
 MASTER_CATALOG = MODULE_DIR / "provider_catalog_master.json"
 DEFAULT_STATE = MODULE_DIR / "connection_state.json"
@@ -492,6 +493,13 @@ class ConnectionManager:
                         )
                     ):
                         errors.append(f"providers[{index}].secret_ref must be a safe non-empty reference")
+                    if "adapter_api_version" in provider and (
+                        not isinstance(provider["adapter_api_version"], str)
+                        or not _ADAPTER_API_VERSION_RE.fullmatch(provider["adapter_api_version"])
+                    ):
+                        errors.append(
+                            f"providers[{index}].adapter_api_version must use bounded MAJOR.MINOR format"
+                        )
                     if "capabilities" in provider:
                         capabilities = provider["capabilities"]
                         if (
@@ -661,11 +669,68 @@ class ConnectionManager:
         provider = self.get_provider(provider_id)
         return provider is not None and provider.get("enabled") is True
 
+    def negotiate_provider_api_version(self, provider_id: str, instance: Any) -> dict[str, Any]:
+        """Select an exact supported adapter API version, defaulting legacy adapters to 1.0."""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"status": "NOT_FOUND", "provider": provider_id, "compatible": False}
+        expected = provider.get("adapter_api_version", "1.0")
+        try:
+            declared = getattr(instance, "supported_provider_api_versions", None)
+            if declared is None:
+                legacy_version = getattr(instance, "provider_adapter_api_version", "1.0")
+                declared = (legacy_version,)
+        except Exception:
+            return {
+                "status": "ADAPTER_VERSION_DECLARATION_FAILED",
+                "provider": provider_id,
+                "compatible": False,
+            }
+        if (
+            not isinstance(declared, (tuple, list, set, frozenset))
+            or not 1 <= len(declared) <= 16
+            or any(
+                not isinstance(version, str)
+                or not _ADAPTER_API_VERSION_RE.fullmatch(version)
+                for version in declared
+            )
+            or len(set(declared)) != len(declared)
+        ):
+            return {
+                "status": "INVALID_ADAPTER_VERSION_DECLARATION",
+                "provider": provider_id,
+                "compatible": False,
+            }
+        supported = sorted(declared)
+        if expected not in supported:
+            return {
+                "status": "ADAPTER_VERSION_INCOMPATIBLE",
+                "provider": provider_id,
+                "compatible": False,
+                "required_version": expected,
+                "supported_versions": supported,
+            }
+        return {
+            "status": "ADAPTER_VERSION_COMPATIBLE",
+            "provider": provider_id,
+            "compatible": True,
+            "selected_version": expected,
+            "supported_versions": supported,
+        }
+
     def validate_provider_contract(self, provider_id: str, instance: Any) -> dict[str, Any]:
-        """Validate the callable surface required by the provider's declared modality."""
+        """Validate the versioned callable surface required by the declared modality."""
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id, "valid": False}
+        version = self.negotiate_provider_api_version(provider_id, instance)
+        if version.get("compatible") is not True:
+            return {
+                **version,
+                "valid": False,
+                "missing_methods": [],
+                "contract_version": "1.0",
+            }
         category = str(provider.get("category", "")).casefold().replace("-", "_").replace(" ", "_")
         contracts = MODALITY_CONTRACTS
         requirements = contracts.get(category)
@@ -693,6 +758,8 @@ class ConnectionManager:
             "valid": not missing,
             "missing_methods": missing,
             "contract_version": "1.0",
+            "adapter_api_version": version["selected_version"],
+            "supported_adapter_api_versions": version["supported_versions"],
         }
 
     def get_modality_binding(self, provider_id: str) -> dict[str, Any]:
@@ -725,6 +792,7 @@ class ConnectionManager:
             "contract_methods": [list(alternatives) for alternatives in requirements],
             "output_modalities": sorted(output_kinds),
             "runtime_contract": runtime_contract,
+            "adapter_api_version": provider.get("adapter_api_version", "1.0"),
             "contract_version": "1.0",
         }
 
@@ -778,7 +846,15 @@ class ConnectionManager:
                 except Exception as exc:
                     cleanup_error_type = type(exc).__name__
             result = {
-                "status": "CONTRACT_VIOLATION",
+                "status": (
+                    "ADAPTER_VERSION_INCOMPATIBLE"
+                    if contract.get("status") in {
+                        "ADAPTER_VERSION_INCOMPATIBLE",
+                        "INVALID_ADAPTER_VERSION_DECLARATION",
+                        "ADAPTER_VERSION_DECLARATION_FAILED",
+                    }
+                    else "CONTRACT_VIOLATION"
+                ),
                 "provider": provider_id,
                 "loaded": False,
                 "contract_status": contract["status"],
