@@ -243,16 +243,54 @@ class ProviderJobManager:
                     )
                 )
                 or (
-                    job.get("remote_submission_state", "NOT_SUBMITTED") == "SUBMITTED"
+                    job.get("remote_submission_lease_token_hash") is not None
                     and (
-                        job.get("remote_job_id") is None
-                        or job.get("remote_status") not in _REMOTE_JOB_STATES
+                        not isinstance(job.get("remote_submission_lease_token_hash"), str)
+                        or not _SHA256_RE.fullmatch(job["remote_submission_lease_token_hash"])
                     )
                 )
                 or (
-                    job.get("remote_submission_state", "NOT_SUBMITTED") != "SUBMITTED"
+                    job.get("remote_submission_state", "NOT_SUBMITTED") == "SUBMITTING"
                     and (
-                        job.get("remote_job_id") is not None
+                        job.get("remote_submission_worker_id") is None
+                        or job.get("remote_submission_lease_token_hash") is None
+                        or job.get("remote_job_id") is not None
+                        or job.get("remote_status") is not None
+                    )
+                )
+                or (
+                    job.get("remote_submission_state", "NOT_SUBMITTED") == "UNKNOWN"
+                    and (
+                        job.get("remote_submission_worker_id") is not None
+                        or job.get("remote_submission_lease_token_hash") is not None
+                        or job.get("remote_job_id") is not None
+                        or job.get("remote_status") is not None
+                    )
+                )
+                or (
+                    job.get("remote_submission_state", "NOT_SUBMITTED") == "SUBMITTED"
+                    and (
+                        job.get("remote_submission_worker_id") is not None
+                        or job.get("remote_submission_lease_token_hash") is not None
+                        or job.get("remote_job_id") is None
+                        or not isinstance(job.get("remote_status"), str)
+                        or job.get("remote_status") not in _REMOTE_JOB_STATES
+                        or (
+                            job.get("remote_status") in {"QUEUED", "RUNNING"}
+                            and job.get("remote_poll_after_seconds") is None
+                        )
+                        or (
+                            job.get("remote_status") in _TERMINAL
+                            and job.get("remote_poll_after_seconds") is not None
+                        )
+                    )
+                )
+                or (
+                    job.get("remote_submission_state", "NOT_SUBMITTED") == "NOT_SUBMITTED"
+                    and (
+                        job.get("remote_submission_worker_id") is not None
+                        or job.get("remote_submission_lease_token_hash") is not None
+                        or job.get("remote_job_id") is not None
                         or job.get("remote_status") is not None
                     )
                 )
@@ -735,13 +773,17 @@ class ProviderJobManager:
                     "remote_job_id": job.get("remote_job_id"),
                     "remote_status": job.get("remote_status"),
                 }
+            current_lease_hash = _lease_token_digest(lease_token)
             if (
                 state == "SUBMITTING"
-                and job.get("remote_submission_worker_id") == worker_id
+                and job.get("remote_submission_lease_token_hash") == current_lease_hash
             ):
+                # This same lease already issued the remote call. Never issue it twice.
                 return {"status": "REMOTE_SUBMISSION_IN_PROGRESS", "saved": False}
+            # A reclaimed worker lease can safely retry with the same provider idempotency digest.
             job["remote_submission_state"] = "SUBMITTING"
             job["remote_submission_worker_id"] = worker_id
+            job["remote_submission_lease_token_hash"] = current_lease_hash
             job["remote_submission_attempts"] = job.get("remote_submission_attempts", 0) + 1
             job["remote_updated_at"] = now
             job.pop("remote_error_code", None)
@@ -777,6 +819,7 @@ class ProviderJobManager:
                 return {"status": "REMOTE_SUBMISSION_NOT_IN_PROGRESS", "saved": False}
             job["remote_submission_state"] = "UNKNOWN"
             job["remote_submission_worker_id"] = None
+            job["remote_submission_lease_token_hash"] = None
             job["remote_error_code"] = error_code
             job["remote_updated_at"] = now
             job["updated_at"] = now
@@ -833,6 +876,7 @@ class ProviderJobManager:
                 return {"status": "REMOTE_SUBMISSION_NOT_IN_PROGRESS", "saved": False}
             job["remote_submission_state"] = "SUBMITTED"
             job["remote_submission_worker_id"] = None
+            job["remote_submission_lease_token_hash"] = None
             job["remote_job_id"] = remote_job_id
             job["remote_status"] = remote_status
             job["remote_poll_after_seconds"] = (
