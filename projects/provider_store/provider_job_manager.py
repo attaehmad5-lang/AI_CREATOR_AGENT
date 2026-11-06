@@ -470,7 +470,8 @@ class ProviderJobManager:
             }
 
     def check_worker_control(
-        self, *, job_id: str, worker_id: str, lease_token: str
+        self, *, job_id: str, worker_id: str, lease_token: str,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         """Worker checkpoint for cooperative cancellation and absolute deadlines.
 
@@ -483,6 +484,10 @@ class ProviderJobManager:
             return {"status": "INVALID_WORKER_ID", "should_stop": True}
         if not isinstance(lease_token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", lease_token):
             return {"status": "INVALID_LEASE_TOKEN", "should_stop": True}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "should_stop": True}
         now = self.clock().astimezone(timezone.utc)
         with self._transaction():
             changed = self._reap_expired_locked(now)
@@ -491,6 +496,10 @@ class ProviderJobManager:
                 if changed:
                     self._save()
                 return {"status": "JOB_NOT_FOUND", "should_stop": True}
+            if job.get("tenant_id") != tenant_id:
+                if changed:
+                    self._save()
+                return {"status": "TENANT_ISOLATION_DENIED", "should_stop": True}
             if job.get("error_code") == "JOB_DEADLINE_EXCEEDED":
                 if changed:
                     self._save()
