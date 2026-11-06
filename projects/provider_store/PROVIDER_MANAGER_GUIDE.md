@@ -107,3 +107,10 @@ ProviderConcurrencyManager persists provider-specific, per-project and global ex
 Known completion releases the concurrency lease. Confirmed pre-start failure releases it as NOT_STARTED. Adapter exceptions, malformed start results and inconsistent billing/start results are treated as ambiguous: the lease stays active and continues consuming capacity. No TTL automatically expires an active or ambiguous lease.
 
 Use ProviderService.set_provider_concurrency_limit() and ProviderService.reconcile_provider_concurrency_lease() through the provider.access.manage admin permission. Reconciliation requires explicit confirmation of the remote outcome. The JSON/interprocess-lock implementation coordinates processes sharing the same state directory; it is not a distributed multi-host coordination service. Production shared-store deployment and sustained load tests remain release gates.
+
+
+## Queue/backpressure multi-process contract — Feature #76
+
+The persistent ProviderJobManager serializes submissions and worker claims through one interprocess lock protecting its state file. Its backpressure limit counts queued jobs, while the worker concurrency limit counts RUNNING jobs. The process-level regression suite starts concurrent submitters and claimers against one shared state path and verifies that neither queue admission nor worker claims exceed the configured limits.
+
+This proves coordination among processes on a host that share the same filesystem and lock semantics. It does not claim multi-host distributed coordination, network-filesystem lock correctness, horizontal autoscaling, or production-grade broker durability. Use a transactional shared database or dedicated queue broker, plus sustained load and failover testing, before treating those deployment properties as verified.
