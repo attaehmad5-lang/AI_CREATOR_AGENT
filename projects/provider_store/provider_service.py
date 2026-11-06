@@ -1261,8 +1261,12 @@ class ProviderService:
             return safe_result
 
         safe_job = dict(job)
-        safe_job.pop("lease_token", None)
-        safe_job.pop("lease_token_hash", None)
+        for protected_field in (
+            "lease_token", "lease_token_hash", "idempotency_key",
+            "idempotency_key_hash", "request_fingerprint",
+            "provider_idempotency_key",
+        ):
+            safe_job.pop(protected_field, None)
         if sensitive_data_policy is not None:
             try:
                 scan = sensitive_data_policy.inspect(safe_job)
