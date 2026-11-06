@@ -29,6 +29,145 @@ class ProviderJobManagerTests(unittest.TestCase):
             payload_ref=f"payload:{job_id}", priority=priority,
         )
 
+    def test_job_trace_id_is_generated_persisted_and_stable_for_idempotent_retries(self):
+        submitted = self.submit("trace-job")
+        self.assertTrue(submitted["accepted"])
+        trace_id = submitted["job"]["trace_id"]
+        self.assertRegex(trace_id, r"^[0-9a-f]{32}$")
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["jobs"]["trace-job"]["trace_id"], trace_id)
+
+        duplicate = self.submit("trace-job")
+        self.assertEqual(duplicate["status"], "ALREADY_SUBMITTED")
+        self.assertEqual(duplicate["job"]["trace_id"], trace_id)
+
+        reloaded = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        self.assertEqual(reloaded.poll(job_id="trace-job")["job"]["trace_id"], trace_id)
+
+    def test_job_trace_id_validation_and_explicit_idempotency_binding(self):
+        invalid = self.manager.submit(
+            job_id="bad-trace", project_id="film", provider_id="image",
+            payload_ref="payload:bad-trace", trace_id="not-a-trace",
+        )
+        self.assertEqual(invalid["status"], "INVALID_TRACE_ID")
+
+        supplied = "a" * 32
+        created = self.manager.submit(
+            job_id="explicit-trace", project_id="film", provider_id="image",
+            payload_ref="payload:explicit-trace", trace_id=supplied,
+        )
+        self.assertEqual(created["job"]["trace_id"], supplied)
+        conflict = self.manager.submit(
+            job_id="explicit-trace", project_id="film", provider_id="image",
+            payload_ref="payload:explicit-trace", trace_id="b" * 32,
+        )
+        self.assertEqual(conflict["status"], "REQUEST_ID_CONFLICT")
+
+    def test_claim_next_filters_jobs_by_allowed_provider_ids_before_leasing(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=5, max_concurrent=2,
+            scheduling_strategy="GLOBAL_PRIORITY",
+            clock=lambda: self.now[0],
+        )
+        image_submission = manager.submit(
+            job_id="image-authorized", project_id="film", provider_id="image",
+            payload_ref="payload:image-authorized", priority=100,
+        )
+        video_submission = manager.submit(
+            job_id="video-not-authorized", project_id="film", provider_id="video",
+            payload_ref="payload:video-not-authorized", priority=99,
+        )
+        self.assertTrue(image_submission["accepted"], image_submission)
+        self.assertTrue(video_submission["accepted"], video_submission)
+        self.assertEqual(
+            manager.poll(job_id="video-not-authorized")["job"]["status"], "QUEUED"
+        )
+        claimed = manager.claim_next(
+            worker_id="worker-1", allowed_provider_ids=["image"]
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.assertEqual(claimed["job"]["provider_id"], "image")
+        self.assertEqual(
+            manager.poll(job_id="video-not-authorized")["job"]["status"], "QUEUED"
+        )
+
+        blocked = manager.claim_next(
+            worker_id="worker-2", allowed_provider_ids=["image"]
+        )
+        self.assertEqual(blocked["status"], "NO_AUTHORIZED_PROVIDER_JOBS")
+        self.assertEqual(manager.poll(job_id="video-not-authorized")["job"]["status"], "QUEUED")
+
+    def test_claim_next_rejects_invalid_allowed_provider_filter(self):
+        manager = ProviderJobManager(self.path, clock=lambda: self.now[0])
+        for allowed in ("image", ["../outside"], ["image", "image"], [None]):
+            with self.subTest(allowed=allowed):
+                self.assertEqual(
+                    manager.claim_next(
+                        worker_id="worker-1", allowed_provider_ids=allowed
+                    )["status"],
+                    "INVALID_ALLOWED_PROVIDER_IDS",
+                )
+
+    def test_provider_specific_concurrency_limits_skip_capped_providers(self):
+        manager = ProviderJobManager(
+            self.path,
+            max_queue_size=10,
+            max_concurrent=4,
+            lease_seconds=10,
+            max_attempts=2,
+            scheduling_strategy="GLOBAL_PRIORITY",
+            provider_concurrency_limits={"image": 1, "video": 2},
+            clock=lambda: self.now[0],
+        )
+        submissions = (
+            ("image-one", "image", 100),
+            ("image-two", "image", 90),
+            ("video-one", "video", 80),
+            ("video-two", "video", 70),
+        )
+        for job_id, provider, priority in submissions:
+            manager.submit(
+                job_id=job_id, project_id="film", provider_id=provider,
+                payload_ref=f"payload:{job_id}", priority=priority,
+            )
+
+        first = manager.claim_next(worker_id="worker-1")
+        second = manager.claim_next(worker_id="worker-2")
+        third = manager.claim_next(worker_id="worker-3")
+        blocked = manager.claim_next(worker_id="worker-4")
+        self.assertEqual(first["job"]["job_id"], "image-one")
+        self.assertEqual(second["job"]["job_id"], "video-one")
+        self.assertEqual(third["job"]["job_id"], "video-two")
+        self.assertEqual(blocked["status"], "PROVIDER_CONCURRENCY_LIMIT")
+        self.assertEqual(blocked["queued"], 1)
+
+        released = manager.complete(
+            job_id="image-one", worker_id="worker-1",
+            lease_token=first["job"]["lease_token"], success=False,
+            error_code="TEST_RELEASE_PROVIDER_SLOT",
+        )
+        self.assertTrue(released["saved"])
+        reopened = manager.claim_next(worker_id="worker-4")
+        self.assertEqual(reopened["status"], "JOB_CLAIMED")
+        self.assertEqual(reopened["job"]["job_id"], "image-two")
+
+    def test_provider_specific_concurrency_limit_configuration_is_validated(self):
+        for limits in (
+            {"../provider": 1},
+            {"image": 0},
+            {"image": True},
+            {"image": 3},
+            ["image"],
+        ):
+            with self.subTest(limits=limits):
+                with self.assertRaises(ValueError):
+                    ProviderJobManager(
+                        self.path,
+                        max_concurrent=2,
+                        provider_concurrency_limits=limits,
+                        clock=lambda: self.now[0],
+                    )
+
     def test_persisted_running_job_requires_well_formed_lease_token(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
@@ -527,6 +666,129 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.claim_next(worker_id="bad worker")["status"], "INVALID_WORKER_ID")
         self.assertEqual(self.manager.poll(job_id="missing")["status"], "JOB_NOT_FOUND")
 
+
+    def test_queued_job_deadline_expires_before_worker_claim(self):
+        deadline = (self.now[0] + timedelta(seconds=5)).isoformat()
+        result = self.manager.submit(
+            job_id="deadline-queued", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-queued", deadline_at=deadline,
+        )
+        self.assertTrue(result["accepted"])
+        self.now[0] += timedelta(seconds=6)
+        self.assertEqual(self.manager.claim_next(worker_id="worker-1")["status"], "QUEUE_EMPTY")
+        job = self.manager.poll(job_id="deadline-queued")["job"]
+        self.assertEqual(job["status"], "FAILED")
+        self.assertEqual(job["error_code"], "JOB_DEADLINE_EXCEEDED")
+
+    def test_running_job_deadline_stops_worker_and_clears_lease(self):
+        deadline = (self.now[0] + timedelta(seconds=5)).isoformat()
+        self.manager.submit(
+            job_id="deadline-running", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-running", deadline_at=deadline,
+        )
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(
+            self.manager.check_worker_control(
+                job_id="deadline-running", worker_id="worker-1",
+                lease_token=claimed["job"]["lease_token"],
+            )["status"],
+            "WORKER_CONTINUE",
+        )
+        self.now[0] += timedelta(seconds=6)
+        stopped = self.manager.check_worker_control(
+            job_id="deadline-running", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"],
+        )
+        self.assertEqual(stopped["status"], "JOB_DEADLINE_EXCEEDED")
+        self.assertTrue(stopped["should_stop"])
+        persisted = self.manager.poll(job_id="deadline-running")["job"]
+        self.assertEqual(persisted["status"], "FAILED")
+        self.assertIsNone(persisted["worker_id"])
+
+    def test_worker_checkpoint_finalizes_cooperative_cancellation(self):
+        self.submit("cancel-checkpoint")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        self.assertEqual(
+            self.manager.cancel(job_id="cancel-checkpoint")["status"],
+            "CANCEL_REQUESTED",
+        )
+        stopped = self.manager.check_worker_control(
+            job_id="cancel-checkpoint", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"],
+        )
+        self.assertEqual(stopped["status"], "JOB_CANCELLED")
+        self.assertTrue(stopped["should_stop"])
+        self.assertEqual(
+            self.manager.poll(job_id="cancel-checkpoint")["job"]["status"],
+            "CANCELLED",
+        )
+
+    def test_invalid_deadlines_fail_closed(self):
+        for invalid in ("2026-10-16T12:00:00", "not-a-date", "x" * 65):
+            result = self.manager.submit(
+                job_id="invalid-deadline", project_id="film", provider_id="image",
+                payload_ref="payload:invalid-deadline", deadline_at=invalid,
+            )
+            self.assertEqual(result["status"], "INVALID_DEADLINE")
+        expired = self.manager.submit(
+            job_id="already-expired", project_id="film", provider_id="image",
+            payload_ref="payload:already-expired",
+            deadline_at=(self.now[0] - timedelta(seconds=1)).isoformat(),
+        )
+        self.assertEqual(expired["status"], "DEADLINE_ALREADY_EXPIRED")
+
+    def test_graceful_stop_is_shared_across_manager_instances(self):
+        self.submit("shared-before-stop")
+        stopped = self.manager.stop_accepting()
+        self.assertFalse(stopped["accepting"])
+
+        other = ProviderJobManager(
+            self.path, max_queue_size=2, max_concurrent=1,
+            lease_seconds=10, max_attempts=2,
+            clock=lambda: self.now[0],
+        )
+        self.assertFalse(other.drain_status()["accepting"])
+        rejected = other.submit(
+            job_id="shared-rejected", project_id="film", provider_id="image",
+            payload_ref="payload:shared-rejected",
+        )
+        self.assertEqual(rejected["status"], "QUEUE_SHUTTING_DOWN")
+
+        resumed = other.resume_accepting()
+        self.assertTrue(resumed["accepting"])
+        accepted = self.manager.submit(
+            job_id="shared-after-resume", project_id="film", provider_id="image",
+            payload_ref="payload:shared-after-resume",
+        )
+        self.assertTrue(accepted["accepted"])
+
+    def test_queue_control_state_validation_rejects_inconsistent_persisted_state(self):
+        self.manager.stop_accepting()
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["control"]["accepting"] = True
+        with self.path.open("w", encoding="utf-8") as stream:
+            json.dump(persisted, stream)
+        with self.assertRaisesRegex(ValueError, "queue control state"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
+
+    def test_graceful_stop_rejects_new_jobs_and_reports_drain(self):
+        self.submit("accepted-before-stop")
+        stopped = self.manager.stop_accepting()
+        self.assertFalse(stopped["accepting"])
+        self.assertEqual(stopped["queued"], 1)
+        self.assertEqual(self.manager.submit(
+            job_id="rejected-after-stop", project_id="film", provider_id="image",
+            payload_ref="payload:rejected-after-stop",
+        )["status"], "QUEUE_SHUTTING_DOWN")
+        claimed = self.manager.claim_next(worker_id="worker-1")
+        result = self.manager.complete(
+            job_id="accepted-before-stop", worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"], success=True,
+            result_ref="asset:drained",
+        )
+        self.assertTrue(result["saved"])
+        self.assertTrue(self.manager.drain_status()["drained"])
+        self.assertTrue(self.manager.resume_accepting()["accepting"])
 
 if __name__ == "__main__":
     unittest.main()

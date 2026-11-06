@@ -26,6 +26,22 @@ def _lease_token_digest(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
+def _parse_aware_timestamp(value: Any) -> datetime | None:
+    """Parse a bounded timezone-aware ISO timestamp; reject naive/invalid values."""
+    if not isinstance(value, str) or not 1 <= len(value) <= 64:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed.tzinfo is None:
+        return None
+    try:
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
+
+
 class ProviderJobManager:
     """Queue references only; hash worker leases and never persist raw payloads."""
 
@@ -40,6 +56,7 @@ class ProviderJobManager:
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
         scheduling_strategy: str = "PROJECT_ROUND_ROBIN",
+        provider_concurrency_limits: dict[str, int] | None = None,
         clock: Any = None,
     ) -> None:
         for value, name, minimum, maximum in (
@@ -54,6 +71,21 @@ class ProviderJobManager:
                 raise ValueError(f"{name} is outside safe limits")
         if scheduling_strategy not in {"PROJECT_ROUND_ROBIN", "GLOBAL_PRIORITY"}:
             raise ValueError("scheduling_strategy must be PROJECT_ROUND_ROBIN or GLOBAL_PRIORITY")
+        if provider_concurrency_limits is None:
+            provider_concurrency_limits = {}
+        if not isinstance(provider_concurrency_limits, dict) or len(provider_concurrency_limits) > 10_000:
+            raise ValueError("provider_concurrency_limits must be a bounded mapping")
+        normalized_provider_limits: dict[str, int] = {}
+        for provider_id, provider_limit in provider_concurrency_limits.items():
+            if not isinstance(provider_id, str) or not _ID_RE.fullmatch(provider_id):
+                raise ValueError("invalid provider ID in concurrency limits")
+            if (
+                isinstance(provider_limit, bool)
+                or not isinstance(provider_limit, int)
+                or not 1 <= provider_limit <= max_concurrent
+            ):
+                raise ValueError("provider concurrency limit is outside safe bounds")
+            normalized_provider_limits[provider_id] = provider_limit
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.scheduling_strategy = scheduling_strategy
@@ -61,14 +93,20 @@ class ProviderJobManager:
         self.max_queue_size = max_queue_size
         self.max_job_records = max_job_records
         self.max_concurrent = max_concurrent
+        self.provider_concurrency_limits = dict(normalized_provider_limits)
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.backpressure_retry_seconds = backpressure_retry_seconds
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        # Graceful-stop state is intentionally process-local: the application
+        # supervisor must stop each worker process and wait for drain_status().
+        self._accepting = True
+        self._shutdown_requested_at: str | None = None
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {
             "version": "1.0", "jobs": {},
             "scheduler": {"last_project_id": None},
+            "control": {"accepting": True, "shutdown_requested_at": None},
         }
         if self.state_path.exists():
             lock_path = self.state_path.with_name(self.state_path.name + ".lock")
@@ -80,7 +118,13 @@ class ProviderJobManager:
 
     def _reload(self) -> bool:
         if not self.state_path.exists():
-            self.data = {"version": "1.0", "jobs": {}}
+            self.data = {
+                "version": "1.0", "jobs": {},
+                "scheduler": {"last_project_id": None},
+                "control": {"accepting": True, "shutdown_requested_at": None},
+            }
+            self._accepting = True
+            self._shutdown_requested_at = None
             return False
         try:
             with self.state_path.open("r", encoding="utf-8") as stream:
@@ -108,7 +152,28 @@ class ProviderJobManager:
         ):
             raise ValueError("invalid provider job scheduler state")
         loaded["scheduler"] = scheduler
-        migrated_legacy_tokens = False
+        control_migrated = "control" not in loaded
+        control = loaded.get(
+            "control", {"accepting": True, "shutdown_requested_at": None}
+        )
+        if (
+            not isinstance(control, dict)
+            or set(control) != {"accepting", "shutdown_requested_at"}
+            or not isinstance(control.get("accepting"), bool)
+            or (
+                control["accepting"] is True
+                and control.get("shutdown_requested_at") is not None
+            )
+            or (
+                control["accepting"] is False
+                and _parse_aware_timestamp(control.get("shutdown_requested_at")) is None
+            )
+        ):
+            raise ValueError("invalid provider job queue control state")
+        loaded["control"] = control
+        self._accepting = control["accepting"]
+        self._shutdown_requested_at = control["shutdown_requested_at"]
+        migrated_legacy_tokens = control_migrated
         for job_id, job in loaded["jobs"].items():
             if isinstance(job, dict) and "lease_token" in job and "lease_token_hash" not in job:
                 legacy_token = job.pop("lease_token")
@@ -177,6 +242,18 @@ class ProviderJobManager:
                         or not _ID_RE.fullmatch(job.get("tenant_id"))
                     )
                 )
+                or (
+                    job.get("deadline_at") is not None
+                    and _parse_aware_timestamp(job.get("deadline_at")) is None
+                )
+                or (
+                    "trace_id" in job
+                    and (
+                        not isinstance(job.get("trace_id"), str)
+                        or re.fullmatch(r"[0-9a-f]{32}", job["trace_id"]) is None
+                        or job["trace_id"] == "0" * 32
+                    )
+                )
                 or isinstance(job.get("attempts"), bool)
                 or not isinstance(job.get("attempts"), int) or job["attempts"] < 0
                 or isinstance(job.get("priority"), bool)
@@ -235,7 +312,18 @@ class ProviderJobManager:
         payload_ref: str,
         priority: int = 50,
         tenant_id: str | None = None,
+        deadline_at: str | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
+        now_dt = self.clock().astimezone(timezone.utc)
+        normalized_deadline = None
+        if deadline_at is not None:
+            parsed_deadline = _parse_aware_timestamp(deadline_at)
+            if parsed_deadline is None:
+                return {"status": "INVALID_DEADLINE", "accepted": False}
+            if parsed_deadline <= now_dt:
+                return {"status": "DEADLINE_ALREADY_EXPIRED", "accepted": False}
+            normalized_deadline = parsed_deadline.isoformat()
         for value, name in ((job_id, "job_id"), (project_id, "project_id"), (provider_id, "provider_id")):
             if not isinstance(value, str) or not _ID_RE.fullmatch(value):
                 return {"status": f"INVALID_{name.upper()}", "accepted": False}
@@ -245,10 +333,21 @@ class ProviderJobManager:
             not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
         ):
             return {"status": "INVALID_TENANT_ID", "accepted": False}
+        if trace_id is not None and (
+            not isinstance(trace_id, str)
+            or re.fullmatch(r"[0-9a-f]{32}", trace_id) is None
+            or trace_id == "0" * 32
+        ):
+            return {"status": "INVALID_TRACE_ID", "accepted": False}
         if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
             return {"status": "INVALID_PRIORITY", "accepted": False}
-        now = self.clock().astimezone(timezone.utc).isoformat()
+        now = now_dt.isoformat()
         with self._transaction():
+            control = self.data["control"]
+            self._accepting = control["accepting"]
+            self._shutdown_requested_at = control["shutdown_requested_at"]
+            if control["accepting"] is not True:
+                return {"status": "QUEUE_SHUTTING_DOWN", "accepted": False}
             existing = self.data["jobs"].get(job_id)
             if isinstance(existing, dict):
                 if existing.get("tenant_id") != tenant_id:
@@ -256,7 +355,10 @@ class ProviderJobManager:
                 same = all(existing.get(key) == value for key, value in {
                     "project_id": project_id, "provider_id": provider_id,
                     "payload_ref": payload_ref, "priority": priority,
+                    "deadline_at": normalized_deadline,
                 }.items())
+                if trace_id is not None and existing.get("trace_id") != trace_id:
+                    same = False
                 return {
                     "status": "ALREADY_SUBMITTED" if same else "REQUEST_ID_CONFLICT",
                     "accepted": same,
@@ -278,7 +380,8 @@ class ProviderJobManager:
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
                 "payload_ref": payload_ref, "priority": priority, "status": "QUEUED",
                 "attempts": 0, "created_at": now, "updated_at": now,
-                "cancel_requested": False,
+                "cancel_requested": False, "deadline_at": normalized_deadline,
+                "trace_id": trace_id or secrets.token_hex(16),
             }
             if tenant_id is not None:
                 job["tenant_id"] = tenant_id
@@ -287,22 +390,26 @@ class ProviderJobManager:
             return {"status": "JOB_QUEUED", "accepted": True, "job": self._public_job(job)}
 
     def _reap_expired_locked(self, now: datetime) -> bool:
+        """Expire job deadlines and worker leases before every queue transition."""
         changed = False
         for job in self.data["jobs"].values():
-            if not isinstance(job, dict) or job.get("status") != "RUNNING":
+            if not isinstance(job, dict) or job.get("status") not in {"QUEUED", "RUNNING"}:
                 continue
-            lease_until = job.get("lease_until")
-            try:
-                if not isinstance(lease_until, str):
-                    expired = True
-                else:
-                    parsed_lease = datetime.fromisoformat(lease_until)
-                    if parsed_lease.tzinfo is None:
-                        expired = True
-                    else:
-                        expired = parsed_lease.astimezone(timezone.utc) <= now
-            except (ValueError, TypeError, OverflowError):
-                expired = True
+            deadline = _parse_aware_timestamp(job.get("deadline_at"))
+            if deadline is not None and deadline <= now:
+                job["status"] = "FAILED"
+                job["error_code"] = "JOB_DEADLINE_EXCEEDED"
+                job["completed_at"] = now.isoformat()
+                job["updated_at"] = now.isoformat()
+                job["worker_id"] = None
+                job["lease_token_hash"] = None
+                job["lease_until"] = None
+                changed = True
+                continue
+            if job.get("status") != "RUNNING":
+                continue
+            lease_until = _parse_aware_timestamp(job.get("lease_until"))
+            expired = lease_until is None or lease_until <= now
             if not expired:
                 continue
             job["updated_at"] = now.isoformat()
@@ -322,20 +429,35 @@ class ProviderJobManager:
             changed = True
         return changed
 
-    def claim_next(self, *, worker_id: str) -> dict[str, Any]:
+    def claim_next(
+        self, *, worker_id: str,
+        allowed_provider_ids: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
         if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
             return {"status": "INVALID_WORKER_ID", "job": None}
+        if allowed_provider_ids is not None and (
+            not isinstance(allowed_provider_ids, (list, tuple))
+            or len(allowed_provider_ids) > 10_000
+            or any(
+                not isinstance(provider_id, str) or not _ID_RE.fullmatch(provider_id)
+                for provider_id in allowed_provider_ids
+            )
+            or len(set(allowed_provider_ids)) != len(allowed_provider_ids)
+        ):
+            return {"status": "INVALID_ALLOWED_PROVIDER_IDS", "job": None}
+        allowed_set = set(allowed_provider_ids) if allowed_provider_ids is not None else None
         now = self.clock().astimezone(timezone.utc)
         with self._transaction():
             changed = self._reap_expired_locked(now)
-            running = sum(
-                1 for job in self.data["jobs"].values()
+            running_jobs = [
+                job for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "RUNNING"
-            )
-            if running >= self.max_concurrent:
+            ]
+            if len(running_jobs) >= self.max_concurrent:
                 if changed:
                     self._save()
                 return {"status": "CONCURRENCY_LIMIT", "job": None}
+
             queued = [
                 job for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "QUEUED"
@@ -344,13 +466,46 @@ class ProviderJobManager:
                 if changed:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
+            if allowed_set is not None:
+                authorized_queued = [
+                    candidate for candidate in queued
+                    if candidate.get("provider_id") in allowed_set
+                ]
+                if not authorized_queued:
+                    if changed:
+                        self._save()
+                    return {
+                        "status": "NO_AUTHORIZED_PROVIDER_JOBS",
+                        "job": None,
+                        "queued": len(queued),
+                    }
+                queued = authorized_queued
+
+            running_by_provider: dict[str, int] = {}
+            for running_job in running_jobs:
+                current_provider = running_job.get("provider_id")
+                if isinstance(current_provider, str):
+                    running_by_provider[current_provider] = running_by_provider.get(current_provider, 0) + 1
+            eligible = [
+                candidate for candidate in queued
+                if running_by_provider.get(candidate["provider_id"], 0)
+                < self.provider_concurrency_limits.get(candidate["provider_id"], self.max_concurrent)
+            ]
+            if not eligible:
+                if changed:
+                    self._save()
+                return {
+                    "status": "PROVIDER_CONCURRENCY_LIMIT",
+                    "job": None,
+                    "queued": len(queued),
+                }
 
             if self.scheduling_strategy == "GLOBAL_PRIORITY":
-                queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
-                job = queued[0]
+                eligible.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
+                job = eligible[0]
             else:
                 project_jobs: dict[str, list[dict[str, Any]]] = {}
-                for candidate in queued:
+                for candidate in eligible:
                     project_jobs.setdefault(candidate["project_id"], []).append(candidate)
                 project_order = sorted(
                     project_jobs,
@@ -400,6 +555,10 @@ class ProviderJobManager:
                 if changed:
                     self._save()
                 return {"status": "JOB_NOT_FOUND", "renewed": False}
+            if job.get("error_code") == "JOB_DEADLINE_EXCEEDED":
+                if changed:
+                    self._save()
+                return {"status": "JOB_DEADLINE_EXCEEDED", "renewed": False}
             if (
                 job.get("status") != "RUNNING"
                 or job.get("worker_id") != worker_id
@@ -408,6 +567,10 @@ class ProviderJobManager:
                 if changed:
                     self._save()
                 return {"status": "JOB_LEASE_NOT_OWNED", "renewed": False}
+            if job.get("cancel_requested") is True:
+                if changed:
+                    self._save()
+                return {"status": "CANCEL_REQUESTED", "renewed": False}
             job["lease_until"] = (
                 now + timedelta(seconds=self.lease_seconds)
             ).isoformat()
@@ -418,6 +581,124 @@ class ProviderJobManager:
                 "renewed": True,
                 "lease_until": job["lease_until"],
                 "job": self._public_job(job),
+            }
+
+    def check_worker_control(
+        self, *, job_id: str, worker_id: str, lease_token: str,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Worker checkpoint for cooperative cancellation and absolute deadlines.
+
+        Workers must call this between bounded work units. A positive stop signal
+        means the worker must cease provider activity and must not publish output.
+        """
+        if not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id):
+            return {"status": "INVALID_JOB_ID", "should_stop": True}
+        if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
+            return {"status": "INVALID_WORKER_ID", "should_stop": True}
+        if not isinstance(lease_token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{40,100}", lease_token):
+            return {"status": "INVALID_LEASE_TOKEN", "should_stop": True}
+        if tenant_id is not None and (
+            not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
+        ):
+            return {"status": "INVALID_TENANT_ID", "should_stop": True}
+        now = self.clock().astimezone(timezone.utc)
+        with self._transaction():
+            changed = self._reap_expired_locked(now)
+            job = self.data["jobs"].get(job_id)
+            if not isinstance(job, dict):
+                if changed:
+                    self._save()
+                return {"status": "JOB_NOT_FOUND", "should_stop": True}
+            if job.get("tenant_id") != tenant_id:
+                if changed:
+                    self._save()
+                return {"status": "TENANT_ISOLATION_DENIED", "should_stop": True}
+            if job.get("error_code") == "JOB_DEADLINE_EXCEEDED":
+                if changed:
+                    self._save()
+                return {"status": "JOB_DEADLINE_EXCEEDED", "should_stop": True}
+            if (
+                job.get("status") != "RUNNING"
+                or job.get("worker_id") != worker_id
+                or not secrets.compare_digest(
+                    str(job.get("lease_token_hash", "")), _lease_token_digest(lease_token)
+                )
+            ):
+                if changed:
+                    self._save()
+                return {"status": "JOB_LEASE_NOT_OWNED", "should_stop": True}
+            if job.get("cancel_requested") is True:
+                job["status"] = "CANCELLED"
+                job["completed_at"] = now.isoformat()
+                job["updated_at"] = now.isoformat()
+                job["worker_id"] = None
+                job["lease_token_hash"] = None
+                job["lease_until"] = None
+                self._save()
+                return {"status": "JOB_CANCELLED", "should_stop": True, "job": self._public_job(job)}
+            if changed:
+                self._save()
+            return {
+                "status": "WORKER_CONTINUE", "should_stop": False,
+                "lease_until": job.get("lease_until"),
+            }
+
+    def stop_accepting(self) -> dict[str, Any]:
+        """Persist a process-shared stop signal while allowing accepted work to drain."""
+        with self._transaction():
+            control = self.data["control"]
+            if control["accepting"]:
+                control["accepting"] = False
+                control["shutdown_requested_at"] = self.clock().astimezone(timezone.utc).isoformat()
+            self._accepting = False
+            self._shutdown_requested_at = control["shutdown_requested_at"]
+            self._save()
+            jobs = list(self.data["jobs"].values())
+            queued = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "QUEUED")
+            running = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "RUNNING")
+            return {
+                "status": "DRAINING", "accepting": False,
+                "queued": queued, "running": running,
+                "drained": queued == 0 and running == 0,
+                "shutdown_requested_at": self._shutdown_requested_at,
+            }
+
+    def resume_accepting(self) -> dict[str, Any]:
+        """Persist an explicit queue resume so every worker process observes it."""
+        with self._transaction():
+            control = self.data["control"]
+            control["accepting"] = True
+            control["shutdown_requested_at"] = None
+            self._accepting = True
+            self._shutdown_requested_at = None
+            self._save()
+            jobs = list(self.data["jobs"].values())
+            queued = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "QUEUED")
+            running = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "RUNNING")
+            return {
+                "status": "ACCEPTING", "accepting": True,
+                "queued": queued, "running": running,
+                "drained": queued == 0 and running == 0,
+                "shutdown_requested_at": None,
+            }
+
+    def drain_status(self) -> dict[str, Any]:
+        """Return queue counters and the process-shared graceful-shutdown state."""
+        with self._transaction():
+            control = self.data["control"]
+            self._accepting = control["accepting"]
+            self._shutdown_requested_at = control["shutdown_requested_at"]
+            jobs = list(self.data["jobs"].values())
+            queued = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "QUEUED")
+            running = sum(1 for job in jobs if isinstance(job, dict) and job.get("status") == "RUNNING")
+            return {
+                "status": "DRAINING" if not control["accepting"] else "ACCEPTING",
+                "accepting": control["accepting"],
+                "queued": queued,
+                "running": running,
+                "drained": queued == 0 and running == 0,
+                "shutdown_requested_at": control["shutdown_requested_at"],
             }
 
     def complete(
@@ -455,6 +736,8 @@ class ProviderJobManager:
                 return {"status": "JOB_NOT_FOUND", "saved": False}
             if changed:
                 self._save()
+            if job.get("error_code") == "JOB_DEADLINE_EXCEEDED":
+                return {"status": "JOB_DEADLINE_EXCEEDED", "saved": False}
             if (
                 job.get("status") != "RUNNING"
                 or job.get("worker_id") != worker_id

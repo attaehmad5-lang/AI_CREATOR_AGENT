@@ -58,6 +58,83 @@ class ConnectionManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_refresh_provider_metadata_accepts_verified_official_catalog_metadata(self):
+        catalog = {
+            "version": "3.0",
+            "providers": [{
+                "id": "metadata_image", "name": "Metadata Image",
+                "category": "image", "auth_type": "API_KEY",
+                "connection_type": "API", "enabled": True,
+                "official_api_url": "https://api.example.com/v1",
+                "official_docs_url": "https://docs.example.com",
+                "allowed_hosts": ["api.example.com"],
+                "subscription_required": True,
+                "endpoint": "https://api.example.com/v1/generate",
+                "capabilities": ["image_generation"],
+            }],
+        }
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+        result = manager.refresh_provider_metadata(
+            "metadata_image",
+            lambda provider: {
+                "verified": True,
+                "source_url": "https://api.example.com/v1/models",
+                "capabilities": ["image_generation", "image_editing"],
+                "adapter_api_version": "1.1",
+                "models": [{
+                    "id": "model-a", "version": "2026-11",
+                    "capabilities": ["image_generation"],
+                }],
+                "pricing": [{
+                    "model_id": "model-a", "unit": "image",
+                    "currency": "USD", "amount": 0.025,
+                }],
+            },
+        )
+        self.assertTrue(result["refreshed"])
+        stored = manager.get_provider_metadata("metadata_image")
+        metadata = stored["provider_metadata"]
+        self.assertEqual(metadata["adapter_api_version"], "1.1")
+        self.assertEqual(metadata["models"][0]["id"], "model-a")
+        self.assertEqual(metadata["pricing"][0]["amount"], 0.025)
+        self.assertEqual(stored["endpoint"], "https://api.example.com/v1/generate")
+
+    def test_refresh_provider_metadata_rejects_untrusted_hosts_and_secret_values(self):
+        catalog = {
+            "version": "3.0",
+            "providers": [{
+                "id": "metadata_image", "name": "Metadata Image",
+                "category": "image", "auth_type": "API_KEY",
+                "connection_type": "API", "enabled": True,
+                "official_api_url": "https://api.example.com/v1",
+                "official_docs_url": "https://docs.example.com",
+                "allowed_hosts": ["api.example.com"],
+                "subscription_required": True,
+                "capabilities": ["image_generation"],
+            }],
+        }
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        manager = ConnectionManager(self.catalog_path, self.state_path)
+        before = self.catalog_path.read_bytes()
+        untrusted = manager.refresh_provider_metadata(
+            "metadata_image",
+            lambda provider: {
+                "verified": True, "source_url": "https://evil.example/models",
+                "capabilities": ["image_generation"],
+            },
+        )
+        self.assertEqual(untrusted["status"], "UNTRUSTED_METADATA_SOURCE")
+        secret = manager.refresh_provider_metadata(
+            "metadata_image",
+            lambda provider: {
+                "verified": True, "source_url": "https://api.example.com/v1/models",
+                "capabilities": ["image_generation"], "api_key": "do-not-store",
+            },
+        )
+        self.assertEqual(secret["status"], "SENSITIVE_METADATA_REJECTED")
+        self.assertEqual(self.catalog_path.read_bytes(), before)
+
     def test_orphaned_verified_state_does_not_claim_connectivity(self):
         self.state_path.write_text(
             json.dumps({
@@ -1066,6 +1143,120 @@ class ConnectionManagerTests(unittest.TestCase):
         result = self.manager.validate_provider_contract("public_image", ImageProvider())
         self.assertTrue(result["valid"])
         self.assertEqual(result["contract_version"], "1.0")
+
+    def test_legacy_provider_adapter_defaults_to_version_1_0(self):
+        class LegacyImageProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        result = self.manager.negotiate_provider_api_version(
+            "public_image", LegacyImageProvider()
+        )
+        self.assertEqual(result["status"], "ADAPTER_VERSION_COMPATIBLE")
+        self.assertEqual(result["selected_version"], "1.0")
+        contract = self.manager.validate_provider_contract(
+            "public_image", LegacyImageProvider()
+        )
+        self.assertTrue(contract["valid"], contract)
+        self.assertEqual(contract["adapter_api_version"], "1.0")
+
+    def test_refreshed_provider_metadata_api_version_drives_adapter_negotiation(self):
+        provider = self.manager.catalog["providers"][0]
+        provider["provider_metadata"] = {
+            "verified_at": "2026-11-06T00:00:00+00:00",
+            "adapter_api_version": "2.2",
+            "capabilities": ["image_generation"],
+            "models": [],
+            "pricing": [],
+            "source_url": "https://api.example.com/models",
+        }
+        self.manager.catalog["providers"][0] = provider
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+
+        class RefreshedProvider:
+            supported_provider_api_versions = ("1.0", "2.2")
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        negotiated = self.manager.negotiate_provider_api_version(
+            "public_image", RefreshedProvider()
+        )
+        self.assertEqual(negotiated["selected_version"], "2.2")
+        self.assertTrue(negotiated["compatible"])
+
+    def test_malformed_refreshed_provider_api_version_fails_closed(self):
+        provider = self.manager.catalog["providers"][0]
+        provider["provider_metadata"] = {"adapter_api_version": "version-two"}
+        self.manager.catalog["providers"][0] = provider
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+
+        class LegacyProvider:
+            def generate_image(self, prompt, output_path):
+                return None
+
+        negotiated = self.manager.negotiate_provider_api_version(
+            "public_image", LegacyProvider()
+        )
+        self.assertEqual(negotiated["status"], "INVALID_REQUIRED_ADAPTER_API_VERSION")
+        self.assertFalse(negotiated["compatible"])
+
+    def test_provider_adapter_negotiates_declared_compatible_version(self):
+        self.manager.catalog["providers"][0]["adapter_api_version"] = "2.1"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+
+        class CompatibleImageProvider:
+            supported_provider_api_versions = ("1.0", "2.1")
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+        negotiated = self.manager.negotiate_provider_api_version(
+            "public_image", CompatibleImageProvider()
+        )
+        self.assertTrue(negotiated["compatible"])
+        self.assertEqual(negotiated["selected_version"], "2.1")
+        loaded = self.manager.load_provider(
+            "public_image", lambda metadata: CompatibleImageProvider()
+        )
+        self.assertEqual(loaded["status"], "LOADED")
+
+    def test_incompatible_provider_adapter_version_is_rejected_and_cleaned_up(self):
+        self.manager.catalog["providers"][0]["adapter_api_version"] = "2.0"
+        self.catalog_path.write_text(json.dumps(self.manager.catalog), encoding="utf-8")
+
+        class IncompatibleImageProvider:
+            supported_provider_api_versions = ("1.0",)
+
+            def __init__(self):
+                self.closed = False
+
+            def generate_image(self, prompt, output_path):
+                return None
+
+            def close(self):
+                self.closed = True
+
+        instance = IncompatibleImageProvider()
+        result = self.manager.load_provider("public_image", lambda metadata: instance)
+        self.assertEqual(result["status"], "ADAPTER_VERSION_INCOMPATIBLE")
+        self.assertEqual(result["contract_status"], "ADAPTER_VERSION_INCOMPATIBLE")
+        self.assertTrue(instance.closed)
+        self.assertIsNone(self.manager.get_loaded_provider("public_image"))
+
+    def test_catalog_rejects_malformed_adapter_api_version(self):
+        for value in ("v1", "1.0.0", "1.-1", "1.10000", ""):
+            with self.subTest(value=value):
+                result = ConnectionManager.validate_catalog_schema({
+                    "providers": [{"id": "versioned", "adapter_api_version": value}]
+                })
+                self.assertFalse(result["valid"])
+                self.assertTrue(any("adapter_api_version" in error for error in result["errors"]))
+
+        valid = ConnectionManager.validate_catalog_schema({
+            "providers": [{"id": "versioned", "adapter_api_version": "2.1"}]
+        })
+        self.assertTrue(valid["valid"], valid["errors"])
 
     def test_provider_contract_rejects_missing_method_and_prevents_loading(self):
         instance = object()

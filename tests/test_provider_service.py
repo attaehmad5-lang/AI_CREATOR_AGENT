@@ -11,6 +11,7 @@ from projects.provider_store.provider_benchmark_manager import ProviderBenchmark
 from projects.provider_store.provider_quality_policy import ProviderOutputQualityPolicy
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
 from projects.provider_store.provider_job_manager import ProviderJobManager
+from projects.provider_store.provider_onboarding_manager import ProviderOnboardingManager
 from projects.provider_store.provider_slo_manager import ProviderSLOManager
 from projects.provider_store.provider_degraded_mode import ProviderDegradedModeManager
 from projects.provider_store.provider_data_policy import ProviderDataHandlingPolicy
@@ -24,6 +25,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.provider_audit_log import ProviderAuditLog
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 from projects.generation.providers.pollinations_provider import PollinationsProviderError
@@ -65,6 +67,520 @@ class ProviderServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_admin_can_refresh_provider_metadata_via_service_facade(self):
+        catalog = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        catalog["providers"][0].update({
+            "official_api_url": "https://api.example.com/v1",
+            "official_docs_url": "https://docs.example.com/api",
+            "subscription_required": False,
+            "allowed_hosts": ["api.example.com"],
+        })
+        self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+        connections = ConnectionManager(self.catalog_path, self.state_path)
+
+        authorization = ProviderAuthorizationManager(self.root / "metadata-refresh-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        authorization.assign_role("viewer-user", "viewer")
+        service = ProviderService(connections, authorization_manager=authorization)
+        calls = []
+        denied = service.refresh_provider_metadata(
+            "image",
+            lambda provider: calls.append(provider) or {},
+            principal_id="viewer-user",
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(calls, [])
+
+        refreshed = service.refresh_provider_metadata(
+            "image",
+            lambda provider: {
+                "verified": True,
+                "source_url": "https://api.example.com/v1/models",
+                "capabilities": ["image_generation", "image_editing"],
+                "adapter_api_version": "1.0",
+                "models": [{"id": "image-model-a", "version": "2026-11"}],
+            },
+            principal_id="admin-user",
+        )
+        self.assertEqual(refreshed["status"], "PROVIDER_METADATA_REFRESHED")
+        self.assertTrue(refreshed["refreshed"])
+        self.assertEqual(
+            connections.get_provider_metadata("image")["provider_metadata"]["models"][0]["id"],
+            "image-model-a",
+        )
+
+    def test_submit_job_propagates_explicit_trace_id_through_service_and_poll(self):
+        job_manager = ProviderJobManager(self.root / "trace-jobs.json")
+        authorization = ProviderAuthorizationManager(self.root / "trace-service-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=job_manager,
+        )
+        trace_id = "c" * 32
+        submitted = service.submit_job(
+            job_id="service-trace-job",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:service-trace",
+            principal_id="creator-user",
+            trace_id=trace_id,
+        )
+        self.assertTrue(submitted["accepted"])
+        self.assertEqual(submitted["job"]["trace_id"], trace_id)
+        polled = service.poll_job(job_id="service-trace-job", principal_id="creator-user")
+        self.assertEqual(polled["job"]["trace_id"], trace_id)
+
+    def test_required_audit_log_records_provider_disable_before_and_after_mutation(self):
+        authorization = ProviderAuthorizationManager(self.root / "audit-service-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        audit = ProviderAuditLog(
+            self.root / "provider-audit.json",
+            signing_key=b"service-audit-test-key-at-least-32-bytes",
+        )
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            audit_manager=audit,
+            require_audit_logging=True,
+        )
+        result = service.set_provider_enabled(
+            "image", False, principal_id="admin-user"
+        )
+        self.assertTrue(result["saved"])
+        self.assertTrue(result["audit_outcome_recorded"])
+        self.assertFalse(self.connections.is_provider_enabled("image"))
+        events = audit.read_events()["events"]
+        self.assertEqual([event["operation"] for event in events], [
+            "provider.disable", "provider.disable",
+        ])
+        self.assertEqual([event["outcome"] for event in events], [
+            "REQUESTED", "SUCCEEDED",
+        ])
+        self.assertTrue(all(event["actor_ref"] for event in events))
+        self.assertNotIn("admin-user", repr(events))
+
+    def test_required_audit_logging_blocks_provider_mutation_when_log_write_fails(self):
+        class FailedAudit:
+            def record(self, **kwargs):
+                return {"status": "AUDIT_STORAGE_UNAVAILABLE", "saved": False}
+
+        authorization = ProviderAuthorizationManager(self.root / "audit-fail-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            audit_manager=FailedAudit(),
+            require_audit_logging=True,
+        )
+        result = service.set_provider_enabled(
+            "image", False, principal_id="admin-user"
+        )
+        self.assertEqual(result["status"], "AUDIT_LOG_REQUIRED")
+        self.assertTrue(self.connections.is_provider_enabled("image"))
+
+    def test_required_audit_logging_requires_a_manager_at_construction(self):
+        with self.assertRaisesRegex(ValueError, "needs an audit_manager"):
+            ProviderService(self.connections, require_audit_logging=True)
+
+    def test_provider_onboarding_approval_probe_and_activation_are_audited(self):
+        authorization = ProviderAuthorizationManager(self.root / "onboarding-audit-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        audit = ProviderAuditLog(
+            self.root / "onboarding-audit.json",
+            signing_key=b"onboarding-audit-test-signing-key-min32",
+        )
+        onboarding = ProviderOnboardingManager(
+            self.root / "onboarding-state.json",
+            self.connections,
+            authorize_admin=lambda principal_id: principal_id == "admin-user",
+            probe_provider=lambda manifest: {"verified": True, "status": "PROBE_OK"},
+        )
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            provider_onboarding_manager=onboarding,
+            audit_manager=audit,
+            require_audit_logging=True,
+        )
+        manifest = {
+            "id": "audit_onboard_image",
+            "name": "Audit Onboard Image",
+            "category": "image",
+            "auth_type": "API_KEY",
+            "connection_type": "API",
+            "official_api_url": "https://api.example.com/v1",
+            "official_docs_url": "https://docs.example.com/api",
+            "allowed_hosts": ["api.example.com"],
+            "capabilities": ["image_generation"],
+            "adapter_api_version": "1.0",
+            "subscription_required": True,
+            "enabled": False,
+        }
+        self.assertTrue(service.submit_provider_onboarding(
+            manifest, principal_id="admin-user"
+        )["accepted"])
+        self.assertTrue(service.approve_provider_onboarding(
+            "audit_onboard_image", principal_id="admin-user"
+        )["approved"])
+        self.assertTrue(service.verify_provider_onboarding(
+            "audit_onboard_image", principal_id="admin-user"
+        )["verified"])
+        self.assertTrue(service.activate_provider_onboarding(
+            "audit_onboard_image", principal_id="admin-user"
+        )["activated"])
+        events = audit.read_events()["events"]
+        self.assertEqual(len(events), 8)
+        self.assertEqual(
+            [events[i]["operation"] for i in range(0, 8, 2)],
+            [
+                "provider.onboarding.submit",
+                "provider.onboarding.approve",
+                "provider.onboarding.verify",
+                "provider.onboarding.activate",
+            ],
+        )
+        self.assertTrue(all(events[i]["outcome"] == "REQUESTED" for i in range(0, 8, 2)))
+        self.assertTrue(all(events[i]["outcome"] == "SUCCEEDED" for i in range(1, 8, 2)))
+
+    def test_required_audit_log_records_route_decisions(self):
+        audit = ProviderAuditLog(
+            self.root / "route-audit.json",
+            signing_key=b"route-audit-test-signing-key-at-least-32-bytes",
+        )
+        calls = []
+
+        class RoutingStub:
+            def route(self, **kwargs):
+                calls.append(kwargs)
+                return {"allowed": True, "provider_id": "image", "status": "ROUTED"}
+
+        service = ProviderService(
+            self.connections, routing_manager=RoutingStub(),
+            audit_manager=audit, require_audit_logging=True,
+        )
+        result = service.route_request(
+            category="image", project_id="film",
+            request_id="route-audit-request", trace_id="f" * 32,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertTrue(result["audit_outcome_recorded"])
+        self.assertEqual(len(calls), 1)
+        events = audit.read_events()["events"]
+        self.assertEqual([event["operation"] for event in events], [
+            "provider.route", "provider.route",
+        ])
+        self.assertEqual([event["outcome"] for event in events], [
+            "REQUESTED", "SUCCEEDED",
+        ])
+        self.assertTrue(all(event["trace_id"] == "f" * 32 for event in events))
+
+    def test_required_audit_log_records_job_submit_and_cancel(self):
+        audit = ProviderAuditLog(
+            self.root / "job-audit.json",
+            signing_key=b"job-audit-test-signing-key-at-least-32-bytes",
+        )
+        authorization = ProviderAuthorizationManager(self.root / "job-audit-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        manager = ProviderJobManager(self.root / "audited-jobs.json")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=manager,
+            audit_manager=audit,
+            require_audit_logging=True,
+        )
+        trace_id = "9" * 32
+        submitted = service.submit_job(
+            job_id="audited-job",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:audited-job",
+            principal_id="creator-user",
+            trace_id=trace_id,
+        )
+        self.assertTrue(submitted["accepted"])
+        self.assertTrue(submitted["audit_outcome_recorded"])
+        self.assertEqual(submitted["job"]["trace_id"], trace_id)
+
+        cancelled = service.cancel_job(
+            job_id="audited-job", principal_id="creator-user"
+        )
+        self.assertTrue(cancelled["saved"])
+        self.assertTrue(cancelled["audit_outcome_recorded"])
+        events = audit.read_events()["events"]
+        self.assertEqual([event["operation"] for event in events], [
+            "provider.job.submit", "provider.job.submit",
+            "provider.job.cancel", "provider.job.cancel",
+        ])
+        self.assertTrue(all(event["trace_id"] == trace_id for event in events))
+
+    def test_required_audit_log_records_worker_claim_and_completion(self):
+        audit = ProviderAuditLog(
+            self.root / "worker-audit.json",
+            signing_key=b"worker-audit-test-signing-key-at-least-32-bytes",
+        )
+        authorization = ProviderAuthorizationManager(self.root / "worker-audit-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        manager = ProviderJobManager(self.root / "worker-audited-jobs.json")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=manager,
+            audit_manager=audit,
+            require_audit_logging=True,
+        )
+        trace_id = "8" * 32
+        submitted = service.submit_job(
+            job_id="worker-audit-job", project_id="film",
+            provider_id="image", payload_ref="payload:worker-audit",
+            principal_id="creator-user", trace_id=trace_id,
+        )
+        self.assertTrue(submitted["accepted"])
+
+        claimed = service.claim_next_job(
+            worker_id="worker-a", principal_id="creator-user"
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        self.assertTrue(claimed["audit_outcome_recorded"])
+        token = claimed["job"]["lease_token"]
+        completed = service.complete_job(
+            job_id="worker-audit-job", worker_id="worker-a",
+            lease_token=token, success=True, result_ref="asset:worker-audit",
+            principal_id="creator-user",
+        )
+        self.assertEqual(completed["status"], "JOB_COMPLETED")
+        self.assertTrue(completed["audit_outcome_recorded"])
+        events = audit.read_events()["events"]
+        self.assertEqual(
+            [event["operation"] for event in events],
+            [
+                "provider.job.submit", "provider.job.submit",
+                "provider.job.claim", "provider.job.claim",
+                "provider.job.complete", "provider.job.complete",
+            ],
+        )
+        self.assertEqual(events[2]["operation"], "provider.job.claim")
+        self.assertEqual(events[2]["outcome"], "REQUESTED")
+        self.assertIsNone(events[2]["trace_id"])
+        self.assertTrue(all(
+            event["trace_id"] == trace_id
+            for index, event in enumerate(events) if index != 2
+        ), [
+            (event["operation"], event["outcome"], event["trace_id"])
+            for event in events
+        ])
+
+    def test_required_audit_log_records_job_queue_stop_and_resume(self):
+        audit = ProviderAuditLog(
+            self.root / "queue-control-audit.json",
+            signing_key=b"queue-control-audit-key-at-least-32-bytes",
+        )
+        authorization = ProviderAuthorizationManager(self.root / "queue-control-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        manager = ProviderJobManager(self.root / "queue-control-jobs.json")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=manager,
+            audit_manager=audit,
+            require_audit_logging=True,
+        )
+        stopped = service.stop_job_submissions(principal_id="admin-user")
+        resumed = service.resume_job_submissions(principal_id="admin-user")
+        self.assertFalse(stopped["accepting"])
+        self.assertTrue(stopped["audit_outcome_recorded"])
+        self.assertTrue(resumed["accepting"])
+        self.assertTrue(resumed["audit_outcome_recorded"])
+        events = audit.read_events()["events"]
+        self.assertEqual(
+            [event["operation"] for event in events],
+            [
+                "provider.job.stop_submissions", "provider.job.stop_submissions",
+                "provider.job.resume_submissions", "provider.job.resume_submissions",
+            ],
+        )
+        self.assertEqual(
+            [event["outcome"] for event in events],
+            ["REQUESTED", "STOPPED", "REQUESTED", "RESUMED"],
+        )
+
+    def test_claim_next_job_returns_lease_only_to_worker_and_poll_hides_it(self):
+        authorization = ProviderAuthorizationManager(self.root / "claim-token-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        manager = ProviderJobManager(self.root / "claim-token-jobs.json")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=manager,
+        )
+        submitted = service.submit_job(
+            job_id="claim-token-job", project_id="film",
+            provider_id="image", payload_ref="payload:claim-token",
+            principal_id="creator-user",
+        )
+        self.assertTrue(submitted["accepted"])
+        claimed = service.claim_next_job(
+            worker_id="worker-claim-token", principal_id="creator-user"
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        token = claimed["job"]["lease_token"]
+        self.assertRegex(token, r"^[A-Za-z0-9_-]{40,100}$")
+
+        polled = service.poll_job(
+            job_id="claim-token-job", principal_id="creator-user"
+        )
+        self.assertEqual(polled["job"]["status"], "RUNNING")
+        self.assertNotIn("lease_token", polled["job"])
+        self.assertNotIn("lease_token_hash", polled["job"])
+        stored = json.loads((self.root / "claim-token-jobs.json").read_text(encoding="utf-8"))
+        self.assertNotIn(token, repr(stored))
+        self.assertEqual(
+            stored["jobs"]["claim-token-job"]["lease_token_hash"],
+            __import__("hashlib").sha256(token.encode("ascii")).hexdigest(),
+        )
+
+    def test_claim_next_job_filters_provider_scopes_before_worker_lease(self):
+        authorization = ProviderAuthorizationManager(self.root / "scoped-claim-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        self.assertTrue(authorization.set_provider_scopes(
+            "creator-user", {"provider.generate": ["image"]}
+        )["saved"])
+        registered = self.connections.register_provider({
+            "id": "video",
+            "name": "Video Provider",
+            "category": "video",
+            "auth_type": "NONE",
+            "connection_type": "API",
+            "subscription_required": False,
+            "enabled": True,
+            "zero_cost_allowed": False,
+            "allowed_hosts": ["api.example.com"],
+            "capabilities": ["video_generation"],
+        })
+        self.assertEqual(registered["status"], "REGISTERED", registered)
+
+        manager = ProviderJobManager(self.root / "scoped-claim-jobs.json")
+        self.assertTrue(manager.submit(
+            job_id="image-scoped-job", project_id="film",
+            provider_id="image", payload_ref="payload:image-scoped",
+            priority=100,
+        )["accepted"])
+        self.assertTrue(manager.submit(
+            job_id="video-scoped-job", project_id="film",
+            provider_id="video", payload_ref="payload:video-scoped",
+            priority=99,
+        )["accepted"])
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=manager,
+        )
+        allowed = service.claim_next_job(
+            worker_id="scoped-worker-1", principal_id="creator-user"
+        )
+        self.assertEqual(allowed["status"], "JOB_CLAIMED")
+        self.assertEqual(allowed["job"]["provider_id"], "image")
+        self.assertIn("lease_token", allowed["job"])
+
+        blocked = service.claim_next_job(
+            worker_id="scoped-worker-2", principal_id="creator-user"
+        )
+        self.assertEqual(blocked["status"], "NO_AUTHORIZED_PROVIDER_JOBS")
+        self.assertEqual(manager.poll(job_id="video-scoped-job")["job"]["status"], "QUEUED")
+
+    def test_provider_registry_discovery_and_metadata_reads_are_authorized(self):
+        authorization = ProviderAuthorizationManager(self.root / "registry-read-auth.json")
+        authorization.assign_role("viewer-user", "viewer")
+        authorization.assign_role("operator-user", "operator")
+        service = ProviderService(self.connections, authorization_manager=authorization)
+
+        discovered = service.discover_providers(
+            principal_id="viewer-user", category="IMAGE", enabled_only=True
+        )
+        self.assertEqual(discovered["status"], "PROVIDERS_DISCOVERED")
+        self.assertEqual([item["id"] for item in discovered["providers"]], ["image"])
+
+        metadata = service.get_provider_metadata("image", principal_id="viewer-user")
+        self.assertEqual(metadata["status"], "PROVIDER_METADATA_FOUND")
+        self.assertEqual(metadata["metadata"]["id"], "image")
+
+        self.assertTrue(authorization.set_provider_scopes(
+            "viewer-user", {"provider.read": ["another-provider"]}
+        )["saved"])
+        denied = service.get_provider_metadata("image", principal_id="viewer-user")
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(denied["authorization"]["status"], "PROVIDER_SCOPE_DENIED")
+
+    def test_provider_registry_reads_fail_closed_without_authorization_manager(self):
+        service = ProviderService(self.connections)
+        self.assertEqual(
+            service.discover_providers()["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE"
+        )
+        self.assertEqual(
+            service.get_provider_metadata("image")["status"],
+            "AUTHORIZATION_MANAGER_UNAVAILABLE",
+        )
+
+    def test_runtime_adapter_lifecycle_uses_authorized_connection_registry(self):
+        authorization = ProviderAuthorizationManager(self.root / "adapter-lifecycle-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        authorization.assign_role("operator-user", "operator")
+        factory_calls = []
+
+        class ImageAdapter:
+            def __init__(self):
+                self.closed = False
+
+            def generate_image(self, prompt, output_path):
+                return {"status": "GENERATED"}
+
+            def close(self):
+                self.closed = True
+
+        adapter = ImageAdapter()
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            adapter_factory_resolver=lambda provider_id, metadata: (
+                factory_calls.append((provider_id, metadata)) or adapter
+            ),
+        )
+        denied = service.load_provider_adapter("image", principal_id="operator-user")
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(factory_calls, [])
+        self.assertIsNone(self.connections.get_loaded_provider("image"))
+
+        loaded = service.load_provider_adapter("image", principal_id="admin-user")
+        self.assertEqual(loaded["status"], "LOADED")
+        self.assertIs(self.connections.get_loaded_provider("image"), adapter)
+        self.assertEqual(len(factory_calls), 1)
+
+        unloaded = service.unload_provider_adapter("image", principal_id="admin-user")
+        self.assertEqual(unloaded["status"], "UNLOADED")
+        self.assertTrue(adapter.closed)
+        self.assertIsNone(self.connections.get_loaded_provider("image"))
+
+    def test_runtime_adapter_lifecycle_requires_trusted_factory_resolver(self):
+        authorization = ProviderAuthorizationManager(self.root / "missing-adapter-resolver-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        service = ProviderService(self.connections, authorization_manager=authorization)
+        result = service.load_provider_adapter("image", principal_id="admin-user")
+        self.assertEqual(result["status"], "ADAPTER_FACTORY_RESOLVER_UNAVAILABLE")
+        self.assertFalse(result["loaded"])
+
+    def test_runtime_adapter_lifecycle_fails_closed_without_authorization_manager(self):
+        service = ProviderService(self.connections)
+        calls = []
+        loaded = service.load_provider_adapter(
+            "image", principal_id="admin-user"
+        )
+        unloaded = service.unload_provider_adapter("image", principal_id="admin-user")
+        self.assertEqual(loaded["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertEqual(unloaded["status"], "AUTHORIZATION_MANAGER_UNAVAILABLE")
+        self.assertEqual(calls, [])
 
     def test_project_policy_simulation_requires_admin_and_never_persists_candidate(self):
         policy_path = self.root / "project-policies.json"
@@ -617,6 +1133,119 @@ class ProviderServiceTests(unittest.TestCase):
             estimated_cost=0.0, modality="image", adapter=lambda **kwargs: calls.append(kwargs), require_fresh_health_check=True)
         self.assertEqual(result["status"], "PROVIDER_HEALTH_REJECTED")
         self.assertEqual(result["health"]["status"], "HEALTH_CHECK_UNAVAILABLE")
+        self.assertEqual(calls, [])
+
+    def test_execute_routed_request_propagates_trace_id_to_adapter_and_result(self):
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router, health_manager=self.health,
+            retry_policy=self.retry, output_validator=self.validator,
+            cost_policy=self.cost, quota_manager=self.quota,
+        )
+        output_path = self.root / "trace-output.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        observed = {}
+        explicit_trace_id = "d" * 32
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="trace-execute-explicit",
+            estimated_cost=0.0, output_path=str(output_path),
+            trace_id=explicit_trace_id,
+            adapter=lambda **kwargs: (
+                observed.update(kwargs) or {
+                    "started": True, "success": True, "actual_cost": 0.0,
+                    "charge_outcome": "not_incurred", "output_path": str(output_path),
+                    "latency_ms": 5.0,
+                }
+            ),
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertEqual(observed["trace_id"], explicit_trace_id)
+        self.assertEqual(result["trace_id"], explicit_trace_id)
+
+        generated = service.execute_routed_request(
+            category="image", project_id="film", request_id="trace-execute-generated",
+            estimated_cost=0.0, output_path=str(output_path),
+            adapter=lambda **kwargs: (
+                observed.update(kwargs) or {
+                    "started": True, "success": True, "actual_cost": 0.0,
+                    "charge_outcome": "not_incurred", "output_path": str(output_path),
+                    "latency_ms": 5.0,
+                }
+            ),
+            modality="image",
+        )
+        self.assertRegex(generated["trace_id"], r"^[0-9a-f]{32}$")
+        self.assertEqual(observed["trace_id"], generated["trace_id"])
+
+    def test_required_audit_log_traces_provider_generation_execution(self):
+        audit = ProviderAuditLog(
+            self.root / "generation-audit.json",
+            signing_key=b"generation-audit-test-signing-key-min-32",
+        )
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            output_validator=self.validator, cost_policy=self.cost,
+            quota_manager=self.quota, audit_manager=audit,
+            require_audit_logging=True,
+        )
+        output_path = self.root / "audited-output.png"
+        output_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"safe-test-image")
+        trace_id = "e" * 32
+        observed = {}
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="audited-generation",
+            estimated_cost=0.0, output_path=str(output_path), trace_id=trace_id,
+            adapter=lambda **kwargs: (
+                observed.update(kwargs) or {
+                    "started": True, "success": True, "actual_cost": 0.0,
+                    "charge_outcome": "not_incurred",
+                    "output_path": str(output_path), "latency_ms": 4.0,
+                }
+            ),
+            modality="image",
+        )
+        self.assertEqual(result["status"], "EXECUTION_SUCCEEDED")
+        self.assertTrue(result["audit_outcome_recorded"])
+        self.assertEqual(observed["trace_id"], trace_id)
+        events = audit.read_events()["events"]
+        self.assertEqual(
+            [event["operation"] for event in events],
+            ["provider.route", "provider.route", "provider.generate", "provider.generate"],
+        )
+        self.assertEqual(
+            [event["outcome"] for event in events],
+            ["REQUESTED", "SUCCEEDED", "REQUESTED", "SUCCEEDED"],
+        )
+        self.assertTrue(all(event["trace_id"] == trace_id for event in events))
+        self.assertTrue(all(event["request_id"] == "audited-generation" for event in events))
+
+    def test_required_audit_log_prevents_generation_when_intent_write_fails(self):
+        class FailedAudit:
+            def record(self, **kwargs):
+                return {"status": "AUDIT_STORAGE_UNAVAILABLE", "saved": False}
+
+        router = ProviderRoutingManager(
+            self.connections, cost_policy=self.cost, quota_manager=self.quota
+        )
+        service = ProviderService(
+            self.connections, routing_manager=router,
+            cost_policy=self.cost, quota_manager=self.quota,
+            audit_manager=FailedAudit(), require_audit_logging=True,
+        )
+        calls = []
+        result = service.execute_routed_request(
+            category="image", project_id="film", request_id="audit-fail-generation",
+            estimated_cost=0.0, adapter=lambda **kwargs: calls.append(kwargs),
+            modality="image",
+        )
+        self.assertEqual(result["status"], "AUDIT_LOG_REQUIRED")
+        self.assertFalse(result["executed"])
         self.assertEqual(calls, [])
 
     def test_execute_routed_request_validates_output_and_finalizes_usage(self):
@@ -2239,6 +2868,136 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(service.route_request(category="image", project_id="film")["status"], "ROUTING_MANAGER_UNAVAILABLE")
         self.assertEqual(service.validate_output("missing.png", modality="image")["status"], "OUTPUT_VALIDATOR_UNAVAILABLE")
 
+
+    def test_job_deadline_and_worker_checkpoint_are_exposed_through_service(self):
+        jobs = ProviderJobManager(self.root / "deadline-service-jobs.json")
+        authorization = ProviderAuthorizationManager(self.root / "deadline-service-auth.json")
+        authorization.assign_role("job-worker", "creator")
+        service = ProviderService(
+            self.connections, job_manager=jobs,
+            authorization_manager=authorization,
+        )
+        accepted = service.submit_job(
+            job_id="deadline-service-job", project_id="film", provider_id="image",
+            payload_ref="payload:deadline-service",
+            deadline_at="2099-01-01T00:00:00+00:00",
+            principal_id="job-worker",
+        )
+        self.assertEqual(accepted["status"], "JOB_QUEUED")
+        claimed = service.claim_next_job(
+            worker_id="deadline-worker", principal_id="job-worker",
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        lease = claimed["job"]["lease_token"]
+        checkpoint = service.check_job_control(
+            job_id="deadline-service-job", worker_id="deadline-worker",
+            lease_token=lease, principal_id="job-worker",
+        )
+        self.assertEqual(checkpoint["status"], "WORKER_CONTINUE")
+        self.assertFalse(checkpoint["should_stop"])
+        service.cancel_job(job_id="deadline-service-job", principal_id="job-worker")
+        cancelled = service.check_job_control(
+            job_id="deadline-service-job", worker_id="deadline-worker",
+            lease_token=lease, principal_id="job-worker",
+        )
+        self.assertEqual(cancelled["status"], "JOB_CANCELLED")
+        self.assertTrue(cancelled["should_stop"])
+
+    def test_graceful_job_shutdown_is_admin_controlled_and_drains_existing_work(self):
+        jobs = ProviderJobManager(self.root / "graceful-service-jobs.json")
+        authorization = ProviderAuthorizationManager(self.root / "graceful-service-auth.json")
+        authorization.assign_role("job-admin", "admin")
+        authorization.assign_role("job-creator", "creator")
+        service = ProviderService(
+            self.connections, job_manager=jobs,
+            authorization_manager=authorization,
+        )
+        accepted = service.submit_job(
+            job_id="before-stop", project_id="film", provider_id="image",
+            payload_ref="payload:before-stop", principal_id="job-creator",
+        )
+        self.assertTrue(accepted["accepted"])
+        denied = service.stop_job_submissions(principal_id="job-creator")
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        stopped = service.stop_job_submissions(principal_id="job-admin")
+        self.assertFalse(stopped["accepting"])
+        rejected = service.submit_job(
+            job_id="after-stop", project_id="film", provider_id="image",
+            payload_ref="payload:after-stop", principal_id="job-creator",
+        )
+        self.assertEqual(rejected["status"], "QUEUE_SHUTTING_DOWN")
+        self.assertFalse(service.job_drain_status(principal_id="job-admin")["drained"])
+        claimed = service.claim_next_job(
+            worker_id="drain-worker", principal_id="job-creator",
+        )
+        completed = service.complete_job(
+            job_id="before-stop", worker_id="drain-worker",
+            lease_token=claimed["job"]["lease_token"], success=True,
+            result_ref="asset:drained", principal_id="job-creator",
+        )
+        self.assertEqual(completed["job"]["status"], "SUCCEEDED")
+        self.assertTrue(service.job_drain_status(principal_id="job-admin")["drained"])
+        self.assertTrue(service.resume_job_submissions(principal_id="job-admin")["accepting"])
+
+
+    def test_provider_onboarding_service_requires_admin_approval_and_successful_probe(self):
+        authorization = ProviderAuthorizationManager(self.root / "onboarding-service-auth.json")
+        authorization.assign_role("onboarding-creator", "creator")
+        authorization.assign_role("onboarding-admin", "admin")
+        onboarding = ProviderOnboardingManager(
+            self.root / "onboarding-service-state.json",
+            self.connections,
+            authorize_admin=lambda principal_id: authorization.authorize(
+                principal_id, "provider.configure"
+            ),
+            probe_provider=lambda manifest: {"verified": True, "status": "PROBE_OK"},
+        )
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            provider_onboarding_manager=onboarding,
+        )
+        manifest = {
+            "id": "service_onboarded_image",
+            "name": "Service Onboarded Image",
+            "category": "image",
+            "auth_type": "API_KEY",
+            "connection_type": "API",
+            "official_api_url": "https://api.onboard.example/v1",
+            "official_docs_url": "https://docs.onboard.example/api",
+            "allowed_hosts": ["api.onboard.example"],
+            "capabilities": ["image_generation"],
+            "adapter_api_version": "1.0",
+            "subscription_required": True,
+            "enabled": False,
+        }
+        denied = service.submit_provider_onboarding(
+            manifest, principal_id="onboarding-creator"
+        )
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        submitted = service.submit_provider_onboarding(
+            manifest, principal_id="onboarding-admin"
+        )
+        self.assertTrue(submitted["accepted"])
+        approved = service.approve_provider_onboarding(
+            "service_onboarded_image", principal_id="onboarding-admin"
+        )
+        self.assertTrue(approved["approved"])
+        verified = service.verify_provider_onboarding(
+            "service_onboarded_image", principal_id="onboarding-admin"
+        )
+        self.assertTrue(verified["verified"])
+        activated = service.activate_provider_onboarding(
+            "service_onboarded_image", principal_id="onboarding-admin"
+        )
+        self.assertTrue(activated["activated"])
+        provider = self.connections.get_provider("service_onboarded_image")
+        self.assertIsNotNone(provider)
+        self.assertFalse(provider["enabled"])
+        status = service.provider_onboarding_status(
+            "service_onboarded_image", principal_id="onboarding-creator"
+        )
+        self.assertEqual(status["onboarding_status"], "ACTIVE")
 
 if __name__ == "__main__":
     unittest.main()
