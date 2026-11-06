@@ -21,7 +21,7 @@ from .safe_numbers import finite_number
 
 
 MODULE_DIR = Path(__file__).resolve().parent
-_ADAPTER_API_VERSION_RE = re.compile(r"(?:0|[1-9][0-9]{0,3})\\.(?:0|[1-9][0-9]{0,3})\\Z")
+_ADAPTER_API_VERSION_RE = re.compile(r"(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})\Z")
 DEFAULT_CATALOG = MODULE_DIR / "provider_catalog.json"
 MASTER_CATALOG = MODULE_DIR / "provider_catalog_master.json"
 DEFAULT_STATE = MODULE_DIR / "connection_state.json"
