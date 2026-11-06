@@ -19,7 +19,7 @@ _PROVIDER_ID_MAX = 128
 _CATEGORY_MAX = 64
 _MAX_PERSISTED_SAMPLES = 100_000
 _MAX_STATE_BYTES = 32 * 1024 * 1024
-_LABEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\\Z")
+_LABEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\Z")
 _SECRET_MARKER_RE = re.compile(
     r"(?i)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|bearer|"
     r"password|secret|private[_-]?key|credential|jwt)"
