@@ -229,6 +229,14 @@ class ProviderJobManager:
                     job.get("deadline_at") is not None
                     and _parse_aware_timestamp(job.get("deadline_at")) is None
                 )
+                or (
+                    "trace_id" in job
+                    and (
+                        not isinstance(job.get("trace_id"), str)
+                        or re.fullmatch(r"[0-9a-f]{32}", job["trace_id"]) is None
+                        or job["trace_id"] == "0" * 32
+                    )
+                )
                 or isinstance(job.get("attempts"), bool)
                 or not isinstance(job.get("attempts"), int) or job["attempts"] < 0
                 or isinstance(job.get("priority"), bool)
@@ -288,6 +296,7 @@ class ProviderJobManager:
         priority: int = 50,
         tenant_id: str | None = None,
         deadline_at: str | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         now_dt = self.clock().astimezone(timezone.utc)
         normalized_deadline = None
@@ -307,6 +316,12 @@ class ProviderJobManager:
             not isinstance(tenant_id, str) or not _ID_RE.fullmatch(tenant_id)
         ):
             return {"status": "INVALID_TENANT_ID", "accepted": False}
+        if trace_id is not None and (
+            not isinstance(trace_id, str)
+            or re.fullmatch(r"[0-9a-f]{32}", trace_id) is None
+            or trace_id == "0" * 32
+        ):
+            return {"status": "INVALID_TRACE_ID", "accepted": False}
         if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
             return {"status": "INVALID_PRIORITY", "accepted": False}
         now = now_dt.isoformat()
@@ -325,6 +340,8 @@ class ProviderJobManager:
                     "payload_ref": payload_ref, "priority": priority,
                     "deadline_at": normalized_deadline,
                 }.items())
+                if trace_id is not None and existing.get("trace_id") != trace_id:
+                    same = False
                 return {
                     "status": "ALREADY_SUBMITTED" if same else "REQUEST_ID_CONFLICT",
                     "accepted": same,
@@ -347,6 +364,7 @@ class ProviderJobManager:
                 "payload_ref": payload_ref, "priority": priority, "status": "QUEUED",
                 "attempts": 0, "created_at": now, "updated_at": now,
                 "cancel_requested": False, "deadline_at": normalized_deadline,
+                "trace_id": trace_id or secrets.token_hex(16),
             }
             if tenant_id is not None:
                 job["tenant_id"] = tenant_id
