@@ -98,6 +98,38 @@ class ProviderServiceAuditIntegrationTests(unittest.TestCase):
         result = service._authorize_operation("admin-1", "provider.configure")
         self.assertEqual(result["status"], "AUTHORIZATION_AUDIT_FAILED")
 
+    def test_audit_reads_require_authorization_and_valid_integrity(self):
+        service = ProviderService(
+            _Connections(), authorization_manager=_Authorization(allowed=False),
+            audit_log=self.log,
+        )
+        denied = service.read_provider_audit_events(principal_id="operator-1")
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        self.assertEqual(denied["events"], [])
+
+        admin_service = ProviderService(
+            _Connections(), authorization_manager=_Authorization(allowed=True),
+            audit_log=self.log,
+        )
+        page = admin_service.read_provider_audit_events(principal_id="admin-1")
+        self.assertEqual(page["status"], "AUDIT_EVENTS_READ")
+        self.assertTrue(page["events"])
+        self.assertTrue(self.log.verify()["valid"])
+
+    def test_audit_read_fails_closed_after_journal_tampering(self):
+        self.log.append("routing_decision", outcome="success")
+        import json
+        state = json.loads((self.root / "audit.json").read_text(encoding="utf-8"))
+        state["events"][0]["outcome"] = "failure"
+        (self.root / "audit.json").write_text(json.dumps(state), encoding="utf-8")
+        service = ProviderService(
+            _Connections(), authorization_manager=_Authorization(allowed=True),
+            audit_log=self.log,
+        )
+        result = service.read_provider_audit_events(principal_id="admin-1")
+        self.assertEqual(result["status"], "AUDIT_INTEGRITY_FAILURE")
+        self.assertEqual(result["events"], [])
+
     def test_routing_attempt_and_outcome_are_recorded(self):
         router = _Router()
         service = ProviderService(_Connections(), routing_manager=router, audit_log=self.log)
