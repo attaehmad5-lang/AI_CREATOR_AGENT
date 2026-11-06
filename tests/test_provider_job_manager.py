@@ -69,19 +69,27 @@ class ProviderJobManagerTests(unittest.TestCase):
             scheduling_strategy="GLOBAL_PRIORITY",
             clock=lambda: self.now[0],
         )
-        manager.submit(
+        image_submission = manager.submit(
             job_id="image-authorized", project_id="film", provider_id="image",
             payload_ref="payload:image-authorized", priority=100,
         )
-        manager.submit(
+        video_submission = manager.submit(
             job_id="video-not-authorized", project_id="film", provider_id="video",
             payload_ref="payload:video-not-authorized", priority=200,
+        )
+        self.assertTrue(image_submission["accepted"], image_submission)
+        self.assertTrue(video_submission["accepted"], video_submission)
+        self.assertEqual(
+            manager.poll(job_id="video-not-authorized")["job"]["status"], "QUEUED"
         )
         claimed = manager.claim_next(
             worker_id="worker-1", allowed_provider_ids=["image"]
         )
         self.assertEqual(claimed["status"], "JOB_CLAIMED")
         self.assertEqual(claimed["job"]["provider_id"], "image")
+        self.assertEqual(
+            manager.poll(job_id="video-not-authorized")["job"]["status"], "QUEUED"
+        )
 
         blocked = manager.claim_next(
             worker_id="worker-2", allowed_provider_ids=["image"]
