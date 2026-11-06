@@ -313,10 +313,19 @@ class ProviderRequestIdempotencyManager:
                     return {"saved": True, "status": "ALREADY_FINALIZED", "state": target}
                 return {"saved": False, "status": "INVALID_IDEMPOTENCY_TRANSITION"}
             record["state"] = target
-            record["lease_token"] = None
-            record["lease_expires_at"] = current
+            if target == "STARTED":
+                # Keep the worker lease while the external call may be in flight.
+                # Clearing it here would make STARTED records unverifiable and
+                # would allow unsafe duplicate execution after a reload.
+                record["lease_expires_at"] = max(
+                    record["lease_expires_at"], current,
+                )
+                record["result_status"] = None
+            else:
+                record["lease_token"] = None
+                record["lease_expires_at"] = current
+                record["result_status"] = result_status
             record["updated_at"] = current
-            record["result_status"] = result_status
             try:
                 self._save(state)
             except OSError:
