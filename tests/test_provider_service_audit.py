@@ -127,7 +127,7 @@ class ProviderServiceAuditIntegrationTests(unittest.TestCase):
             audit_log=self.log,
         )
         result = service.read_provider_audit_events(principal_id="admin-1")
-        self.assertEqual(result["status"], "AUDIT_INTEGRITY_FAILURE")
+        self.assertEqual(result["status"], "AUTHORIZATION_AUDIT_FAILED")
         self.assertEqual(result["events"], [])
 
     def test_routing_attempt_and_outcome_are_recorded(self):
