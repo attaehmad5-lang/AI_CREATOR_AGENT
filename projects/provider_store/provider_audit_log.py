@@ -18,6 +18,7 @@ _EVENT_TYPES = {
     "authorization_decision", "routing_decision", "provider_configuration",
     "provider_enablement", "credential_rotation", "role_assignment",
     "provider_scope_update", "principal_disable", "retention_sweep",
+    "approval_decision",
 }
 _DETAIL_KEYS = {
     "operation", "status", "reason_code", "billing_mode", "model",
