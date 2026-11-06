@@ -1323,9 +1323,13 @@ class ProviderService:
             "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
 
+    @with_provider_trace_context
     def route_request(
         self, *, principal_id: str | None = None,
         tenant_id: str | None = None,
+        request_id: str | None = None,
+        traceparent: str | None = None,
+        _trace_context: ProviderRequestTraceContext | None = None,
         **route_options: Any,
     ) -> dict[str, Any]:
         """Route through the policy manager and persist decision/approval evidence.
@@ -1333,20 +1337,20 @@ class ProviderService:
         principal_id and tenant_id must be supplied by trusted API middleware,
         never copied from caller-controlled request JSON.
         """
+        if not isinstance(_trace_context, ProviderRequestTraceContext):
+            return {"allowed": False, "status": "INVALID_TRACE_CONTEXT"}
         actor_id = principal_id
+        if request_id is not None:
+            route_options["request_id"] = request_id
         if tenant_id is not None:
             if "tenant_id" in route_options and route_options["tenant_id"] != tenant_id:
                 return {"allowed": False, "status": "TENANT_CONTEXT_CONFLICT"}
             route_options["tenant_id"] = tenant_id
         tenant_id = route_options.get("tenant_id")
-        trace_context = route_options.pop("_trace_context", None)
-        if trace_context is not None and not isinstance(trace_context, ProviderRequestTraceContext):
-            return {"allowed": False, "status": "INVALID_TRACE_CONTEXT"}
-        trace_id = trace_context.trace_id if trace_context is not None else None
-        if trace_context is not None:
-            route_options["trace_id"] = trace_context.trace_id
-            route_options["span_id"] = trace_context.span_id
-            route_options["traceparent"] = trace_context.traceparent
+        trace_id = _trace_context.trace_id
+        route_options["trace_id"] = _trace_context.trace_id
+        route_options["span_id"] = _trace_context.span_id
+        route_options["traceparent"] = _trace_context.traceparent
         project_id = route_options.get("project_id")
         request_id = route_options.get("request_id")
         approvals = route_options.get("paid_approved_providers")
@@ -1757,11 +1761,10 @@ class ProviderService:
         # tenant_id is passed explicitly as trusted middleware context; remove any
         # copy already placed in route_options to avoid duplicate keyword binding.
         route_options.pop("tenant_id", None)
-        route_trace_context = _trace_context.child()
         route = self.route_request(
             principal_id=principal_id,
             tenant_id=tenant_id,
-            _trace_context=route_trace_context,
+            request_id=request_id,
             category=category,
             project_id=project_id,
             request_id=request_id,
