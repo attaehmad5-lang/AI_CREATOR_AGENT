@@ -72,6 +72,7 @@ class ProviderServiceTests(unittest.TestCase):
         catalog["providers"][0].update({
             "official_api_url": "https://api.example.com/v1",
             "official_docs_url": "https://docs.example.com/api",
+            "subscription_required": True,
             "allowed_hosts": ["api.example.com"],
         })
         self.catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
