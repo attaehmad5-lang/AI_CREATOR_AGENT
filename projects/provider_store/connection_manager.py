@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import urlsplit
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 from .safe_numbers import finite_number
