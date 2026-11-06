@@ -1322,7 +1322,10 @@ class ProviderService:
         project_id = route_options.get("project_id")
         request_id = route_options.get("request_id")
         approvals = route_options.get("paid_approved_providers")
-        if isinstance(approvals, (set, frozenset)) and approvals:
+        if (
+            isinstance(approvals, (set, frozenset)) and approvals
+            and all(isinstance(value, str) for value in approvals)
+        ):
             approval_auth = self._authorize_operation(actor_id, "billing.approve")
             if approval_auth is not None:
                 result = {
