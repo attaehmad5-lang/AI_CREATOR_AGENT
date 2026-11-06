@@ -1,4 +1,5 @@
 """OIDC/JWT identity verification and fail-closed integration tests."""
+import socket
 import tempfile
 import time
 import unittest
@@ -139,6 +140,24 @@ class OIDCIdentityAuthenticatorTests(unittest.TestCase):
             strict.authenticate(self.token(iat=self.now + 600))
         with self.assertRaises(OIDCAuthenticationError):
             strict.authenticate(self.token(iat=self.now - 7200))
+
+    def test_default_jwks_transport_rejects_private_dns_before_connect(self):
+        resolutions = []
+
+        def resolver(host, port, *, type):
+            resolutions.append((host, port))
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("169.254.169.254", port))
+            ]
+
+        resolver = OIDCJWKSResolver(
+            "https://identity.example.test/keys",
+            allowed_hosts=["identity.example.test"], resolver=resolver,
+        )
+        with self.assertRaises(OIDCAuthenticationError) as caught:
+            resolver._load_keys()
+        self.assertEqual(caught.exception.status, "OIDC_JWKS_UNAVAILABLE")
+        self.assertEqual(resolutions, [("identity.example.test", 443)])
 
     def test_jwks_uri_requires_https_and_exact_allowlisted_host(self):
         for uri, hosts in (
