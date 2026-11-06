@@ -175,7 +175,11 @@ class ProviderService:
             return {"status": "AUDIT_LOG_UNAVAILABLE", "events": []}
         authorization = self._authorize_operation(principal_id, "provider.audit.read")
         if authorization is not None:
-            return {"status": "AUTHORIZATION_DENIED", "events": []}
+            status = authorization.get("status") if isinstance(authorization, dict) else None
+            return {
+                "status": status if status in {"AUTHORIZATION_AUDIT_FAILED"} else "AUTHORIZATION_DENIED",
+                "events": [],
+            }
         verify = getattr(self.audit_log, "verify", None)
         reader = getattr(self.audit_log, "read_events", None)
         if not callable(verify) or not callable(reader):
