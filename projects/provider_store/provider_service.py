@@ -167,6 +167,33 @@ class ProviderService:
             "status": "INVALID_OPERATION_RESPONSE", "saved": False
         }
 
+    def read_provider_audit_events(
+        self, *, principal_id: str, limit: int = 100, after_sequence: int = 0,
+    ) -> dict[str, Any]:
+        """Read the tamper-evident journal only for an explicitly authorized principal."""
+        if self.audit_log is None:
+            return {"status": "AUDIT_LOG_UNAVAILABLE", "events": []}
+        authorization = self._authorize_operation(principal_id, "provider.audit.read")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "events": []}
+        verify = getattr(self.audit_log, "verify", None)
+        reader = getattr(self.audit_log, "read_events", None)
+        if not callable(verify) or not callable(reader):
+            return {"status": "AUDIT_READ_INTERFACE_UNAVAILABLE", "events": []}
+        try:
+            integrity = verify()
+        except Exception:
+            return {"status": "AUDIT_INTEGRITY_FAILURE", "events": []}
+        if not isinstance(integrity, dict) or integrity.get("valid") is not True:
+            return {"status": "AUDIT_INTEGRITY_FAILURE", "events": []}
+        try:
+            page = reader(limit=limit, after_sequence=after_sequence)
+        except Exception:
+            return {"status": "AUDIT_READ_FAILED", "events": []}
+        return page if isinstance(page, dict) else {
+            "status": "INVALID_AUDIT_READ_RESPONSE", "events": []
+        }
+
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
 
