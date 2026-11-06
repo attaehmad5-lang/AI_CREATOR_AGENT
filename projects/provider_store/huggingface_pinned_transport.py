@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 import threading
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 from urllib.request import Request
 
 from .http_probe import ProviderPinnedHTTPSOpener
@@ -65,6 +65,21 @@ def build_pinned_httpx_transport(
             except (TypeError, ValueError):
                 raise ValueError("HUGGINGFACE_REQUEST_URL_INVALID") from None
             host = parsed.hostname.casefold().rstrip(".") if parsed.hostname else ""
+            try:
+                query_fields = parse_qsl(
+                    parsed.query, keep_blank_values=True, max_num_fields=64,
+                )
+            except ValueError:
+                raise ValueError("HUGGINGFACE_REQUEST_QUERY_INVALID") from None
+            sensitive_query_markers = (
+                "token", "api_key", "apikey", "password", "secret",
+                "authorization", "bearer", "credential",
+            )
+            if any(
+                any(marker in key.casefold().replace("-", "_") for marker in sensitive_query_markers)
+                for key, _value in query_fields
+            ):
+                raise ValueError("HUGGINGFACE_CREDENTIAL_IN_QUERY_REJECTED")
             if (
                 parsed.scheme != "https"
                 or host not in _ALLOWED_HOSTS
