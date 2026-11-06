@@ -180,11 +180,12 @@ class PollinationsProvider:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Image prompt must be a non-empty string")
         api_key = self.environ.get("POLLINATIONS_API_KEY", "")
-        if (
-            not isinstance(api_key, str) or not api_key.strip() or len(api_key) > 16384
-            or any(ord(char) < 32 or ord(char) == 127 for char in api_key)
+        if not isinstance(api_key, str) or not api_key.strip():
+            raise RuntimeError("POLLINATIONS_API_KEY is not configured")
+        if len(api_key) > 16384 or any(
+            ord(char) < 32 or ord(char) == 127 for char in api_key
         ):
-            raise RuntimeError("POLLINATIONS_API_KEY is missing or invalid")
+            raise RuntimeError("POLLINATIONS_API_KEY is invalid")
         api_key = api_key.strip()
 
         model = self.environ.get("POLLINATIONS_IMAGE_MODEL", self.default_model).strip()
