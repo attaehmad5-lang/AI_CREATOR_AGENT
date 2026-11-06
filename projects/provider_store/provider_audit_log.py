@@ -6,6 +6,7 @@ import hmac
 import json
 import math
 import os
+import re
 import tempfile
 import threading
 import time
@@ -70,7 +71,11 @@ class ProviderAuditLog:
             return None
         if (
             not isinstance(value, str) or not value.strip() or len(value) > 200
-            or any(ord(char) < 32 or ord(char) == 127 for char in value)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}", value.strip()) is None
+            or re.search(
+                r"(?i)(?:bearer\\s+|api[_-]?key\\s*=|token\\s*=|password\\s*=|secret\\s*=|-----BEGIN [A-Z ]+PRIVATE KEY-----)",
+                value,
+            )
         ):
             raise ValueError("invalid audit identifier")
         return value.strip()
@@ -95,7 +100,14 @@ class ProviderAuditLog:
                 clean[key] = value
             elif value is None:
                 continue
-            elif not isinstance(value, str) or len(value) > 160 or any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+            elif (
+                not isinstance(value, str) or len(value) > 160
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,159}", value) is None
+                or re.search(
+                    r"(?i)(?:bearer\\s+|api[_-]?key\\s*=|token\\s*=|password\\s*=|secret\\s*=|-----BEGIN [A-Z ]+PRIVATE KEY-----)",
+                    value,
+                )
+            ):
                 raise ValueError("invalid text audit detail")
             else:
                 clean[key] = value
