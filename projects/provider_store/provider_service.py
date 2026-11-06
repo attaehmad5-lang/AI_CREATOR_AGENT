@@ -1418,6 +1418,26 @@ class ProviderService:
                     "route_result": result, "side_effects_may_exist": True,
                     "audit": audit_failure,
                 }
+            if result.get("billing_mode") == "PAID_APPROVED":
+                approval_details = {
+                    "operation": "paid_usage_approval_decision",
+                    "approval_status": "APPROVED",
+                }
+                approval_id = route_options.get("approval_id")
+                if isinstance(approval_id, str):
+                    approval_details["approval_id"] = approval_id
+                approval_failure = self._record_audit(
+                    "approval_decision", actor_id=audit_context["actor_id"],
+                    tenant_id=audit_context["tenant_id"], provider_id=provider_id,
+                    request_id=audit_context["request_id"], trace_id=audit_context["trace_id"],
+                    outcome="allowed", details=approval_details,
+                )
+                if approval_failure is not None:
+                    return {
+                        "allowed": False, "status": "PAID_APPROVAL_AUDIT_PERSISTENCE_FAILED",
+                        "route_result": result, "side_effects_may_exist": True,
+                        "audit": approval_failure,
+                    }
         return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
