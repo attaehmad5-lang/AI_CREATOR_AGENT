@@ -22,10 +22,10 @@ from urllib.parse import urlsplit
 from .connection_manager import ConnectionManager, MODALITY_CONTRACTS
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
-_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\\Z")
-_VERSION_RE = re.compile(r"(?:0|[1-9][0-9]{0,3})\\.(?:0|[1-9][0-9]{0,3})\\Z")
-_CAPABILITY_RE = re.compile(r"[a-z][a-z0-9_]{0,79}\\Z")
-_HOST_RE = re.compile(r"(?=.{1,253}\\Z)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\Z")
+_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z")
+_VERSION_RE = re.compile(r"(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})\Z")
+_CAPABILITY_RE = re.compile(r"[a-z][a-z0-9_]{0,79}\Z")
+_HOST_RE = re.compile(r"(?=.{1,253}\Z)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\Z")
 _STATUSES = {"PENDING_APPROVAL", "APPROVED", "PROBE_FAILED", "PROBE_SUCCEEDED", "REJECTED", "ACTIVE"}
 
 
@@ -125,7 +125,7 @@ class ProviderOnboardingManager:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 json.dump(self.data, stream, indent=2, ensure_ascii=False)
-                stream.write("\\n")
+                stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             atomic_replace_with_retry(temp_name, self.state_path)
@@ -281,7 +281,7 @@ class ProviderOnboardingManager:
             record = self.data["requests"].get(provider_id)
             if not isinstance(record, dict):
                 return {"status": "ONBOARDING_NOT_FOUND", "verified": False}
-            if record.get("status") != "APPROVED":
+            if record.get("status") not in {"APPROVED", "PROBE_FAILED"}:
                 return {"status": "ONBOARDING_NOT_APPROVED", "verified": False}
             manifest = copy.deepcopy(record["manifest"])
 
