@@ -9,6 +9,8 @@ import time
 from .safe_numbers import finite_number
 from .provider_error_policy import classify_provider_error
 from .secrets_manager import SecretManagerError
+from .provider_request_trace import trace_provider_request, validate_request_id
+from .provider_request_idempotency import provider_execution_idempotent
 
 
 class ProviderService:
@@ -43,6 +45,7 @@ class ProviderService:
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
         secret_manager: Any | None = None,
+        request_idempotency_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -118,6 +121,12 @@ class ProviderService:
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
+        if request_idempotency_manager is not None and any(
+            not callable(getattr(request_idempotency_manager, method, None))
+            for method in ("reserve_request", "mark_started", "finalize", "get_status")
+        ):
+            raise ValueError("request_idempotency_manager does not implement the execution idempotency contract")
+        self.request_idempotency_manager = request_idempotency_manager
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
@@ -1214,19 +1223,26 @@ class ProviderService:
             "verified": False, "status": "INVALID_WEBHOOK_VERIFIER_RESPONSE"
         }
 
+    @trace_provider_request
     def route_request(self, **route_options: Any) -> dict[str, Any]:
         if self.routing_manager is None:
             return {"allowed": False, "status": "ROUTING_MANAGER_UNAVAILABLE"}
         rejection = self._sensitive_input_rejection({"route_options": route_options})
         if rejection is not None:
             return {"allowed": False, **rejection}
+        routing_options = dict(route_options)
+        trace_id = routing_options.pop("trace_id", None)
+        routing_options.pop("traceparent", None)
         try:
-            result = self.routing_manager.route(**route_options)
+            result = self.routing_manager.route(**routing_options)
         except Exception as exc:
             return {"allowed": False, "status": "ROUTING_FAILED", "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {
-            "allowed": False, "status": "INVALID_ROUTING_RESPONSE"
-        }
+        if not isinstance(result, dict):
+            return {"allowed": False, "status": "INVALID_ROUTING_RESPONSE"}
+        if isinstance(trace_id, str):
+            result = dict(result)
+            result.setdefault("trace_id", trace_id)
+        return result
 
     def validate_output(self, path: Any, *, modality: str) -> dict[str, Any]:
         if self.output_validator is None:
@@ -1248,12 +1264,14 @@ class ProviderService:
             return default
         return value
 
+    @trace_provider_request
+    @provider_execution_idempotent
     def execute_routed_request(
         self,
         *,
         category: str,
         project_id: str,
-        request_id: str,
+        request_id: str | None = None,
         estimated_cost: float,
         adapter: Any,
         modality: str,
@@ -1278,13 +1296,14 @@ class ProviderService:
         This method deliberately does not auto-retry: after an adapter exception, it
         may be impossible to know whether a paid/credit-consuming request started.
         """
+        idempotency_lease_token = route_options.pop("_request_idempotency_lease_token", None)
         if not callable(adapter):
             return {"status": "INVALID_ADAPTER", "executed": False}
         if not isinstance(adapter_options, (dict, type(None))):
             return {"status": "INVALID_ADAPTER_OPTIONS", "executed": False}
         if not isinstance(use_managed_credential, bool):
             return {"status": "INVALID_MANAGED_CREDENTIAL_POLICY", "executed": False}
-        if not isinstance(request_id, str) or not request_id.strip():
+        if not validate_request_id(request_id):
             return {"status": "INVALID_REQUEST_ID", "executed": False}
         if not isinstance(category, str) or not category.strip():
             return {"status": "INVALID_CATEGORY", "executed": False}
@@ -1649,6 +1668,39 @@ class ProviderService:
                     "provider": provider_id,
                     "release": released,
                 }
+        if self.request_idempotency_manager is not None:
+            if not isinstance(idempotency_lease_token, str):
+                if secret_lease is not None:
+                    options.pop("provider_credential_lease", None)
+                    secret_lease.close()
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "IDEMPOTENCY_LEASE_REQUIRED", "executed": False,
+                    "provider": provider_id, "release": released,
+                }
+            try:
+                started_claim = self.request_idempotency_manager.mark_started(
+                    project_id=project_id, request_id=request_id,
+                    tenant_id=tenant_id, lease_token=idempotency_lease_token,
+                )
+            except Exception:
+                started_claim = {"saved": False, "status": "IDEMPOTENCY_START_FAILED"}
+            if not isinstance(started_claim, dict) or started_claim.get("saved") is not True:
+                if secret_lease is not None:
+                    options.pop("provider_credential_lease", None)
+                    secret_lease.close()
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "IDEMPOTENCY_START_FAILED", "executed": False,
+                    "provider": provider_id, "release": released,
+                }
+
         started_at = time.monotonic()
         try:
             adapter_result = adapter(**options)
