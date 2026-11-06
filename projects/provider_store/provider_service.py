@@ -241,7 +241,7 @@ class ProviderService:
             decision = {"allowed": False, "status": "INVALID_AUTHORIZATION_RESPONSE"}
         return self._finish_authorization_decision(
             decision, principal_id=principal_id, operation=operation,
-            provider_id=provider_id, return_decision=return_decision,
+            provider_id=provider_id, return_decision=return_decision, tenant_id=tenant_id,
         )
 
 
@@ -767,7 +767,8 @@ class ProviderService:
         if self.authorization_manager is None:
             return {"status": "AUTHORIZATION_MANAGER_REQUIRED", "rotated": False}
         authorization = self._authorize_operation(
-            principal_id, "provider.credentials.rotate", provider_id=provider_id
+            principal_id, "provider.credentials.rotate", provider_id=provider_id,
+            tenant_id=tenant_id,
         )
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "rotated": False}
@@ -1331,7 +1332,7 @@ class ProviderService:
             isinstance(approvals, (set, frozenset)) and approvals
             and all(isinstance(value, str) for value in approvals)
         ):
-            approval_auth = self._authorize_operation(actor_id, "billing.approve")
+            approval_auth = self._authorize_operation(actor_id, "billing.approve", tenant_id=tenant_id)
             if approval_auth is not None:
                 result = {
                     "allowed": False, "status": "AUTHORIZATION_DENIED",
