@@ -89,6 +89,23 @@ class ProviderAuditLogTests(unittest.TestCase):
         self.assertFalse(rejected_secret["saved"])
         self.assertNotIn("secret-value", self.path.read_text(encoding="utf-8"))
 
+    def test_credential_shaped_identifier_and_approval_id_are_rejected(self):
+        self.assertEqual(
+            self.log.append(
+                "authorization_decision", actor_id="Bearer super-secret",
+                outcome="denied",
+            )["status"],
+            "AUDIT_EVENT_INVALID",
+        )
+        self.assertEqual(
+            self.log.append(
+                "approval_decision", outcome="allowed",
+                details={"approval_id": "token=private-value"},
+            )["status"],
+            "AUDIT_EVENT_INVALID",
+        )
+        self.assertNotIn("private-value", self.path.read_text(encoding="utf-8"))
+
     def test_event_types_and_outcomes_are_allowlisted(self):
         self.assertEqual(
             self.log.append("unknown_event", outcome="success")["status"],
