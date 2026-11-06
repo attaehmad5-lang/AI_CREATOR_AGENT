@@ -8,11 +8,13 @@ on:
       - task-25-feature-72-audit-trail
       - task-25-feature-73-current-trace-propagation
       - task-25-feature-74-idempotency-keys
+      - task-25-feature-75-concurrency-limits-integrated
   pull_request:
     branches:
       - main
       - task-25-feature-72-audit-trail
       - task-25-feature-73-current-trace-propagation
+      - task-25-feature-74-idempotency-keys
 
 permissions:
   contents: read

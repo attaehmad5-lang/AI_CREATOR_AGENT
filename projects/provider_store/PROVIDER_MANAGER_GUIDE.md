@@ -98,3 +98,12 @@ else:
 This probe does not display the account response body or token. Do not run it in CI with a personal token; execute it only in the user's local authorized environment.
 
 Live provider API/account probes, provider-specific OAuth registration/token-refresh integrations, complete multimodal adapters, full media decoding and semantic validation, end-to-end generation execution, provider-specific network-failure injection, cross-manager atomic transactions, and individual evidence-based verification of every item in the canonical feature checklist remain separate requirements. Fine-grained capability discovery uses only explicitly declared capability strings; a category label does not prove every advanced capability.
+
+
+## Provider concurrency admission — Feature #75
+
+ProviderConcurrencyManager persists provider-specific, per-project and global execution limits in a separate state file beside the connection state. ProviderService acquires a lease and durably marks it STARTED immediately before invoking the provider adapter. A provider/project/global limit rejection blocks the adapter call and releases only pre-start accounting reservations.
+
+Known completion releases the concurrency lease. Confirmed pre-start failure releases it as NOT_STARTED. Adapter exceptions, malformed start results and inconsistent billing/start results are treated as ambiguous: the lease stays active and continues consuming capacity. No TTL automatically expires an active or ambiguous lease.
+
+Use ProviderService.set_provider_concurrency_limit() and ProviderService.reconcile_provider_concurrency_lease() through the provider.access.manage admin permission. Reconciliation requires explicit confirmation of the remote outcome. The JSON/interprocess-lock implementation coordinates processes sharing the same state directory; it is not a distributed multi-host coordination service. Production shared-store deployment and sustained load tests remain release gates.
