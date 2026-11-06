@@ -41,6 +41,12 @@ class ProviderRequestIdempotencyManagerTests(unittest.TestCase):
             result_status="EXECUTION_SUCCEEDED",
         )
         self.assertTrue(completed["saved"])
+        repeated_finalize = self.manager.finalize(
+            project_id="film", request_id="request-1", tenant_id="tenant-a",
+            lease_token=reserved["lease_token"], outcome="completed",
+            result_status="EXECUTION_SUCCEEDED",
+        )
+        self.assertEqual(repeated_finalize["status"], "ALREADY_FINALIZED")
         duplicate = self.reserve()
         self.assertEqual(duplicate["status"], "DUPLICATE_REQUEST")
         self.assertEqual(duplicate["result_status"], "EXECUTION_SUCCEEDED")
