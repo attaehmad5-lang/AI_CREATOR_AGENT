@@ -2330,7 +2330,7 @@ class ProviderServiceTests(unittest.TestCase):
         authorization.assign_role("retention-operator", "operator")
         service = ProviderService(
             self.connections, authorization_manager=authorization,
-            provider_retention_manager=retention,
+            data_handling_policy=policy, provider_retention_manager=retention,
         )
         denied = service.run_provider_retention_sweep(
             delete_provider_resource=lambda **kwargs: self.fail("unauthorized deletion"),
