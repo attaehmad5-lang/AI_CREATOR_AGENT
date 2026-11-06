@@ -1365,6 +1365,7 @@ class ProviderService:
                 audit = self._record_provider_audit(
                     event_type="provider.approval.decision",
                     actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+                    trace_id=trace_id,
                     provider_id=approved_provider, request_id=request_id,
                     operation="billing.approve", outcome="APPROVED",
                     reason_code="BILLING_APPROVAL_GRANTED", approved=True,
@@ -1480,6 +1481,7 @@ class ProviderService:
                 approval_audit = self._record_provider_audit(
                     event_type="provider.approval.decision",
                     actor_id=actor_id, tenant_id=tenant_id, project_id=project_id,
+                    trace_id=trace_id,
                     provider_id=candidate, request_id=request_id,
                     operation="billing.approve", outcome="DENIED",
                     reason_code="PAID_APPROVAL_REQUIRED", approved=False,
