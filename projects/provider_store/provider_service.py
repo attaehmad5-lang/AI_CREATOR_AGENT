@@ -298,6 +298,60 @@ class ProviderService:
             "status": "INVALID_AUTHORIZATION_MANAGER_RESPONSE", "saved": False
         }
 
+    def discover_providers(
+        self, *, principal_id: str | None = None, category: str | None = None,
+        capability: str | None = None, enabled_only: bool = False,
+    ) -> dict[str, Any]:
+        """Read provider registry entries through the authorized metadata boundary."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "providers": []}
+        authorization = self._authorize_operation(principal_id, "provider.read")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "providers": [], "authorization": authorization}
+        discover = getattr(self.connection_manager, "discover_providers", None)
+        if not callable(discover):
+            return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "providers": []}
+        try:
+            providers = discover(
+                category=category, capability=capability, enabled_only=enabled_only
+            )
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_DISCOVERY_FAILED", "providers": [],
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(providers, list) or any(not isinstance(item, dict) for item in providers):
+            return {"status": "INVALID_PROVIDER_DISCOVERY_RESPONSE", "providers": []}
+        return {"status": "PROVIDERS_DISCOVERED", "providers": providers, "count": len(providers)}
+
+    def get_provider_metadata(
+        self, provider_id: str, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        """Read one provider's safe metadata under provider-scoped read authorization."""
+        if self.authorization_manager is None:
+            return {"status": "AUTHORIZATION_MANAGER_UNAVAILABLE", "provider": provider_id}
+        authorization = self._authorize_operation(
+            principal_id, "provider.read", provider_id=provider_id
+        )
+        if authorization is not None:
+            return {
+                "status": "AUTHORIZATION_DENIED", "provider": provider_id,
+                "authorization": authorization,
+            }
+        getter = getattr(self.connection_manager, "get_provider_metadata", None)
+        if not callable(getter):
+            return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id}
+        try:
+            metadata = getter(provider_id)
+        except Exception as exc:
+            return {
+                "status": "PROVIDER_METADATA_LOOKUP_FAILED", "provider": provider_id,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(metadata, dict):
+            return {"status": "PROVIDER_NOT_FOUND", "provider": provider_id}
+        return {"status": "PROVIDER_METADATA_FOUND", "provider": provider_id, "metadata": metadata}
+
     def load_provider_adapter(
         self, provider_id: str, factory: Any, *, principal_id: str | None = None
     ) -> dict[str, Any]:
