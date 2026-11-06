@@ -153,6 +153,26 @@ class HuggingFacePinnedTransportTests(unittest.TestCase):
             transport.handle_request(request)
         self.assertEqual(opener.calls, [])
 
+    def test_compressed_response_is_rejected_and_closed(self):
+        response = FakeHTTPResponse(
+            body=b"compressed-bytes",
+            headers={"Content-Encoding": "gzip", "Content-Length": "16"},
+        )
+        opener = FakeOpener(response)
+        transport = self.transport(opener)
+        with self.assertRaisesRegex(ValueError, "HUGGINGFACE_COMPRESSED_RESPONSE_REJECTED"):
+            transport.handle_request(RequestStub("https://router.huggingface.co/path"))
+        self.assertTrue(response.closed)
+
+    def test_request_stream_chunk_count_is_bounded(self):
+        opener = FakeOpener()
+        transport = self.transport(opener)
+        request = RequestStub("https://router.huggingface.co/path", body=b"")
+        request.stream = (b"" for _ in range(16385))
+        with self.assertRaisesRegex(ValueError, "HUGGINGFACE_REQUEST_BODY_CHUNK_LIMIT"):
+            transport.handle_request(request)
+        self.assertEqual(opener.calls, [])
+
     def test_oversized_response_is_rejected_and_closed(self):
         response = FakeHTTPResponse(body=b"x" * 2049)
         opener = FakeOpener(response)
