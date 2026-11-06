@@ -8,7 +8,7 @@
 - Record who attempted a protected provider operation, what operation was requested, which provider/tenant/request it concerned, and whether authorization and execution succeeded.
 - Record routing attempts and selected-provider outcomes without storing prompts, request bodies, credentials, raw endpoint URLs, or arbitrary caller-supplied metadata.
 - Record credential-rotation outcomes without persisting secret values, secret references, or idempotency keys.
-- Make unauthorized modification, insertion, deletion, reordering, and truncation of retained events detectable when the journal is verified against its externally supplied integrity key and expected history.
+- Make unauthorized modification, insertion, and reordering detectable through a keyed hash chain. Detecting deletion of the final tail requires an independently stored chain-head anchor or expected sequence checkpoint; the local journal alone cannot prove that its final event was not truncated.
 - Deny protected audit reads unless the caller is authorized for provider.audit.read.
 
 ## Event journal
@@ -40,7 +40,7 @@ Regression tests cover HMAC/hash-chain verification, event tampering, previous-h
 
 ## Residual risks and production requirements
 
-1. This is tamper-evident, not intrinsically immutable. An attacker who can replace the journal and obtain the HMAC key can forge a new chain. Production must keep the HMAC key separate from the journal host and periodically anchor signed chain heads to an independent append-only/WORM or remote audit service.
+1. This is tamper-evident, not intrinsically immutable. An attacker who can replace the journal and obtain the HMAC key can forge a new chain. The local chain also cannot detect deletion of its final tail without an independently retained checkpoint. Production must keep the HMAC key separate from the journal host and periodically anchor signed chain heads and sequence numbers to an independent append-only/WORM or remote audit service.
 2. File permissions and local locks do not replace protected storage, encrypted backups, access monitoring, or centralized log retention.
 3. Service integrations cover the listed operations. Direct manager calls, external control planes, future endpoints, provider SDK callbacks, and infrastructure changes outside ProviderService need their own audit hooks.
 4. Some operations can complete even if the post-operation event write fails. The service returns an explicit audit-persistence failure and the prior attempt event remains evidence; operators must reconcile such cases.
