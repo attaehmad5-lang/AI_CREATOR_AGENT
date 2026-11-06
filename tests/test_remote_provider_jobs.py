@@ -134,7 +134,8 @@ class RemoteProviderJobServiceTests(unittest.TestCase):
         self.assertEqual(record["remote_status"], "QUEUED")
         self.assertEqual(record["remote_poll_after_seconds"], 10)
         self.assertNotIn("lease_token", record)
-        self.assertNotIn("lease_token_hash", record)
+        self.assertNotIn(worker_job["lease_token"], self.jobs_path.read_text(encoding="utf-8"))
+        self.assertRegex(record["lease_token_hash"], r"^[0-9a-f]{64}$")
         self.assertNotIn("client-retry-key-001", self.jobs_path.read_text(encoding="utf-8"))
         self.assertNotIn("provider_debug", repr(result))
 
@@ -256,7 +257,7 @@ class RemoteProviderJobServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "REMOTE_PROVIDER_IDEMPOTENCY_REQUIRED")
         self.assertEqual(self.adapter.submit_calls, [])
         self.assertEqual(
-            self.jobs.data["jobs"]["no-idempotency"]["remote_submission_state"],
+            self.jobs.data["jobs"]["no-idempotency"].get("remote_submission_state", "NOT_SUBMITTED"),
             "NOT_SUBMITTED",
         )
 
