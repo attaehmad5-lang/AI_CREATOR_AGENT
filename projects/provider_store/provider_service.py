@@ -846,6 +846,7 @@ class ProviderService:
         max_response_bytes: int = 4096,
         principal_id: str | None = None,
         tenant_id: str | None = None,
+        dns_resolver: Any = None,
     ) -> dict[str, Any]:
         """Verify a configured allowlisted HTTPS endpoint using the built-in safe probe.
 
@@ -865,6 +866,7 @@ class ProviderService:
                 environ=environ,
                 opener=opener,
                 max_response_bytes=max_response_bytes,
+                dns_resolver=dns_resolver,
                 secret_manager=self.secret_manager,
                 tenant_id=tenant_id,
                 principal_id=principal_id,
