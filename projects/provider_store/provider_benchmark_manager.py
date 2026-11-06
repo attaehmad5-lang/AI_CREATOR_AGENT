@@ -74,7 +74,7 @@ class ProviderBenchmarkManager:
 
         self.max_samples = max_samples
         self.minimum_samples_for_confidence = minimum_samples_for_confidence
-        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.clock = clock if clock is not None else (lambda: datetime.now(timezone.utc))
         self.storage_path = resolved_path
         self._lock_path = (
             resolved_path.with_name(resolved_path.name + ".lock")
@@ -142,6 +142,12 @@ class ProviderBenchmarkManager:
     def _read_persisted_unlocked(self) -> list[dict[str, Any]]:
         assert self.storage_path is not None
         try:
+            state_size = self.storage_path.stat().st_size
+        except FileNotFoundError:
+            return []
+        if state_size > _MAX_STATE_BYTES:
+            raise ValueError("benchmark state exceeds size limit")
+        try:
             raw = self.storage_path.read_bytes()
         except FileNotFoundError:
             return []
@@ -178,7 +184,7 @@ class ProviderBenchmarkManager:
         encoded = json.dumps(
             {"schema_version": _SCHEMA_VERSION, "samples": samples},
             ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
-        ).encode("utf-8") + b"\\n"
+        ).encode("utf-8") + b"\n"
         if len(encoded) > _MAX_STATE_BYTES:
             raise ValueError("benchmark state exceeds size limit")
         fd, temporary_name = tempfile.mkstemp(
