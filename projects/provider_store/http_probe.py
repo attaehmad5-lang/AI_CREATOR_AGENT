@@ -17,6 +17,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .connection_manager import ConnectionManager, ProviderAuthenticationVerificationRequired
 from .safe_numbers import finite_number
+from .pinned_https_transport import build_pinned_https_opener
 
 
 class ProviderHTTPAuthError(PermissionError):
@@ -134,13 +135,14 @@ class ProviderHTTPConnectivityProbe:
             raise ValueError("dns_resolver must be callable")
         self.dns_resolver = dns_resolver or socket.getaddrinfo
         self.environ = os.environ if environ is None else environ
-        self.opener = opener or build_opener(_RejectRedirects())
+        self.opener = opener
+        self._custom_opener = opener is not None
         self.max_response_bytes = max_response_bytes
         self.secret_manager = secret_manager
         self.tenant_id = tenant_id
         self.principal_id = principal_id
 
-    def _validate_public_dns_resolution(self, hostname: str, port: int) -> None:
+    def _validate_public_dns_resolution(self, hostname: str, port: int) -> list[str]:
         """Fail closed if any DNS answer is not a globally routable IP address.
 
         This is a preflight SSRF defense. It is not a substitute for DNS-pinned
@@ -153,6 +155,7 @@ class ProviderHTTPConnectivityProbe:
             raise ConnectionError("provider hostname resolution failed") from None
         if not isinstance(records, (list, tuple)) or not records or len(records) > 64:
             raise ConnectionError("provider hostname resolution returned no usable addresses")
+        validated_addresses: list[str] = []
         for record in records:
             if not isinstance(record, (tuple, list)) or len(record) < 5:
                 raise ConnectionError("provider hostname resolution returned invalid address data")
@@ -167,6 +170,10 @@ class ProviderHTTPConnectivityProbe:
                 address = address.ipv4_mapped
             if not address.is_global:
                 raise PermissionError("provider endpoint resolved to a non-public network address")
+            normalized = str(address)
+            if normalized not in validated_addresses:
+                validated_addresses.append(normalized)
+        return validated_addresses
 
     def __call__(self, provider: dict[str, Any], *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         if not isinstance(provider, dict):
@@ -192,9 +199,9 @@ class ProviderHTTPConnectivityProbe:
         if not validation.get("valid"):
             raise ValueError(str(validation.get("status", "INVALID_ENDPOINT")))
         parsed_endpoint = urlsplit(endpoint.strip())
-        self._validate_public_dns_resolution(
+        resolved_addresses = self._validate_public_dns_resolution(
             parsed_endpoint.hostname,
-            parsed_endpoint.port or (443 if parsed_endpoint.scheme == "https" else 80),
+            parsed_endpoint.port or 443,
         )
 
         headers = {
@@ -291,7 +298,10 @@ class ProviderHTTPConnectivityProbe:
         try:
             request = Request(endpoint.strip(), headers=headers, method="GET")
             try:
-                response = self.opener.open(request, timeout=timeout_value)
+                opener = self.opener if self._custom_opener else build_pinned_https_opener(
+                    resolved_addresses[0], _RejectRedirects()
+                )
+                response = opener.open(request, timeout=timeout_value)
             except HTTPError as exc:
                 clear_credential()
                 status_code = exc.code
