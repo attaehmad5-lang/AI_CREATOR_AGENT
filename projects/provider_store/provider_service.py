@@ -1372,6 +1372,7 @@ class ProviderService:
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
         tenant_id: str | None = None, idempotency_key: str | None = None,
+        deadline_at: str | None = None,
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
@@ -1392,6 +1393,7 @@ class ProviderService:
                 "priority": priority,
                 "tenant_id": tenant_id,
                 "idempotency_key_present": idempotency_key is not None,
+                "deadline_at": deadline_at,
             },
         })
         if rejection is not None:
@@ -1405,6 +1407,8 @@ class ProviderService:
                 submit_args["tenant_id"] = tenant_id
             if idempotency_key is not None:
                 submit_args["idempotency_key"] = idempotency_key
+            if deadline_at is not None:
+                submit_args["deadline_at"] = deadline_at
             result = self.job_manager.submit(**submit_args)
         except Exception as exc:
             return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
@@ -1451,6 +1455,90 @@ class ProviderService:
             if tenant_error is not None:
                 return {"status": tenant_error["status"], "job": None}
         return self._sanitize_job_response(result, self.sensitive_data_policy)
+
+
+    def get_worker_job_control(
+        self, *, job_id: str, worker_id: str, lease_token: str,
+        principal_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Authorized cooperative cancellation/deadline checkpoint for workers."""
+        if self.job_manager is None or not callable(
+            getattr(self.job_manager, "get_worker_control", None)
+        ):
+            return {"status": "JOB_CONTROL_UNAVAILABLE", "stop_requested": True}
+        authorization = self._authorize_operation(principal_id, "provider.generate")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "stop_requested": True}
+        try:
+            result = self.job_manager.get_worker_control(
+                job_id=job_id, worker_id=worker_id, lease_token=lease_token
+            )
+        except Exception as exc:
+            return {
+                "status": "JOB_CONTROL_CHECK_FAILED",
+                "stop_requested": True,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            return {"status": "INVALID_JOB_CONTROL_RESPONSE", "stop_requested": True}
+        return result
+
+    def request_graceful_shutdown(
+        self, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        """Stop new admissions and claims while allowing active workers to drain."""
+        if self.job_manager is None or not callable(
+            getattr(self.job_manager, "request_graceful_shutdown", None)
+        ):
+            return {"status": "JOB_MANAGER_UNAVAILABLE"}
+        authorization = self._authorize_operation(
+            principal_id, "provider.access.manage", return_decision=True
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+            return {"status": "AUTHORIZATION_DENIED"}
+        try:
+            result = self.job_manager.request_graceful_shutdown()
+        except Exception as exc:
+            return {"status": "GRACEFUL_SHUTDOWN_FAILED", "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_SHUTDOWN_RESPONSE"}
+
+    def resume_job_dispatch(
+        self, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        """Resume admissions/claims after an authorized operator action."""
+        if self.job_manager is None or not callable(
+            getattr(self.job_manager, "resume_dispatch", None)
+        ):
+            return {"status": "JOB_MANAGER_UNAVAILABLE"}
+        authorization = self._authorize_operation(
+            principal_id, "provider.access.manage", return_decision=True
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+            return {"status": "AUTHORIZATION_DENIED"}
+        try:
+            result = self.job_manager.resume_dispatch()
+        except Exception as exc:
+            return {"status": "JOB_DISPATCH_RESUME_FAILED", "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_SHUTDOWN_RESPONSE"}
+
+    def get_job_shutdown_status(
+        self, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        """Read-only operational view of drain progress."""
+        if self.job_manager is None or not callable(
+            getattr(self.job_manager, "get_shutdown_status", None)
+        ):
+            return {"status": "JOB_MANAGER_UNAVAILABLE"}
+        authorization = self._authorize_operation(
+            principal_id, "provider.read", provider_id="*", return_decision=True
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+            return {"status": "AUTHORIZATION_DENIED"}
+        try:
+            result = self.job_manager.get_shutdown_status()
+        except Exception as exc:
+            return {"status": "SHUTDOWN_STATUS_FAILED", "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_SHUTDOWN_RESPONSE"}
 
     def claim_next_job(self, *, worker_id: str, principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
