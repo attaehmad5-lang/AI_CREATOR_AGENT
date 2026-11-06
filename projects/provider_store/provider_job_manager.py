@@ -833,6 +833,7 @@ class ProviderJobManager:
     ) -> dict[str, Any]:
         if (
             not isinstance(remote_job_id, str) or not _REF_RE.fullmatch(remote_job_id)
+            or not isinstance(remote_status, str)
             or remote_status not in _REMOTE_JOB_STATES
             or (
                 remote_status in {"QUEUED", "RUNNING"}
@@ -903,6 +904,7 @@ class ProviderJobManager:
     ) -> dict[str, Any]:
         if (
             not isinstance(remote_job_id, str) or not _REF_RE.fullmatch(remote_job_id)
+            or not isinstance(remote_status, str)
             or remote_status not in _REMOTE_JOB_STATES
             or not isinstance(job_id, str) or not _ID_RE.fullmatch(job_id)
             or not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id)
