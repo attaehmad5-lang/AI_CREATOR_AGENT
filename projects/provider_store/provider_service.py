@@ -416,16 +416,30 @@ class ProviderService:
         refresh = getattr(self.connection_manager, "refresh_provider_metadata", None)
         if not callable(refresh):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "refreshed": False}
+        audit_intent = self._audit_operation_intent(
+            "provider.metadata.refresh", principal_id=principal_id,
+            provider_id=provider_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "provider": provider_id, "refreshed": False, **audit_intent}
         try:
             result = refresh(provider_id, fetch_metadata)
         except Exception as exc:
-            return {
-                "status": "PROVIDER_METADATA_REFRESH_FAILED", "provider": provider_id,
-                "refreshed": False, "error_type": type(exc).__name__,
+            result = {
+                "status": "PROVIDER_METADATA_REFRESH_FAILED",
+                "provider": provider_id, "refreshed": False,
+                "error_type": type(exc).__name__,
             }
-        return result if isinstance(result, dict) else {
-            "status": "INVALID_METADATA_REFRESH_RESPONSE", "provider": provider_id, "refreshed": False,
-        }
+        if not isinstance(result, dict):
+            result = {
+                "status": "INVALID_METADATA_REFRESH_RESPONSE",
+                "provider": provider_id, "refreshed": False,
+            }
+        return self._audit_operation_result(
+            result, "provider.metadata.refresh",
+            success=result.get("refreshed") is True,
+            principal_id=principal_id, provider_id=provider_id,
+        )
 
     def discover_providers(
         self, *, principal_id: str | None = None, category: str | None = None,
@@ -591,14 +605,29 @@ class ProviderService:
         configure = getattr(self.connection_manager, "configure_provider", None)
         if not callable(configure):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
+        audit_intent = self._audit_operation_intent(
+            "provider.configure", principal_id=principal_id, provider_id=provider_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "provider": provider_id, "saved": False, **audit_intent}
         try:
-            return configure(
+            result = configure(
                 provider_id, model=model, endpoint=endpoint,
                 probe_endpoint=probe_endpoint,
                 authentication_required=authentication_required,
             )
         except Exception as exc:
-            return {"status": "PROVIDER_CONFIGURATION_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
+            result = {
+                "status": "PROVIDER_CONFIGURATION_FAILED",
+                "provider": provider_id, "saved": False,
+                "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_PROVIDER_CONFIGURATION_RESPONSE", "provider": provider_id, "saved": False}
+        return self._audit_operation_result(
+            result, "provider.configure", success=result.get("saved") is True,
+            principal_id=principal_id, provider_id=provider_id,
+        )
 
     def set_provider_enabled(
         self,
@@ -621,10 +650,25 @@ class ProviderService:
         setter = getattr(self.connection_manager, "set_provider_enabled", None)
         if not callable(setter):
             return {"status": "CONNECTION_MANAGER_UNAVAILABLE", "provider": provider_id, "saved": False}
+        audit_operation = operation
+        audit_intent = self._audit_operation_intent(
+            audit_operation, principal_id=principal_id, provider_id=provider_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "provider": provider_id, "saved": False, **audit_intent}
         try:
-            return setter(provider_id, enabled)
+            result = setter(provider_id, enabled)
         except Exception as exc:
-            return {"status": "PROVIDER_ENABLEMENT_FAILED", "provider": provider_id, "saved": False, "error_type": type(exc).__name__}
+            result = {
+                "status": "PROVIDER_ENABLEMENT_FAILED", "provider": provider_id,
+                "saved": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_PROVIDER_ENABLEMENT_RESPONSE", "provider": provider_id, "saved": False}
+        return self._audit_operation_result(
+            result, audit_operation, success=result.get("saved") is True,
+            principal_id=principal_id, provider_id=provider_id,
+        )
 
     def assign_provider_role(
         self,
@@ -1007,6 +1051,11 @@ class ProviderService:
                 "status": "AUTHORIZATION_DENIED", "provider": provider_id,
                 "verified": False, "authorization": authorization,
             }
+        audit_intent = self._audit_operation_intent(
+            "provider.verify", principal_id=principal_id, provider_id=provider_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "provider": provider_id, "verified": False, **audit_intent}
         try:
             connection = self.connection_manager.verify_connectivity(
                 provider_id, probe, timeout_seconds=timeout_seconds, environ=environ
@@ -1029,13 +1078,17 @@ class ProviderService:
                 )
             except Exception as exc:
                 health = {"status": "HEALTH_RECORD_FAILED", "saved": False, "error_type": type(exc).__name__}
-        return {
+        result = {
             "status": connection.get("status", "UNKNOWN"),
             "provider": provider_id,
             "verified": connection.get("verified") is True,
             "connection": connection,
             "health": health,
         }
+        return self._audit_operation_result(
+            result, "provider.verify", success=result["verified"],
+            principal_id=principal_id, provider_id=provider_id,
+        )
 
     def rotate_provider_secret(
         self,
@@ -1072,6 +1125,12 @@ class ProviderService:
         secret_ref = provider.get("secret_ref")
         if not isinstance(secret_ref, str):
             return {"status": "PROVIDER_SECRET_REFERENCE_REQUIRED", "rotated": False}
+        audit_intent = self._audit_operation_intent(
+            "provider.credentials.rotate", principal_id=principal_id,
+            provider_id=provider_id, tenant_id=tenant_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "rotated": False, **audit_intent}
         try:
             result = self.secret_manager.rotate_secret(
                 secret_ref,
@@ -1082,7 +1141,7 @@ class ProviderService:
                 tenant_id=tenant_id,
             )
         except Exception as exc:
-            return {
+            result = {
                 "status": "SECRET_ROTATION_FAILED",
                 "rotated": False,
                 "error_type": type(exc).__name__,
@@ -1099,8 +1158,12 @@ class ProviderService:
                 and re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", candidate_status)
                 else "INVALID_ROTATION_RESPONSE"
             )
-            return {"status": safe_status, "rotated": False}
-        return {
+            response = {"status": safe_status, "rotated": False}
+            return self._audit_operation_result(
+                response, "provider.credentials.rotate", success=False,
+                principal_id=principal_id, provider_id=provider_id, tenant_id=tenant_id,
+            )
+        response = {
             "status": "PROVIDER_SECRET_ROTATED",
             "rotated": True,
             "provider_id": provider_id,
@@ -1108,6 +1171,10 @@ class ProviderService:
             **({"version_id": result["version_id"]} if isinstance(result.get("version_id"), str) else {}),
             **({"rotated_at": result["rotated_at"]} if isinstance(result.get("rotated_at"), str) else {}),
         }
+        return self._audit_operation_result(
+            response, "provider.credentials.rotate", success=True,
+            principal_id=principal_id, provider_id=provider_id, tenant_id=tenant_id,
+        )
 
     def verify_http_provider(
         self,
