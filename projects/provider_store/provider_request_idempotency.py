@@ -124,6 +124,10 @@ class ProviderRequestIdempotencyManager:
                 or re.fullmatch(r"[A-Z][A-Z0-9_]{1,79}", result_status) is None
             ):
                 raise ValueError("idempotency result status is invalid")
+            if record["state"] in {"COMPLETED", "NOT_STARTED", "UNKNOWN"} and result_status is None:
+                raise ValueError("terminal idempotency record has no result status")
+            if record["updated_at"] < record["created_at"] or record["lease_expires_at"] < record["created_at"]:
+                raise ValueError("idempotency timestamps are inconsistent")
         return state
 
     def _save(self, state: dict[str, Any]) -> None:
@@ -275,7 +279,15 @@ class ProviderRequestIdempotencyManager:
             except ValueError:
                 return {"saved": False, "status": "IDEMPOTENCY_STATE_INVALID"}
             record = state["requests"].get(key)
-            if not isinstance(record, dict) or record.get("lease_token") != lease_token:
+            if not isinstance(record, dict):
+                return {"saved": False, "status": "IDEMPOTENCY_LEASE_MISMATCH"}
+            if (
+                record.get("state") == target
+                and record.get("result_status") == result_status
+                and record.get("lease_token") is None
+            ):
+                return {"saved": True, "status": "ALREADY_FINALIZED", "state": target}
+            if record.get("lease_token") != lease_token:
                 return {"saved": False, "status": "IDEMPOTENCY_LEASE_MISMATCH"}
             allowed = (
                 target == "STARTED" and record["state"] == "RESERVED"
