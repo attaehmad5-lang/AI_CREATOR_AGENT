@@ -50,14 +50,6 @@ class ProviderAuditLogTests(unittest.TestCase):
 
     def test_event_payloads_and_unknown_fields_are_not_accepted(self):
         manager = self.make_manager()
-        self.assertEqual(
-            manager.record(
-                operation="provider.generate",
-                outcome="STARTED",
-                prompt="private user prompt",
-            )["status"],
-            "TypeError",
-        ) if False else None
         with self.assertRaises(TypeError):
             manager.record(
                 operation="provider.generate",
