@@ -5,9 +5,13 @@ on:
     branches:
       - task-25-provider-connection-manager
       - pollinations-current-api-20261030
+      - 'task25-feature*'
+      - 'task-25-feature-*'
   pull_request:
     branches:
       - main
+      - 'task25-feature*'
+      - 'task-25-feature-*'
 
 permissions:
   contents: read
