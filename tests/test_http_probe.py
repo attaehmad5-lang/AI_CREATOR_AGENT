@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 
 from projects.provider_store.connection_manager import ConnectionManager
-from projects.provider_store.http_probe import ProviderHTTPConnectivityProbe
+from projects.provider_store.http_probe import ProviderDNSResolver, ProviderHTTPConnectivityProbe
 
 
 class _Response:
@@ -44,6 +44,50 @@ class _Opener:
 
 
 class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
+    def test_bounded_dns_resolver_returns_both_address_families_and_uses_lifetime(self):
+        calls = []
+
+        class FakeResolver:
+            timeout = None
+            lifetime = None
+
+            def resolve(self, hostname, record_type, **kwargs):
+                calls.append((hostname, record_type, kwargs))
+                address = "93.184.216.34" if record_type == "A" else "2606:2800:220:1:248:1893:25c8:1946"
+                return type("Answer", (), {
+                    "rrset": [type("Record", (), {"address": address})()]
+                })()
+
+        instance = FakeResolver()
+        dns = ProviderDNSResolver(
+            timeout_seconds=1.0, lifetime_seconds=3.0,
+            resolver_factory=lambda: instance,
+        )
+        records = dns("api.example.com", 443, type=socket.SOCK_STREAM)
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0][0], socket.AF_INET)
+        self.assertEqual(records[1][0], socket.AF_INET6)
+        self.assertEqual(instance.timeout, 1.0)
+        self.assertEqual(instance.lifetime, 3.0)
+        self.assertEqual([call[0] for call in calls], ["api.example.com.", "api.example.com."])
+        self.assertEqual([call[1] for call in calls], ["A", "AAAA"])
+        self.assertTrue(all(call[2]["search"] is False for call in calls))
+        self.assertTrue(all(0 < call[2]["lifetime"] <= 3.0 for call in calls))
+
+    def test_bounded_dns_resolver_converts_timeout_to_safe_timeout_error(self):
+        import dns.exception
+
+        class TimeoutResolver:
+            timeout = None
+            lifetime = None
+
+            def resolve(self, hostname, record_type, **kwargs):
+                raise dns.exception.Timeout
+
+        dns = ProviderDNSResolver(resolver_factory=TimeoutResolver)
+        with self.assertRaises(TimeoutError):
+            dns("api.example.com", 443, type=socket.SOCK_STREAM)
+
     def test_response_cleanup_failure_does_not_mask_successful_probe(self):
         class Response:
             status = 204
