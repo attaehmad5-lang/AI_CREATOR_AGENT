@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from projects.provider_store.provider_metrics_manager import ProviderMetricsManager
@@ -36,6 +36,39 @@ class ProviderMetricsManagerTests(unittest.TestCase):
         self.assertEqual(metrics["p50_latency_ms"], 10)
         self.assertEqual(metrics["p95_latency_ms"], 30)
         self.assertEqual(metrics["avg_queue_wait_ms"], 4)
+
+    def test_throughput_and_timeout_rate_use_requested_time_window(self):
+        current = [self.now - timedelta(seconds=120)]
+        manager = ProviderMetricsManager(max_samples=10, clock=lambda: current[0])
+        manager.record(
+            provider_id="image-a", category="image", success=True, latency_ms=10,
+        )
+        current[0] = self.now - timedelta(seconds=30)
+        manager.record(
+            provider_id="image-a", category="image", success=False,
+            latency_ms=30, timed_out=True,
+        )
+        current[0] = self.now - timedelta(seconds=10)
+        manager.record(
+            provider_id="image-a", category="image", success=True, latency_ms=20,
+        )
+        current[0] = self.now
+
+        result = manager.snapshot(provider_id="image-a", window_seconds=60)
+        metrics = result["metrics"]
+        self.assertEqual(metrics["sample_count"], 3)
+        self.assertEqual(metrics["window_sample_count"], 2)
+        self.assertEqual(metrics["throughput_per_minute"], 2.0)
+        self.assertEqual(metrics["timeout_count"], 1)
+        self.assertAlmostEqual(metrics["timeout_rate"], 1 / 3)
+
+    def test_invalid_throughput_window_is_rejected(self):
+        for value in (0, -1, float("nan"), float("inf"), True, 86_401):
+            with self.subTest(window_seconds=value):
+                self.assertEqual(
+                    self.manager.snapshot(window_seconds=value)["status"],
+                    "INVALID_METRIC_WINDOW",
+                )
 
     def test_sample_history_is_bounded(self):
         for value in (1, 2, 3, 4):
