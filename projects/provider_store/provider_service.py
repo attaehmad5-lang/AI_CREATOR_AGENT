@@ -1301,7 +1301,8 @@ class ProviderService:
 
         safe_job = dict(job)
         for protected_field in (
-            "lease_token", "lease_token_hash", "idempotency_key",
+            "lease_token", "lease_token_hash", "remote_submission_lease_token_hash",
+            "remote_submission_worker_id", "idempotency_key",
             "idempotency_key_hash", "request_fingerprint",
             "provider_idempotency_key",
         ):
