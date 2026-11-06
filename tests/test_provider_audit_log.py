@@ -82,6 +82,36 @@ class ProviderAuditLogTests(unittest.TestCase):
         self.assertRegex(event["tenant_ref"], r"^[0-9a-f]{64}$")
         self.assertNotIn("secret", raw.casefold())
 
+    def test_trace_reference_is_hmac_pseudonymized_in_audit_record(self):
+        trace_id = "a" * 32
+        result = self.manager().record(
+            event_type="provider.routing.decision",
+            provider_id="image",
+            request_id="trace-correlated-request",
+            trace_id=trace_id,
+            operation="provider.route",
+            outcome="ALLOWED",
+            reason_code="ROUTED",
+        )
+        self.assertTrue(result["saved"])
+        raw = self.path.read_text(encoding="utf-8")
+        self.assertNotIn(trace_id, raw)
+        event = self.manager().read_events()["events"][0]
+        self.assertRegex(event["trace_ref"], r"^[0-9a-f]{64}$")
+        self.assertNotEqual(event["trace_ref"], trace_id)
+
+    def test_invalid_trace_reference_is_rejected(self):
+        result = self.manager().record(
+            event_type="provider.routing.decision",
+            provider_id="image",
+            trace_id="0" * 32,
+            operation="provider.route",
+            outcome="ALLOWED",
+            reason_code="ROUTED",
+        )
+        self.assertFalse(result["saved"])
+        self.assertEqual(self.manager().verify()["event_count"], 0)
+
     def test_credential_rotation_event_stores_backend_but_not_secret_reference(self):
         manager = self.manager()
         result = manager.record(
