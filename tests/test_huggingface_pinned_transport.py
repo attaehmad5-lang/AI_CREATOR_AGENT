@@ -161,6 +161,32 @@ class HuggingFacePinnedTransportTests(unittest.TestCase):
             transport.handle_request(RequestStub("https://router.huggingface.co/path"))
         self.assertTrue(response.closed)
 
+    def test_real_huggingface_factory_preserves_offline_request_hook(self):
+        try:
+            from huggingface_hub.utils import httpx as hub_httpx
+            from huggingface_hub.utils._http import hf_request_event_hook
+        except ImportError:
+            self.skipTest("huggingface_hub runtime HTTP client is not installed")
+        original = pinned._INSTALLED
+        captured = {}
+        try:
+            pinned._INSTALLED = False
+            pinned.install_huggingface_pinned_transport(
+                httpx_module=hub_httpx,
+                set_client_factory=lambda factory: captured.setdefault("factory", factory),
+                request_event_hook=hf_request_event_hook,
+                timeout_seconds=90,
+            )
+            client = captured["factory"]()
+            try:
+                self.assertIsInstance(client, hub_httpx.Client)
+                self.assertFalse(client.follow_redirects)
+                self.assertIsInstance(client._transport, hub_httpx.BaseTransport)
+            finally:
+                client.close()
+        finally:
+            pinned._INSTALLED = original
+
     def test_factory_installs_redirect_disabled_http_client(self):
         original = pinned._INSTALLED
         pinned._INSTALLED = False
