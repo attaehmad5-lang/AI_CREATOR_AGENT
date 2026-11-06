@@ -56,6 +56,7 @@ class ProviderJobManager:
         max_attempts: int = 3,
         backpressure_retry_seconds: int = 5,
         scheduling_strategy: str = "PROJECT_ROUND_ROBIN",
+        provider_concurrency_limits: dict[str, int] | None = None,
         clock: Any = None,
     ) -> None:
         for value, name, minimum, maximum in (
@@ -70,6 +71,21 @@ class ProviderJobManager:
                 raise ValueError(f"{name} is outside safe limits")
         if scheduling_strategy not in {"PROJECT_ROUND_ROBIN", "GLOBAL_PRIORITY"}:
             raise ValueError("scheduling_strategy must be PROJECT_ROUND_ROBIN or GLOBAL_PRIORITY")
+        if provider_concurrency_limits is None:
+            provider_concurrency_limits = {}
+        if not isinstance(provider_concurrency_limits, dict) or len(provider_concurrency_limits) > 10_000:
+            raise ValueError("provider_concurrency_limits must be a bounded mapping")
+        normalized_provider_limits: dict[str, int] = {}
+        for provider_id, provider_limit in provider_concurrency_limits.items():
+            if not isinstance(provider_id, str) or not _ID_RE.fullmatch(provider_id):
+                raise ValueError("invalid provider ID in concurrency limits")
+            if (
+                isinstance(provider_limit, bool)
+                or not isinstance(provider_limit, int)
+                or not 1 <= provider_limit <= max_concurrent
+            ):
+                raise ValueError("provider concurrency limit is outside safe bounds")
+            normalized_provider_limits[provider_id] = provider_limit
         if clock is not None and not callable(clock):
             raise ValueError("clock must be callable")
         self.scheduling_strategy = scheduling_strategy
@@ -77,6 +93,7 @@ class ProviderJobManager:
         self.max_queue_size = max_queue_size
         self.max_job_records = max_job_records
         self.max_concurrent = max_concurrent
+        self.provider_concurrency_limits = dict(normalized_provider_limits)
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.backpressure_retry_seconds = backpressure_retry_seconds
@@ -418,14 +435,15 @@ class ProviderJobManager:
         now = self.clock().astimezone(timezone.utc)
         with self._transaction():
             changed = self._reap_expired_locked(now)
-            running = sum(
-                1 for job in self.data["jobs"].values()
+            running_jobs = [
+                job for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "RUNNING"
-            )
-            if running >= self.max_concurrent:
+            ]
+            if len(running_jobs) >= self.max_concurrent:
                 if changed:
                     self._save()
                 return {"status": "CONCURRENCY_LIMIT", "job": None}
+
             queued = [
                 job for job in self.data["jobs"].values()
                 if isinstance(job, dict) and job.get("status") == "QUEUED"
@@ -435,12 +453,31 @@ class ProviderJobManager:
                     self._save()
                 return {"status": "QUEUE_EMPTY", "job": None}
 
+            running_by_provider: dict[str, int] = {}
+            for running_job in running_jobs:
+                current_provider = running_job.get("provider_id")
+                if isinstance(current_provider, str):
+                    running_by_provider[current_provider] = running_by_provider.get(current_provider, 0) + 1
+            eligible = [
+                candidate for candidate in queued
+                if running_by_provider.get(candidate["provider_id"], 0)
+                < self.provider_concurrency_limits.get(candidate["provider_id"], self.max_concurrent)
+            ]
+            if not eligible:
+                if changed:
+                    self._save()
+                return {
+                    "status": "PROVIDER_CONCURRENCY_LIMIT",
+                    "job": None,
+                    "queued": len(queued),
+                }
+
             if self.scheduling_strategy == "GLOBAL_PRIORITY":
-                queued.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
-                job = queued[0]
+                eligible.sort(key=lambda job: (-job["priority"], job["created_at"], job["job_id"]))
+                job = eligible[0]
             else:
                 project_jobs: dict[str, list[dict[str, Any]]] = {}
-                for candidate in queued:
+                for candidate in eligible:
                     project_jobs.setdefault(candidate["project_id"], []).append(candidate)
                 project_order = sorted(
                     project_jobs,
