@@ -332,6 +332,8 @@ def _fingerprint_value(value: Any) -> Any:
         return value
     if isinstance(value, bytes):
         return {"bytes_sha256": hashlib.sha256(value).hexdigest(), "length": len(value)}
+    if isinstance(value, os.PathLike):
+        return os.fspath(value)
     if isinstance(value, Mapping):
         result = {}
         for key, item in value.items():
@@ -378,6 +380,16 @@ def provider_execution_idempotent(function: Any) -> Any:
                 "modality": kwargs.get("modality"),
                 "estimated_cost": kwargs.get("estimated_cost"),
                 "estimated_cost_unit": kwargs.get("estimated_cost_unit", "USD"),
+                "data_categories": kwargs.get("data_categories", ("user_content",)),
+                "retention_days": kwargs.get("retention_days", 0),
+                "provider_training_use": kwargs.get("provider_training_use", False),
+                "user_training_consent": kwargs.get("user_training_consent", False),
+                "output_path": kwargs.get("output_path"),
+                "require_modality_binding": kwargs.get("require_modality_binding", False),
+                "use_managed_credential": kwargs.get("use_managed_credential", False),
+                "require_fresh_health_check": kwargs.get("require_fresh_health_check", False),
+                "health_stale_after_seconds": kwargs.get("health_stale_after_seconds", 300.0),
+                "health_max_latency_ms": kwargs.get("health_max_latency_ms"),
                 "adapter": adapter_name,
                 "adapter_options": kwargs.get("adapter_options") or {},
                 "route_options": {
