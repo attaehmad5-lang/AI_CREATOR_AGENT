@@ -283,7 +283,6 @@ class ProviderJobManager:
         priority: int = 50,
         tenant_id: str | None = None,
         idempotency_key: str | None = None,
-        request_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         for value, name in ((job_id, "job_id"), (project_id, "project_id"), (provider_id, "provider_id")):
             if not isinstance(value, str) or not _ID_RE.fullmatch(value):
@@ -296,19 +295,24 @@ class ProviderJobManager:
             return {"status": "INVALID_TENANT_ID", "accepted": False}
         if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
             return {"status": "INVALID_PRIORITY", "accepted": False}
+        request_fingerprint = None
         if idempotency_key is None:
-            if request_fingerprint is not None:
-                return {"status": "IDEMPOTENCY_KEY_REQUIRED", "accepted": False}
             key_digest = None
         else:
             if not isinstance(idempotency_key, str) or not _IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
                 return {"status": "INVALID_IDEMPOTENCY_KEY", "accepted": False}
-            if not isinstance(request_fingerprint, str) or not _SHA256_RE.fullmatch(request_fingerprint):
-                return {"status": "INVALID_REQUEST_FINGERPRINT", "accepted": False}
             key_digest = _idempotency_key_digest(
                 tenant_id=tenant_id, project_id=project_id,
                 provider_id=provider_id, key=idempotency_key,
             )
+            fingerprint_material = json.dumps(
+                ["provider-job-request-v1", tenant_id, project_id, provider_id, payload_ref, priority],
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+            request_fingerprint = hashlib.sha256(
+                fingerprint_material.encode("utf-8")
+            ).hexdigest()
         now = self.clock().astimezone(timezone.utc).isoformat()
         with self._transaction():
             if key_digest is not None:
