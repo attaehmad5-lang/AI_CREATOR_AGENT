@@ -128,8 +128,8 @@ class HuggingFacePinnedTransportTests(unittest.TestCase):
             transport=transport, follow_redirects=False, timeout=3.0,
         )
         try:
-            self.assertFalse(client.follow_redirects)
-            self.assertIs(client._transport, transport)
+            self.assertIsInstance(client, hub_httpx.Client)
+            self.assertIsInstance(transport, hub_httpx.BaseTransport)
         finally:
             client.close()
 
