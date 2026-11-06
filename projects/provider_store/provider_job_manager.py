@@ -265,6 +265,10 @@ class ProviderJobManager:
                     job.get("deadline_at") is not None
                     and _parse_aware_datetime(job.get("deadline_at")) is None
                 )
+                or (
+                    job.get("deadline_exceeded_at") is not None
+                    and _parse_aware_datetime(job.get("deadline_exceeded_at")) is None
+                )
                 or not isinstance(job.get("remote_submission_state", "NOT_SUBMITTED"), str)
                 or job.get("remote_submission_state", "NOT_SUBMITTED") not in _REMOTE_SUBMISSION_STATES
                 or (
@@ -591,13 +595,17 @@ class ProviderJobManager:
                         job["cancel_requested"] = False
                         changed = True
                         continue
-                elif job.get("cancel_requested") is not True:
+                elif job.get("status") == "RUNNING":
                     # Running work gets a cooperative stop signal. Do not discard a possibly
                     # billable remote job ID before the provider confirms cancellation/terminal state.
-                    job["cancel_requested"] = True
-                    job["deadline_exceeded_at"] = now_utc.isoformat()
-                    job["updated_at"] = now_utc.isoformat()
-                    changed = True
+                    if job.get("cancel_requested") is not True:
+                        job["cancel_requested"] = True
+                        changed = True
+                    if job.get("deadline_exceeded_at") is None:
+                        job["deadline_exceeded_at"] = now_utc.isoformat()
+                        changed = True
+                    if changed:
+                        job["updated_at"] = now_utc.isoformat()
             if job.get("status") != "RUNNING":
                 continue
             lease_until = job.get("lease_until")
@@ -621,12 +629,12 @@ class ProviderJobManager:
             if job.get("cancel_requested") is True and remote_outcome_may_exist:
                 job["status"] = "QUEUED"
                 job["last_error_code"] = "WORKER_LEASE_EXPIRED_DURING_CANCELLATION"
-            elif job.get("cancel_requested") is True:
-                job["status"] = "CANCELLED"
-                job["completed_at"] = now.isoformat()
-            elif deadline_expired:
+            elif deadline_expired or job.get("deadline_exceeded_at") is not None:
                 job["status"] = "FAILED"
                 job["error_code"] = "JOB_DEADLINE_EXCEEDED"
+                job["completed_at"] = now.isoformat()
+            elif job.get("cancel_requested") is True:
+                job["status"] = "CANCELLED"
                 job["completed_at"] = now.isoformat()
             elif job.get("attempts", 0) < self.max_attempts:
                 job["status"] = "QUEUED"
