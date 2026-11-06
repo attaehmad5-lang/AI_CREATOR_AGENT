@@ -18,12 +18,26 @@ from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}\Z")
 _REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\Z")
 _ERROR_RE = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
+_IDEMPOTENCY_KEY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~:-]{0,127}\Z")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 _TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED"}
 
 
 def _lease_token_digest(token: str) -> str:
     """Hash high-entropy worker lease tokens before persistent storage."""
     return hashlib.sha256(token.encode("ascii")).hexdigest()
+
+
+def _idempotency_key_digest(
+    *, tenant_id: str | None, project_id: str, provider_id: str, key: str
+) -> str:
+    """Scope a client key to one tenant/project/provider without storing the key."""
+    material = json.dumps(
+        ["provider-job-idempotency-v1", tenant_id, project_id, provider_id, key],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 class ProviderJobManager:
@@ -67,7 +81,7 @@ class ProviderJobManager:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
         self.data: dict[str, Any] = {
-            "version": "1.0", "jobs": {},
+            "version": "1.0", "jobs": {}, "idempotency_index": {},
             "scheduler": {"last_project_id": None},
         }
         if self.state_path.exists():
@@ -80,7 +94,10 @@ class ProviderJobManager:
 
     def _reload(self) -> bool:
         if not self.state_path.exists():
-            self.data = {"version": "1.0", "jobs": {}}
+            self.data = {
+                "version": "1.0", "jobs": {}, "idempotency_index": {},
+                "scheduler": {"last_project_id": None},
+            }
             return False
         try:
             with self.state_path.open("r", encoding="utf-8") as stream:
@@ -108,7 +125,12 @@ class ProviderJobManager:
         ):
             raise ValueError("invalid provider job scheduler state")
         loaded["scheduler"] = scheduler
+        index_missing = "idempotency_index" not in loaded
+        idempotency_index = loaded.get("idempotency_index", {})
+        if not isinstance(idempotency_index, dict) or len(idempotency_index) > self.max_job_records:
+            raise ValueError("invalid provider job idempotency index")
         migrated_legacy_tokens = False
+        expected_idempotency_index: dict[str, str] = {}
         for job_id, job in loaded["jobs"].items():
             if isinstance(job, dict) and "lease_token" in job and "lease_token_hash" not in job:
                 legacy_token = job.pop("lease_token")
@@ -183,17 +205,42 @@ class ProviderJobManager:
                 or not isinstance(job.get("priority"), int) or not 0 <= job["priority"] <= 100
             ):
                 raise ValueError("invalid provider job record")
+            key_digest = job.get("idempotency_key_hash")
+            fingerprint = job.get("request_fingerprint")
+            if key_digest is None:
+                if fingerprint is not None:
+                    raise ValueError("invalid provider job idempotency record")
+            else:
+                if (
+                    not isinstance(key_digest, str) or not _SHA256_RE.fullmatch(key_digest)
+                    or not isinstance(fingerprint, str) or not _SHA256_RE.fullmatch(fingerprint)
+                    or key_digest in expected_idempotency_index
+                ):
+                    raise ValueError("invalid provider job idempotency record")
+                expected_idempotency_index[key_digest] = job_id
+        if not index_missing and idempotency_index != expected_idempotency_index:
+            raise ValueError("provider job idempotency index does not match stored jobs")
+        loaded["idempotency_index"] = expected_idempotency_index
         self.data = loaded
-        return migrated_legacy_tokens
+        return migrated_legacy_tokens or index_missing
 
     @staticmethod
-    def _public_job(job: dict[str, Any], *, lease_token: str | None = None) -> dict[str, Any]:
-        """Hide persisted token verifiers; reveal a token only in the worker claim response."""
+    def _public_job(
+        job: dict[str, Any],
+        *,
+        lease_token: str | None = None,
+        include_provider_idempotency_key: bool = False,
+    ) -> dict[str, Any]:
+        """Hide internal digests; expose a stable provider key only to a claiming worker."""
         public_job = dict(job)
         public_job.pop("lease_token_hash", None)
         public_job.pop("lease_token", None)
+        key_digest = public_job.pop("idempotency_key_hash", None)
+        public_job.pop("request_fingerprint", None)
         if lease_token is not None:
             public_job["lease_token"] = lease_token
+        if include_provider_idempotency_key and isinstance(key_digest, str):
+            public_job["provider_idempotency_key"] = key_digest
         return public_job
 
     @contextmanager
@@ -235,6 +282,7 @@ class ProviderJobManager:
         payload_ref: str,
         priority: int = 50,
         tenant_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         for value, name in ((job_id, "job_id"), (project_id, "project_id"), (provider_id, "provider_id")):
             if not isinstance(value, str) or not _ID_RE.fullmatch(value):
@@ -247,8 +295,48 @@ class ProviderJobManager:
             return {"status": "INVALID_TENANT_ID", "accepted": False}
         if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 100:
             return {"status": "INVALID_PRIORITY", "accepted": False}
+        request_fingerprint = None
+        if idempotency_key is None:
+            key_digest = None
+        else:
+            if not isinstance(idempotency_key, str) or not _IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
+                return {"status": "INVALID_IDEMPOTENCY_KEY", "accepted": False}
+            key_digest = _idempotency_key_digest(
+                tenant_id=tenant_id, project_id=project_id,
+                provider_id=provider_id, key=idempotency_key,
+            )
+            fingerprint_material = json.dumps(
+                ["provider-job-request-v1", tenant_id, project_id, provider_id, payload_ref, priority],
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+            request_fingerprint = hashlib.sha256(
+                fingerprint_material.encode("utf-8")
+            ).hexdigest()
         now = self.clock().astimezone(timezone.utc).isoformat()
         with self._transaction():
+            if key_digest is not None:
+                prior_job_id = self.data["idempotency_index"].get(key_digest)
+                if prior_job_id is not None:
+                    prior = (
+                        self.data["jobs"].get(prior_job_id)
+                        if isinstance(prior_job_id, str) else None
+                    )
+                    if not isinstance(prior, dict):
+                        return {"status": "IDEMPOTENCY_STATE_INVALID", "accepted": False}
+                    same_scope = all(prior.get(key) == value for key, value in {
+                        "tenant_id": tenant_id, "project_id": project_id,
+                        "provider_id": provider_id,
+                    }.items())
+                    if not same_scope:
+                        return {"status": "IDEMPOTENCY_STATE_INVALID", "accepted": False}
+                    if prior.get("request_fingerprint") != request_fingerprint:
+                        return {"status": "IDEMPOTENCY_KEY_CONFLICT", "accepted": False}
+                    return {
+                        "status": "ALREADY_SUBMITTED", "accepted": True,
+                        "idempotency_replayed": True,
+                        "job": self._public_job(prior),
+                    }
             existing = self.data["jobs"].get(job_id)
             if isinstance(existing, dict):
                 if existing.get("tenant_id") != tenant_id:
@@ -257,10 +345,18 @@ class ProviderJobManager:
                     "project_id": project_id, "provider_id": provider_id,
                     "payload_ref": payload_ref, "priority": priority,
                 }.items())
+                same_idempotency = (
+                    key_digest is None and existing.get("idempotency_key_hash") is None
+                ) or (
+                    key_digest is not None
+                    and existing.get("idempotency_key_hash") == key_digest
+                    and existing.get("request_fingerprint") == request_fingerprint
+                )
+                same = same and same_idempotency
                 return {
                     "status": "ALREADY_SUBMITTED" if same else "REQUEST_ID_CONFLICT",
                     "accepted": same,
-                    "job": self._public_job(existing),
+                    "job": self._public_job(existing) if same else None,
                 }
             if len(self.data["jobs"]) >= self.max_job_records:
                 return {"status": "JOB_HISTORY_CAPACITY_REACHED", "accepted": False}
@@ -282,6 +378,10 @@ class ProviderJobManager:
             }
             if tenant_id is not None:
                 job["tenant_id"] = tenant_id
+            if key_digest is not None:
+                job["idempotency_key_hash"] = key_digest
+                job["request_fingerprint"] = request_fingerprint
+                self.data["idempotency_index"][key_digest] = job_id
             self.data["jobs"][job_id] = job
             self._save()
             return {"status": "JOB_QUEUED", "accepted": True, "job": self._public_job(job)}
@@ -381,7 +481,13 @@ class ProviderJobManager:
             job["updated_at"] = now.isoformat()
             job["lease_until"] = (now + timedelta(seconds=self.lease_seconds)).isoformat()
             self._save()
-            return {"status": "JOB_CLAIMED", "job": self._public_job(job, lease_token=lease_token)}
+            return {
+                "status": "JOB_CLAIMED",
+                "job": self._public_job(
+                    job, lease_token=lease_token,
+                    include_provider_idempotency_key=True,
+                ),
+            }
 
     def renew_lease(
         self, *, job_id: str, worker_id: str, lease_token: str

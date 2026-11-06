@@ -1261,8 +1261,12 @@ class ProviderService:
             return safe_result
 
         safe_job = dict(job)
-        safe_job.pop("lease_token", None)
-        safe_job.pop("lease_token_hash", None)
+        for protected_field in (
+            "lease_token", "lease_token_hash", "idempotency_key",
+            "idempotency_key_hash", "request_fingerprint",
+            "provider_idempotency_key",
+        ):
+            safe_job.pop(protected_field, None)
         if sensitive_data_policy is not None:
             try:
                 scan = sensitive_data_policy.inspect(safe_job)
@@ -1313,7 +1317,7 @@ class ProviderService:
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
-        tenant_id: str | None = None,
+        tenant_id: str | None = None, idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
@@ -1333,6 +1337,7 @@ class ProviderService:
                 "payload_ref": payload_ref,
                 "priority": priority,
                 "tenant_id": tenant_id,
+                "idempotency_key_present": idempotency_key is not None,
             },
         })
         if rejection is not None:
@@ -1342,8 +1347,10 @@ class ProviderService:
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
                 "payload_ref": payload_ref, "priority": priority,
             }
-            if self.tenant_isolation_manager is not None:
+            if self.tenant_isolation_manager is not None or tenant_id is not None:
                 submit_args["tenant_id"] = tenant_id
+            if idempotency_key is not None:
+                submit_args["idempotency_key"] = idempotency_key
             result = self.job_manager.submit(**submit_args)
         except Exception as exc:
             return {"status": "JOB_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}

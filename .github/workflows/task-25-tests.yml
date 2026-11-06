@@ -7,10 +7,12 @@ on:
       - pollinations-current-api-20261030
       - task-25-feature-72-audit-trail
       - task-25-feature-73-current-trace-propagation
+      - task-25-feature-74-idempotency-keys
   pull_request:
     branches:
       - main
       - task-25-feature-72-audit-trail
+      - task-25-feature-73-current-trace-propagation
 
 permissions:
   contents: read

@@ -1,6 +1,7 @@
 """Queue capacity, idempotency, async lifecycle, and backpressure tests."""
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -205,6 +206,123 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertEqual(second["status"], "JOB_HISTORY_CAPACITY_REACHED")
         self.assertEqual(duplicate["status"], "ALREADY_SUBMITTED")
         self.assertEqual(len(limited.data["jobs"]), 1)
+
+    def test_scoped_idempotency_key_deduplicates_different_job_ids_and_survives_restart(self):
+        key = "client-retry-key-2026"
+        first = self.manager.submit(
+            job_id="idem-job-1", project_id="film", provider_id="image",
+            payload_ref="payload:idem-1", idempotency_key=key
+        )
+        duplicate = self.manager.submit(
+            job_id="idem-job-2", project_id="film", provider_id="image",
+            payload_ref="payload:idem-1", idempotency_key=key
+        )
+        self.assertEqual(first["status"], "JOB_QUEUED")
+        self.assertEqual(duplicate["status"], "ALREADY_SUBMITTED")
+        self.assertTrue(duplicate["idempotency_replayed"])
+        self.assertEqual(duplicate["job"]["job_id"], "idem-job-1")
+        persisted = self.path.read_text(encoding="utf-8")
+        self.assertNotIn(key, persisted)
+        self.assertEqual(len(json.loads(persisted)["idempotency_index"]), 1)
+        public = self.manager.poll(job_id="idem-job-1")["job"]
+        self.assertNotIn("idempotency_key_hash", public)
+        self.assertNotIn("request_fingerprint", public)
+        self.assertNotIn("provider_idempotency_key", public)
+
+        reloaded = ProviderJobManager(
+            self.path, lease_seconds=10, max_attempts=2,
+            clock=lambda: self.now[0],
+        )
+        replay = reloaded.submit(
+            job_id="idem-job-3", project_id="film", provider_id="image",
+            payload_ref="payload:idem-1", idempotency_key=key
+        )
+        self.assertEqual(replay["status"], "ALREADY_SUBMITTED")
+        claim = reloaded.claim_next(worker_id="worker-idem")
+        self.assertEqual(claim["status"], "JOB_CLAIMED")
+        provider_key = claim["job"]["provider_idempotency_key"]
+        self.assertRegex(provider_key, r"^[0-9a-f]{64}$")
+        self.now[0] += timedelta(seconds=11)
+        retry_claim = reloaded.claim_next(worker_id="worker-retry")
+        self.assertEqual(retry_claim["status"], "JOB_CLAIMED")
+        self.assertEqual(retry_claim["job"]["job_id"], "idem-job-1")
+        self.assertEqual(retry_claim["job"]["provider_idempotency_key"], provider_key)
+        self.assertNotIn(key, self.path.read_text(encoding="utf-8"))
+
+    def test_idempotency_key_reuse_with_changed_request_payload_conflicts(self):
+        first = self.manager.submit(
+            job_id="idem-conflict-1", project_id="film", provider_id="image",
+            payload_ref="payload:idem-conflict-1", idempotency_key="stable-client-key"
+        )
+        replay = self.manager.submit(
+            job_id="idem-conflict-2", project_id="film", provider_id="image",
+            payload_ref="payload:changed-request", idempotency_key="stable-client-key"
+        )
+        self.assertEqual(first["status"], "JOB_QUEUED")
+        self.assertEqual(replay["status"], "IDEMPOTENCY_KEY_CONFLICT")
+        self.assertFalse(replay["accepted"])
+        self.assertEqual(len(self.manager.data["jobs"]), 1)
+
+    def test_idempotency_keys_are_isolated_by_tenant_project_and_provider(self):
+        manager = ProviderJobManager(
+            self.path, max_queue_size=10, max_concurrent=1,
+            clock=lambda: self.now[0],
+        )
+        scopes = [
+            (None, "film-a", "image"),
+            (None, "film-b", "image"),
+            (None, "film-a", "video"),
+            ("tenant-a", "film-a", "image"),
+            ("tenant-b", "film-a", "image"),
+        ]
+        for index, (tenant, project, provider) in enumerate(scopes):
+            result = manager.submit(
+                job_id=f"scope-job-{index}", project_id=project,
+                provider_id=provider, payload_ref=f"payload:scope-{index}",
+                tenant_id=tenant, idempotency_key="same-key"
+            )
+            self.assertEqual(result["status"], "JOB_QUEUED")
+        self.assertEqual(len(manager.data["jobs"]), len(scopes))
+        self.assertEqual(
+            len(manager.data["idempotency_index"]), len(scopes)
+        )
+
+    def test_concurrent_same_key_submissions_create_exactly_one_job(self):
+        def submit(index):
+            return self.manager.submit(
+                job_id=f"concurrent-idem-{index}", project_id="film",
+                provider_id="image", payload_ref="payload:concurrent-shared",
+                idempotency_key="one-logical-request"
+            )
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(submit, range(12)))
+        self.assertEqual(
+            sum(result["status"] == "JOB_QUEUED" for result in results), 1
+        )
+        self.assertEqual(
+            sum(result["status"] == "ALREADY_SUBMITTED" for result in results), 11
+        )
+        self.assertEqual(len(self.manager.data["jobs"]), 1)
+        self.assertEqual(len(self.manager.data["idempotency_index"]), 1)
+
+    def test_idempotency_fields_reject_malformed_keys(self):
+        bad_key = self.manager.submit(
+            job_id="idem-bad-key", project_id="film", provider_id="image",
+            payload_ref="payload:idem-bad-key", idempotency_key="bad key",
+        )
+        self.assertEqual(bad_key["status"], "INVALID_IDEMPOTENCY_KEY")
+        self.assertEqual(len(self.manager.data["jobs"]), 0)
+
+    def test_corrupt_idempotency_index_fails_closed_on_reload(self):
+        self.manager.submit(
+            job_id="idem-integrity", project_id="film", provider_id="image",
+            payload_ref="payload:idem-integrity", idempotency_key="integrity-key"
+        )
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["idempotency_index"] = {}
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "idempotency index"):
+            ProviderJobManager(self.path, clock=lambda: self.now[0])
 
     def test_job_store_rejects_unsupported_version(self):
         self.path.write_text('{"version":"2.0","jobs":{}}', encoding="utf-8")
