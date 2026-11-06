@@ -146,6 +146,7 @@ class ProviderRetentionManager:
         if (
             not isinstance(data_categories, (list, tuple))
             or any(not isinstance(value, str) or value not in known_categories for value in data_categories)
+            or "credential" in data_categories
             or len(data_categories) != len(set(data_categories))
         ):
             return {"saved": False, "status": "INVALID_DATA_CATEGORIES"}
