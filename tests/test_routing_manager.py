@@ -71,6 +71,32 @@ class ProviderRoutingManagerTests(unittest.TestCase):
 
         return ProviderRoutingManager(connections, benchmark_manager=BenchmarkStub(), quota_manager=quota_manager)
 
+    def test_w3c_trace_context_is_validated_and_returned_with_route(self):
+        router = ProviderRoutingManager(self.connections)
+        trace_id = "a" * 32
+        span_id = "b" * 16
+        traceparent = f"00-{trace_id}-{span_id}-01"
+        result = router.route(
+            category="image", project_id="film",
+            request_id="trace-route-request",
+            trace_id=trace_id, span_id=span_id, traceparent=traceparent,
+        )
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["trace_id"], trace_id)
+        self.assertEqual(result["span_id"], span_id)
+        self.assertEqual(result["traceparent"], traceparent)
+
+    def test_mismatched_w3c_trace_context_fails_closed_before_provider_selection(self):
+        router = ProviderRoutingManager(self.connections)
+        result = router.route(
+            category="image", project_id="film",
+            trace_id="a" * 32,
+            span_id="b" * 16,
+            traceparent=f"00-{'c' * 32}-{'b' * 16}-00",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertEqual(result["status"], "INVALID_TRACE_CONTEXT")
+
     def test_confidence_aware_routing_adapts_to_verified_benchmark_history(self):
         router = self._confidence_router([
             {"provider_id": "fallback", "model_id": "stable-diffusion-xl", "modality": "image",
