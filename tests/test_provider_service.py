@@ -2453,5 +2453,103 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(service.validate_output("missing.png", modality="image")["status"], "OUTPUT_VALIDATOR_UNAVAILABLE")
 
 
+    def test_service_forwards_job_deadline_and_worker_can_observe_deadline(self):
+        now = [datetime(2026, 10, 16, 12, tzinfo=timezone.utc)]
+        jobs = ProviderJobManager(
+            self.root / "service-deadline-jobs.json",
+            clock=lambda: now[0],
+            lease_seconds=30,
+        )
+        authorization = ProviderAuthorizationManager(
+            self.root / "service-deadline-auth.json"
+        )
+        authorization.assign_role("creator-1", "creator")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=jobs,
+        )
+        deadline = now[0] + timedelta(seconds=5)
+        accepted = service.submit_job(
+            job_id="service-deadline-job",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:service-deadline",
+            principal_id="creator-1",
+            idempotency_key="service-deadline-key",
+            deadline_at=deadline.isoformat(),
+        )
+        self.assertEqual(accepted["status"], "JOB_QUEUED")
+        self.assertEqual(accepted["job"]["deadline_at"], deadline.isoformat())
+        claimed = service.claim_next_job(
+            worker_id="worker-1", principal_id="creator-1"
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        control = service.get_worker_job_control(
+            job_id="service-deadline-job",
+            worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"],
+            principal_id="creator-1",
+        )
+        self.assertEqual(control["status"], "WORKER_CONTINUE")
+        self.assertGreater(control["seconds_to_deadline"], 0)
+
+        now[0] += timedelta(seconds=6)
+        expired = service.get_worker_job_control(
+            job_id="service-deadline-job",
+            worker_id="worker-1",
+            lease_token=claimed["job"]["lease_token"],
+            principal_id="creator-1",
+        )
+        self.assertEqual(expired["status"], "JOB_DEADLINE_EXCEEDED")
+        self.assertTrue(expired["stop_requested"])
+        self.assertEqual(jobs.data["jobs"]["service-deadline-job"]["status"], "FAILED")
+
+    def test_graceful_shutdown_controls_require_admin_and_are_observable(self):
+        jobs = ProviderJobManager(
+            self.root / "service-shutdown-jobs.json",
+            lease_seconds=30,
+        )
+        authorization = ProviderAuthorizationManager(
+            self.root / "service-shutdown-auth.json"
+        )
+        authorization.assign_role("admin-1", "admin")
+        authorization.assign_role("creator-1", "creator")
+        authorization.assign_role("viewer-1", "viewer")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=jobs,
+        )
+
+        denied = service.request_graceful_shutdown(principal_id="creator-1")
+        self.assertEqual(denied["status"], "AUTHORIZATION_DENIED")
+        active = service.get_job_shutdown_status(principal_id="viewer-1")
+        self.assertEqual(active["status"], "ACTIVE")
+
+        stopped = service.request_graceful_shutdown(principal_id="admin-1")
+        self.assertEqual(stopped["status"], "DRAINED")
+        blocked_claim = service.claim_next_job(
+            worker_id="worker-1", principal_id="creator-1"
+        )
+        self.assertEqual(blocked_claim["status"], "SERVICE_DRAINING")
+        blocked_submit = service.submit_job(
+            job_id="during-drain", project_id="film", provider_id="image",
+            payload_ref="payload:during-drain", principal_id="creator-1",
+        )
+        self.assertEqual(blocked_submit["status"], "SERVICE_DRAINING")
+
+        denied_resume = service.resume_job_dispatch(principal_id="viewer-1")
+        self.assertEqual(denied_resume["status"], "AUTHORIZATION_DENIED")
+        resumed = service.resume_job_dispatch(principal_id="admin-1")
+        self.assertEqual(resumed["status"], "ACTIVE")
+        queued = service.submit_job(
+            job_id="after-drain", project_id="film", provider_id="image",
+            payload_ref="payload:after-drain", principal_id="creator-1",
+        )
+        self.assertEqual(queued["status"], "JOB_QUEUED")
+
+
+
 if __name__ == "__main__":
     unittest.main()
