@@ -7,7 +7,6 @@ import secrets
 from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Callable
-from urllib.parse import urlsplit
 
 _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,200}\Z")
 _TRACEPARENT_RE = re.compile(
