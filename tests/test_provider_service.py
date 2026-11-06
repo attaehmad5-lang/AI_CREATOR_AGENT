@@ -398,6 +398,90 @@ class ProviderServiceTests(unittest.TestCase):
             ["REQUESTED", "STOPPED", "REQUESTED", "RESUMED"],
         )
 
+    def test_claim_next_job_returns_lease_only_to_worker_and_poll_hides_it(self):
+        authorization = ProviderAuthorizationManager(self.root / "claim-token-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        manager = ProviderJobManager(self.root / "claim-token-jobs.json")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=manager,
+        )
+        submitted = service.submit_job(
+            job_id="claim-token-job", project_id="film",
+            provider_id="image", payload_ref="payload:claim-token",
+            principal_id="creator-user",
+        )
+        self.assertTrue(submitted["accepted"])
+        claimed = service.claim_next_job(
+            worker_id="worker-claim-token", principal_id="creator-user"
+        )
+        self.assertEqual(claimed["status"], "JOB_CLAIMED")
+        token = claimed["job"]["lease_token"]
+        self.assertRegex(token, r"^[A-Za-z0-9_-]{40,100}$")
+
+        polled = service.poll_job(
+            job_id="claim-token-job", principal_id="creator-user"
+        )
+        self.assertEqual(polled["job"]["status"], "RUNNING")
+        self.assertNotIn("lease_token", polled["job"])
+        self.assertNotIn("lease_token_hash", polled["job"])
+        stored = json.loads((self.root / "claim-token-jobs.json").read_text(encoding="utf-8"))
+        self.assertNotIn(token, repr(stored))
+        self.assertEqual(
+            stored["jobs"]["claim-token-job"]["lease_token_hash"],
+            __import__("hashlib").sha256(token.encode("ascii")).hexdigest(),
+        )
+
+    def test_claim_next_job_filters_provider_scopes_before_worker_lease(self):
+        authorization = ProviderAuthorizationManager(self.root / "scoped-claim-auth.json")
+        authorization.assign_role("creator-user", "creator")
+        self.assertTrue(authorization.set_provider_scopes(
+            "creator-user", {"provider.generate": ["image"]}
+        )["saved"])
+        registered = self.connections.register_provider({
+            "id": "video",
+            "name": "Video Provider",
+            "category": "video",
+            "auth_type": "NONE",
+            "connection_type": "API",
+            "subscription_required": False,
+            "enabled": True,
+            "zero_cost_allowed": False,
+            "allowed_hosts": ["api.example.com"],
+            "capabilities": ["video_generation"],
+        })
+        self.assertEqual(registered["status"], "REGISTERED", registered)
+
+        manager = ProviderJobManager(self.root / "scoped-claim-jobs.json")
+        self.assertTrue(manager.submit(
+            job_id="image-scoped-job", project_id="film",
+            provider_id="image", payload_ref="payload:image-scoped",
+            priority=100,
+        )["accepted"])
+        self.assertTrue(manager.submit(
+            job_id="video-scoped-job", project_id="film",
+            provider_id="video", payload_ref="payload:video-scoped",
+            priority=200,
+        )["accepted"])
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            job_manager=manager,
+        )
+        allowed = service.claim_next_job(
+            worker_id="scoped-worker-1", principal_id="creator-user"
+        )
+        self.assertEqual(allowed["status"], "JOB_CLAIMED")
+        self.assertEqual(allowed["job"]["provider_id"], "image")
+        self.assertIn("lease_token", allowed["job"])
+
+        blocked = service.claim_next_job(
+            worker_id="scoped-worker-2", principal_id="creator-user"
+        )
+        self.assertEqual(blocked["status"], "NO_AUTHORIZED_PROVIDER_JOBS")
+        self.assertEqual(manager.poll(job_id="video-scoped-job")["job"]["status"], "QUEUED")
+
     def test_provider_registry_discovery_and_metadata_reads_are_authorized(self):
         authorization = ProviderAuthorizationManager(self.root / "registry-read-auth.json")
         authorization.assign_role("viewer-user", "viewer")
