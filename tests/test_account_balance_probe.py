@@ -1,4 +1,5 @@
 import json
+import socket
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +57,27 @@ class ProviderJSONBalanceProbeTests(unittest.TestCase):
         }
         options.update(overrides)
         return ProviderJSONBalanceProbe(**options)
+
+    def test_default_pinned_transport_rejects_private_dns_answers(self):
+        resolutions = []
+
+        def resolver(host, port, *, type):
+            resolutions.append((host, port))
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", port))
+            ]
+
+        probe = ProviderJSONBalanceProbe(
+            endpoint="https://api.example.com/account/balance",
+            allowed_hosts=["api.example.com"], token_env="PROVIDER_TOKEN",
+            unit="credits", balance_field="totalBalance",
+            authentication_required=True, balance_field_is_available_credits=True,
+            environ={"PROVIDER_TOKEN": "private-token"}, resolver=resolver,
+        )
+        result = probe("provider")
+        self.assertEqual(result["status"], "BALANCE_REQUEST_FAILED")
+        self.assertEqual(result["error_type"], "ValueError")
+        self.assertEqual(resolutions, [("api.example.com", 443)])
 
     def test_valid_balance_is_normalized_without_exposing_secret_or_body(self):
         opener = _Opener(_Response({"totalBalance": 2.75, "private": "do-not-return"}))
@@ -218,6 +240,22 @@ class PollinationsAccountBalanceProbeTests(unittest.TestCase):
         }
         options.update(overrides)
         return PollinationsAccountBalanceProbe(**options)
+
+    def test_pollinations_default_pinned_transport_rejects_private_dns(self):
+        resolutions = []
+
+        def resolver(host, port, *, type):
+            resolutions.append((host, port))
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("10.1.2.3", port))
+            ]
+
+        probe = PollinationsAccountBalanceProbe(
+            environ={"POLLINATIONS_API_KEY": "private-token"}, resolver=resolver,
+        )
+        result = probe()
+        self.assertEqual(result["status"], "BALANCE_REQUEST_FAILED")
+        self.assertEqual(resolutions, [("gen.pollinations.ai", 443)])
 
     def test_reads_account_total_and_paid_tier_without_exposing_key(self):
         opener = _Opener(_Response({
