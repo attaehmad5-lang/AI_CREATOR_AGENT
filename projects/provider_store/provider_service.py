@@ -1589,6 +1589,7 @@ class ProviderService:
         options["provider_id"] = provider_id
         options["request_id"] = request_id
         secret_lease = None
+        concurrency_lease_token = None
         if use_managed_credential:
             try:
                 adapter_parameters = inspect.signature(adapter).parameters.values()
@@ -1675,8 +1676,47 @@ class ProviderService:
                     "provider": provider_id,
                     "release": released,
                 }
+        if self.concurrency_manager is not None:
+            try:
+                concurrency_claim = self.concurrency_manager.acquire(
+                    provider_id=provider_id, request_id=request_id,
+                    project_id=project_id, tenant_id=tenant_id,
+                )
+            except Exception:
+                concurrency_claim = {"acquired": False, "status": "CONCURRENCY_ACQUIRE_FAILED"}
+            if not isinstance(concurrency_claim, dict) or concurrency_claim.get("acquired") is not True:
+                if secret_lease is not None:
+                    options.pop("provider_credential_lease", None)
+                    secret_lease.close()
+                    secret_lease = None
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                status = (
+                    concurrency_claim.get("status")
+                    if isinstance(concurrency_claim, dict) and isinstance(concurrency_claim.get("status"), str)
+                    else "CONCURRENCY_ACQUIRE_FAILED"
+                )
+                return {
+                    "status": status, "executed": False, "provider": provider_id,
+                    "concurrency": concurrency_claim, "release": released,
+                }
+            concurrency_lease_token = concurrency_claim.get("lease_token")
+            if not isinstance(concurrency_lease_token, str):
+                released = self.release_unstarted_request(
+                    project_id=project_id, provider_id=provider_id,
+                    request_id=request_id, tenant_id=tenant_id,
+                )
+                return {
+                    "status": "CONCURRENCY_LEASE_INVALID", "executed": False,
+                    "provider": provider_id, "release": released,
+                }
+
         if self.request_idempotency_manager is not None:
             if not isinstance(idempotency_lease_token, str):
+                if concurrency_lease_token is not None:
+                    self.concurrency_manager.release(concurrency_lease_token)
                 if secret_lease is not None:
                     options.pop("provider_credential_lease", None)
                     secret_lease.close()
@@ -1696,6 +1736,8 @@ class ProviderService:
             except Exception:
                 started_claim = {"saved": False, "status": "IDEMPOTENCY_START_FAILED"}
             if not isinstance(started_claim, dict) or started_claim.get("saved") is not True:
+                if concurrency_lease_token is not None:
+                    self.concurrency_manager.release(concurrency_lease_token)
                 if secret_lease is not None:
                     options.pop("provider_credential_lease", None)
                     secret_lease.close()
@@ -1709,8 +1751,15 @@ class ProviderService:
                 }
 
         started_at = time.monotonic()
+        concurrency_lease_lost = False
+        concurrency_release_result = None
         try:
-            adapter_result = adapter(**options)
+            if concurrency_lease_token is not None:
+                with self.concurrency_manager.maintain_lease(concurrency_lease_token) as lease_lost:
+                    adapter_result = adapter(**options)
+                    concurrency_lease_lost = lease_lost.is_set()
+            else:
+                adapter_result = adapter(**options)
         except Exception as exc:
             # The adapter may have transmitted the request before failing. Do not
             # release cost, quota, or credit reservations on this ambiguous outcome.
@@ -1770,10 +1819,22 @@ class ProviderService:
                 "retry_decision": {"retry": False, "reason": reason},
             }
         finally:
+            if concurrency_lease_token is not None:
+                try:
+                    concurrency_release_result = self.concurrency_manager.release(concurrency_lease_token)
+                except Exception:
+                    concurrency_release_result = {"released": False, "status": "CONCURRENCY_RELEASE_FAILED"}
             if secret_lease is not None:
                 options.pop("provider_credential_lease", None)
                 secret_lease.close()
                 secret_lease = None
+        if concurrency_lease_lost:
+            return {
+                "status": "PROVIDER_CONCURRENCY_LEASE_LOST",
+                "executed": False, "provider": provider_id,
+                "request_id": request_id, "reservations_retained": True,
+                "concurrency": {"status": "LEASE_RENEWAL_FAILED"},
+            }
         if not isinstance(adapter_result, dict) or not isinstance(adapter_result.get("started"), bool):
             return {
                 "status": "EXECUTION_OUTCOME_UNKNOWN",
