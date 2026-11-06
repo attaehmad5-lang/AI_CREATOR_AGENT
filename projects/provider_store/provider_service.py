@@ -45,6 +45,7 @@ class ProviderService:
         tenant_isolation_manager: Any | None = None,
         secret_manager: Any | None = None,
         provider_retention_manager: Any | None = None,
+        provider_deletion_adapter: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -67,6 +68,10 @@ class ProviderService:
             or getattr(provider_retention_manager, "policy", None) is not data_handling_policy
         ):
             raise ValueError("provider retention and execution must share the same data-handling policy")
+        if provider_deletion_adapter is not None and not callable(
+            getattr(provider_deletion_adapter, "delete_resource", None)
+        ):
+            raise ValueError("provider_deletion_adapter must support delete_resource")
         resolved_secret_manager = secret_manager or getattr(connection_manager, "secret_manager", None)
         if resolved_secret_manager is not None and (
             not callable(getattr(resolved_secret_manager, "resolve_secret", None))
@@ -131,6 +136,7 @@ class ProviderService:
         self.tenant_isolation_manager = tenant_isolation_manager
         self.secret_manager = resolved_secret_manager
         self.provider_retention_manager = provider_retention_manager
+        self.provider_deletion_adapter = provider_deletion_adapter
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
@@ -233,10 +239,16 @@ class ProviderService:
         }
 
     def run_provider_retention_sweep(
-        self, *, delete_provider_resource: Any, principal_id: str | None,
+        self, *, principal_id: str | None, delete_provider_resource: Any | None = None,
         now: float | None = None, limit: int = 100,
     ) -> dict[str, Any]:
-        """Run due provider-resource deletion only through the admin service boundary."""
+        """Run due provider-resource deletion only through an admin service boundary.
+
+        A configured ProviderResourceDeletionAdapter is preferred. The optional
+        callback remains for trusted, server-side maintenance wiring only; API
+        handlers must never accept a callback or arbitrary deletion function from
+        client input.
+        """
         if self.provider_retention_manager is None:
             return {"status": "PROVIDER_RETENTION_MANAGER_UNAVAILABLE", "deleted": 0, "failed": 0}
         if self.authorization_manager is None:
@@ -244,13 +256,22 @@ class ProviderService:
         authorization = self._authorize_operation(principal_id, "provider.access.manage")
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "deleted": 0, "failed": 0}
+        configured_delete = (
+            getattr(self.provider_deletion_adapter, "delete_resource", None)
+            if self.provider_deletion_adapter is not None else None
+        )
+        delete_fn = configured_delete if callable(configured_delete) else delete_provider_resource
+        if not callable(delete_fn):
+            return {"status": "PROVIDER_DELETION_ADAPTER_UNAVAILABLE", "deleted": 0, "failed": 0}
         try:
             result = self.provider_retention_manager.run_due(
-                delete_provider_resource=delete_provider_resource, now=now, limit=limit,
+                delete_provider_resource=delete_fn, now=now, limit=limit,
             )
         except Exception as exc:
-            return {"status": "PROVIDER_RETENTION_SWEEP_FAILED", "deleted": 0, "failed": 0,
-                    "error_type": type(exc).__name__}
+            return {
+                "status": "PROVIDER_RETENTION_SWEEP_FAILED", "deleted": 0, "failed": 0,
+                "error_type": type(exc).__name__,
+            }
         if not isinstance(result, dict) or result.get("status") != "RETENTION_SWEEP_COMPLETE":
             return {"status": "INVALID_PROVIDER_RETENTION_RESPONSE", "deleted": 0, "failed": 0}
         deleted = result.get("deleted")
