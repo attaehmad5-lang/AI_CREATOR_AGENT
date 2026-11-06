@@ -145,6 +145,7 @@ class ProviderService:
     def _finish_authorization_decision(
         self, decision: dict[str, Any], *, principal_id: str | None,
         operation: str, provider_id: str | None, return_decision: bool,
+        tenant_id: str | None = None,
     ) -> dict[str, Any] | None:
         if self.provider_audit_manager is not None:
             allowed = decision.get("allowed") is True
@@ -154,6 +155,7 @@ class ProviderService:
             audit = self._record_provider_audit(
                 event_type="provider.authorization.decision",
                 actor_id=principal_id,
+                tenant_id=tenant_id,
                 provider_id=provider_id,
                 operation=operation,
                 outcome="ALLOWED" if allowed else "DENIED",
@@ -199,6 +201,7 @@ class ProviderService:
         *,
         provider_id: str | None = None,
         return_decision: bool = False,
+        tenant_id: str | None = None,
     ) -> dict[str, Any] | None:
         if self.identity_authenticator is not None:
             try:
@@ -209,7 +212,7 @@ class ProviderService:
                 return self._finish_authorization_decision(
                     {"allowed": False, "status": "OIDC_AUTHENTICATION_REQUIRED"},
                     principal_id=principal_id, operation=operation,
-                    provider_id=provider_id, return_decision=return_decision,
+                    provider_id=provider_id, return_decision=return_decision, tenant_id=tenant_id,
                 )
             # Convert only after the in-process capability check succeeds.
             principal_id = str(principal_id)
@@ -221,7 +224,7 @@ class ProviderService:
                 decision = {"allowed": True, "status": "TRUSTED_INTERNAL"}
             return self._finish_authorization_decision(
                 decision, principal_id=principal_id, operation=operation,
-                provider_id=provider_id, return_decision=return_decision,
+                provider_id=provider_id, return_decision=return_decision, tenant_id=tenant_id,
             )
         try:
             authorize = self.authorization_manager.authorize
