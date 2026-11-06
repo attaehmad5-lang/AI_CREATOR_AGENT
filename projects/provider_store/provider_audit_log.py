@@ -96,6 +96,7 @@ class ProviderAuditLog:
         project_id: str | None = None,
         provider_id: str | None = None,
         request_id: str | None = None,
+        trace_id: str | None = None,
         operation: str | None = None,
         strategy: str | None = None,
         estimated_cost: float | None = None,
@@ -152,6 +153,12 @@ class ProviderAuditLog:
         timestamp = self.clock()
         if not isinstance(timestamp, datetime) or timestamp.tzinfo is None:
             raise ValueError("audit clock must return an aware datetime")
+        if trace_id is not None and (
+            not isinstance(trace_id, str)
+            or not re.fullmatch(r"[0-9a-f]{32}", trace_id)
+            or trace_id == "0" * 32
+        ):
+            raise ValueError("invalid provider audit trace ID")
         event = {
             "event_id": secrets.token_hex(16),
             "occurred_at": timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -161,6 +168,7 @@ class ProviderAuditLog:
             "project_ref": self._pseudonym("project", project_id),
             "provider_id": provider_id,
             "request_ref": self._pseudonym("request", request_id),
+            "trace_ref": self._pseudonym("trace", trace_id),
             "operation": operation,
             "outcome": outcome,
             "reason_code": reason_code,
@@ -199,7 +207,7 @@ class ProviderAuditLog:
     def _valid_loaded_event(event: Any) -> bool:
         required = {
             "event_id", "occurred_at", "event_type", "actor_ref", "tenant_ref",
-            "project_ref", "provider_id", "request_ref", "operation", "outcome",
+            "project_ref", "provider_id", "request_ref", "trace_ref", "operation", "outcome",
             "reason_code", "strategy", "estimated_cost", "billing_mode",
             "approved", "credential_backend", "credential_version_ref",
         }
@@ -216,7 +224,7 @@ class ProviderAuditLog:
             parsed_time = None
         if parsed_time is None or parsed_time.tzinfo is None:
             return False
-        for field in ("actor_ref", "tenant_ref", "project_ref", "request_ref", "credential_version_ref"):
+        for field in ("actor_ref", "tenant_ref", "project_ref", "request_ref", "trace_ref", "credential_version_ref"):
             value = event.get(field)
             if value is not None and (
                 not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
