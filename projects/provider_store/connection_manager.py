@@ -26,7 +26,7 @@ MASTER_CATALOG = MODULE_DIR / "provider_catalog_master.json"
 DEFAULT_STATE = MODULE_DIR / "connection_state.json"
 _MAX_CONFIG_BYTES = 4 * 1024 * 1024
 _MAX_STATE_PROVIDERS = 10000
-_STATE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\\Z")
+_STATE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 
 
 class ProviderAuthenticationVerificationRequired(PermissionError):
@@ -189,7 +189,7 @@ class ConnectionManager:
             if (
                 not isinstance(version, (str, int, float))
                 or isinstance(version, bool)
-                or not re.fullmatch(r"\\d+(?:\\.\\d+){0,2}", str(version))
+                or not re.fullmatch(r"\d+(?:\.\d+){0,2}", str(version))
             ):
                 errors.append("connection state version must be a numeric version")
             policy = state.get("policy", "USER_CONTROLLED")
