@@ -11,7 +11,7 @@ from functools import wraps
 from typing import Any, Iterator
 
 
-_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}")
+_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}")
 _TRACE_ID_RE = re.compile(r"[0-9a-fA-F]{32}")
 _SPAN_ID_RE = re.compile(r"[0-9a-fA-F]{16}")
 _TRACEPARENT_RE = re.compile(r"00-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})")
@@ -175,6 +175,8 @@ def extract_trace_context(headers: Any) -> ProviderRequestContext:
         (item for key, item in headers.items() if isinstance(key, str) and key.casefold() == "traceparent"),
         None,
     )
+    if value is None:
+        raise ValueError("TRACEPARENT_REQUIRED")
     return create_request_context(traceparent=value)
 
 
