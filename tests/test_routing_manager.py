@@ -1040,6 +1040,38 @@ class ProviderRoutingManagerTests(unittest.TestCase):
         self.assertTrue(all(result["allowed"] for result in results))
         self.assertEqual({result["provider"] for result in results}, {"primary"})
 
+    def test_healthiest_first_prefers_measured_lower_latency_over_priority(self):
+        health = ProviderHealthManager(self.health_path)
+        health.record_result("primary", success=True, latency_ms=85)
+        health.record_result("fallback", success=True, latency_ms=20)
+        router = ProviderRoutingManager(self.connections, health_manager=health)
+
+        result = router.route(
+            category="image", project_id="film", strategy="HEALTHIEST_FIRST"
+        )
+
+        self.assertTrue(result["allowed"])
+        self.assertEqual(result["provider"], "fallback")
+
+    def test_healthiest_first_ranks_missing_latency_last_without_crashing(self):
+        health = ProviderHealthManager(self.health_path)
+        health.record_result("primary", success=True, latency_ms=None)
+        health.record_result("fallback", success=True, latency_ms=25)
+        router = ProviderRoutingManager(self.connections, health_manager=health)
+
+        measured = router.route(
+            category="image", project_id="film", strategy="HEALTHIEST_FIRST"
+        )
+        self.assertTrue(measured["allowed"])
+        self.assertEqual(measured["provider"], "fallback")
+
+        health.record_result("fallback", success=True, latency_ms=None)
+        missing = router.route(
+            category="image", project_id="film", strategy="HEALTHIEST_FIRST"
+        )
+        self.assertTrue(missing["allowed"])
+        self.assertEqual(missing["provider"], "primary")
+
 
 if __name__ == "__main__":
     unittest.main()
