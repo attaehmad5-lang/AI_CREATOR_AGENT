@@ -196,6 +196,7 @@ def install_huggingface_pinned_transport(
     *,
     httpx_module: Any | None = None,
     set_client_factory: Callable[[Callable[[], Any]], Any] | None = None,
+    request_event_hook: Callable[..., Any] | None = None,
     timeout_seconds: float = 180.0,
 ) -> None:
     """Install the pinned transport through Hugging Face's supported client factory.
@@ -221,8 +222,16 @@ def install_huggingface_pinned_transport(
                 except ImportError:
                     setter = None
             set_client_factory = setter
+            if request_event_hook is None:
+                try:
+                    from huggingface_hub.utils._http import hf_request_event_hook
+                    request_event_hook = hf_request_event_hook
+                except ImportError:
+                    raise RuntimeError("huggingface_hub request security hook is unavailable") from None
         if not callable(set_client_factory):
             raise RuntimeError("huggingface_hub does not expose set_client_factory")
+        if request_event_hook is not None and not callable(request_event_hook):
+            raise ValueError("request_event_hook must be callable")
         transport_class = build_pinned_httpx_transport(
             httpx_module, timeout_seconds=timeout_seconds,
         )
@@ -230,11 +239,15 @@ def install_huggingface_pinned_transport(
         def factory() -> Any:
             transport = transport_class()
             try:
-                return httpx_module.Client(
-                    transport=transport,
-                    follow_redirects=False,
-                    timeout=float(timeout_seconds),
-                )
+                client_options = {
+                    "transport": transport,
+                    "follow_redirects": False,
+                    "timeout": float(timeout_seconds),
+                }
+                if request_event_hook is not None:
+                    # Preserve Hugging Face's built-in offline-mode and request-ID hook.
+                    client_options["event_hooks"] = {"request": [request_event_hook]}
+                return httpx_module.Client(**client_options)
             except Exception:
                 transport.close()
                 raise
