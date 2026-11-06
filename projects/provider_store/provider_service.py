@@ -1,6 +1,8 @@
 """Integration facade for provider connection, routing, health, cost, quota, and outputs."""
 from __future__ import annotations
 
+import json
+
 from typing import Any
 from pathlib import Path
 import hashlib
