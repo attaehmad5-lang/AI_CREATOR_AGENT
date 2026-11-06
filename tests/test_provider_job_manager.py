@@ -63,6 +63,66 @@ class ProviderJobManagerTests(unittest.TestCase):
         )
         self.assertEqual(conflict["status"], "REQUEST_ID_CONFLICT")
 
+    def test_provider_specific_concurrency_limits_skip_capped_providers(self):
+        manager = ProviderJobManager(
+            self.path,
+            max_queue_size=10,
+            max_concurrent=4,
+            lease_seconds=10,
+            max_attempts=2,
+            scheduling_strategy="GLOBAL_PRIORITY",
+            provider_concurrency_limits={"image": 1, "video": 2},
+            clock=lambda: self.now[0],
+        )
+        submissions = (
+            ("image-one", "image", 100),
+            ("image-two", "image", 90),
+            ("video-one", "video", 80),
+            ("video-two", "video", 70),
+        )
+        for job_id, provider, priority in submissions:
+            manager.submit(
+                job_id=job_id, project_id="film", provider_id=provider,
+                payload_ref=f"payload:{job_id}", priority=priority,
+            )
+
+        first = manager.claim_next(worker_id="worker-1")
+        second = manager.claim_next(worker_id="worker-2")
+        third = manager.claim_next(worker_id="worker-3")
+        blocked = manager.claim_next(worker_id="worker-4")
+        self.assertEqual(first["job"]["job_id"], "image-one")
+        self.assertEqual(second["job"]["job_id"], "video-one")
+        self.assertEqual(third["job"]["job_id"], "video-two")
+        self.assertEqual(blocked["status"], "PROVIDER_CONCURRENCY_LIMIT")
+        self.assertEqual(blocked["queued"], 1)
+
+        released = manager.complete(
+            job_id="image-one", worker_id="worker-1",
+            lease_token=first["job"]["lease_token"], success=False,
+            error_code="TEST_RELEASE_PROVIDER_SLOT",
+        )
+        self.assertTrue(released["saved"])
+        reopened = manager.claim_next(worker_id="worker-4")
+        self.assertEqual(reopened["status"], "JOB_CLAIMED")
+        self.assertEqual(reopened["job"]["job_id"], "image-two")
+
+    def test_provider_specific_concurrency_limit_configuration_is_validated(self):
+        for limits in (
+            {"../provider": 1},
+            {"image": 0},
+            {"image": True},
+            {"image": 3},
+            ["image"],
+        ):
+            with self.subTest(limits=limits):
+                with self.assertRaises(ValueError):
+                    ProviderJobManager(
+                        self.path,
+                        max_concurrent=2,
+                        provider_concurrency_limits=limits,
+                        clock=lambda: self.now[0],
+                    )
+
     def test_persisted_running_job_requires_well_formed_lease_token(self):
         self.submit("job-1")
         claimed = self.manager.claim_next(worker_id="worker-1")
