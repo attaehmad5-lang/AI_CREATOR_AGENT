@@ -19,10 +19,10 @@ from typing import Any
 
 from .interprocess_lock import atomic_replace_with_retry, interprocess_file_lock
 
-_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\\Z")
-_OPERATION = re.compile(r"[a-z][a-z0-9_.:-]{0,79}\\Z")
-_OUTCOME = re.compile(r"[A-Z][A-Z0-9_]{0,63}\\Z")
-_HASH = re.compile(r"[0-9a-f]{64}\\Z")
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_OPERATION = re.compile(r"[a-z][a-z0-9_.:-]{0,79}\Z")
+_OUTCOME = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
+_HASH = re.compile(r"[0-9a-f]{64}\Z")
 _EVENT_TYPES = frozenset({
     "ROUTING_DECISION",
     "CREDENTIAL_ACCESS",
