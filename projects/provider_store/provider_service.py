@@ -1566,6 +1566,7 @@ class ProviderService:
         if (
             not isinstance(remote_job_id, str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}", remote_job_id)
+            or not isinstance(status, str)
             or status not in {"QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"}
         ):
             return None
