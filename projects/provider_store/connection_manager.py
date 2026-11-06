@@ -1157,11 +1157,12 @@ class ConnectionManager:
             pass
         if parsed.scheme == "http" and not (allow_loopback_http and is_loopback):
             return {"valid": False, "status": "HTTPS_REQUIRED"}
-        # Private, link-local, and reserved literal IPs are unsafe defaults for
-        # outbound provider calls. An explicit per-provider allowlist is required.
-        if address is not None and not address.is_global and not (
-            allow_loopback_http and is_loopback
-        ) and (normalized_allowed is None or normalized_host not in normalized_allowed):
+        # An allowlist proves endpoint identity, not permission to reach private
+        # networks. Only the explicit loopback-development exception may use a
+        # non-public literal; private, link-local and metadata IPs are never
+        # authorized merely by adding them to an API provider's host allowlist.
+        explicit_loopback_http = allow_loopback_http and is_loopback and parsed.scheme == "http"
+        if address is not None and not address.is_global and not explicit_loopback_http:
             return {"valid": False, "status": "NON_PUBLIC_ADDRESS_REJECTED"}
         if normalized_allowed is not None and normalized_host not in normalized_allowed:
             return {"valid": False, "status": "HOST_NOT_ALLOWLISTED"}
