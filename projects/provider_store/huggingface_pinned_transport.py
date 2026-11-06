@@ -101,16 +101,21 @@ def build_pinned_httpx_transport(
             # Bound request body accumulation before passing bytes to urllib.
             chunks: list[bytes] = []
             total = 0
+            chunk_count = 0
             stream = getattr(request, "stream", None)
             try:
                 iterator = iter(stream) if stream is not None else iter(())
                 for chunk in iterator:
+                    chunk_count += 1
+                    if chunk_count > 16384:
+                        raise ValueError("HUGGINGFACE_REQUEST_BODY_CHUNK_LIMIT")
                     if not isinstance(chunk, bytes):
                         raise ValueError("HUGGINGFACE_REQUEST_BODY_INVALID")
                     total += len(chunk)
                     if total > max_request_bytes:
                         raise ValueError("HUGGINGFACE_REQUEST_BODY_TOO_LARGE")
-                    chunks.append(chunk)
+                    if chunk:
+                        chunks.append(chunk)
             except ValueError:
                 raise
             except Exception:
@@ -168,6 +173,11 @@ def build_pinned_httpx_transport(
                     if length is not None:
                         if not isinstance(length, str) or not length.isdigit() or int(length) > max_response_bytes:
                             raise ValueError("HUGGINGFACE_RESPONSE_TOO_LARGE")
+                    content_encoding = response_headers.get("Content-Encoding")
+                    if content_encoding is not None and str(content_encoding).strip().casefold() not in {"", "identity"}:
+                        # Do not hand compressed, attacker-controlled bytes to an
+                        # automatic decoder after applying only a compressed-size cap.
+                        raise ValueError("HUGGINGFACE_COMPRESSED_RESPONSE_REJECTED")
                 payload = response.read(max_response_bytes + 1)
                 if not isinstance(payload, (bytes, bytearray)) or len(payload) > max_response_bytes:
                     raise ValueError("HUGGINGFACE_RESPONSE_TOO_LARGE")
