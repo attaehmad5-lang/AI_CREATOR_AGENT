@@ -1704,6 +1704,10 @@ class ProviderService:
                 }
             concurrency_lease_token = concurrency_claim.get("lease_token")
             if not isinstance(concurrency_lease_token, str):
+                if secret_lease is not None:
+                    options.pop("provider_credential_lease", None)
+                    secret_lease.close()
+                    secret_lease = None
                 released = self.release_unstarted_request(
                     project_id=project_id, provider_id=provider_id,
                     request_id=request_id, tenant_id=tenant_id,
@@ -1873,6 +1877,17 @@ class ProviderService:
                 "provider": provider_id,
                 "request_id": request_id,
                 "release": released,
+            }
+
+        if (
+            concurrency_release_result is not None
+            and concurrency_release_result.get("released") is not True
+        ):
+            return {
+                "status": "PROVIDER_CONCURRENCY_RELEASE_FAILED",
+                "executed": True, "provider": provider_id,
+                "request_id": request_id, "reservations_retained": True,
+                "concurrency": concurrency_release_result,
             }
 
         accounting_required = False
