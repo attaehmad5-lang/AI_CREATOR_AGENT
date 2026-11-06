@@ -1042,5 +1042,52 @@ class ProviderJobManagerTests(unittest.TestCase):
             )
 
 
+    def test_pre_deadline_idempotency_fingerprint_remains_replay_compatible(self):
+        accepted = self.manager.submit(
+            job_id="legacy-idempotency-job",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:legacy-idempotency",
+            idempotency_key="legacy-idempotency-key",
+        )
+        self.assertEqual(accepted["status"], "JOB_QUEUED")
+        legacy_material = json.dumps(
+            [
+                "provider-job-request-v1",
+                None,
+                "film",
+                "image",
+                "payload:legacy-idempotency",
+                50,
+            ],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        legacy_fingerprint = hashlib.sha256(
+            legacy_material.encode("utf-8")
+        ).hexdigest()
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        persisted["jobs"]["legacy-idempotency-job"]["request_fingerprint"] = legacy_fingerprint
+        self.path.write_text(json.dumps(persisted), encoding="utf-8")
+        restored = ProviderJobManager(
+            self.path,
+            max_queue_size=2,
+            max_concurrent=1,
+            lease_seconds=10,
+            max_attempts=2,
+            clock=lambda: self.now[0],
+        )
+        replay = restored.submit(
+            job_id="different-local-id",
+            project_id="film",
+            provider_id="image",
+            payload_ref="payload:legacy-idempotency",
+            idempotency_key="legacy-idempotency-key",
+        )
+        self.assertEqual(replay["status"], "ALREADY_SUBMITTED")
+        self.assertTrue(replay["idempotency_replayed"])
+        self.assertEqual(replay["job"]["job_id"], "legacy-idempotency-job")
+
+
 if __name__ == "__main__":
     unittest.main()
