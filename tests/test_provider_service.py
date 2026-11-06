@@ -25,6 +25,7 @@ from projects.provider_store.routing_manager import ProviderRoutingManager
 from projects.provider_store.health_manager import ProviderHealthManager
 from projects.provider_store.output_validator import ProviderOutputValidator
 from projects.provider_store.provider_service import ProviderService
+from projects.provider_store.provider_audit_log import ProviderAuditLog
 from projects.provider_store.quota_manager import ProviderQuotaManager
 from projects.provider_store.retry_policy import RetryPolicy
 from projects.generation.providers.pollinations_provider import PollinationsProviderError
@@ -131,6 +132,58 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertEqual(submitted["job"]["trace_id"], trace_id)
         polled = service.poll_job(job_id="service-trace-job", principal_id="creator-user")
         self.assertEqual(polled["job"]["trace_id"], trace_id)
+
+    def test_required_audit_log_records_provider_disable_before_and_after_mutation(self):
+        authorization = ProviderAuthorizationManager(self.root / "audit-service-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        audit = ProviderAuditLog(
+            self.root / "provider-audit.json",
+            signing_key=b"service-audit-test-key-at-least-32-bytes",
+        )
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            audit_manager=audit,
+            require_audit_logging=True,
+        )
+        result = service.set_provider_enabled(
+            "image", False, principal_id="admin-user"
+        )
+        self.assertTrue(result["saved"])
+        self.assertTrue(result["audit_outcome_recorded"])
+        self.assertFalse(self.connections.is_provider_enabled("image"))
+        events = audit.read_events()["events"]
+        self.assertEqual([event["operation"] for event in events], [
+            "provider.disable", "provider.disable",
+        ])
+        self.assertEqual([event["outcome"] for event in events], [
+            "REQUESTED", "SUCCEEDED",
+        ])
+        self.assertTrue(all(event["actor_ref"] for event in events))
+        self.assertNotIn("admin-user", repr(events))
+
+    def test_required_audit_logging_blocks_provider_mutation_when_log_write_fails(self):
+        class FailedAudit:
+            def record(self, **kwargs):
+                return {"status": "AUDIT_STORAGE_UNAVAILABLE", "saved": False}
+
+        authorization = ProviderAuthorizationManager(self.root / "audit-fail-auth.json")
+        authorization.assign_role("admin-user", "admin")
+        service = ProviderService(
+            self.connections,
+            authorization_manager=authorization,
+            audit_manager=FailedAudit(),
+            require_audit_logging=True,
+        )
+        result = service.set_provider_enabled(
+            "image", False, principal_id="admin-user"
+        )
+        self.assertEqual(result["status"], "AUDIT_LOG_REQUIRED")
+        self.assertTrue(self.connections.is_provider_enabled("image"))
+
+    def test_required_audit_logging_requires_a_manager_at_construction(self):
+        with self.assertRaisesRegex(ValueError, "needs an audit_manager"):
+            ProviderService(self.connections, require_audit_logging=True)
 
     def test_provider_registry_discovery_and_metadata_reads_are_authorized(self):
         authorization = ProviderAuthorizationManager(self.root / "registry-read-auth.json")
