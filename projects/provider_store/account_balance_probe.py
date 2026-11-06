@@ -9,16 +9,13 @@ import json
 import math
 import os
 import re
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import Request
+
+from .http_probe import ProviderPinnedHTTPSOpener
 
 from .connection_manager import ConnectionManager
-
-
-class _RejectRedirects(HTTPRedirectHandler):
-    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
-        return None
 
 
 class ProviderJSONBalanceProbe:
@@ -47,6 +44,7 @@ class ProviderJSONBalanceProbe:
         opener: Any = None,
         authentication_required: bool = False,
         balance_field_is_available_credits: bool = False,
+        resolver: Callable[..., Any] | None = None,
     ) -> None:
         if not isinstance(allowed_hosts, (list, tuple, set)) or not allowed_hosts or any(
             not isinstance(host, str) or not host.strip() for host in allowed_hosts
@@ -96,6 +94,10 @@ class ProviderJSONBalanceProbe:
             raise ValueError("INVALID_ENVIRONMENT")
         if opener is not None and not callable(getattr(opener, "open", None)):
             raise ValueError("INVALID_OPENER")
+        if resolver is not None and not callable(resolver):
+            raise ValueError("INVALID_RESOLVER")
+        if opener is not None and resolver is not None:
+            raise ValueError("CUSTOM_OPENER_AND_RESOLVER_CONFLICT")
         self.endpoint = endpoint.strip()
         self.allowed_hosts = tuple(allowed_hosts)
         self.token_env = token_env
@@ -107,7 +109,7 @@ class ProviderJSONBalanceProbe:
         self.timeout_seconds = timeout_value
         self.max_response_bytes = max_response_bytes
         self.environ = os.environ if environ is None else environ
-        self.opener = opener or build_opener(_RejectRedirects())
+        self.opener = opener if opener is not None else ProviderPinnedHTTPSOpener(resolver=resolver)
 
     def __call__(self, provider_id: str) -> dict[str, Any]:
         if not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", provider_id):
@@ -160,7 +162,21 @@ class ProviderJSONBalanceProbe:
             try:
                 status = response.getcode() if callable(getattr(response, "getcode", None)) else getattr(response, "status", None)
                 if not isinstance(status, int) or not 200 <= status < 300:
-                    return {"status": "BALANCE_HTTP_ERROR", "provider": provider_id, "verified": False}
+                    headers_obj = getattr(response, "headers", None)
+                    retry_after = headers_obj.get("Retry-After") if headers_obj is not None else None
+                    if (
+                        not isinstance(retry_after, str) or len(retry_after) > 128
+                        or any(ord(char) < 32 or ord(char) == 127 for char in retry_after)
+                    ):
+                        retry_after = None
+                    result = {
+                        "status": "BALANCE_AUTH_FAILED" if status in {401, 403} else "BALANCE_HTTP_ERROR",
+                        "http_status": status if isinstance(status, int) and 100 <= status <= 599 else None,
+                        "provider": provider_id, "verified": False,
+                    }
+                    if retry_after is not None:
+                        result["retry_after"] = retry_after
+                    return result
                 body = response.read(self.max_response_bytes + 1)
             except TimeoutError:
                 return {"status": "BALANCE_TIMEOUT", "provider": provider_id, "verified": False}
@@ -220,6 +236,7 @@ class PollinationsAccountBalanceProbe:
         environ: dict[str, str] | None = None,
         opener: Any = None,
         timeout_seconds: float = 5.0,
+        resolver: Callable[..., Any] | None = None,
     ) -> None:
         if environ is not None and not isinstance(environ, dict):
             raise ValueError("INVALID_ENVIRONMENT")
@@ -236,8 +253,12 @@ class PollinationsAccountBalanceProbe:
             raise ValueError("INVALID_TIMEOUT")
         if opener is not None and not callable(getattr(opener, "open", None)):
             raise ValueError("INVALID_OPENER")
+        if resolver is not None and not callable(resolver):
+            raise ValueError("INVALID_RESOLVER")
+        if opener is not None and resolver is not None:
+            raise ValueError("CUSTOM_OPENER_AND_RESOLVER_CONFLICT")
         self.environ = os.environ if environ is None else environ
-        self.opener = opener or build_opener(_RejectRedirects())
+        self.opener = opener if opener is not None else ProviderPinnedHTTPSOpener(resolver=resolver)
         self.timeout_seconds = timeout
 
     def __call__(self, provider_id: str = "pollinations") -> dict[str, Any]:
@@ -312,11 +333,29 @@ class PollinationsAccountBalanceProbe:
                     else getattr(response, "status", None)
                 )
                 if not isinstance(status, int) or not 200 <= status < 300:
-                    return {
-                        "status": "BALANCE_HTTP_ERROR",
-                        "provider": "pollinations",
+                    headers_obj = getattr(response, "headers", None)
+                    retry_after = headers_obj.get("Retry-After") if headers_obj is not None else None
+                    if (
+                        not isinstance(retry_after, str) or len(retry_after) > 128
+                        or any(ord(char) < 32 or ord(char) == 127 for char in retry_after)
+                    ):
+                        retry_after = None
+                    code = (
+                        "BALANCE_AUTH_FAILED" if status == 401
+                        else "ACCOUNT_USAGE_SCOPE_REQUIRED" if status == 403
+                        else "BALANCE_RATE_LIMITED" if status == 429
+                        else "BALANCE_HTTP_ERROR"
+                    )
+                    result = {
+                        "status": code, "provider": "pollinations",
+                        "http_status": status if isinstance(status, int) else None,
                         "verified": False,
                     }
+                    if retry_after is not None:
+                        result["retry_after"] = retry_after
+                    if status == 403:
+                        result["required_scope"] = "account:usage"
+                    return result
                 body = response.read(self.max_response_bytes + 1)
             except TimeoutError:
                 return {"status": "BALANCE_TIMEOUT", "provider": "pollinations", "verified": False}
