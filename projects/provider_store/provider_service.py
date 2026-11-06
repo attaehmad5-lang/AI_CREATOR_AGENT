@@ -1727,11 +1727,26 @@ class ProviderService:
         stop = getattr(self.job_manager, "stop_accepting", None)
         if not callable(stop):
             return {"status": "GRACEFUL_SHUTDOWN_UNAVAILABLE", "accepting": False}
+        audit_intent = self._audit_operation_intent(
+            "provider.job.stop_submissions", principal_id=principal_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "accepting": False, **audit_intent}
         try:
             result = stop()
         except Exception as exc:
-            return {"status": "GRACEFUL_SHUTDOWN_FAILED", "accepting": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepting": False}
+            result = {
+                "status": "GRACEFUL_SHUTDOWN_FAILED",
+                "accepting": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepting": False}
+        return self._audit_operation_result(
+            result, "provider.job.stop_submissions",
+            success=result.get("accepting") is False,
+            outcome="STOPPED" if result.get("accepting") is False else "FAILED",
+            principal_id=principal_id,
+        )
 
     def job_drain_status(self, *, principal_id: str | None = None) -> dict[str, Any]:
         if self.job_manager is None:
@@ -1757,11 +1772,26 @@ class ProviderService:
         resume = getattr(self.job_manager, "resume_accepting", None)
         if not callable(resume):
             return {"status": "GRACEFUL_SHUTDOWN_UNAVAILABLE", "accepting": False}
+        audit_intent = self._audit_operation_intent(
+            "provider.job.resume_submissions", principal_id=principal_id,
+        )
+        if audit_intent is not None:
+            return {"status": "AUDIT_LOG_REQUIRED", "accepting": False, **audit_intent}
         try:
             result = resume()
         except Exception as exc:
-            return {"status": "GRACEFUL_RESUME_FAILED", "accepting": False, "error_type": type(exc).__name__}
-        return result if isinstance(result, dict) else {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepting": False}
+            result = {
+                "status": "GRACEFUL_RESUME_FAILED",
+                "accepting": False, "error_type": type(exc).__name__,
+            }
+        if not isinstance(result, dict):
+            result = {"status": "INVALID_JOB_MANAGER_RESPONSE", "accepting": False}
+        return self._audit_operation_result(
+            result, "provider.job.resume_submissions",
+            success=result.get("accepting") is True,
+            outcome="RESUMED" if result.get("accepting") is True else "FAILED",
+            principal_id=principal_id,
+        )
 
     def renew_job_lease(
         self, *, job_id: str, worker_id: str, lease_token: str,
