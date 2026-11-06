@@ -42,6 +42,7 @@ class ProviderService:
         slo_manager: Any | None = None,
         degraded_mode_manager: Any | None = None,
         tenant_isolation_manager: Any | None = None,
+        provider_onboarding_manager: Any | None = None,
         secret_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
@@ -88,6 +89,11 @@ class ProviderService:
             (degraded_mode_manager, "evaluate", "degraded_mode_manager"),
             (degraded_mode_manager, "get_state", "degraded_mode_manager"),
             (tenant_isolation_manager, "authorize_project", "tenant_isolation_manager"),
+            (provider_onboarding_manager, "submit", "provider_onboarding_manager"),
+            (provider_onboarding_manager, "approve", "provider_onboarding_manager"),
+            (provider_onboarding_manager, "verify", "provider_onboarding_manager"),
+            (provider_onboarding_manager, "activate", "provider_onboarding_manager"),
+            (provider_onboarding_manager, "get_status", "provider_onboarding_manager"),
         )
         for instance, method, label in expected:
             if instance is not None and not callable(getattr(instance, method, None)):
@@ -117,7 +123,80 @@ class ProviderService:
         self.slo_manager = slo_manager
         self.degraded_mode_manager = degraded_mode_manager
         self.tenant_isolation_manager = tenant_isolation_manager
+        self.provider_onboarding_manager = provider_onboarding_manager
         self.secret_manager = resolved_secret_manager
+
+    def submit_provider_onboarding(
+        self, manifest: dict[str, Any], *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        if self.provider_onboarding_manager is None:
+            return {"status": "PROVIDER_ONBOARDING_UNAVAILABLE", "accepted": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "accepted": False, "authorization": authorization}
+        try:
+            result = self.provider_onboarding_manager.submit(manifest)
+        except Exception as exc:
+            return {"status": "PROVIDER_ONBOARDING_SUBMISSION_FAILED", "accepted": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_ONBOARDING_RESPONSE", "accepted": False}
+
+    def approve_provider_onboarding(
+        self, provider_id: str, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        if self.provider_onboarding_manager is None:
+            return {"status": "PROVIDER_ONBOARDING_UNAVAILABLE", "approved": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "approved": False, "authorization": authorization}
+        try:
+            result = self.provider_onboarding_manager.approve(provider_id, principal_id=principal_id)
+        except Exception as exc:
+            return {"status": "PROVIDER_ONBOARDING_APPROVAL_FAILED", "approved": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_ONBOARDING_RESPONSE", "approved": False}
+
+    def verify_provider_onboarding(
+        self, provider_id: str, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        if self.provider_onboarding_manager is None:
+            return {"status": "PROVIDER_ONBOARDING_UNAVAILABLE", "verified": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "verified": False, "authorization": authorization}
+        try:
+            result = self.provider_onboarding_manager.verify(provider_id, principal_id=principal_id)
+        except Exception as exc:
+            return {"status": "PROVIDER_ONBOARDING_PROBE_FAILED", "verified": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_ONBOARDING_RESPONSE", "verified": False}
+
+    def activate_provider_onboarding(
+        self, provider_id: str, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        if self.provider_onboarding_manager is None:
+            return {"status": "PROVIDER_ONBOARDING_UNAVAILABLE", "activated": False}
+        authorization = self._authorize_operation(principal_id, "provider.configure")
+        if authorization is not None:
+            return {"status": "AUTHORIZATION_DENIED", "activated": False, "authorization": authorization}
+        try:
+            result = self.provider_onboarding_manager.activate(provider_id, principal_id=principal_id)
+        except Exception as exc:
+            return {"status": "PROVIDER_ONBOARDING_ACTIVATION_FAILED", "activated": False, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_ONBOARDING_RESPONSE", "activated": False}
+
+    def provider_onboarding_status(
+        self, provider_id: str, *, principal_id: str | None = None
+    ) -> dict[str, Any]:
+        if self.provider_onboarding_manager is None:
+            return {"status": "PROVIDER_ONBOARDING_UNAVAILABLE", "provider_id": provider_id}
+        authorization = self._authorize_operation(
+            principal_id, "provider.read", provider_id="*", return_decision=True
+        )
+        if not isinstance(authorization, dict) or authorization.get("allowed") is not True:
+            return {"status": "AUTHORIZATION_DENIED", "provider_id": provider_id, "authorization": authorization}
+        try:
+            result = self.provider_onboarding_manager.get_status(provider_id)
+        except Exception as exc:
+            return {"status": "PROVIDER_ONBOARDING_STATUS_FAILED", "provider_id": provider_id, "error_type": type(exc).__name__}
+        return result if isinstance(result, dict) else {"status": "INVALID_ONBOARDING_RESPONSE", "provider_id": provider_id}
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
