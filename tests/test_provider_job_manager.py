@@ -499,7 +499,10 @@ class ProviderJobManagerTests(unittest.TestCase):
             },
         }), encoding="utf-8")
         manager = ProviderJobManager(self.path, clock=lambda: self.now[0])
-        self.assertEqual(manager.data["scheduler"], {"last_project_id": None})
+        self.assertEqual(
+            manager.data["scheduler"],
+            {"last_project_id": None, "draining": False, "drain_requested_at": None},
+        )
         claimed = manager.claim_next(worker_id="worker-1")
         self.assertEqual(claimed["status"], "JOB_CLAIMED")
         persisted = json.loads(self.path.read_text(encoding="utf-8"))
@@ -805,7 +808,7 @@ class ProviderJobManagerTests(unittest.TestCase):
         job = self.manager.data["jobs"]["queued-deadline"]
         self.assertEqual(job["status"], "FAILED")
         self.assertEqual(job["error_code"], "JOB_DEADLINE_EXCEEDED")
-        self.assertIsNone(job["worker_id"])
+        self.assertIsNone(job.get("worker_id"))
 
     def test_running_job_deadline_revokes_worker_and_prevents_late_success(self):
         deadline = self.now[0] + timedelta(seconds=4)
@@ -949,8 +952,8 @@ class ProviderJobManagerTests(unittest.TestCase):
         self.assertNotIn("result_ref", completed["job"])
 
     def test_graceful_shutdown_blocks_new_admission_and_claims_until_resumed(self):
-        self.assertEqual(self.submit("shutdown-running")["status"], "JOB_QUEUED")
-        self.assertEqual(self.submit("shutdown-queued")["status"], "JOB_QUEUED")
+        self.assertEqual(self.submit("shutdown-running", priority=75)["status"], "JOB_QUEUED")
+        self.assertEqual(self.submit("shutdown-queued", priority=50)["status"], "JOB_QUEUED")
         running = self.manager.claim_next(worker_id="worker-1")
         self.assertEqual(running["job"]["job_id"], "shutdown-running")
 
