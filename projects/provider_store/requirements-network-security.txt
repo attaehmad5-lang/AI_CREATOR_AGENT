@@ -1,0 +1,2 @@
+# Runtime dependency for bounded DNS resolution used by pinned provider HTTPS transports.
+dnspython>=2.7,<3
