@@ -171,7 +171,12 @@ class ProviderRequestIdempotencyManager:
         if not isinstance(fingerprint, str) or _HASH_RE.fullmatch(fingerprint) is None:
             return {"reserved": False, "status": "INVALID_REQUEST_FINGERPRINT"}
         try:
-            current = self._now() if now is None else float(now)
+            if now is None:
+                current = self._now()
+            elif isinstance(now, bool) or not isinstance(now, (int, float)):
+                raise ValueError
+            else:
+                current = float(now)
             if not math.isfinite(current) or current < 0:
                 raise ValueError
         except (TypeError, ValueError, OverflowError):
@@ -192,6 +197,8 @@ class ProviderRequestIdempotencyManager:
                     or record["fingerprint"] != fingerprint
                 ):
                     return {"reserved": False, "status": "REQUEST_ID_CONFLICT"}
+                if current < record["updated_at"]:
+                    return {"reserved": False, "status": "INVALID_IDEMPOTENCY_TIMESTAMP"}
                 if record["state"] == "COMPLETED":
                     return {
                         "reserved": False, "status": "DUPLICATE_REQUEST",
@@ -267,7 +274,12 @@ class ProviderRequestIdempotencyManager:
         ):
             return {"saved": False, "status": "INVALID_IDEMPOTENCY_IDENTITY"}
         try:
-            current = self._now() if now is None else float(now)
+            if now is None:
+                current = self._now()
+            elif isinstance(now, bool) or not isinstance(now, (int, float)):
+                raise ValueError
+            else:
+                current = float(now)
             if not math.isfinite(current) or current < 0:
                 raise ValueError
         except (TypeError, ValueError, OverflowError):
@@ -289,6 +301,8 @@ class ProviderRequestIdempotencyManager:
                 return {"saved": True, "status": "ALREADY_FINALIZED", "state": target}
             if record.get("lease_token") != lease_token:
                 return {"saved": False, "status": "IDEMPOTENCY_LEASE_MISMATCH"}
+            if current < record["updated_at"]:
+                return {"saved": False, "status": "INVALID_IDEMPOTENCY_TIMESTAMP"}
             allowed = (
                 target == "STARTED" and record["state"] == "RESERVED"
                 or target == "NOT_STARTED" and record["state"] in {"RESERVED", "STARTED"}
