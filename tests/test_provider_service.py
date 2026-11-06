@@ -368,7 +368,10 @@ class ProviderServiceTests(unittest.TestCase):
         self.assertTrue(all(
             event["trace_id"] == trace_id
             for index, event in enumerate(events) if index != 2
-        ))
+        ), [
+            (event["operation"], event["outcome"], event["trace_id"])
+            for event in events
+        ])
 
     def test_required_audit_log_records_job_queue_stop_and_resume(self):
         audit = ProviderAuditLog(
