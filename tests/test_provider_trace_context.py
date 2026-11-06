@@ -72,7 +72,7 @@ class ProviderTraceContextTests(unittest.TestCase):
             @with_provider_trace_context
             def invoke(self, *, request_id=None, traceparent=None, _trace_context=None):
                 active = current_provider_trace_context()
-                self.assertIs(active, _trace_context)
+                assert active is _trace_context
                 return {"status": "OK", "inside_trace": active.trace_id}
 
         target = Target()
