@@ -1653,13 +1653,69 @@ class ProviderService:
         rejection = self._sensitive_input_rejection({"worker_id": worker_id})
         if rejection is not None:
             return {"job": None, **rejection}
+
+        allowed_provider_ids = None
+        if self.authorization_manager is not None:
+            if getattr(self.authorization_manager, "supports_provider_scopes", False) is not True:
+                return {"status": "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE", "job": None}
+            list_providers = getattr(self.connection_manager, "list_providers", None)
+            if not callable(list_providers):
+                return {"status": "PROVIDER_REGISTRY_UNAVAILABLE", "job": None}
+            try:
+                providers = list_providers()
+            except Exception as exc:
+                return {
+                    "status": "PROVIDER_REGISTRY_LOOKUP_FAILED",
+                    "job": None, "error_type": type(exc).__name__,
+                }
+            if not isinstance(providers, list) or any(not isinstance(item, dict) for item in providers):
+                return {"status": "INVALID_PROVIDER_REGISTRY_RESPONSE", "job": None}
+            allowed_provider_ids = []
+            for provider in providers:
+                provider_id = provider.get("id")
+                if provider.get("enabled") is not True or not isinstance(provider_id, str):
+                    continue
+                decision = self._authorize_operation(
+                    principal_id, "provider.generate",
+                    provider_id=provider_id, return_decision=True,
+                )
+                if isinstance(decision, dict) and decision.get("allowed") is True:
+                    allowed_provider_ids.append(provider_id)
+                elif isinstance(decision, dict) and decision.get("status") in {
+                    "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE",
+                    "AUTHORIZATION_CHECK_FAILED",
+                    "INVALID_AUTHORIZATION_RESPONSE",
+                }:
+                    return {
+                        "status": "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE",
+                        "job": None,
+                    }
+
+        claim = getattr(self.job_manager, "claim_next", None)
+        if not callable(claim):
+            return {"status": "JOB_MANAGER_UNAVAILABLE", "job": None}
+        claim_kwargs = {"worker_id": worker_id}
+        if allowed_provider_ids is not None:
+            try:
+                parameters = inspect.signature(claim).parameters.values()
+                supports_provider_filter = any(
+                    parameter.name == "allowed_provider_ids"
+                    or parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in parameters
+                )
+            except (TypeError, ValueError):
+                supports_provider_filter = False
+            if not supports_provider_filter:
+                return {"status": "PROVIDER_SCOPE_ENFORCEMENT_UNAVAILABLE", "job": None}
+            claim_kwargs["allowed_provider_ids"] = allowed_provider_ids
+
         audit_intent = self._audit_operation_intent(
             "provider.job.claim", principal_id=principal_id,
         )
         if audit_intent is not None:
             return {"status": "AUDIT_LOG_REQUIRED", "job": None, **audit_intent}
         try:
-            result = self.job_manager.claim_next(worker_id=worker_id)
+            result = claim(**claim_kwargs)
         except Exception as exc:
             result = {"status": "JOB_CLAIM_FAILED", "job": None, "error_type": type(exc).__name__}
         if not isinstance(result, dict):
