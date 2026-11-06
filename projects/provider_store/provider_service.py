@@ -46,6 +46,7 @@ class ProviderService:
         tenant_isolation_manager: Any | None = None,
         secret_manager: Any | None = None,
         request_idempotency_manager: Any | None = None,
+        concurrency_manager: Any | None = None,
     ) -> None:
         if not callable(getattr(connection_manager, "verify_connectivity", None)):
             raise ValueError("connection_manager must support connectivity verification")
@@ -126,7 +127,13 @@ class ProviderService:
             for method in ("reserve_request", "mark_started", "finalize", "get_status")
         ):
             raise ValueError("request_idempotency_manager does not implement the execution idempotency contract")
+        if concurrency_manager is not None and any(
+            not callable(getattr(concurrency_manager, method, None))
+            for method in ("acquire", "renew", "release", "maintain_lease")
+        ):
+            raise ValueError("concurrency_manager does not implement the provider lease contract")
         self.request_idempotency_manager = request_idempotency_manager
+        self.concurrency_manager = concurrency_manager
 
     def authenticate_bearer_token(self, authorization_header: str) -> dict[str, Any]:
         """Verify an API bearer token and return an opaque in-process principal.
