@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextvars
+from collections.abc import Mapping
 import re
 import secrets
 import uuid
@@ -154,7 +155,7 @@ def inject_trace_headers(headers: Any = None) -> dict[str, str]:
     """Return a copied header mapping with the active W3C traceparent injected."""
     if headers is None:
         result: dict[str, str] = {}
-    elif isinstance(headers, dict):
+    elif isinstance(headers, Mapping):
         result = dict(headers)
     else:
         raise ValueError("INVALID_TRACE_HEADERS")
@@ -169,7 +170,7 @@ def inject_trace_headers(headers: Any = None) -> dict[str, str]:
 
 def extract_trace_context(headers: Any) -> ProviderRequestContext:
     """Extract traceparent from a case-insensitive HTTP header mapping."""
-    if not isinstance(headers, dict):
+    if not isinstance(headers, Mapping):
         raise ValueError("INVALID_TRACE_HEADERS")
     value = next(
         (item for key, item in headers.items() if isinstance(key, str) and key.casefold() == "traceparent"),
