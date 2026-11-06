@@ -118,6 +118,24 @@ class ProviderServiceAuditIntegrationTests(unittest.TestCase):
         self.assertTrue(page["events"])
         self.assertTrue(self.log.verify()["valid"])
 
+    def test_real_authorization_manager_grants_audit_reads_only_to_admin(self):
+        from projects.provider_store.provider_authorization import ProviderAuthorizationManager
+
+        authorization = ProviderAuthorizationManager(self.root / "auth.json")
+        authorization.assign_role("admin-1", "admin")
+        authorization.assign_role("operator-1", "operator")
+        service = ProviderService(
+            _Connections(), authorization_manager=authorization, audit_log=self.log,
+        )
+        self.assertEqual(
+            service.read_provider_audit_events(principal_id="operator-1")["status"],
+            "AUTHORIZATION_DENIED",
+        )
+        self.assertEqual(
+            service.read_provider_audit_events(principal_id="admin-1")["status"],
+            "AUDIT_EVENTS_READ",
+        )
+
     def test_audit_read_fails_closed_after_journal_tampering(self):
         self.log.append("routing_decision", outcome="success")
         import json
