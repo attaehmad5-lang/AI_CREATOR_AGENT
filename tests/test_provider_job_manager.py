@@ -1,13 +1,38 @@
 """Queue capacity, idempotency, async lifecycle, and backpressure tests."""
 import hashlib
 import json
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from projects.provider_store.provider_job_manager import ProviderJobManager
+
+
+def _submit_provider_job_in_process(args):
+    state_path, index, max_queue_size = args
+    manager = ProviderJobManager(
+        state_path, max_queue_size=max_queue_size, max_concurrent=2
+    )
+    result = manager.submit(
+        job_id=f"process-submit-{index}",
+        project_id=f"project-{index % 3}",
+        provider_id="image",
+        payload_ref=f"payload:{index}",
+    )
+    return result["status"]
+
+
+def _claim_provider_job_in_process(args):
+    state_path, index, max_queue_size, max_concurrent = args
+    manager = ProviderJobManager(
+        state_path,
+        max_queue_size=max_queue_size,
+        max_concurrent=max_concurrent,
+    )
+    result = manager.claim_next(worker_id=f"process-worker-{index}")
+    return result["status"]
 
 
 class ProviderJobManagerTests(unittest.TestCase):
@@ -644,6 +669,76 @@ class ProviderJobManagerTests(unittest.TestCase):
         )["status"], "INVALID_JOB_ID")
         self.assertEqual(self.manager.claim_next(worker_id="bad worker")["status"], "INVALID_WORKER_ID")
         self.assertEqual(self.manager.poll(job_id="missing")["status"], "JOB_NOT_FOUND")
+
+
+    def test_multi_process_submissions_never_exceed_persisted_queue_capacity(self):
+        path = Path(self.temp_dir.name) / "multiprocess-submit.json"
+        queue_limit = 4
+        manager = ProviderJobManager(
+            path, max_queue_size=queue_limit, max_concurrent=2
+        )
+        self.assertEqual(manager.submit(
+            job_id="seed-job", project_id="seed-project", provider_id="image",
+            payload_ref="payload:seed",
+        )["status"], "JOB_QUEUED")
+
+        args = [(str(path), index, queue_limit) for index in range(16)]
+        with ProcessPoolExecutor(max_workers=8) as executor:
+            statuses = list(executor.map(_submit_provider_job_in_process, args))
+
+        accepted = sum(status == "JOB_QUEUED" for status in statuses)
+        rejected = sum(status == "QUEUE_FULL" for status in statuses)
+        self.assertEqual(accepted, queue_limit - 1)
+        self.assertEqual(rejected, len(args) - accepted)
+        persisted = json.loads(path.read_text(encoding="utf-8"))
+        queued = [
+            job for job in persisted["jobs"].values()
+            if job.get("status") == "QUEUED"
+        ]
+        self.assertEqual(len(queued), queue_limit)
+        self.assertEqual(len({job["job_id"] for job in queued}), queue_limit)
+
+    def test_multi_process_claims_never_exceed_worker_concurrency_limit(self):
+        path = Path(self.temp_dir.name) / "multiprocess-claim.json"
+        queue_limit = 20
+        concurrent_limit = 2
+        manager = ProviderJobManager(
+            path,
+            max_queue_size=queue_limit,
+            max_concurrent=concurrent_limit,
+        )
+        for index in range(12):
+            self.assertEqual(manager.submit(
+                job_id=f"claim-job-{index}",
+                project_id=f"project-{index % 3}",
+                provider_id="image",
+                payload_ref=f"payload:claim-{index}",
+            )["status"], "JOB_QUEUED")
+
+        args = [
+            (str(path), index, queue_limit, concurrent_limit)
+            for index in range(12)
+        ]
+        with ProcessPoolExecutor(max_workers=8) as executor:
+            statuses = list(executor.map(_claim_provider_job_in_process, args))
+
+        self.assertEqual(statuses.count("JOB_CLAIMED"), concurrent_limit)
+        self.assertEqual(
+            statuses.count("CONCURRENCY_LIMIT"),
+            len(args) - concurrent_limit,
+        )
+        persisted = json.loads(path.read_text(encoding="utf-8"))
+        running = [
+            job for job in persisted["jobs"].values()
+            if job.get("status") == "RUNNING"
+        ]
+        queued = [
+            job for job in persisted["jobs"].values()
+            if job.get("status") == "QUEUED"
+        ]
+        self.assertEqual(len(running), concurrent_limit)
+        self.assertEqual(len(queued), 12 - concurrent_limit)
+        self.assertEqual(len({job["worker_id"] for job in running}), concurrent_limit)
 
 
 if __name__ == "__main__":
