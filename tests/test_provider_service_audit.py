@@ -202,6 +202,63 @@ class ProviderServiceAuditTests(unittest.TestCase):
         self.assertEqual(route_result["status"], "AUDIT_LOG_WRITE_FAILED")
         self.assertTrue(route_result["reservations_retained"])
 
+    def test_execute_routed_request_propagates_one_trace_across_routing_adapter_and_audit(self):
+        self.authorization.assign_role("trace-admin", "admin")
+        router = RoutingStub()
+        service = self.service(router=router)
+        adapter_calls = []
+        parent = "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
+
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: adapter_calls.append(dict(kwargs)) or {"started": False},
+            modality="image",
+            principal_id="trace-admin",
+            tenant_id="tenant-a",
+            traceparent=parent,
+        )
+
+        self.assertEqual(result["status"], "EXECUTION_NOT_STARTED")
+        self.assertRegex(result["request_id"], r"^[0-9a-f]{32}$")
+        self.assertEqual(result["trace_id"], "a" * 32)
+        self.assertNotEqual(result["span_id"], "b" * 16)
+        self.assertTrue(result["traceparent"].startswith("00-" + "a" * 32 + "-"))
+        self.assertEqual(len(router.calls), 1)
+        route_call = router.calls[0]
+        self.assertEqual(route_call["request_id"], result["request_id"])
+        self.assertEqual(route_call["trace_id"], result["trace_id"])
+        self.assertRegex(route_call["span_id"], r"^[0-9a-f]{16}$")
+        self.assertEqual(route_call["traceparent"].split("-")[1], result["trace_id"])
+        self.assertEqual(len(adapter_calls), 1)
+        self.assertEqual(adapter_calls[0]["request_id"], result["request_id"])
+        self.assertEqual(adapter_calls[0]["trace_id"], result["trace_id"])
+        self.assertRegex(adapter_calls[0]["span_id"], r"^[0-9a-f]{16}$")
+        self.assertNotEqual(adapter_calls[0]["span_id"], route_call["span_id"])
+        events = self.audit.read_events(limit=100)["events"]
+        self.assertTrue(events)
+        trace_refs = {event["trace_ref"] for event in events}
+        self.assertEqual(len(trace_refs), 1)
+        self.assertRegex(next(iter(trace_refs)), r"^[0-9a-f]{64}$")
+        self.assertNotEqual(next(iter(trace_refs)), result["trace_id"])
+
+    def test_invalid_incoming_traceparent_blocks_provider_routing(self):
+        router = RoutingStub()
+        service = self.service(router=router)
+        result = service.execute_routed_request(
+            category="image",
+            project_id="film",
+            estimated_cost=0.0,
+            adapter=lambda **kwargs: self.fail("invalid trace must block adapter call"),
+            modality="image",
+            request_id="invalid-trace-request",
+            traceparent="00-" + "0" * 32 + "-" + "b" * 16 + "-00",
+        )
+        self.assertEqual(result["status"], "INVALID_TRACEPARENT")
+        self.assertEqual(router.calls, [])
+        self.assertEqual(self.audit.verify()["event_count"], 0)
+
     def test_audit_read_and_verify_are_admin_only(self):
         self.authorization.assign_role("creator-user", "creator")
         self.authorization.assign_role("security-admin", "admin")
