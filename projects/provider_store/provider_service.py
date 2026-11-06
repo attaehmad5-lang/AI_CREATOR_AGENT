@@ -1092,14 +1092,22 @@ class ProviderService:
             }
         return None
 
+    @with_provider_trace_context
     def submit_job(
         self, *, job_id: str, project_id: str, provider_id: str,
         payload_ref: str, priority: int = 50, principal_id: str | None = None,
-        tenant_id: str | None = None,
+        tenant_id: str | None = None, request_id: str | None = None,
+        traceparent: str | None = None,
+        _trace_context: ProviderRequestTraceContext | None = None,
     ) -> dict[str, Any]:
+        if not isinstance(_trace_context, ProviderRequestTraceContext):
+            return {"status": "INVALID_TRACE_CONTEXT", "accepted": False}
         if self.job_manager is None:
             return {"status": "JOB_MANAGER_UNAVAILABLE", "accepted": False}
-        authorization = self._authorize_operation(principal_id, "provider.generate", provider_id=provider_id)
+        authorization = self._authorize_operation(
+            principal_id, "provider.generate", provider_id=provider_id,
+            tenant_id=tenant_id, trace_id=_trace_context.trace_id,
+        )
         if authorization is not None:
             return {"status": "AUTHORIZATION_DENIED", "accepted": False, "authorization": authorization}
         tenant_error = self._authorize_tenant_project(
@@ -1123,6 +1131,9 @@ class ProviderService:
             submit_args = {
                 "job_id": job_id, "project_id": project_id, "provider_id": provider_id,
                 "payload_ref": payload_ref, "priority": priority,
+                "request_id": _trace_context.request_id,
+                "trace_id": _trace_context.trace_id,
+                "traceparent": _trace_context.traceparent,
             }
             if self.tenant_isolation_manager is not None:
                 submit_args["tenant_id"] = tenant_id
