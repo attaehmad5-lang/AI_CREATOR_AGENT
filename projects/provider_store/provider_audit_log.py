@@ -181,7 +181,7 @@ class ProviderAuditLog:
                     self._data, stream, ensure_ascii=False, indent=2,
                     sort_keys=True, allow_nan=False,
                 )
-                stream.write("\\n")
+                stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             atomic_replace_with_retry(temporary_path, self.state_path)
