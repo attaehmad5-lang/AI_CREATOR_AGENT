@@ -299,7 +299,8 @@ class ProviderMetricsManager:
                     "avg_latency_ms": None, "p50_latency_ms": None,
                     "p95_latency_ms": None, "avg_queue_wait_ms": None,
                     "window_sample_count": 0, "throughput_per_minute": 0.0,
-                    "timeout_rate": None, "window_seconds": float(window),
+                    "timeout_rate": None, "window_timeout_count": 0,
+                    "window_timeout_rate": None, "window_seconds": float(window),
                 },
             }
         window_start = current_time - timedelta(seconds=float(window))
@@ -310,6 +311,10 @@ class ProviderMetricsManager:
                 and window_start <= recorded_at <= current_time
             )
         ]
+        window_timeout_count = sum(item["timed_out"] for item in window_samples)
+        window_timeout_rate = (
+            window_timeout_count / len(window_samples) if window_samples else None
+        )
         latencies = [item["latency_ms"] for item in samples]
         waits = [item["queue_wait_ms"] for item in samples]
         success_count = sum(item["success"] for item in samples)
@@ -320,6 +325,8 @@ class ProviderMetricsManager:
             "failure_count": len(samples) - success_count,
             "timeout_count": timeout_count,
             "timeout_rate": timeout_count / len(samples),
+            "window_timeout_count": window_timeout_count,
+            "window_timeout_rate": window_timeout_rate,
             "success_rate": success_count / len(samples),
             "avg_latency_ms": sum(latencies) / len(latencies),
             "p50_latency_ms": self._percentile(latencies, 0.50),
