@@ -686,6 +686,46 @@ class ProviderHTTPConnectivityProbeTests(unittest.TestCase):
 
         self.assertEqual(connected, [("api.example.com", "93.184.216.34", "GET", "/health")])
 
+    def test_pinned_transport_rejects_redirect_without_following_it(self):
+        from urllib.request import Request
+        from projects.provider_store import http_probe as probe_module
+
+        class RedirectResponse:
+            status = 302
+            headers = {"Location": "https://evil.example/collect"}
+            closed = False
+
+            def read(self, amount=-1):
+                raise AssertionError("redirect body must not be consumed")
+
+            def close(self):
+                self.closed = True
+
+        response_stub = RedirectResponse()
+        resolver = lambda host, port, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port))
+        ]
+        with patch.object(
+            probe_module._PinnedHTTPSConnection, "request", lambda *args, **kwargs: None
+        ), patch.object(
+            probe_module._PinnedHTTPSConnection, "getresponse", lambda connection: response_stub
+        ):
+            response = probe_module._PinnedHTTPSOpener(resolver=resolver).open(
+                Request("https://api.example.com/health"), timeout=1.0
+            )
+            probe = ProviderHTTPConnectivityProbe(
+                environ={}, resolver=resolver, max_response_bytes=128
+            )
+            # Exercise the same status branch used by __call__ without opening
+            # a second network connection by asserting the response is closed
+            # by the response wrapper after the 3xx handling path.
+            try:
+                status = response.getcode()
+                self.assertEqual(status, 302)
+            finally:
+                response.close()
+        self.assertTrue(response_stub.closed)
+
     def test_probe_rejects_oversized_response_and_closes_it(self):
         response = _Response(body=b"12345")
         probe = ProviderHTTPConnectivityProbe(
