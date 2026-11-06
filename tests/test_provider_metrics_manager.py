@@ -48,6 +48,12 @@ class ProviderMetricsManagerTests(unittest.TestCase):
         self.assertEqual(self.manager.snapshot()["status"], "NO_METRICS")
         self.assertEqual(self.record("image-a", True, float("nan"))["status"], "INVALID_METRIC_TIMING")
         self.assertEqual(self.manager.record(
+            provider_id="api_key:SECRET", category="image", success=True, latency_ms=1,
+        )["status"], "INVALID_PROVIDER_ID")
+        self.assertEqual(self.manager.record(
+            provider_id="image-a", category="client_secret", success=True, latency_ms=1,
+        )["status"], "INVALID_CATEGORY")
+        self.assertEqual(self.manager.record(
             provider_id="image-a", category="image", success="yes",
             latency_ms=1,
         )["status"], "INVALID_METRIC_FLAGS")
