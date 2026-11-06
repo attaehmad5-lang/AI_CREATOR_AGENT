@@ -143,7 +143,7 @@ class ProviderConcurrencyManagerTests(unittest.TestCase):
         blocked = small.acquire(
             provider_id="video", request_id="two", project_id="film",
         )
-        self.assertEqual(blocked["status"], "PROVIDER_CONCURRENCY_LIMIT_REACHED")
+        self.assertEqual(blocked["status"], "CONCURRENCY_CAPACITY_REACHED")
 
 
 if __name__ == "__main__":
