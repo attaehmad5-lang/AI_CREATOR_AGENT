@@ -311,6 +311,11 @@ class AdvancedProviderStoreTests(unittest.TestCase):
             status = manager.metadata_change_status("advanced-story")
             self.assertEqual(status["status"], "OUT_OF_BAND_CHANGE")
             self.assertFalse(status["integrity_valid"])
+            public_view = manager.get_provider("advanced-story")
+            self.assertNotIn("metadata_revision", public_view)
+            self.assertNotIn("metadata_updated_at", public_view)
+            self.assertEqual(status["revision"], None)
+            self.assertEqual(status["changed_fields"], [])
             blocked = manager.update_provider_metadata(
                 "advanced-story", {"description": "Attempted overwrite"}
             )
