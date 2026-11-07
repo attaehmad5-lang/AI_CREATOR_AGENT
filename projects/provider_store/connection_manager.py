@@ -5,6 +5,8 @@ unless a separate provider-specific probe has actually succeeded.
 """
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import math
 import os
@@ -71,6 +73,13 @@ MODALITY_OUTPUT_KINDS: dict[str, frozenset[str]] = {
 
 
 class ConnectionManager:
+    _METADATA_TRACKING_FIELDS = frozenset({
+        "metadata_revision",
+        "metadata_updated_at",
+        "metadata_changed_fields",
+        "metadata_fingerprint",
+    })
+
     VALID_STATES = {
         "LOCKED",
         "CONNECTING",
@@ -554,11 +563,305 @@ class ConnectionManager:
             raise ValueError("Provider catalog 'providers' must be a list")
         return [item for item in providers if isinstance(item, dict)]
 
-    @staticmethod
-    def _public_provider_view(provider: dict[str, Any]) -> dict[str, Any]:
-        """Detach catalog data and distinguish catalog labels from live connection state."""
-        import copy
+    @classmethod
+    def _metadata_fingerprint(cls, provider: dict[str, Any]) -> str:
+        """Hash canonical provider metadata without including its tracking envelope."""
+        metadata = {
+            key: value for key, value in provider.items()
+            if key not in cls._METADATA_TRACKING_FIELDS
+        }
+        canonical = json.dumps(
+            metadata,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _metadata_tracking_state(cls, provider: dict[str, Any]) -> dict[str, Any]:
+        """Return safe tracking state, detecting edits made outside manager APIs."""
+        fields_present = cls._METADATA_TRACKING_FIELDS.intersection(provider)
+        if not fields_present:
+            return {
+                "status": "UNTRACKED",
+                "integrity_valid": None,
+                "revision": None,
+                "updated_at": None,
+                "changed_fields": [],
+            }
+
+        revision = provider.get("metadata_revision")
+        updated_at = provider.get("metadata_updated_at")
+        changed_fields = provider.get("metadata_changed_fields")
+        fingerprint = provider.get("metadata_fingerprint")
+        if (
+            type(revision) is not int
+            or revision < 1
+            or not isinstance(updated_at, str)
+            or not isinstance(changed_fields, list)
+            or not changed_fields
+            or len(changed_fields) > 100
+            or any(
+                not isinstance(item, str) or not item.strip() or len(item) > 128
+                for item in changed_fields
+            )
+            or not isinstance(fingerprint, str)
+            or re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None
+        ):
+            return {
+                "status": "OUT_OF_BAND_CHANGE",
+                "integrity_valid": False,
+                "revision": revision if type(revision) is int else None,
+                "updated_at": None,
+                "changed_fields": [],
+            }
+
+        try:
+            parsed = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                raise ValueError("timestamp must be timezone-aware")
+            actual_fingerprint = cls._metadata_fingerprint(provider)
+        except (TypeError, ValueError, OverflowError):
+            actual_fingerprint = None
+
+        valid = actual_fingerprint == fingerprint
+        return {
+            "status": "TRACKED" if valid else "OUT_OF_BAND_CHANGE",
+            "integrity_valid": valid,
+            "revision": revision,
+            "updated_at": updated_at,
+            "changed_fields": list(changed_fields) if valid else [],
+        }
+
+    @classmethod
+    def _stamp_provider_metadata(
+        cls,
+        provider: dict[str, Any],
+        *,
+        revision: int,
+        changed_fields: list[str],
+    ) -> dict[str, Any]:
+        """Add a versioned, integrity-checked metadata envelope to one provider."""
+        record = copy.deepcopy(provider)
+        for key in cls._METADATA_TRACKING_FIELDS:
+            record.pop(key, None)
+        record["metadata_revision"] = revision
+        record["metadata_updated_at"] = datetime.now(timezone.utc).isoformat()
+        record["metadata_changed_fields"] = sorted(set(changed_fields))
+        record["metadata_fingerprint"] = cls._metadata_fingerprint(record)
+        return record
+
+    def get_provider_metadata_change_status(self, provider_id: str) -> dict[str, Any]:
+        """Report provider metadata revision and safe change history without secret values."""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"status": "NOT_FOUND", "provider": provider_id}
+        tracking = {
+            "status": provider.get("metadata_tracking_status", "UNTRACKED"),
+            "integrity_valid": provider.get("metadata_integrity_valid"),
+            "revision": provider.get("metadata_revision"),
+            "updated_at": provider.get("metadata_updated_at"),
+            "changed_fields": provider.get("metadata_changed_fields", []),
+        }
+        return {"provider": provider_id, **tracking}
+
+    def initialize_metadata_tracking(
+        self, provider_ids: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Start an honest baseline for legacy catalog entries; never invent past history."""
+        if provider_ids is not None and (
+            not isinstance(provider_ids, list)
+            or any(not isinstance(item, str) or not item.strip() for item in provider_ids)
+            or len(provider_ids) != len(set(provider_ids))
+        ):
+            return {"status": "INVALID_PROVIDER_IDS", "initialized": [], "count": 0}
+
+        with self._catalog_transaction():
+            providers = self._list_providers_unlocked()
+            selected = set(provider_ids) if provider_ids is not None else {
+                item.get("id") for item in providers if isinstance(item.get("id"), str)
+            }
+            known = {item.get("id") for item in providers if isinstance(item.get("id"), str)}
+            missing = sorted(selected - known)
+            if missing:
+                return {
+                    "status": "NOT_FOUND",
+                    "initialized": [],
+                    "count": 0,
+                    "missing": missing,
+                }
+
+            updated: list[dict[str, Any]] = []
+            initialized: list[str] = []
+            for provider in providers:
+                provider_id = provider.get("id")
+                record = copy.deepcopy(provider)
+                if provider_id in selected:
+                    tracking = self._metadata_tracking_state(record)
+                    if tracking["status"] == "OUT_OF_BAND_CHANGE":
+                        return {
+                            "status": "METADATA_INTEGRITY_ERROR",
+                            "initialized": [],
+                            "count": 0,
+                            "provider": provider_id,
+                        }
+                    if tracking["status"] == "UNTRACKED":
+                        record = self._stamp_provider_metadata(
+                            record, revision=1, changed_fields=["__baseline__"]
+                        )
+                        initialized.append(provider_id)
+                updated.append(record)
+
+            if not initialized:
+                return {"status": "NO_CHANGE", "initialized": [], "count": 0}
+
+            candidate = dict(self.catalog)
+            candidate["providers"] = updated
+            validation = self.validate_catalog_schema(candidate)
+            if validation.get("valid") is not True:
+                return {
+                    "status": "INVALID_PROVIDER_CATALOG",
+                    "initialized": [],
+                    "count": 0,
+                    "errors": validation.get("errors", []),
+                }
+            self._atomic_write_json(self.catalog_path, candidate)
+            self.catalog = candidate
+            return {
+                "status": "INITIALIZED",
+                "initialized": sorted(initialized),
+                "count": len(initialized),
+            }
+
+    def update_provider_metadata(
+        self, provider_id: str, changes: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Atomically update safe catalog metadata and record exactly which top-level fields changed."""
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            return {"status": "INVALID_PROVIDER_ID", "saved": False}
+        if not isinstance(changes, dict) or any(
+            not isinstance(key, str) or not key.strip() for key in changes
+        ):
+            return {"status": "INVALID_METADATA_CHANGES", "provider": provider_id, "saved": False}
+
+        reserved = self._METADATA_TRACKING_FIELDS | {
+            "metadata_tracking_status",
+            "metadata_integrity_valid",
+        }
+        if "id" in changes or reserved.intersection(changes):
+            return {
+                "status": "IMMUTABLE_METADATA_FIELD",
+                "provider": provider_id,
+                "saved": False,
+            }
+        if self._contains_credential_value_field(changes):
+            return {
+                "status": "SENSITIVE_METADATA_REJECTED",
+                "provider": provider_id,
+                "saved": False,
+            }
+
+        try:
+            requested_changes = copy.deepcopy(changes)
+            json.dumps(requested_changes, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError, OverflowError):
+            return {
+                "status": "INVALID_METADATA_VALUE",
+                "provider": provider_id,
+                "saved": False,
+            }
+
+        with self._catalog_transaction():
+            providers = self._list_providers_unlocked()
+            index = next(
+                (i for i, item in enumerate(providers) if item.get("id") == provider_id),
+                None,
+            )
+            if index is None:
+                return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
+
+            existing = providers[index]
+            tracking = self._metadata_tracking_state(existing)
+            if tracking["status"] == "OUT_OF_BAND_CHANGE":
+                return {
+                    "status": "METADATA_INTEGRITY_ERROR",
+                    "provider": provider_id,
+                    "saved": False,
+                }
+
+            candidate_provider = copy.deepcopy(existing)
+            candidate_provider.update(requested_changes)
+            old_metadata = {
+                key: value for key, value in existing.items()
+                if key not in self._METADATA_TRACKING_FIELDS
+            }
+            new_metadata = {
+                key: value for key, value in candidate_provider.items()
+                if key not in self._METADATA_TRACKING_FIELDS
+            }
+            missing = object()
+            changed_fields = sorted(
+                key for key in set(old_metadata) | set(new_metadata)
+                if old_metadata.get(key, missing) != new_metadata.get(key, missing)
+            )
+            if not changed_fields:
+                return {
+                    "status": "NO_CHANGE",
+                    "provider": provider_id,
+                    "saved": False,
+                    "metadata_revision": tracking["revision"],
+                    "metadata_updated_at": tracking["updated_at"],
+                    "changed_fields": [],
+                }
+
+            revision = (tracking["revision"] or 0) + 1
+            candidate_provider = self._stamp_provider_metadata(
+                candidate_provider,
+                revision=revision,
+                changed_fields=changed_fields,
+            )
+            updated = [copy.deepcopy(item) for item in providers]
+            updated[index] = candidate_provider
+            candidate = dict(self.catalog)
+            candidate["providers"] = updated
+            validation = self.validate_catalog_schema(candidate)
+            if validation.get("valid") is not True:
+                return {
+                    "status": "INVALID_PROVIDER_METADATA",
+                    "provider": provider_id,
+                    "saved": False,
+                    "errors": validation.get("errors", []),
+                }
+            try:
+                json.dumps(candidate, ensure_ascii=False, allow_nan=False)
+            except (TypeError, ValueError, OverflowError):
+                return {
+                    "status": "INVALID_METADATA_VALUE",
+                    "provider": provider_id,
+                    "saved": False,
+                }
+            self._atomic_write_json(self.catalog_path, candidate)
+            self.catalog = candidate
+
+        return {
+            "status": "UPDATED",
+            "provider": provider_id,
+            "saved": True,
+            "metadata_revision": revision,
+            "metadata_updated_at": candidate_provider["metadata_updated_at"],
+            "changed_fields": changed_fields,
+        }
+
+    @classmethod
+    def _public_provider_view(cls, provider: dict[str, Any]) -> dict[str, Any]:
+        """Return detached catalog metadata with a truthful integrity indicator."""
         safe = copy.deepcopy(provider)
+        tracking = cls._metadata_tracking_state(provider)
+        safe.pop("metadata_fingerprint", None)
+        safe["metadata_tracking_status"] = tracking["status"]
+        safe["metadata_integrity_valid"] = tracking["integrity_valid"]
         if "status" in safe:
             safe["catalog_status"] = safe.pop("status")
         return safe
@@ -609,8 +912,26 @@ class ConnectionManager:
             index = next((i for i, item in enumerate(providers) if item.get("id") == provider_id), None)
             if index is None:
                 return {"status": "NOT_FOUND", "provider": provider_id, "saved": False}
-            updated = [dict(item) for item in providers]
-            updated[index]["enabled"] = enabled
+            existing_provider = providers[index]
+            if existing_provider.get("enabled") is enabled:
+                updated_provider = copy.deepcopy(existing_provider)
+            else:
+                tracking = self._metadata_tracking_state(existing_provider)
+                if tracking["status"] == "OUT_OF_BAND_CHANGE":
+                    return {
+                        "status": "METADATA_INTEGRITY_ERROR",
+                        "provider": provider_id,
+                        "saved": False,
+                    }
+                updated_provider = copy.deepcopy(existing_provider)
+                updated_provider["enabled"] = enabled
+                updated_provider = self._stamp_provider_metadata(
+                    updated_provider,
+                    revision=(tracking["revision"] or 0) + 1,
+                    changed_fields=["enabled"],
+                )
+            updated = [copy.deepcopy(item) for item in providers]
+            updated[index] = updated_provider
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
             validation = self.validate_catalog_schema(new_catalog)
@@ -880,7 +1201,7 @@ class ConnectionManager:
     def register_provider(
         self, provider: dict[str, Any], *, overwrite: bool = False
     ) -> dict[str, Any]:
-        """Register validated provider metadata; never accept credentials in catalog data."""
+        """Register safe provider metadata with versioned change tracking."""
         if not isinstance(provider, dict):
             return {"status": "INVALID_PROVIDER", "reason": "provider must be an object"}
         required = ("id", "name", "category", "auth_type", "connection_type")
@@ -892,20 +1213,68 @@ class ConnectionManager:
         provider_id = provider["id"].strip()
         if any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in provider_id):
             return {"status": "INVALID_PROVIDER", "reason": "provider id contains unsupported characters"}
-
-        # Metadata may name an environment variable, but must never contain a secret value.
         if self._contains_credential_value_field(provider):
             return {"status": "SENSITIVE_METADATA_REJECTED", "provider": provider_id}
+
+        try:
+            safe_provider = copy.deepcopy(provider)
+            for key in self._METADATA_TRACKING_FIELDS | {
+                "metadata_tracking_status", "metadata_integrity_valid"
+            }:
+                safe_provider.pop(key, None)
+            safe_provider["id"] = provider_id
+            json.dumps(safe_provider, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError, OverflowError):
+            return {"status": "INVALID_METADATA_VALUE", "provider": provider_id}
 
         with self._catalog_transaction():
             providers = self._list_providers_unlocked()
             existing = next((item for item in providers if item.get("id") == provider_id), None)
             if existing is not None and not overwrite:
                 return {"status": "ALREADY_EXISTS", "provider": provider_id, "saved": False}
-            safe_provider = dict(provider)
-            safe_provider["id"] = provider_id
-            updated = [item for item in providers if item.get("id") != provider_id]
-            updated.append(safe_provider)
+
+            if existing is None:
+                tracked_provider = self._stamp_provider_metadata(
+                    safe_provider, revision=1, changed_fields=["__created__"]
+                )
+                changed_fields = ["__created__"]
+                revision = 1
+            else:
+                tracking = self._metadata_tracking_state(existing)
+                if tracking["status"] == "OUT_OF_BAND_CHANGE":
+                    return {
+                        "status": "METADATA_INTEGRITY_ERROR",
+                        "provider": provider_id,
+                        "saved": False,
+                    }
+                old_metadata = {
+                    key: value for key, value in existing.items()
+                    if key not in self._METADATA_TRACKING_FIELDS
+                }
+                new_metadata = {
+                    key: value for key, value in safe_provider.items()
+                    if key not in self._METADATA_TRACKING_FIELDS
+                }
+                missing = object()
+                changed_fields = sorted(
+                    key for key in set(old_metadata) | set(new_metadata)
+                    if old_metadata.get(key, missing) != new_metadata.get(key, missing)
+                )
+                if not changed_fields:
+                    return {
+                        "status": "NO_CHANGE",
+                        "provider": provider_id,
+                        "saved": False,
+                        "metadata_revision": tracking["revision"],
+                        "metadata_updated_at": tracking["updated_at"],
+                    }
+                revision = (tracking["revision"] or 0) + 1
+                tracked_provider = self._stamp_provider_metadata(
+                    safe_provider, revision=revision, changed_fields=changed_fields
+                )
+
+            updated = [copy.deepcopy(item) for item in providers if item.get("id") != provider_id]
+            updated.append(tracked_provider)
             new_catalog = dict(self.catalog)
             new_catalog["providers"] = updated
             validation = self.validate_catalog_schema(new_catalog)
@@ -923,6 +1292,9 @@ class ConnectionManager:
                 "provider": provider_id,
                 "saved": True,
                 "overwritten": existing is not None,
+                "metadata_revision": revision,
+                "metadata_updated_at": tracked_provider["metadata_updated_at"],
+                "changed_fields": changed_fields,
             }
 
     @staticmethod
