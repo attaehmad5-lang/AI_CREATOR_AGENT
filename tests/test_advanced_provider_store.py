@@ -255,5 +255,135 @@ class AdvancedProviderStoreTests(unittest.TestCase):
             self.assertNotIn("catalog_view_mutation", persisted["capabilities"])
 
 
+    def test_metadata_updates_record_revision_timestamp_and_changed_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            before = manager.metadata_change_status("advanced-story")
+            self.assertEqual(before["status"], "UNTRACKED")
+
+            result = manager.update_provider_metadata(
+                "advanced-story", {"description": "Updated advanced story provider"}
+            )
+            self.assertEqual(result["status"], "UPDATED")
+            self.assertEqual(result["metadata_revision"], 1)
+            self.assertEqual(result["changed_fields"], ["description"])
+
+            after = manager.metadata_change_status("advanced-story")
+            self.assertEqual(after["status"], "TRACKED")
+            self.assertTrue(after["integrity_valid"])
+            self.assertEqual(after["revision"], 1)
+            self.assertEqual(after["changed_fields"], ["description"])
+            self.assertTrue(after["updated_at"])
+            public_view = manager.get_provider("advanced-story")
+            self.assertNotIn("metadata_fingerprint", public_view)
+            self.assertEqual(public_view["metadata_tracking_status"], "TRACKED")
+
+            second = manager.update_provider_metadata(
+                "advanced-story", {"description": "Second revision"}
+            )
+            self.assertEqual(second["metadata_revision"], 2)
+            self.assertEqual(second["changed_fields"], ["description"])
+
+    def test_metadata_noop_does_not_increment_revision_or_timestamp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            manager.update_provider_metadata("advanced-story", {"description": "Same value"})
+            first = manager.metadata_change_status("advanced-story")
+            result = manager.update_provider_metadata(
+                "advanced-story", {"description": "Same value"}
+            )
+            second = manager.metadata_change_status("advanced-story")
+            self.assertEqual(result["status"], "NO_CHANGE")
+            self.assertEqual(first["revision"], second["revision"])
+            self.assertEqual(first["updated_at"], second["updated_at"])
+
+    def test_out_of_band_metadata_tampering_is_detected_and_blocks_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager = self._manager(root)
+            manager.update_provider_metadata("advanced-story", {"description": "Trusted value"})
+            catalog_path = manager.store.manager.catalog_path
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+            story = next(item for item in catalog["providers"] if item["id"] == "advanced-story")
+            story["description"] = "Changed outside the manager API"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+            status = manager.metadata_change_status("advanced-story")
+            self.assertEqual(status["status"], "OUT_OF_BAND_CHANGE")
+            self.assertFalse(status["integrity_valid"])
+            public_view = manager.get_provider("advanced-story")
+            self.assertNotIn("metadata_revision", public_view)
+            self.assertNotIn("metadata_updated_at", public_view)
+            self.assertEqual(status["revision"], None)
+            self.assertEqual(status["changed_fields"], [])
+            blocked = manager.update_provider_metadata(
+                "advanced-story", {"description": "Attempted overwrite"}
+            )
+            self.assertEqual(blocked["status"], "METADATA_INTEGRITY_ERROR")
+            self.assertFalse(blocked["saved"])
+
+    def test_advanced_store_cannot_update_core_provider_or_change_category_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            core = manager.update_provider_metadata("core-image", {"description": "No"})
+            self.assertEqual(core["status"], "NOT_ADVANCED_PROVIDER")
+            category = manager.update_provider_metadata(
+                "advanced-story", {"category": "image"}
+            )
+            self.assertEqual(category["status"], "ADVANCED_CATEGORY_REQUIRED")
+            self.assertEqual(manager.get_provider("advanced-story")["category"], "script_story")
+
+    def test_advanced_store_rejects_secret_values_in_metadata_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            result = manager.update_provider_metadata(
+                "advanced-story", {"api_key": "must-not-be-stored"}
+            )
+            self.assertEqual(result["status"], "SENSITIVE_METADATA_REJECTED")
+            self.assertIsNone(manager.store.manager.get_provider_metadata("advanced-story").get("api_key"))
+
+    def test_advanced_store_metadata_baseline_is_scoped_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            first = manager.initialize_metadata_tracking()
+            self.assertEqual(first["status"], "INITIALIZED")
+            self.assertEqual(first["count"], 2)
+            self.assertEqual(manager.metadata_change_status("advanced-story")["status"], "TRACKED")
+            self.assertEqual(
+                manager.store.manager.get_provider_metadata_change_status("core-image")["status"],
+                "UNTRACKED",
+            )
+            second = manager.initialize_metadata_tracking()
+            self.assertEqual(second["status"], "NO_CHANGE")
+
+    def test_runtime_enablement_also_advances_provider_metadata_revision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            result = manager.store.manager.set_provider_enabled("advanced-story", False)
+            self.assertEqual(result["status"], "DISABLED")
+            status = manager.metadata_change_status("advanced-story")
+            self.assertEqual(status["status"], "TRACKED")
+            self.assertEqual(status["revision"], 1)
+            self.assertEqual(status["changed_fields"], ["enabled"])
+
+    def test_new_provider_registration_starts_metadata_tracking(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = self._manager(Path(tmp))
+            result = manager.store.manager.register_provider({
+                "id": "advanced-new", "name": "Advanced New",
+                "category": "advanced_audio", "auth_type": "NONE",
+                "connection_type": "API", "enabled": False,
+                "subscription_required": False,
+                "capabilities": ["audio_generation"],
+            })
+            self.assertEqual(result["status"], "REGISTERED")
+            self.assertEqual(result["metadata_revision"], 1)
+            self.assertEqual(result["changed_fields"], ["__created__"])
+            status = manager.store.manager.get_provider_metadata_change_status("advanced-new")
+            self.assertEqual(status["status"], "TRACKED")
+            self.assertTrue(status["integrity_valid"])
+
+
+
 if __name__ == "__main__":
     unittest.main()

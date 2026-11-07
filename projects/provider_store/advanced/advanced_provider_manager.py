@@ -9,11 +9,11 @@ from ..provider_store_manager import ProviderStoreManager
 
 
 class AdvancedProviderManager:
-    """Read-only advanced-provider view with evidence-based runtime status.
+    """Catalog-backed advanced-provider facade with evidence-based status and scoped metadata edits.
 
     Provider definitions are owned by ConnectionManager's validated central
-    catalog. This facade intentionally does not invent independent provider
-    state or treat catalog labels as proof of a live connection.
+    catalog. This facade does not invent independent provider state or treat
+    catalog labels as proof of a live connection.
     """
 
     def __init__(
@@ -62,13 +62,48 @@ class AdvancedProviderManager:
             if provider.get("category") == category
         ]
 
+    def metadata_change_status(self, provider_id: str) -> dict[str, Any]:
+        """Return revision history only for a provider in an advanced category."""
+        if self.get_provider(provider_id) is None:
+            return {"status": "NOT_ADVANCED_PROVIDER", "provider": provider_id}
+        return self.store.manager.get_provider_metadata_change_status(provider_id)
+
+    def update_provider_metadata(
+        self, provider_id: str, changes: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update advanced catalog metadata without calling the provider service."""
+        provider = self.get_provider(provider_id)
+        if provider is None:
+            return {"status": "NOT_ADVANCED_PROVIDER", "provider": provider_id, "saved": False}
+        if not isinstance(changes, dict):
+            return {"status": "INVALID_METADATA_CHANGES", "provider": provider_id, "saved": False}
+        target_category = changes.get("category", provider.get("category"))
+        if not isinstance(target_category, str) or target_category not in ADVANCED_CATEGORIES:
+            return {
+                "status": "ADVANCED_CATEGORY_REQUIRED",
+                "provider": provider_id,
+                "saved": False,
+            }
+        return self.store.manager.update_provider_metadata(provider_id, changes)
+
+    def initialize_metadata_tracking(self) -> dict[str, Any]:
+        """Create a truthful baseline for legacy advanced records, not fabricated prior history."""
+        provider_ids = [provider["id"] for provider in self.list_providers()]
+        if not provider_ids:
+            return {"status": "NO_ADVANCED_PROVIDERS", "initialized": [], "count": 0}
+        return self.store.manager.initialize_metadata_tracking(provider_ids)
+
     def status(self) -> dict[str, Any]:
-        """Separate catalog readiness from enabled and verified runtime state."""
+        """Separate catalog readiness, metadata integrity, and live connection state."""
         providers = self.list_providers()
         enabled = sum(provider.get("enabled") is True for provider in providers)
         disabled = sum(provider.get("enabled") is False for provider in providers)
         connected_verified = 0
+        tracking_counts = {"TRACKED": 0, "UNTRACKED": 0, "OUT_OF_BAND_CHANGE": 0}
         for provider in providers:
+            tracking_status = provider.get("metadata_tracking_status", "UNTRACKED")
+            if tracking_status in tracking_counts:
+                tracking_counts[tracking_status] += 1
             provider_id = provider.get("id")
             if not isinstance(provider_id, str) or not provider_id:
                 continue
@@ -86,6 +121,9 @@ class AdvancedProviderManager:
             "providers_enabled": enabled,
             "providers_disabled": disabled,
             "connected_verified": connected_verified,
+            "metadata_tracked": tracking_counts["TRACKED"],
+            "metadata_untracked": tracking_counts["UNTRACKED"],
+            "metadata_integrity_errors": tracking_counts["OUT_OF_BAND_CHANGE"],
             "catalog_valid": validation.get("valid") is True,
             "ready": validation.get("valid") is True,
         }
