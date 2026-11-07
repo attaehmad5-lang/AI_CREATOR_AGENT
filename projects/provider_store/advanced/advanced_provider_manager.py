@@ -9,11 +9,11 @@ from ..provider_store_manager import ProviderStoreManager
 
 
 class AdvancedProviderManager:
-    """Read-only advanced-provider view with evidence-based runtime status.
+    """Catalog-backed advanced-provider facade with evidence-based status and scoped metadata edits.
 
     Provider definitions are owned by ConnectionManager's validated central
-    catalog. This facade intentionally does not invent independent provider
-    state or treat catalog labels as proof of a live connection.
+    catalog. This facade does not invent independent provider state or treat
+    catalog labels as proof of a live connection.
     """
 
     def __init__(
