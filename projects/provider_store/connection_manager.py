@@ -658,9 +658,19 @@ class ConnectionManager:
         provider = self.get_provider(provider_id)
         if provider is None:
             return {"status": "NOT_FOUND", "provider": provider_id}
+        tracking_status = provider.get("metadata_tracking_status", "UNTRACKED")
+        if tracking_status != "TRACKED":
+            return {
+                "provider": provider_id,
+                "status": tracking_status,
+                "integrity_valid": provider.get("metadata_integrity_valid"),
+                "revision": None,
+                "updated_at": None,
+                "changed_fields": [],
+            }
         tracking = {
-            "status": provider.get("metadata_tracking_status", "UNTRACKED"),
-            "integrity_valid": provider.get("metadata_integrity_valid"),
+            "status": tracking_status,
+            "integrity_valid": True,
             "revision": provider.get("metadata_revision"),
             "updated_at": provider.get("metadata_updated_at"),
             "changed_fields": provider.get("metadata_changed_fields", []),
@@ -862,6 +872,10 @@ class ConnectionManager:
         safe.pop("metadata_fingerprint", None)
         safe["metadata_tracking_status"] = tracking["status"]
         safe["metadata_integrity_valid"] = tracking["integrity_valid"]
+        if tracking["status"] != "TRACKED":
+            safe.pop("metadata_revision", None)
+            safe.pop("metadata_updated_at", None)
+            safe.pop("metadata_changed_fields", None)
         if "status" in safe:
             safe["catalog_status"] = safe.pop("status")
         return safe
