@@ -37,6 +37,40 @@ This guide describes the current implementation in this branch. It is not a clai
 7. **Persistence limits.** Shared JSON state for provider connection/catalog, health, credits, cost budgets, and quotas uses atomic replacement plus OS-level interprocess lock files and reload-before-mutate. `ProviderJobManager` applies the same locked atomic persistence pattern and stores worker lease-token SHA-256 digests rather than raw token values; legacy plaintext lease records are migrated under the state-file lock without invalidating an already-issued worker token. This prevents lost read-modify-write updates across local processes when every writer uses these manager APIs. It is not a single transaction across multiple manager files, and it does not coordinate separate devices, containers with non-shared lock semantics, or external writers bypassing these APIs. Routing compensates reservations created by the current attempt when a later quota step rejects the route, and fails closed if that compensation fails; this reduces orphaned reservations but does not make the separate JSON files one atomic transaction. SQLite or a transactional database is preferred for production multi-worker coordination.
 8. **Secrets stay outside the catalog.** Store environment-variable names or references, not credential values. Returned provider metadata and state views redact credential-like fields. `ProviderSecretsManager` validates references and authorizes tenant ownership before retrieval when tenant isolation is enabled. It returns a short-lived lease; the service passes that lease only to an explicitly compatible adapter and closes it after invocation. Rotation requires `provider.credentials.rotate`, explicit confirmation, an idempotency key, and a backend implementing `rotate_secret`. External backends must enforce workload identity, request timeouts, audit logging and idempotency. Closing clears the lease's internal byte buffer, but cannot guarantee erasure of immutable string copies created by a trusted adapter.
 
+
+## Advanced Provider Store metadata change tracking
+
+The Advanced Provider Store remains a catalog-only module. Metadata updates never call an external provider, test an API key, or run generation. AdvancedProviderManager exposes metadata change status, validated metadata updates, and explicit baseline migration for records in the six advanced categories only.
+
+Each tracked record stores a monotonically increasing metadata revision, a timezone-aware UTC update timestamp, a sorted list of changed top-level field names, and an internal SHA-256 fingerprint. Public views never return the fingerprint or credential values. A record reports:
+
+- TRACKED when its recorded fingerprint matches the catalog metadata.
+- UNTRACKED when no history baseline has been created yet.
+- OUT_OF_BAND_CHANGE when fields have changed outside the manager's validated update path or its tracking envelope is malformed.
+
+Legacy records begin as UNTRACKED; the system does not invent earlier change dates. Run the explicit baseline migration once after reviewing the current catalog:
+
+\`\`\`python
+from projects.provider_store.advanced.advanced_provider_manager import AdvancedProviderManager
+
+store = AdvancedProviderManager()
+print(store.initialize_metadata_tracking())
+print(store.metadata_change_status("openai_script"))
+\`\`\`
+
+To update metadata safely, use the manager API rather than editing JSON directly:
+
+\`\`\`python
+result = store.update_provider_metadata(
+    "openai_script",
+    {"description": "Provider documentation and capability notes"},
+)
+print(result)
+\`\`\`
+
+No-op writes do not increment the revision. Changes to enabled state are also versioned by ConnectionManager. An integrity mismatch is reported and blocks a subsequent manager update until the catalog is reviewed and repaired. API keys remain in the Authentication/Secrets Manager, and live connectivity, health, provider choice, and generation remain owned by their separate modules.
+
+
 ## Explicit catalog recovery
 
 `ConnectionManager.restore_catalog_from_master()` restores the provider catalog only when the target is missing or fails validation. It validates the master copy first, refuses to overwrite an already-valid target, uses the target's interprocess lock, and reports a safe status instead of silently replacing a valid catalog.
