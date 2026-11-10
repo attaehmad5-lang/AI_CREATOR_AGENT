@@ -137,6 +137,28 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(ok["status"], "RECONCILED")
         self.assertEqual(self.gateway.calls, 1)
 
+    def test_provider_return_cannot_overwrite_reconciliation_committed_mid_call(self):
+        job_id = self.job["job_id"]
+        engine = self.engine
+        class RacingGateway:
+            calls = 0
+            def execute(self, capability, payload):
+                self.calls += 1
+                # A webhook may arrive while dispatch_external_stage is still
+                # waiting for the provider HTTP response.
+                engine.reconcile_external_dispatch(job_id, "GENERATION", "scene-race",
+                    "SUCCEEDED", resolver_id="webhook", result_ref="asset:confirmed",
+                    authorize_reconciliation=True)
+                return {"status": "QUEUED"}
+        race = RacingGateway()
+        engine.gateway = race
+        dispatched = engine.dispatch_external_stage(job_id, "GENERATION", "scene-race",
+            "text_to_image", {"prompt": "image"}, authorize_spend=True)
+        self.assertEqual(dispatched["status"], "RECONCILIATION_REQUIRED")
+        history = engine.external_dispatch_history(job_id)
+        self.assertEqual(history[0]["state"], "CONFIRMED_SUCCEEDED")
+        self.assertEqual(race.calls, 1)
+
     def test_concurrent_reconciliation_is_consistent_with_across_process_connections(self):
         self.dispatch()
         replies, errors = [], []

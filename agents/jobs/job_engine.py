@@ -1076,7 +1076,7 @@ class MasterJobEngine:
         try:
             with self._tx() as db:
                 db.execute("""UPDATE external_dispatches SET state='RECONCILE',response_status=?
-                    WHERE job_id=? AND stage=? AND operation_id=?""",
+                    WHERE job_id=? AND stage=? AND operation_id=? AND state='UNKNOWN'""",
                     (safe_status, job_id, stage, operation_id))
         except sqlite3.Error:
             # Intent still exists in durable store; caller must reconcile.

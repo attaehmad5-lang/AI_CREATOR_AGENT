@@ -285,6 +285,14 @@ python -m scripts.offline_media_acceptance
 
 The additional suite tests signed and unsigned reconciliation, immutable
 conflicting reports, concurrency races, v2→v3 schema migration, spending limits,
-strict production initialization and private ledger fields. The final synthetic
+strict production initialization, a provider callback arriving before the original
+HTTP call returns, and private ledger fields. Confirmed decisions are never
+silently overwritten by a late upstream response. The final synthetic
 media command requires separately available FFmpeg/FFprobe. Linux-host tests
 are **not proof of Windows, Android, iOS or real third-party provider PASS**.
+
+**Latest offline regression:** 64 tests PASS under Python 3.13.5 on Linux, plus
+FFmpeg/FFprobe synthetic media PASS. Branch coverage for the two core modules
+is 85% on this suite. These checks do not replace production tenant access
+control, provider sandbox invoices, hosted Windows/Linux runners or physical
+mobile-platform acceptance tests.
