@@ -136,3 +136,89 @@ platform PASS. For critical deployments, test separately on physical Android/iOS
 hosts, use authenticated multi-tenant service APIs, independent artifact
 integrity verification, signed provider callbacks, backup/restore drills,
 monitoring and a server-grade database when deploying across hosts.
+
+## v2.2 advanced handoff: physical artifact integrity (opt-in)
+
+Use `MasterJobEngine(storage_path=..., artifact_root="/private/media", receipt_key=...)`
+(or `job_cli.py --artifact-root /private/media ...`) to require **local** media
+proof at every enabled media stage. The artifact root must exist, be a directory,
+and be writable only by trusted services. Remote URLs and references alone do
+**not** prove physical media; a separate, authenticated ingestion adapter must
+fetch approved provider outputs, virus-scan and store them under this root.
+
+A trusted producer may create a manifest via
+`ArtifactVerifier(root).inspect("scene-1.png", "image/png")` and include the
+result as `evidence` alongside `status:"COMPLETED"` and `asset_ref`.
+`evidence` contains **exactly** `path`, `media_type`, `size_bytes` and `sha256`.
+The engine streams bytes for SHA-256 verification, checks maximum size and
+container signatures, rejects absolute paths, traversals and symlink entries,
+and rechecks prior artifacts at QC and final handoff. Signed receipts still
+bind stage output and job identity. On POSIX, safe directory-descriptor opens
+prevent symlink swaps; protect the root with appropriate Windows ACLs.
+
+Stage-specific media types: `GENERATION` images (PNG, JPEG, WebP) or videos
+(MP4, WebM); `AUDIO` WAV or MP3; `SUBTITLES` VTT, SRT or plain text;
+`EDITING` MP4 or WebM. The final stage rechecks the render or requires
+separate verified `final_result` evidence for non-video pipelines.
+Missing proof causes WAITING, mismatched, corrupt or inaccessible proof causes
+FAILED, and failure requires explicit operator intervention. Existing remote
+reference workflows retain their old semantics when `artifact_root` is unset.
+
+**Limits:** container magic checks plus SHA-256 are not media decoding,
+malware detection, copyright or perceptual-quality assurance. They prove that
+local file bytes match the submitted hash and a basic media header. Dedicated
+sandboxed media decoders and human/automated QC must still issue authenticated
+stage receipts; an unauthenticated `checks: true` payload is not independently
+credible. Do not market this alone as a verified or production-rendered video.
+
+## v2.2 external provider submission: at-most-once local dispatch
+
+`dispatch_external_stage(job_id, stage, operation_id, capability, payload,
+authorize_spend=True)` is the explicit integration point for a configured
+`ExecutionGateway`. It only accepts a **WAITING** job at the named stage and
+supported capability. Callers must be authenticated and separately authorized
+for account/tenant/budget use. The default rejects all external calls;
+`execute_capability` is deliberately disabled because it had no durable record.
+
+Before making an external request, the engine commits a unique operation intent
+to SQLite and stores only stage, capability and a payload SHA-256. Provider
+exceptions, timeouts and process crashes are treated as **ambiguous**: the same
+job/stage/operation ID cannot be dispatched twice, even after restart. Successful
+returns are `RECONCILIATION_REQUIRED` (never automatically COMPLETED) because
+users must independently collect the provider's artifact and signed stage
+receipt. Use `external_dispatch_history(job_id)` to review metadata safely.
+For each image scene choose a stable distinct `operation_id` such as `scene-1`.
+
+**Important:** at-most-once local dispatch does not provide exactly-once
+provider-side execution. Reconcile provider-generated requests and expenses
+via the external provider's API or dashboard before manual resubmission; never
+blindly retry an unknown paid operation. Durable provider-specific idempotency
+keys, account-level quota/budget enforcement, live integration tests and
+multi-tenant authorization remain external service responsibilities. No live
+provider calls are made in the offline regression suite.
+
+### Offline regression
+
+```bash
+python -m compileall -q agents/jobs tests/test_master_job_engine.py tests/test_master_artifact_integrity.py
+python -m unittest discover -s tests -p 'test_master*.py' -v
+```
+
+The 54 offline tests include SQLite lease recovery, signed receipts,
+physical media hash tampering, path traversal/symlink attempts, false-success
+prevention, deliberate paid-operation gating, and cross-restart replay safety.
+The GitHub matrix still needs actual hosted-runner execution for Ubuntu,
+Windows, Python 3.11 and 3.13. Cross-platform AST parsing is not a substitute.
+
+### Optional synthetic media acceptance with an actual decoder
+
+If trusted local `ffmpeg` and `ffprobe` executables are installed, run
+`python -m scripts.offline_media_acceptance`. It creates a tiny valid PNG,
+WAV, WebVTT and MP4 under a private temporary directory, decodes the image,
+audio and video using ffmpeg, streams SHA-256 evidence, signs each required
+stage receipt with an ephemeral test key, and validates end-to-end workflow
+completion. This uses **zero cloud API credits**. It is intentionally separate
+from the dependency-free Windows/Linux unittest matrix because ffmpeg is not
+installed identically on every runner. A successful synthetic test is **not**
+a production-provider connection test, a codec matrix, or a multimedia quality
+certification.

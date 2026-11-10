@@ -24,6 +24,8 @@ def _read_json(path: str) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Master job workflow control")
     parser.add_argument("--db", default="agents/jobs/master_jobs.sqlite3")
+    parser.add_argument("--artifact-root", default=os.environ.get("AI_CREATOR_JOB_ARTIFACT_ROOT"),
+                        help="Enable local SHA-256 media integrity verification under this root")
     commands = parser.add_subparsers(dest="command", required=True)
     submit = commands.add_parser("submit", help="Create job from local JSON file")
     submit.add_argument("request_file")
@@ -58,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise JobStateError("Invalid receipt key environment configuration") from exc
         else:
             receipt_key = None
-        engine = MasterJobEngine(args.db, receipt_key=receipt_key)
+        engine = MasterJobEngine(args.db, receipt_key=receipt_key, artifact_root=args.artifact_root)
         if args.command == "submit":
             request = _read_json(args.request_file)
             if args.idempotency_key is not None:

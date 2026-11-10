@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .artifact_integrity import ArtifactIntegrityError, ArtifactVerifier
+
 
 STAGES = (
     "CREATED", "PLANNING", "SCRIPT", "SCENES", "GENERATION", "AUDIO",
@@ -50,6 +52,13 @@ _INITIAL_ALLOWED = frozenset({
     "source_result", "reference_result", "legacy_imported",
 })
 _IDEMPOTENCY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\Z")
+_OPERATION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_EXTERNAL_CAPABILITIES = {
+    "GENERATION": frozenset({"text_to_image", "image_to_image", "text_to_video"}),
+    "AUDIO": frozenset({"text_to_speech", "text_to_music"}),
+    "SUBTITLES": frozenset({"speech_to_text"}),
+    "EDITING": frozenset({"video_editing"}),
+}
 _WORKER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\Z")
 _SENSITIVE_KEYS = frozenset({"password", "passwd", "secret", "api_key", "apikey", "access_token", "refresh_token", "private_key", "authorization", "credential", "credentials", "client_secret", "auth_token"})
 
@@ -147,6 +156,7 @@ class MasterJobEngine:
         max_recoveries: int = 3,
         max_queued: int = 5000,
         receipt_key: bytes | None = None,
+        artifact_root: str | os.PathLike[str] | None = None,
     ) -> None:
         if (any(type(x) is not int for x in (lease_seconds, max_concurrent, max_recoveries, max_queued))
                 or not 1 <= lease_seconds <= 86400 or not 1 <= max_concurrent <= 512
@@ -154,9 +164,12 @@ class MasterJobEngine:
             raise ValueError("Invalid worker limits")
         if receipt_key is not None and (type(receipt_key) is not bytes or len(receipt_key) < 32):
             raise ValueError("receipt_key must be at least 32 bytes")
-        self.version = "2.1"
+        self.version = "2.2"
         self.status = "READY"
         self._receipt_key = receipt_key
+        # Production opt-in: require on-disk SHA-256 evidence for every media stage.
+        # Disabled for legacy deployments that use remote asset references.
+        self._artifacts = ArtifactVerifier(artifact_root) if artifact_root is not None else None
         self.storage_path = str(storage_path)
         self.gateway = gateway
         self.lease_seconds = lease_seconds
@@ -212,6 +225,14 @@ class MasterJobEngine:
                 current_stage TEXT NOT NULL
             )""")
             db.execute("CREATE INDEX IF NOT EXISTS job_events_job_seq ON job_events(job_id,seq)")
+            db.execute("""CREATE TABLE IF NOT EXISTS external_dispatches (
+                job_id TEXT NOT NULL, stage TEXT NOT NULL,
+                operation_id TEXT NOT NULL, capability TEXT NOT NULL,
+                request_sha256 TEXT NOT NULL, state TEXT NOT NULL,
+                recorded_at TEXT NOT NULL, response_status TEXT,
+                PRIMARY KEY(job_id,stage,operation_id),
+                FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+            )""")
             db.execute("PRAGMA user_version=2")
 
     @contextmanager
@@ -673,6 +694,47 @@ class MasterJobEngine:
         job["scene_plan"] = {"scenes": scenes}
         return self._result(job, "SCENES", scene_count=len(scenes))
 
+    def _media_gate(self, job: dict[str, Any], stage: str) -> tuple[str, str] | None:
+        """Fail closed on corrupted evidence; wait if producer has not supplied it.
+
+        This validates locally owned files, not remote URLs or perceptual media
+        quality. Remote media requires a trusted ingestion service to download,
+        scan and place files inside artifact_root before receipt submission.
+        """
+        if self._artifacts is None:
+            return None
+        output = job.get(RESULT_KEYS[stage], {})
+        if not isinstance(output, dict):
+            return ("WAITING", "VERIFIED_MEDIA_EVIDENCE_REQUIRED")
+        if stage == "GENERATION":
+            records = output.get("generated_outputs")
+            if not isinstance(records, list) or not records:
+                return ("WAITING", "VERIFIED_MEDIA_EVIDENCE_REQUIRED")
+            artifacts = [(o.get("result", o) if isinstance(o, dict) else {}) for o in records]
+            allowed = frozenset({"image/png", "image/jpeg", "image/webp", "video/mp4", "video/webm"})
+        elif stage == "AUDIO":
+            artifacts = [output]
+            allowed = frozenset({"audio/wav", "audio/mpeg"})
+        elif stage == "SUBTITLES":
+            artifacts = [output]
+            allowed = frozenset({"text/vtt", "text/srt", "text/plain"})
+        elif stage == "EDITING":
+            artifacts = [output]
+            allowed = frozenset({"video/mp4", "video/webm"})
+        elif stage == "COMPLETED":
+            artifacts = [output]
+            allowed = frozenset({"text/plain", "video/mp4", "video/webm", "image/png", "image/jpeg"})
+        else:
+            raise JobStateError("Unrecognized media verification stage")
+        if any(not isinstance(a, dict) or "evidence" not in a for a in artifacts):
+            return ("WAITING", "VERIFIED_MEDIA_EVIDENCE_REQUIRED")
+        try:
+            for artifact in artifacts:
+                self._artifacts.verify(artifact["evidence"], allowed_types=allowed)
+        except (ArtifactIntegrityError, OSError, ValueError):
+            return ("FAILED", "MEDIA_INTEGRITY_FAILED")
+        return None
+
     def handle_generation(self, job, stage=None):
         result = job.get("generation_result", {})
         if _failed(result):
@@ -692,6 +754,9 @@ class MasterJobEngine:
             any(not _completed(o.get("result", o)) or not _artifact(
                 o.get("result", o), "asset_ref", "output_path", "file_path", "url") for o in outputs)):
             return self._result(job, "GENERATION", "WAITING", reason="INCOMPLETE_GENERATED_ASSETS")
+        media_gate = self._media_gate(job, "GENERATION")
+        if media_gate:
+            return self._result(job, "GENERATION", media_gate[0], reason=media_gate[1])
         job["generation_plan"] = {"generated_outputs": outputs, "generation_status": "COMPLETED"}
         return self._result(job, "GENERATION", generation_ready=True)
 
@@ -701,6 +766,9 @@ class MasterJobEngine:
             return self._result(job, "AUDIO", "FAILED", reason="AUDIO_FAILED")
         if not _completed(result) or not _artifact(result, "asset_ref", "audio_path", "file_path"):
             return self._result(job, "AUDIO", "WAITING", reason="AUDIO_ASSET_REQUIRED")
+        media_gate = self._media_gate(job, "AUDIO")
+        if media_gate:
+            return self._result(job, "AUDIO", media_gate[0], reason=media_gate[1])
         job["audio_plan"] = {"audio_asset": result}
         return self._result(job, "AUDIO", audio_ready=True)
 
@@ -710,6 +778,9 @@ class MasterJobEngine:
             return self._result(job, "SUBTITLES", "FAILED", reason="SUBTITLES_FAILED")
         if not _completed(result) or not _artifact(result, "asset_ref", "subtitle_path", "file_path"):
             return self._result(job, "SUBTITLES", "WAITING", reason="SUBTITLE_ASSET_REQUIRED")
+        media_gate = self._media_gate(job, "SUBTITLES")
+        if media_gate:
+            return self._result(job, "SUBTITLES", media_gate[0], reason=media_gate[1])
         job["subtitle_plan"] = {"subtitle_asset": result}
         return self._result(job, "SUBTITLES", subtitles_ready=True)
 
@@ -719,11 +790,22 @@ class MasterJobEngine:
             return self._result(job, "EDITING", "FAILED", reason="RENDER_FAILED")
         if not _completed(result) or not _artifact(result, "asset_ref", "render_path", "file_path"):
             return self._result(job, "EDITING", "WAITING", reason="FINAL_RENDER_REQUIRED")
+        media_gate = self._media_gate(job, "EDITING")
+        if media_gate:
+            return self._result(job, "EDITING", media_gate[0], reason=media_gate[1])
         job["editing_plan"] = {"render_asset": result}
         return self._result(job, "EDITING", final_render_ready=True)
 
     def handle_quality_control(self, job, stage=None):
         result = job.get("quality_control_result", {})
+        if self._artifacts is not None:
+            # Recheck bytes at the quality gate: files may have been tampered
+            # with after the original stage receipt was accepted.
+            passed_stages = {x.get("stage") for x in job.get("stages", []) if
+                             isinstance(x, dict) and x.get("status") == "PASSED"}
+            for prior in ("GENERATION", "AUDIO", "SUBTITLES", "EDITING"):
+                if prior in passed_stages and self._media_gate(job, prior):
+                    return self._result(job, "QUALITY_CONTROL", "FAILED", reason="PRIOR_MEDIA_INTEGRITY_FAILED")
         if _failed(result) or (isinstance(result, dict) and result.get("status") == "REJECTED"):
             return self._result(job, "QUALITY_CONTROL", "FAILED", reason="QUALITY_REJECTED")
         plan = job.get("brain_analysis", {}).get("production_plan", {})
@@ -756,6 +838,13 @@ class MasterJobEngine:
                        editing.get("file_path") or supplied.get("asset_ref"))
         if not isinstance(final_asset, str) or not final_asset.strip():
             return self._result(job, "COMPLETED", "WAITING", reason="FINAL_ARTIFACT_REQUIRED")
+        if self._artifacts is not None:
+            # A pipeline with editing verifies the render again at final handoff.
+            # Other workflows must supply a separate verified final_result.
+            proof_stage = "EDITING" if editing else "COMPLETED"
+            media_gate = self._media_gate(job, proof_stage)
+            if media_gate:
+                return self._result(job, "COMPLETED", media_gate[0], reason=media_gate[1])
         job["final_output"] = {"status": "READY", "quality_status": "PASSED", "asset_ref": final_asset,
                                "topic": job["request"]["topic"]}
         return self._result(job, "COMPLETED", final_output=job["final_output"])
@@ -825,12 +914,72 @@ class MasterJobEngine:
             return stored
         return self.process_claim(job["job_id"], worker_id, claimed["lease_token"])
 
+    def external_dispatch_history(self, job_id: str) -> list[dict[str, Any]]:
+        """For trusted operators only; intentionally excludes request bodies and credentials."""
+        with self._db() as db:
+            return [dict(row) for row in db.execute("""SELECT stage, operation_id, capability,
+                request_sha256,state,recorded_at,response_status FROM external_dispatches
+                WHERE job_id=? ORDER BY recorded_at,operation_id""", (job_id,))]
+
+    def dispatch_external_stage(self, job_id: str, stage: str, operation_id: str,
+                                capability: str, payload: dict[str, Any], *,
+                                authorize_spend: bool = False) -> dict[str, Any]:
+        """At-most-once local handoff; never auto-retry unknown provider outcomes.
+
+        Use only from an authenticated service. Each distinct operation ID is a
+        consciously approved provider submission (e.g., `scene-1`). If the worker
+        crashes after recording an intent, manual provider-side reconciliation
+        is necessary. This does not replace upstream idempotency or a budget check.
+        """
+        if authorize_spend is not True:
+            raise JobStateError("External provider spending is disabled by default")
+        if (stage not in _EXTERNAL_CAPABILITIES or
+                capability not in _EXTERNAL_CAPABILITIES[stage]):
+            raise JobStateError("Unsupported stage capability")
+        if not isinstance(operation_id, str) or not _OPERATION_RE.fullmatch(operation_id):
+            raise JobStateError("Invalid provider operation ID")
+        if not isinstance(payload, dict):
+            raise JobStateError("Provider payload must be an object")
+        _validate_no_credentials(payload)
+        request_hash = hashlib.sha256(_serialized(payload, MAX_OUTPUT_BYTES).encode("utf-8")).hexdigest()
+        # Intent commits before the side effect. Even a timeout or crash will
+        # leave the unique row and block blind retries of a paid request.
+        with self._tx() as db:
+            row = db.execute("SELECT status,current_stage,owner FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not row or row["status"] != "WAITING" or row["current_stage"] != stage or row["owner"] is not None:
+                raise JobStateError("Job is not waiting for this external stage")
+            exists = db.execute("SELECT 1 FROM external_dispatches WHERE job_id=? AND stage=? AND operation_id=?",
+                                (job_id, stage, operation_id)).fetchone()
+            if exists:
+                raise JobStateError("Provider operation already submitted; reconcile before further action")
+            db.execute("""INSERT INTO external_dispatches
+                (job_id,stage,operation_id,capability,request_sha256,state,recorded_at)
+                VALUES(?,?,?,?,?,'UNKNOWN',?)""", (job_id, stage, operation_id, capability, request_hash, _now()))
+        safe_status = "UNKNOWN"
+        try:
+            if self.gateway is None:
+                from agents.execution.execution_gateway import ExecutionGateway
+                self.gateway = ExecutionGateway()
+            response = self.gateway.execute(capability, payload)
+            if isinstance(response, dict) and response.get("status") in ("COMPLETED", "FAILED", "QUEUED", "SUBMITTED", "RUNNING", "ROUTABLE"):
+                safe_status = response["status"]
+        except Exception:
+            # Never log exception messages: upstream errors can contain secrets.
+            pass
+        try:
+            with self._tx() as db:
+                db.execute("""UPDATE external_dispatches SET state='RECONCILE',response_status=?
+                    WHERE job_id=? AND stage=? AND operation_id=?""",
+                    (safe_status, job_id, stage, operation_id))
+        except sqlite3.Error:
+            # Intent still exists in durable store; caller must reconcile.
+            pass
+        return {"status": "RECONCILIATION_REQUIRED", "provider_status": safe_status,
+                "job_id": job_id, "stage": stage, "operation_id": operation_id}
+
     def execute_capability(self, capability: str, payload: dict[str, Any] | None = None) -> Any:
-        """Explicit external call. Never executed implicitly during a stage retry."""
-        if self.gateway is None:
-            from agents.execution.execution_gateway import ExecutionGateway
-            self.gateway = ExecutionGateway()
-        return self.gateway.execute(capability, payload)
+        """Legacy entry point disabled: use durable dispatch_external_stage."""
+        raise JobStateError("Use an explicitly authorized, durable stage dispatch")
 
     def status_info(self) -> dict[str, str]:
         return {"engine": "Master Job Engine", "version": self.version, "status": self.status}
