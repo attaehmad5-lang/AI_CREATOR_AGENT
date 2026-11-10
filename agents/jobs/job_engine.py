@@ -197,7 +197,7 @@ class MasterJobEngine:
             raise ValueError("Strict production requires a receipt key and artifact root")
         if type(max_external_operations) is not int or not 1 <= max_external_operations <= 10000:
             raise ValueError("Invalid external operation limit")
-        self.version = "2.3"
+        self.version = "2.4"
         self.status = "READY"
         self._receipt_key = receipt_key
         self.strict_production = strict_production

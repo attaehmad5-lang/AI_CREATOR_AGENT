@@ -296,3 +296,62 @@ FFmpeg/FFprobe synthetic media PASS. Branch coverage for the two core modules
 is 85% on this suite. These checks do not replace production tenant access
 control, provider sandbox invoices, hosted Windows/Linux runners or physical
 mobile-platform acceptance tests.
+
+
+## v2.4: signed disaster-recovery snapshots, verified restore and FIFO defense
+
+The online SQLite backup API now provides a **WAL-consistent** durable snapshot.
+A manifest binds SHA-256, byte count, schema version 3, table row counts and
+creation time. Production backups require an HMAC-SHA256 of the manifest with
+an independent 32+ byte key. **The HMAC key must be stored out of band**. The
+manifest is published only after the SQLite integrity check succeeds. Concurrent
+backup attempts fail closed without replacing another process's successful copy.
+
+Set `AI_CREATOR_BACKUP_KEY_HEX` to at least 32 random bytes in a restricted
+operator environment, not in commands, source, CI logs or the repository. Then:
+
+```bash
+python -m agents.jobs.disaster_recovery backup agents/jobs/master_jobs.sqlite3 /secure/backups/master-2026-11-10.sqlite3
+python -m agents.jobs.disaster_recovery verify /secure/backups/master-2026-11-10.sqlite3
+python -m agents.jobs.disaster_recovery restore /secure/backups/master-2026-11-10.sqlite3 /secure/restore-rehearsal.sqlite3
+```
+
+The backup file and its `.manifest.json` are created with mode 0600 on POSIX.
+Both backup and restore are **create-only**; an existing destination is never
+overwritten. All temporary files and the snapshot live on the same volume;
+filesystem hard links must be supported (otherwise creation fails closed).
+Restore validates the signature, manifest, physical file bytes, SQLite schema
+and integrity **before** copying and independently verifies copied bytes and
+SQLite integrity again. Run an offline restore rehearsal and inspect its contents
+before considering a backup operationally ready. Restore does **not** write into
+production databases, does not contact external providers, and cannot recreate
+external media, API secrets, provider billing records or remote assets.
+
+The backup **contains sensitive job payloads** even though the manifest only
+contains safe counts. Place it on access-controlled, encrypted storage with
+a documented retention/rotation policy. A local HMAC does not replace backup
+encryption, independent key escrow, tenant authorization or off-site replication.
+The `--allow-unsigned` operator option is for throwaway offline development only.
+Do **not** enable it for production. SQLite remains a single-host state store;
+a clustered service needs a server-grade database and separate disaster recovery.
+
+Artifact verification now opens regular files non-blockingly before `fstat` to
+prevent FIFO/special-file denial of service on POSIX. It still checks `fstat`
+for regular files and uses secure directory descriptor traversal. This check
+does not provide a media decoder; validate file quality independently.
+
+```bash
+python -m unittest discover -s tests -p 'test_master*.py' -v
+python -m compileall -q agents/jobs tests/test_master_disaster_recovery.py
+```
+
+The 13 additional offline tests cover WAL-consistent backup/restore, full event
+retention, signed and unsigned policy, corruption, manifest forgery, wrong keys,
+create-only safety, malformed databases, migration-version rejection, symlink
+refusal, concurrent same-name snapshot attempts, redacted CLI output and FIFO
+protection. No live cloud provider or payment APIs are invoked.
+
+**Remaining external release gates:** actual Ubuntu/Windows CI runner PASS,
+end-to-end authenticated provider staging/sandbox exercises, tenant-scoped API
+authorization, independent media decoding and iOS/Android host verification.
+Do not infer any of those passes from local tests.

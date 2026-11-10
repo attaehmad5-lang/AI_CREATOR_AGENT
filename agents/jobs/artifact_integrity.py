@@ -88,7 +88,7 @@ class ArtifactVerifier:
                     next_fd = os.open(name, flags_dir, dir_fd=dir_fd)
                     os.close(dir_fd)
                     dir_fd = next_fd
-                return os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
+                return os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0), dir_fd=dir_fd)
             except (OSError, ValueError) as exc:
                 raise ArtifactIntegrityError("Cannot open artifact securely") from exc
             finally:
@@ -101,7 +101,7 @@ class ArtifactVerifier:
         if not target.resolve(strict=True).is_relative_to(self.root):
             raise ArtifactIntegrityError("Artifact escaped root")
         try:
-            return os.open(target, os.O_RDONLY)
+            return os.open(target, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
         except (OSError, ValueError) as exc:
             raise ArtifactIntegrityError("Cannot open artifact securely") from exc
 
