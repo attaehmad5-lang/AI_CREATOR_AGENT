@@ -39,6 +39,17 @@ and media verification in authenticated, separately tested integrations.
   only for the current inactive stage. Duplicate identical outputs are
   idempotent. An external API wrapping this method **must** authenticate and
   authorize the caller/tenant; this local module is not a public API.
+- For higher-assurance deployments, configure `MasterJobEngine(receipt_key=...)`
+  with at least 32 random secret bytes (provided out-of-band). Every external
+  stage notification must then supply an HMAC-SHA256 `receipt_signature` using
+  `stage_receipt_signature(job_id, stage, output, key)`. Proof binds both job
+  identity and stage name to canonical output JSON and is never stored in the
+  job database. CLI may load the same bytes from environment variable
+  `AI_CREATOR_JOB_RECEIPT_KEY_HEX` and accepts `record ... --signature <hex>`;
+  do not pass secrets on the command line. HMAC authenticates the producer,
+  **not** physical artifact integrity; validate actual media independently.
+  Signed mode intentionally disallows loading an unsigned `script_result` through
+  the legacy `save_job` compatibility path; use signed SCRIPT stage receipts.
 - The script stage accepts `script_result.script` as a non-empty text/list,
   and scenes as a non-empty list of scene dictionaries. Generation expects one
   `{scene, result: {status: "COMPLETED", asset_ref: "..."}}` per scene. The
@@ -115,10 +126,10 @@ transactional data store and maintain the same lease/compare-and-set contracts.
 
 ## High-assurance acceptance and limitations
 
-Local test command (Python 3.11+; no credentials) exercises 36 offline tests,
+Local test command (Python 3.11+; no credentials) exercises 40 offline tests,
 including concurrent idempotent submissions, stale lease rejection, worker
 crash recovery, an immutable terminal state, direct-save forgery attempts,
-credential key screening, audit log privacy and CLI behavior. These tests are
+credential key screening, signed stage receipts, audit log privacy and CLI behavior. These tests are
 not proof that third-party providers are working. Linux/Windows CI is configured
 with Python 3.11 and 3.13; **only GitHub's actual run results** may establish
 platform PASS. For critical deployments, test separately on physical Android/iOS

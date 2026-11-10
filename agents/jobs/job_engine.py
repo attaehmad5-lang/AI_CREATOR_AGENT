@@ -8,6 +8,7 @@ hashed lease tokens protect state from concurrent workers and stale completions.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -89,6 +90,24 @@ def _serialized(value: Any, limit: int) -> str:
     return result
 
 
+def stage_receipt_signature(job_id: str, stage: str, output: dict[str, Any], key: bytes) -> str:
+    """HMAC-SHA256 authenticity receipt for an external trusted stage producer.
+
+    Keys must be at least 32 random bytes and provisioned out-of-band.
+    The signature authenticates a payload, not physical media integrity.
+    """
+    if (not isinstance(job_id, str) or not isinstance(stage, str) or
+            not isinstance(output, dict) or type(key) is not bytes or len(key) < 32):
+        raise JobStateError("Invalid receipt signing input")
+    _validate_no_credentials(output)
+    document = json.dumps({"job_id": job_id, "stage": stage, "output": output},
+                          ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    if len(document.encode("utf-8")) > MAX_OUTPUT_BYTES:
+        raise JobStateError("Signed evidence exceeds safe size limit")
+    return hmac.new(key, b"master-job-stage-receipt-v1\x00" + document.encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
 def _has_content(value: Any) -> bool:
     if isinstance(value, str):
         return bool(value.strip())
@@ -127,13 +146,17 @@ class MasterJobEngine:
         max_concurrent: int = 4,
         max_recoveries: int = 3,
         max_queued: int = 5000,
+        receipt_key: bytes | None = None,
     ) -> None:
         if (any(type(x) is not int for x in (lease_seconds, max_concurrent, max_recoveries, max_queued))
                 or not 1 <= lease_seconds <= 86400 or not 1 <= max_concurrent <= 512
                 or not 0 <= max_recoveries <= 100 or not 1 <= max_queued <= 1000000):
             raise ValueError("Invalid worker limits")
-        self.version = "2.0"
+        if receipt_key is not None and (type(receipt_key) is not bytes or len(receipt_key) < 32):
+            raise ValueError("receipt_key must be at least 32 bytes")
+        self.version = "2.1"
         self.status = "READY"
+        self._receipt_key = receipt_key
         self.storage_path = str(storage_path)
         self.gateway = gateway
         self.lease_seconds = lease_seconds
@@ -279,6 +302,8 @@ class MasterJobEngine:
         self._check_job(job)
         row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job["job_id"],)).fetchone()
         new = dict(job)
+        if self._receipt_key is not None and row is None and "script_result" in new:
+            raise JobStateError("Signed mode requires stage receipts, not preloaded artifacts")
         if row:
             if token is None:
                 if row["owner"] is not None:
@@ -368,6 +393,8 @@ class MasterJobEngine:
         if (job["status"] != "CREATED" or job["current_stage"] != "CREATED"
                 or any(key not in _INITIAL_ALLOWED for key in job)):
             raise JobStateError("Only pre-execution planning can be saved directly")
+        if self._receipt_key is not None and "script_result" in job:
+            raise JobStateError("Signed mode requires stage receipts, not preloaded artifacts")
         with self._tx() as db:
             row = db.execute("SELECT snapshot FROM jobs WHERE job_id=?", (job["job_id"],)).fetchone()
             if row:
@@ -504,12 +531,19 @@ class MasterJobEngine:
             job["status"] = "WAITING"
             return self._write(db, job, allow_reopen=True)
 
-    def record_stage_output(self, job_id: str, stage: str, output: dict[str, Any]) -> dict[str, Any]:
-        """Trusted integration hook; external API authorization is caller's responsibility."""
+    def record_stage_output(self, job_id: str, stage: str, output: dict[str, Any],
+                            *, receipt_signature: str | None = None) -> dict[str, Any]:
+        """Stage hook: optionally require signed receipts; authenticate APIs separately."""
         if stage not in RESULT_KEYS or not isinstance(output, dict):
             raise JobStateError("Unknown output stage or invalid output")
         _validate_no_credentials(output)
         _serialized(output, MAX_OUTPUT_BYTES)
+        if self._receipt_key is not None:
+            expected = stage_receipt_signature(job_id, stage, output, self._receipt_key)
+            if (not isinstance(receipt_signature, str) or
+                    not re.fullmatch(r"[a-f0-9]{64}", receipt_signature) or
+                    not hmac.compare_digest(expected, receipt_signature)):
+                raise JobStateError("Invalid or missing signed stage receipt")
         with self._tx() as db:
             row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
             if not row:

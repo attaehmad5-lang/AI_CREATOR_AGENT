@@ -2,6 +2,7 @@
 import hashlib
 from contextlib import closing
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -11,7 +12,7 @@ import time
 import unittest
 from pathlib import Path
 
-from agents.jobs.job_engine import JobStateError, MasterJobEngine, STAGES
+from agents.jobs.job_engine import JobStateError, MasterJobEngine, STAGES, stage_receipt_signature
 
 
 class SpyGateway:
@@ -523,6 +524,88 @@ class MasterJobTests(unittest.TestCase):
         status = cli("status", first["job_id"])
         self.assertNotIn("private CLI topic", json.dumps(status))
 
+
+
+    def test_signed_stage_receipt_authenticates_payload_job_and_stage(self):
+        key = b"a" * 32
+        engine = MasterJobEngine(self.dbpath, receipt_key=key)
+        job = engine.create_job({"topic": "signed documentary"})
+        engine.save_job(job)
+        engine.run_job(job)
+        output = {"script": ["Verified script"], "scenes": [{"scene": 1, "description": "image"}]}
+        valid_sig = stage_receipt_signature(job["job_id"], "SCRIPT", output, key)
+        for bad_sig in (None, "0" * 64, "not-hex"):
+            with self.subTest(signature=bad_sig), self.assertRaises(JobStateError):
+                engine.record_stage_output(job["job_id"], "SCRIPT", output, receipt_signature=bad_sig)
+        with self.assertRaises(JobStateError):
+            engine.record_stage_output(job["job_id"], "SCRIPT", {**output, "script": ["tampered"]},
+                                       receipt_signature=valid_sig)
+        with self.assertRaises(JobStateError):
+            engine.record_stage_output(job["job_id"], "SCRIPT", output,
+                receipt_signature=stage_receipt_signature("wrong-job", "SCRIPT", output, key))
+        stored = engine.record_stage_output(job["job_id"], "SCRIPT", output, receipt_signature=valid_sig)
+        self.assertEqual(stored["status"], "QUEUED")
+        with closing(sqlite3.connect(self.dbpath)) as db:
+            # A receipt is a transient proof; never put the HMAC in persistent state.
+            data = db.execute("SELECT snapshot FROM jobs WHERE job_id=?", (job["job_id"],)).fetchone()[0]
+        self.assertNotIn(valid_sig, data)
+        self.assertNotIn(key.hex(), data)
+        state = engine.run_job(engine.load_job(job["job_id"]))
+        self.assertEqual((state["current_stage"], state["status"]), ("GENERATION", "WAITING"))
+        with self.assertRaises(JobStateError):
+            engine.record_stage_output(job["job_id"], "GENERATION", {"status": "COMPLETED"},
+                                       receipt_signature=valid_sig)
+        with self.assertRaises(ValueError):
+            MasterJobEngine(self.dbpath, receipt_key=b"short")
+
+    def test_signatures_identical_for_ordered_json_and_different_across_stages(self):
+        key = b"b" * 32
+        a = {"status": "COMPLETED", "asset_ref": "asset:one"}
+        b = {"asset_ref": "asset:one", "status": "COMPLETED"}
+        self.assertEqual(stage_receipt_signature("id", "AUDIO", a, key),
+                         stage_receipt_signature("id", "AUDIO", b, key))
+        self.assertNotEqual(stage_receipt_signature("id", "AUDIO", a, key),
+                            stage_receipt_signature("id", "EDITING", b, key))
+
+
+
+    def test_signed_mode_blocks_unsigned_preloaded_script(self):
+        key = b"c" * 32
+        engine = MasterJobEngine(self.dbpath, receipt_key=key)
+        job = engine.create_job({"topic": "signed-only"})
+        job["script_result"] = {"script": ["unverified"]}
+        with self.assertRaises(JobStateError):
+            engine.save_job(job)
+        with self.assertRaises(JobStateError):
+            engine.run_job(job)
+        self.assertIsNone(engine.load_job(job["job_id"]))
+
+    def test_cli_signed_mode_requires_receipt_and_uses_env_without_key_leak(self):
+        key = b"d" * 32
+        env = {**os.environ, "AI_CREATOR_JOB_RECEIPT_KEY_HEX": key.hex()}
+        request = Path(self.temp.name) / "signed.json"
+        request.write_text(json.dumps({"topic": "signed CLI"}), encoding="utf-8")
+        def cli(*args, ok=True):
+            proc = subprocess.run([sys.executable, "-m", "agents.jobs.job_cli", "--db", self.dbpath, *args],
+                                  capture_output=True, text=True, env=env)
+            if ok:
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                return json.loads(proc.stdout)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertNotIn(key.hex(), proc.stderr)
+            return json.loads(proc.stderr)
+        job = cli("submit", str(request))
+        cli("worker")
+        output = {"script": ["signed"], "scenes": [{"scene": 1, "description": "generated"}]}
+        file = Path(self.temp.name) / "output.json"
+        file.write_text(json.dumps(output), encoding="utf-8")
+        err = cli("record", job["job_id"], "SCRIPT", str(file), ok=False)
+        self.assertEqual(err["error"], "JobStateError")
+        sig = stage_receipt_signature(job["job_id"], "SCRIPT", output, key)
+        result = cli("record", job["job_id"], "SCRIPT", str(file), "--signature", sig)
+        self.assertEqual(result["status"], "QUEUED")
+        cli("worker")
+        self.assertEqual(cli("status", job["job_id"])["current_stage"], "GENERATION")
 
 
 if __name__ == "__main__":

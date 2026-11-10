@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -38,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     record.add_argument("job_id")
     record.add_argument("stage")
     record.add_argument("output_file")
+    record.add_argument("--signature", help="Verified HMAC receipt, required in signed mode")
     cancel = commands.add_parser("cancel")
     cancel.add_argument("job_id")
     retry = commands.add_parser("reopen")
@@ -48,7 +50,15 @@ def main(argv: list[str] | None = None) -> int:
     legacy.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
     try:
-        engine = MasterJobEngine(args.db)
+        key_hex = os.environ.get("AI_CREATOR_JOB_RECEIPT_KEY_HEX")
+        if key_hex:
+            try:
+                receipt_key = bytes.fromhex(key_hex)
+            except ValueError as exc:
+                raise JobStateError("Invalid receipt key environment configuration") from exc
+        else:
+            receipt_key = None
+        engine = MasterJobEngine(args.db, receipt_key=receipt_key)
         if args.command == "submit":
             request = _read_json(args.request_file)
             if args.idempotency_key is not None:
@@ -81,7 +91,8 @@ def main(argv: list[str] | None = None) -> int:
                 if not args.drain:
                     break
         elif args.command == "record":
-            job = engine.record_stage_output(args.job_id, args.stage, _read_json(args.output_file))
+            job = engine.record_stage_output(args.job_id, args.stage, _read_json(args.output_file),
+                                             receipt_signature=args.signature)
             output = {"job_id": job["job_id"], "status": job["status"], "current_stage": job["current_stage"]}
         elif args.command == "cancel":
             job = engine.cancel_job(args.job_id)
