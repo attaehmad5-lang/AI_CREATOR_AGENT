@@ -1,0 +1,38 @@
+name: Master Job Engine Offline Regression
+
+on:
+  push:
+    paths:
+      - 'agents/jobs/**'
+      - 'tests/test_master_job_engine.py'
+      - '.github/workflows/master-job-engine.yml'
+  pull_request:
+    paths:
+      - 'agents/jobs/**'
+      - 'tests/test_master_job_engine.py'
+      - '.github/workflows/master-job-engine.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  master-job-engine:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.11', '3.13']
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Check compiled module and regression test
+        run: python -m compileall -q agents/jobs tests/test_master_job_engine.py
+      - name: Offline workflow and CLI integration tests
+        run: python -m unittest discover -s tests -p test_master_job_engine.py -v

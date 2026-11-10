@@ -1,195 +1,699 @@
-import uuid
+"""Durable, fail-closed master workflow orchestrator.
+
+The engine orchestrates externally produced artifacts; it never bills providers or
+assumes that a plan is an artifact. Workers may submit verified output references
+via ``record_stage_output`` and resume a waiting job. SQLite transactions and
+hashed lease tokens protect state from concurrent workers and stale completions.
+"""
+from __future__ import annotations
+
+import hashlib
 import json
 import os
-from datetime import datetime
-from agents.execution.execution_gateway import ExecutionGateway
+import secrets
+import sqlite3
+import time
+import uuid
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+STAGES = (
+    "CREATED", "PLANNING", "SCRIPT", "SCENES", "GENERATION", "AUDIO",
+    "SUBTITLES", "EDITING", "QUALITY_CONTROL", "COMPLETED",
+)
+TERMINAL = frozenset(("COMPLETED", "FAILED", "CANCELLED"))
+RESULT_KEYS = {
+    "SCRIPT": "script_result",
+    "SCENES": "scene_result",
+    "GENERATION": "generation_result",
+    "AUDIO": "audio_result",
+    "SUBTITLES": "subtitle_result",
+    "EDITING": "editing_result",
+    "QUALITY_CONTROL": "quality_control_result",
+    "COMPLETED": "final_result",
+}
+FLAGS = {
+    "SCRIPT": "script", "SCENES": "storyboard", "GENERATION": "visual_generation",
+    "AUDIO": "audio", "SUBTITLES": "subtitles", "EDITING": "editing",
+}
+MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+MAX_OUTPUT_BYTES = 256 * 1024
+
+
+class JobStateError(ValueError):
+    """Conflicting, invalid or stale state; no mutation was committed."""
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _serialized(value: Any, limit: int) -> str:
+    try:
+        result = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+        raise JobStateError("Job data must be finite JSON") from exc
+    if len(result.encode("utf-8")) > limit:
+        raise JobStateError("Job payload exceeds safe size limit")
+    return result
+
+
+def _has_content(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return bool(value) and all(isinstance(x, str) and bool(x.strip()) for x in value)
+    return False
+
+
+def _artifact(result: Any, *fields: str) -> bool:
+    return isinstance(result, dict) and any(
+        isinstance(result.get(k), str) and bool(result[k].strip()) for k in fields
+    )
+
+
+def _completed(result: Any) -> bool:
+    return isinstance(result, dict) and result.get("status") == "COMPLETED"
+
+
+def _failed(result: Any) -> bool:
+    return isinstance(result, dict) and result.get("status") in ("FAILED", "REJECTED")
+
 
 class MasterJobEngine:
+    """Orchestrates one finite pipeline and durable queue without provider side effects.
 
-    def __init__(self):
-        self.version = "1.0"
+    ``run_job`` may be called by existing orchestrators with an unsaved job dict.
+    Worker APIs: ``claim_next`` -> ``process_claim`` or ``release_claim``.
+    All worker leases are opaque, never stored or returned through load APIs.
+    """
+
+    def __init__(
+        self, storage_path: str | os.PathLike[str] = "agents/jobs/master_jobs.sqlite3",
+        gateway: Any = None,
+        *,
+        lease_seconds: int = 120,
+        max_concurrent: int = 4,
+        max_recoveries: int = 3,
+        max_queued: int = 5000,
+    ) -> None:
+        if (not 1 <= lease_seconds <= 86400 or not 1 <= max_concurrent <= 512
+                or not 0 <= max_recoveries <= 100 or not 1 <= max_queued <= 1000000):
+            raise ValueError("Invalid worker limits")
+        self.version = "2.0"
         self.status = "READY"
-        self.storage_path = "agents/jobs/jobs.json"
-        self.gateway = ExecutionGateway()
-        self.stage_handlers = {"CREATED": self.handle_created, "PLANNING": self.handle_planning, "SCRIPT": self.handle_script, "SCENES": self.handle_scenes, "GENERATION": self.handle_generation, "AUDIO": self.handle_audio, "SUBTITLES": self.handle_subtitles, "EDITING": self.handle_editing, "QUALITY_CONTROL": self.handle_quality_control, "COMPLETED": self.handle_completed}
+        self.storage_path = str(storage_path)
+        self.gateway = gateway
+        self.lease_seconds = lease_seconds
+        self.max_concurrent = max_concurrent
+        self.max_recoveries = max_recoveries
+        self.max_queued = max_queued
+        self.stages = list(STAGES)
+        self.stage_handlers = {
+            "CREATED": self.handle_created, "PLANNING": self.handle_planning,
+            "SCRIPT": self.handle_script, "SCENES": self.handle_scenes,
+            "GENERATION": self.handle_generation, "AUDIO": self.handle_audio,
+            "SUBTITLES": self.handle_subtitles, "EDITING": self.handle_editing,
+            "QUALITY_CONTROL": self.handle_quality_control,
+            "COMPLETED": self.handle_completed,
+        }
+        self._init_db()
 
-        self.stages = ["CREATED", "PLANNING", "SCRIPT", "SCENES", "GENERATION", "AUDIO", "SUBTITLES", "EDITING", "QUALITY_CONTROL", "COMPLETED"]
+    def _init_db(self) -> None:
+        path = Path(self.storage_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_symlink():
+            raise JobStateError("Symlink database paths are not allowed")
+        # POSIX: create the database inaccessible to other users by default.
+        if not path.exists():
+            try:
+                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                os.close(fd)
+            except FileExistsError:
+                pass
+        with self._db() as db:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA synchronous=FULL")
+            v = db.execute("PRAGMA user_version").fetchone()[0]
+            if v not in (0, 2):
+                raise JobStateError("Unsupported master job database schema")
+            db.execute("""CREATE TABLE IF NOT EXISTS jobs (
+                job_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL,
+                status TEXT NOT NULL, current_stage TEXT NOT NULL,
+                priority INTEGER NOT NULL, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, owner TEXT, lease_hash TEXT,
+                lease_until REAL, recoveries INTEGER NOT NULL DEFAULT 0
+            )""")
+            db.execute("CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(status,priority,created_at)")
+            db.execute("PRAGMA user_version=2")
 
-    def create_job(self, request):
+    @contextmanager
+    def _db(self):
+        db = sqlite3.connect(self.storage_path, timeout=15, isolation_level=None)
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=15000")
+        try:
+            yield db
+        finally:
+            db.close()
+
+    @contextmanager
+    def _tx(self):
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                yield db
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+            else:
+                db.execute("COMMIT")
+
+    @staticmethod
+    def _request(request: Any) -> dict[str, Any]:
+        if not isinstance(request, dict):
+            raise JobStateError("request must be an object")
+        topic = request.get("topic")
+        if not isinstance(topic, str) or not topic.strip() or len(topic) > 1024:
+            raise JobStateError("request.topic must be a nonempty string of at most 1024 characters")
+        for field in ("language", "type"):
+            value = request.get(field)
+            if value is not None and (not isinstance(value, str) or len(value) > 128):
+                raise JobStateError("Invalid request field: " + field)
+        _serialized(request, MAX_OUTPUT_BYTES)
+        return request
+
+    def create_job(self, request: dict[str, Any], *, priority: int = 50) -> dict[str, Any]:
+        if isinstance(request, dict) and not request.get("topic") and isinstance(request.get("prompt"), str):
+            request = {**request, "topic": request["prompt"][:1024]}
+        self._request(request)
+        if type(priority) is not int or not 0 <= priority <= 100:
+            raise JobStateError("priority must be 0..100")
         return {
-            "job_id": str(uuid.uuid4()),
-            "status": "CREATED",
-            "current_stage": "CREATED",
-            "created_at": datetime.utcnow().isoformat(),
-            "request": request,
-            "stages": []
+            "job_id": str(uuid.uuid4()), "status": "CREATED", "current_stage": "CREATED",
+            "created_at": _now(), "request": request, "priority": priority,
+            "stages": [], "revision": 0, "cancel_requested": False,
         }
 
-    def save_job(self, job):
-        os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
-        jobs = []
-        if os.path.exists(self.storage_path):
-            try:
-                with open(self.storage_path, "r", encoding="utf-8") as f:
-                    jobs = json.load(f)
-            except Exception:
-                jobs = []
-        jobs = [x for x in jobs if x.get("job_id") != job.get("job_id")]
-        jobs.append(job)
-        with open(self.storage_path, "w", encoding="utf-8") as f:
-            json.dump(jobs, f, indent=2, ensure_ascii=False)
+    @staticmethod
+    def _check_job(job: Any) -> None:
+        if not isinstance(job, dict):
+            raise JobStateError("Job must be an object")
+        try:
+            uuid.UUID(job["job_id"])
+        except (KeyError, ValueError, TypeError, AttributeError) as exc:
+            raise JobStateError("Invalid job ID") from exc
+        MasterJobEngine._request(job.get("request"))
+        if job.get("status") not in ("CREATED", "QUEUED", "RUNNING", "WAITING", *TERMINAL):
+            raise JobStateError("Invalid lifecycle state")
+        if job.get("current_stage") not in STAGES:
+            raise JobStateError("Invalid pipeline stage")
+        if type(job.get("priority", 50)) is not int or not 0 <= job.get("priority", 50) <= 100:
+            raise JobStateError("Invalid priority")
+        if type(job.get("revision", 0)) is not int or job.get("revision", 0) < 0:
+            raise JobStateError("Invalid revision")
+        if job["status"] == "COMPLETED" and not (
+            isinstance(job.get("quality_plan"), dict)
+            and isinstance(job.get("final_output"), dict)
+            and isinstance(job.get("stage_result"), dict)
+            and job["quality_plan"].get("final_quality_status") == "PASSED"
+            and job["final_output"].get("status") == "READY"
+            and job["stage_result"].get("stage") == "COMPLETED"
+            and job["stage_result"].get("status") == "READY"
+        ):
+            raise JobStateError("A completed job must pass the final quality gate")
+        _serialized(job, MAX_SNAPSHOT_BYTES)
+
+    @staticmethod
+    def _row_job(row: sqlite3.Row) -> dict[str, Any]:
+        return json.loads(row["snapshot"])
+
+    def _write(self, db: sqlite3.Connection, job: dict[str, Any], *, token: str | None = None,
+               allow_reopen: bool = False) -> dict[str, Any]:
+        self._check_job(job)
+        row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job["job_id"],)).fetchone()
+        new = dict(job)
+        if row:
+            if token is None:
+                if row["owner"] is not None:
+                    raise JobStateError("Job is owned by an active worker")
+                if self._row_job(row).get("revision", 0) != new.get("revision", 0):
+                    raise JobStateError("Stale job revision")
+                if row["status"] in TERMINAL and not (
+                    allow_reopen and row["status"] == "FAILED" and new["status"] == "WAITING"
+                ):
+                    raise JobStateError("Terminal jobs are immutable")
+            elif not self._valid_lease(row, token):
+                raise JobStateError("Worker lease has expired or is not owned")
+        elif token is not None:
+            raise JobStateError("Cannot lease a missing job")
+        else:
+            queued = db.execute("SELECT count(*) FROM jobs WHERE status IN ('CREATED','QUEUED')").fetchone()[0]
+            if queued >= self.max_queued:
+                raise JobStateError("Job queue full")
+        new["updated_at"] = _now()
+        new["revision"] = (row and self._row_job(row).get("revision", 0) or 0) + 1
+        snapshot = _serialized(new, MAX_SNAPSHOT_BYTES)
+        if row:
+            db.execute("""UPDATE jobs SET snapshot=?,status=?,current_stage=?,priority=?,updated_at=?
+                WHERE job_id=?""", (snapshot, new["status"], new["current_stage"],
+                    new.get("priority", 50), new["updated_at"], new["job_id"]))
+        else:
+            db.execute("""INSERT INTO jobs
+                (job_id,snapshot,status,current_stage,priority,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?)""", (new["job_id"], snapshot, new["status"],
+                  new["current_stage"], new.get("priority", 50),
+                  new.get("created_at", new["updated_at"]), new["updated_at"]))
+        job.clear()
+        job.update(new)
         return job
 
-    def load_jobs(self):
-        if not os.path.exists(self.storage_path):
-            return []
-        with open(self.storage_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+    def save_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        with self._tx() as db:
+            return self._write(db, job)
 
-    def update_stage(self, job, stage):
-        if stage not in self.stages:
-            raise ValueError("Unknown stage: " + stage)
-        job["status"] = stage
+    def load_job(self, job_id: str) -> dict[str, Any] | None:
+        with self._db() as db:
+            row = db.execute("SELECT snapshot FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            return json.loads(row["snapshot"]) if row else None
+
+    def load_jobs(self) -> list[dict[str, Any]]:
+        with self._db() as db:
+            return [json.loads(r["snapshot"]) for r in db.execute(
+                "SELECT snapshot FROM jobs ORDER BY created_at, job_id")]
+
+    @staticmethod
+    def _valid_lease(row: sqlite3.Row, token: str) -> bool:
+        return (isinstance(token, str) and row["owner"] is not None
+            and row["lease_until"] is not None and row["lease_until"] > time.time()
+            and isinstance(row["lease_hash"], str)
+            and secrets.compare_digest(row["lease_hash"], hashlib.sha256(token.encode()).hexdigest()))
+
+    def _reap(self, db: sqlite3.Connection) -> None:
+        now = time.time()
+        for row in db.execute("SELECT * FROM jobs WHERE owner IS NOT NULL AND (lease_until<=? OR lease_until IS NULL)", (now,)):
+            job = self._row_job(row)
+            if row["status"] in TERMINAL:
+                pass
+            elif job.get("cancel_requested"):
+                job["status"] = "CANCELLED"
+            elif row["recoveries"] >= self.max_recoveries:
+                job["status"] = "FAILED"
+                job["stage_result"] = {"stage": job["current_stage"], "status": "FAILED", "reason": "WORKER_RECOVERY_LIMIT"}
+            else:
+                job["status"] = "QUEUED"
+            job["updated_at"] = _now()
+            job["revision"] = job.get("revision", 0) + 1
+            db.execute("""UPDATE jobs SET snapshot=?,status=?,owner=NULL,lease_hash=NULL,
+                lease_until=NULL,recoveries=recoveries+1,updated_at=? WHERE job_id=?""",
+                (_serialized(job, MAX_SNAPSHOT_BYTES), job["status"], job["updated_at"], job["job_id"]))
+
+    def _claim(self, db: sqlite3.Connection, worker_id: str, job_id: str | None) -> dict[str, Any] | None:
+        self._reap(db)
+        active = db.execute("SELECT count(*) FROM jobs WHERE owner IS NOT NULL AND lease_until>?", (time.time(),)).fetchone()[0]
+        if active >= self.max_concurrent:
+            return None
+        if job_id:
+            row = db.execute("SELECT * FROM jobs WHERE job_id=? AND status IN ('CREATED','QUEUED') AND owner IS NULL", (job_id,)).fetchone()
+        else:
+            row = db.execute("""SELECT * FROM jobs WHERE status IN ('CREATED','QUEUED') AND owner IS NULL
+                ORDER BY priority DESC,created_at ASC,job_id ASC LIMIT 1""").fetchone()
+        if not row:
+            return None
+        token = secrets.token_urlsafe(32)
+        job = self._row_job(row)
+        job["status"] = "RUNNING"
+        job["updated_at"] = _now()
+        job["revision"] = job.get("revision", 0) + 1
+        db.execute("""UPDATE jobs SET snapshot=?,status='RUNNING',owner=?,lease_hash=?,lease_until=?,updated_at=?
+            WHERE job_id=?""", (_serialized(job, MAX_SNAPSHOT_BYTES), worker_id,
+            hashlib.sha256(token.encode()).hexdigest(), time.time() + self.lease_seconds,
+            job["updated_at"], job["job_id"]))
+        return {"job": job, "lease_token": token, "worker_id": worker_id}
+
+    def claim_next(self, worker_id: str) -> dict[str, Any] | None:
+        if not isinstance(worker_id, str) or not 1 <= len(worker_id) <= 128 or not worker_id.isascii():
+            raise JobStateError("Invalid worker ID")
+        with self._tx() as db:
+            return self._claim(db, worker_id, None)
+
+    def renew_lease(self, job_id: str, worker_id: str, lease_token: str) -> bool:
+        with self._tx() as db:
+            row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not row or row["owner"] != worker_id or not self._valid_lease(row, lease_token):
+                return False
+            db.execute("UPDATE jobs SET lease_until=? WHERE job_id=?", (time.time() + self.lease_seconds, job_id))
+            return True
+
+    def release_claim(self, job_id: str, worker_id: str, lease_token: str) -> dict[str, Any]:
+        """Return unprocessed claimed job to queue, without marking it completed."""
+        with self._tx() as db:
+            row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not row or row["owner"] != worker_id or not self._valid_lease(row, lease_token):
+                raise JobStateError("Invalid worker lease")
+            job = self._row_job(row)
+            job["status"] = "CANCELLED" if job.get("cancel_requested") else "QUEUED"
+            self._write(db, job, token=lease_token)
+            self._clear_owner(db, job_id)
+            return job
+
+    @staticmethod
+    def _clear_owner(db: sqlite3.Connection, job_id: str) -> None:
+        db.execute("UPDATE jobs SET owner=NULL,lease_hash=NULL,lease_until=NULL WHERE job_id=?", (job_id,))
+
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        with self._tx() as db:
+            row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not row:
+                raise JobStateError("Job not found")
+            job = self._row_job(row)
+            if job["status"] in TERMINAL:
+                return job
+            job["cancel_requested"] = True
+            if row["owner"] is None:
+                job["status"] = "CANCELLED"
+            job["updated_at"] = _now()
+            job["revision"] = job.get("revision", 0) + 1
+            db.execute("UPDATE jobs SET snapshot=?,status=?,updated_at=? WHERE job_id=?", (
+                _serialized(job, MAX_SNAPSHOT_BYTES), job["status"], job["updated_at"], job_id))
+            return job
+
+    def reopen_failed_job(self, job_id: str, *, reason: str) -> dict[str, Any]:
+        """Explicit operator recovery. Never automatically re-dispatches charged work."""
+        if not isinstance(reason, str) or not 4 <= len(reason.strip()) <= 128:
+            raise JobStateError("A short manual recovery reason is required")
+        with self._tx() as db:
+            row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not row:
+                raise JobStateError("Job not found")
+            job = self._row_job(row)
+            if row["owner"] is not None or job["status"] != "FAILED":
+                raise JobStateError("Only inactive failed jobs can be reopened")
+            job.setdefault("recovery_history", []).append({
+                "stage": job["current_stage"], "at": _now(), "reason": reason.strip(),
+            })
+            job["status"] = "WAITING"
+            return self._write(db, job, allow_reopen=True)
+
+    def record_stage_output(self, job_id: str, stage: str, output: dict[str, Any]) -> dict[str, Any]:
+        """Trusted integration hook; external API authorization is caller's responsibility."""
+        if stage not in RESULT_KEYS or not isinstance(output, dict):
+            raise JobStateError("Unknown output stage or invalid output")
+        _serialized(output, MAX_OUTPUT_BYTES)
+        with self._tx() as db:
+            row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not row:
+                raise JobStateError("Job not found")
+            job = self._row_job(row)
+            if row["owner"] is not None or job["status"] in TERMINAL:
+                raise JobStateError("Job is active or terminal")
+            if job["current_stage"] != stage:
+                raise JobStateError("Output does not match the current stage")
+            field = RESULT_KEYS[stage]
+            if job.get(field) == output:
+                return job  # Idempotent duplicate notification.
+            job[field] = output
+            job["status"] = "QUEUED"
+            return self._write(db, job)
+
+    def import_legacy_jobs(self, legacy_path: str | os.PathLike[str], *, dry_run: bool = True) -> dict[str, int]:
+        """Opt-in migration of old jobs.json. All imported jobs restart unverified.
+
+        Historical ``COMPLETED`` markers are deliberately NOT trusted because the
+        previous engine could declare success without a render. Existing rows
+        are never overwritten and the original JSON is never modified.
+        """
+        path = Path(legacy_path)
+        if not path.is_file() or path.is_symlink() or path.stat().st_size > 20 * 1024 * 1024:
+            raise JobStateError("Missing, unsafe or oversized legacy state")
+        try:
+            legacy = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise JobStateError("Malformed legacy job state") from exc
+        if not isinstance(legacy, list):
+            raise JobStateError("Legacy jobs must be a list")
+        counts = {"scanned": len(legacy), "imported": 0, "skipped": 0, "invalid": 0}
+        seen: set[str] = set()
+        for old in legacy:
+            try:
+                if not isinstance(old, dict):
+                    raise JobStateError("Invalid legacy record")
+                job_id = old["job_id"]
+                uuid.UUID(job_id)
+                if job_id in seen:
+                    raise JobStateError("Duplicate legacy job")
+                seen.add(job_id)
+                new = self.create_job(old["request"])
+                new["job_id"] = job_id
+                new["legacy_imported"] = True
+                # Retain non-executable planning inputs, never prior completion flags.
+                for key in ("brain_analysis", "idea_result", "script_result", "research_result"):
+                    if isinstance(old.get(key), dict):
+                        new[key] = old[key]
+                _serialized(new, MAX_SNAPSHOT_BYTES)
+            except (JobStateError, KeyError, TypeError, ValueError, OverflowError):
+                counts["invalid"] += 1
+                continue
+            with self._tx() as db:
+                exists = db.execute("SELECT 1 FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+                if exists:
+                    counts["skipped"] += 1
+                else:
+                    if not dry_run:
+                        self._write(db, new)
+                    counts["imported"] += 1
+        return counts
+
+    def update_stage(self, job: dict[str, Any], stage: str) -> dict[str, Any]:
+        if stage not in STAGES:
+            raise JobStateError("Unknown stage: " + str(stage))
         job["current_stage"] = stage
         return job
 
-    def _set_stage_result(self, job, stage, status="READY", **details):
+    def advance_stage(self, job: dict[str, Any]) -> dict[str, Any]:
+        i = STAGES.index(job["current_stage"])
+        plan = job.get("brain_analysis", {}).get("production_plan", {})
+        if not isinstance(plan, dict):
+            plan = {}
+        while i < len(STAGES) - 1:
+            i += 1
+            candidate = STAGES[i]
+            flag = FLAGS.get(candidate)
+            if flag is not None and plan.get(flag) is False:
+                job.setdefault("stages", []).append({"stage": candidate, "status": "SKIPPED", "at": _now()})
+                continue
+            job["current_stage"] = candidate
+            return job
+        return job
+
+    def _result(self, job: dict[str, Any], stage: str, status: str = "READY", **details: Any) -> dict[str, Any]:
         job["stage_result"] = {"stage": stage, "status": status, **details}
         return job
 
     def handle_created(self, job, stage=None):
-        return self._set_stage_result(job, "CREATED", request_received=True)
+        self._request(job.get("request"))
+        return self._result(job, "CREATED", request_received=True)
 
     def handle_planning(self, job, stage=None):
-        request = job.get("request", {})
-        topic = request.get("topic", "")
-        language = request.get("language", "auto")
-        duration = request.get("duration", "auto")
-        content_type = request.get("type", "cinematic_video")
-        idea_result = job.get("idea_result", {})
-        brain_plan = job.get("brain_analysis", {}).get("production_plan", {})
-        plan = {"topic": topic, "language": language, "duration": duration, "content_type": content_type, "research_required": brain_plan.get("research", True), "script_required": brain_plan.get("script", True), "scene_breakdown_required": brain_plan.get("storyboard", True), "visual_generation_required": brain_plan.get("visual_generation", True), "audio_required": brain_plan.get("audio", True), "subtitles_required": brain_plan.get("subtitles", True), "editing_required": brain_plan.get("editing", True), "quality_control_required": brain_plan.get("quality_control", True), "ideas": idea_result.get("ideas", []), "concepts": idea_result.get("concepts", []), "hooks": idea_result.get("hooks", [])}
-        job["production_plan"] = plan
-        return self._set_stage_result(job, "PLANNING", plan_ready=True, production_plan=plan)
+        request = job["request"]
+        plan = job.get("brain_analysis", {}).get("production_plan", {})
+        if not isinstance(plan, dict) or any(type(v) is not bool for v in plan.values()):
+            return self._result(job, "PLANNING", "FAILED", reason="INVALID_PRODUCTION_FLAGS")
+        job["production_plan"] = {
+            "topic": request["topic"], "language": request.get("language", "auto"),
+            "duration": request.get("duration", "auto"),
+            "content_type": request.get("type", "cinematic_video"),
+            "required": {key: plan.get(key, True) for key in (*FLAGS.values(), "quality_control")},
+        }
+        return self._result(job, "PLANNING", plan_ready=True)
 
     def handle_script(self, job, stage=None):
-        request = job.get("request", {})
-        plan = job.get("production_plan", {})
-        script_result = job.get("script_result", {})
-        job["script_plan"] = {"topic": plan.get("topic", request.get("topic", "")), "language": plan.get("language", request.get("language", "auto")), "duration": plan.get("duration", request.get("duration", "auto")), "content_type": plan.get("content_type", request.get("type", "general")), "ideas": script_result.get("ideas", plan.get("ideas", [])), "concepts": script_result.get("concepts", plan.get("concepts", [])), "hooks": script_result.get("hooks", plan.get("hooks", [])), "script": script_result.get("script", []), "scenes": script_result.get("scenes", []), "dialogue": script_result.get("dialogue", []), "script_status": "READY" if script_result.get("script") else "PENDING_AI_WRITER"}
-        return self._set_stage_result(job, "SCRIPT", script_ready=bool(job["script_plan"].get("script")), script_plan=job["script_plan"], next="SCENES_ENGINE" if job["script_plan"].get("script") else "SCRIPT_ENGINE")
+        result = job.get("script_result", {})
+        if _failed(result):
+            return self._result(job, "SCRIPT", "FAILED", reason="SCRIPT_FAILED")
+        if not isinstance(result, dict) or not _has_content(result.get("script")):
+            return self._result(job, "SCRIPT", "WAITING", reason="SCRIPT_OUTPUT_REQUIRED")
+        job["script_plan"] = {"script": result["script"], "dialogue": result.get("dialogue", [])}
+        return self._result(job, "SCRIPT", script_ready=True)
 
     def handle_scenes(self, job, stage=None):
-        plan = job.get("production_plan", {})
-        script_plan = job.get("script_plan", {})
-        job["scene_plan"] = {"topic": script_plan.get("topic", plan.get("topic", "")), "content_type": script_plan.get("content_type", plan.get("content_type", "general")), "language": script_plan.get("language", plan.get("language", "auto")), "duration": script_plan.get("duration", plan.get("duration", "auto")), "script": script_plan.get("script", []), "scenes": script_plan.get("scenes", []), "dialogue": script_plan.get("dialogue", []), "storyboard_status": "READY" if script_plan.get("scenes") else "PENDING_SCENE_ENGINE"}
-        return self._set_stage_result(job, "SCENES", storyboard_ready=bool(job["scene_plan"].get("scenes")), scene_plan=job["scene_plan"], next="GENERATION_ENGINE" if job["scene_plan"].get("scenes") else "SCENE_ENGINE")
+        result = job.get("scene_result") or job.get("script_result") or {}
+        if _failed(result):
+            return self._result(job, "SCENES", "FAILED", reason="SCENES_FAILED")
+        scenes = result.get("scenes") if isinstance(result, dict) else None
+        if not isinstance(scenes, list) or not scenes or any(
+            not isinstance(x, dict) or not _has_content(x.get("description", x.get("image_prompt")))
+            for x in scenes
+        ):
+            return self._result(job, "SCENES", "WAITING", reason="SCENES_REQUIRED")
+        job["scene_plan"] = {"scenes": scenes}
+        return self._result(job, "SCENES", scene_count=len(scenes))
 
     def handle_generation(self, job, stage=None):
-        scene_plan = job.get("scene_plan", {})
-        job["generation_plan"] = {"topic": scene_plan.get("topic", ""), "content_type": scene_plan.get("content_type", "general"), "language": scene_plan.get("language", "auto"), "duration": scene_plan.get("duration", "auto"), "script": scene_plan.get("script", []), "scenes": scene_plan.get("scenes", []), "dialogue": scene_plan.get("dialogue", []), "visual_generation": True, "image_generation": True, "video_generation": True, "provider_routing": "UNIFIED_PROVIDER_ROUTER", "generation_status": "READY" if scene_plan.get("scenes") else "PENDING_GENERATION_GATEWAY"}
-        generated_outputs = []
-        for scene in job["generation_plan"].get("scenes", []):
-            scene_id = scene.get("scene", len(generated_outputs) + 1)
-            prompt = scene.get("description", "") or job["generation_plan"].get("topic", "")
-            output_path = f"output/job_{job.get("job_id", "unknown")}_scene_{scene_id}.png"
-            result = self.execute_capability("text_to_image", {"prompt": prompt, "output_path": output_path})
-            generated_outputs.append({"scene": scene_id, "result": result})
-        job["generation_plan"]["generated_outputs"] = generated_outputs
-        job["generation_plan"]["generation_status"] = "COMPLETED" if generated_outputs and all(x.get("result", {}).get("status") == "COMPLETED" for x in generated_outputs) else job["generation_plan"].get("generation_status", "READY")
-        return self._set_stage_result(job, "GENERATION", generation_ready=bool(job["generation_plan"].get("scenes")), generation_plan=job["generation_plan"], next="GENERATION_GATEWAY" if job["generation_plan"].get("scenes") else "GENERATION_GATEWAY")
+        result = job.get("generation_result", {})
+        if _failed(result):
+            return self._result(job, "GENERATION", "FAILED", reason="GENERATION_FAILED")
+        outputs = result.get("generated_outputs") if isinstance(result, dict) else None
+        scenes = job.get("scene_plan", {}).get("scenes", [])
+        if isinstance(outputs, list) and any(
+            isinstance(o, dict) and _failed(o.get("result", o)) for o in outputs
+        ):
+            return self._result(job, "GENERATION", "FAILED", reason="GENERATION_ASSET_FAILED")
+        if not isinstance(outputs, list) or len(outputs) != len(scenes):
+            return self._result(job, "GENERATION", "WAITING", reason="GENERATED_ASSETS_REQUIRED")
+        # Require one artifact for each scene, not just a simulated READY flag.
+        scene_ids = [str(s.get("scene", i + 1)) for i, s in enumerate(scenes)]
+        output_ids = [str(o.get("scene", "")) for o in outputs if isinstance(o, dict)]
+        if (len(set(scene_ids)) != len(scene_ids) or output_ids != scene_ids or
+            any(not _completed(o.get("result", o)) or not _artifact(
+                o.get("result", o), "asset_ref", "output_path", "file_path", "url") for o in outputs)):
+            return self._result(job, "GENERATION", "WAITING", reason="INCOMPLETE_GENERATED_ASSETS")
+        job["generation_plan"] = {"generated_outputs": outputs, "generation_status": "COMPLETED"}
+        return self._result(job, "GENERATION", generation_ready=True)
 
     def handle_audio(self, job, stage=None):
-        generation_plan = job.get("generation_plan", {})
-        job["audio_plan"] = {"topic": generation_plan.get("topic", ""), "content_type": generation_plan.get("content_type", "general"), "script": generation_plan.get("script", []), "scenes": generation_plan.get("scenes", []), "dialogue": generation_plan.get("dialogue", []), "generated_outputs": generation_plan.get("generated_outputs", []), "voice_required": True, "music_required": True, "sfx_required": True, "voice_provider_routing": "UNIFIED_PROVIDER_ROUTER", "music_provider_routing": "UNIFIED_PROVIDER_ROUTER", "audio_status": "READY" if generation_plan.get("scenes") else "PENDING_AUDIO_ENGINE"}
-        return self._set_stage_result(job, "AUDIO", voice_ready=bool(job["audio_plan"].get("dialogue")), music_ready=bool(job["audio_plan"].get("scenes")), sfx_ready=bool(job["audio_plan"].get("scenes")), audio_plan=job["audio_plan"], next="AUDIO_ENGINE")
+        result = job.get("audio_result", {})
+        if _failed(result):
+            return self._result(job, "AUDIO", "FAILED", reason="AUDIO_FAILED")
+        if not _completed(result) or not _artifact(result, "asset_ref", "audio_path", "file_path"):
+            return self._result(job, "AUDIO", "WAITING", reason="AUDIO_ASSET_REQUIRED")
+        job["audio_plan"] = {"audio_asset": result}
+        return self._result(job, "AUDIO", audio_ready=True)
 
     def handle_subtitles(self, job, stage=None):
-        audio_plan = job.get("audio_plan", {})
-        job["subtitle_plan"] = {"topic": audio_plan.get("topic", ""), "content_type": audio_plan.get("content_type", "general"), "language": audio_plan.get("language", job.get("request", {}).get("language", "auto")), "script": audio_plan.get("script", []), "scenes": audio_plan.get("scenes", []), "dialogue": audio_plan.get("dialogue", []), "captions_required": True, "subtitle_generation": True, "subtitle_status": "READY" if audio_plan.get("dialogue") or audio_plan.get("script") else "PENDING_SUBTITLE_ENGINE"}
-        return self._set_stage_result(job, "SUBTITLES", subtitles_ready=bool(job["subtitle_plan"].get("dialogue") or job["subtitle_plan"].get("script")), subtitle_plan=job["subtitle_plan"], next="EDITING_ENGINE")
+        result = job.get("subtitle_result", {})
+        if _failed(result):
+            return self._result(job, "SUBTITLES", "FAILED", reason="SUBTITLES_FAILED")
+        if not _completed(result) or not _artifact(result, "asset_ref", "subtitle_path", "file_path"):
+            return self._result(job, "SUBTITLES", "WAITING", reason="SUBTITLE_ASSET_REQUIRED")
+        job["subtitle_plan"] = {"subtitle_asset": result}
+        return self._result(job, "SUBTITLES", subtitles_ready=True)
 
     def handle_editing(self, job, stage=None):
-        subtitle_plan = job.get("subtitle_plan", {}); generation_plan = job.get("generation_plan", {}); audio_plan = job.get("audio_plan", {})
-        job["editing_plan"] = {"topic": subtitle_plan.get("topic", ""), "content_type": subtitle_plan.get("content_type", "general"), "language": subtitle_plan.get("language", "auto"), "script": subtitle_plan.get("script", []), "scenes": generation_plan.get("scenes", subtitle_plan.get("scenes", [])), "generated_outputs": generation_plan.get("generated_outputs", []), "dialogue": audio_plan.get("dialogue", subtitle_plan.get("dialogue", [])), "visuals_input": bool(generation_plan.get("generated_outputs") or generation_plan.get("scenes")), "audio_input": bool(audio_plan.get("dialogue") or audio_plan.get("scenes")), "subtitles_input": bool(subtitle_plan.get("dialogue") or subtitle_plan.get("script")), "timeline_editing": True, "final_render": True, "editing_status": "READY" if (generation_plan.get("generated_outputs") or generation_plan.get("scenes")) else "PENDING_VIDEO_EDITOR"}
-        return self._set_stage_result(job, "EDITING", edit_ready=bool(job["editing_plan"].get("visuals_input")), final_render_ready=bool(job["editing_plan"].get("visuals_input") and job["editing_plan"].get("audio_input") and job["editing_plan"].get("subtitles_input")), editing_plan=job["editing_plan"], next="QUALITY_CONTROL")
+        result = job.get("editing_result", {})
+        if _failed(result):
+            return self._result(job, "EDITING", "FAILED", reason="RENDER_FAILED")
+        if not _completed(result) or not _artifact(result, "asset_ref", "render_path", "file_path"):
+            return self._result(job, "EDITING", "WAITING", reason="FINAL_RENDER_REQUIRED")
+        job["editing_plan"] = {"render_asset": result}
+        return self._result(job, "EDITING", final_render_ready=True)
 
     def handle_quality_control(self, job, stage=None):
-        editing_plan = job.get("editing_plan", {})
-        production_plan = job.get("brain_analysis", {}).get("production_plan", {})
-        visual_required = production_plan.get("visual_generation", True)
-        audio_required = production_plan.get("audio", True)
-        subtitles_required = production_plan.get("subtitles", True)
-        editing_required = production_plan.get("editing", True)
-        generation_outputs = job.get("generation_plan", {}).get("generated_outputs", [])
-        generation_ok = (not visual_required) or (bool(generation_outputs) and all(x.get("result", {}).get("status") == "COMPLETED" for x in generation_outputs))
-        visual_ok = (not visual_required) or bool(editing_plan.get("visuals_input"))
-        audio_ok = (not audio_required) or bool(editing_plan.get("audio_input"))
-        subtitles_ok = (not subtitles_required) or bool(editing_plan.get("subtitles_input"))
-        render_ok = (not editing_required) or bool(editing_plan.get("final_render"))
-        passed = generation_ok and visual_ok and audio_ok and subtitles_ok and render_ok
-        job["quality_plan"] = {"topic": editing_plan.get("topic", ""), "content_type": editing_plan.get("content_type", "general"), "language": editing_plan.get("language", "auto"), "visual_quality_check": visual_ok, "audio_quality_check": audio_ok, "subtitle_quality_check": subtitles_ok, "sync_check": (not (audio_required and subtitles_required)) or bool(editing_plan.get("audio_input") and editing_plan.get("subtitles_input")), "render_check": render_ok, "generation_quality_check": generation_ok, "final_quality_status": "READY" if passed else "FAILED"}
-        return self._set_stage_result(job, "QUALITY_CONTROL", quality_passed=passed, quality_plan=job["quality_plan"], next="COMPLETED" if passed else "QC_ENGINE")
+        result = job.get("quality_control_result", {})
+        if _failed(result) or (isinstance(result, dict) and result.get("status") == "REJECTED"):
+            return self._result(job, "QUALITY_CONTROL", "FAILED", reason="QUALITY_REJECTED")
+        plan = job.get("brain_analysis", {}).get("production_plan", {})
+        if not isinstance(plan, dict):
+            plan = {}
+        checks = result.get("checks") if isinstance(result, dict) else None
+        required = ["integrity"]
+        if plan.get("visual_generation", True):
+            required.append("visual")
+        if plan.get("audio", True):
+            required.append("audio")
+        if plan.get("subtitles", True):
+            required.append("subtitles")
+        if plan.get("editing", True):
+            required.append("render")
+        if plan.get("audio", True) and plan.get("subtitles", True):
+            required.append("sync")
+        if (not isinstance(result, dict) or result.get("status") != "PASSED" or
+            not isinstance(checks, dict) or any(checks.get(k) is not True for k in required)):
+            return self._result(job, "QUALITY_CONTROL", "WAITING", reason="VERIFIED_QUALITY_EVIDENCE_REQUIRED")
+        job["quality_plan"] = {"final_quality_status": "PASSED", "checks": {k: True for k in required}}
+        return self._result(job, "QUALITY_CONTROL", quality_passed=True)
 
     def handle_completed(self, job, stage=None):
-        editing_plan = job.get("editing_plan", {})
-        quality_plan = job.get("quality_plan", {})
-        final_output = job.get("final_output") or {"topic": job.get("request", {}).get("topic", editing_plan.get("topic", "")), "content_type": job.get("request", {}).get("type", editing_plan.get("content_type", "general")), "visuals": editing_plan.get("generated_outputs", []), "scenes": editing_plan.get("scenes", []), "dialogue": editing_plan.get("dialogue", []), "subtitles": job.get("subtitle_plan", {}).get("script", []), "quality_status": quality_plan.get("final_quality_status", "PENDING"), "status": "READY" if quality_plan.get("final_quality_status") == "READY" else "BLOCKED"}
-        job["final_output"] = final_output
-        final_status = "READY" if final_output.get("status") == "READY" else "BLOCKED"
-        return self._set_stage_result(job, "COMPLETED", status=final_status, final_output=final_output)
+        if job.get("quality_plan", {}).get("final_quality_status") != "PASSED":
+            return self._result(job, "COMPLETED", "FAILED", reason="QUALITY_GATE_NOT_PASSED")
+        editing = job.get("editing_result") or {}
+        supplied = job.get("final_result") or {}
+        final_asset = (editing.get("asset_ref") or editing.get("render_path") or
+                       editing.get("file_path") or supplied.get("asset_ref"))
+        if not isinstance(final_asset, str) or not final_asset.strip():
+            return self._result(job, "COMPLETED", "WAITING", reason="FINAL_ARTIFACT_REQUIRED")
+        job["final_output"] = {"status": "READY", "quality_status": "PASSED", "asset_ref": final_asset,
+                               "topic": job["request"]["topic"]}
+        return self._result(job, "COMPLETED", final_output=job["final_output"])
 
     def handle_stage(self, job, stage=None):
-        stage = stage or job.get("status", "CREATED")
-        job["stage_result"] = {"stage": stage, "status": "READY"}
-        return job
+        stage = stage or job["current_stage"]
+        return self.stage_handlers[stage](job, stage)
 
-    def run_job(self, job):
-        self.save_job(job)
-        while True:
-            current_stage = job.get("current_stage", job.get("status", "CREATED"))
-            handler = self.stage_handlers.get(current_stage)
-            if handler:
-                job = handler(job, current_stage)
-            self.save_job(job)
-            if job.get("current_stage") == "COMPLETED":
-                break
-            job = self.advance_stage(job)
-            self.save_job(job)
-        return job
+    def process_claim(self, job_id: str, worker_id: str, lease_token: str) -> dict[str, Any]:
+        """Advance only while artifacts exist. Releases ownership on all outcomes."""
+        try:
+            while True:
+                with self._tx() as db:
+                    row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+                    if not row or row["owner"] != worker_id or not self._valid_lease(row, lease_token):
+                        raise JobStateError("Stale or missing worker lease")
+                    job = self._row_job(row)
+                    if job.get("cancel_requested"):
+                        job["status"] = "CANCELLED"
+                        self._write(db, job, token=lease_token)
+                        self._clear_owner(db, job_id)
+                        return job
+                    stage = job["current_stage"]
+                    try:
+                        self.stage_handlers[stage](job, stage)
+                    except Exception as exc:
+                        # Never persist exception text: it may include credentials or user data.
+                        self._result(job, stage, "FAILED", reason="HANDLER_ERROR", exception_type=type(exc).__name__)
+                    stage_status = job["stage_result"]["status"]
+                    if stage_status == "WAITING":
+                        job["status"] = "WAITING"
+                    elif stage_status == "FAILED":
+                        job["status"] = "FAILED"
+                    else:
+                        job.setdefault("stages", []).append({"stage": stage, "status": "PASSED", "at": _now()})
+                        if stage == "COMPLETED":
+                            job["status"] = "COMPLETED"
+                        else:
+                            self.advance_stage(job)
+                            job["status"] = "RUNNING"
+                    self._write(db, job, token=lease_token)
+                    if job["status"] != "RUNNING":
+                        self._clear_owner(db, job_id)
+                        return job
+        except BaseException:
+            # Unexpected internal failures must not pretend success. The lease will
+            # expire and be safely recovered; no automatic charged call is retried.
+            raise
 
-    def advance_stage(self, job):
-        current = job.get("current_stage", job.get("status", "CREATED"))
-        if current == "COMPLETED":
-            return job
-        if current not in self.stages:
-            current = "CREATED"
-        plan = job.get("brain_analysis", {}).get("production_plan", {})
-        stage_flags = {"SCRIPT": "script", "SCENES": "storyboard", "GENERATION": "visual_generation", "AUDIO": "audio", "SUBTITLES": "subtitles", "EDITING": "editing", "QUALITY_CONTROL": "quality_control"}
-        i = self.stages.index(current)
-        while i < len(self.stages) - 1:
-            i += 1
-            next_stage = self.stages[i]
-            flag = stage_flags.get(next_stage)
-            if flag is None or plan.get(flag, True):
-                return self.update_stage(job, next_stage)
-        return job
+    def run_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        """Legacy entry point: persist a new job, then run until blocked or complete."""
+        if not isinstance(job, dict):
+            raise JobStateError("Job must be an object")
+        with self._tx() as db:
+            current = db.execute("SELECT snapshot FROM jobs WHERE job_id=?", (job.get("job_id"),)).fetchone()
+            if not current:
+                self._write(db, job)
+            elif job.get("revision") != json.loads(current["snapshot"]).get("revision"):
+                raise JobStateError("Refusing to run a stale job")
+        worker_id = "local-" + uuid.uuid4().hex
+        with self._tx() as db:
+            claimed = self._claim(db, worker_id, job["job_id"])
+        if not claimed:
+            stored = self.load_job(job["job_id"])
+            if stored is None:
+                raise JobStateError("Job not found")
+            return stored
+        return self.process_claim(job["job_id"], worker_id, claimed["lease_token"])
 
-    def execute_capability(self, capability, payload=None):
+    def execute_capability(self, capability: str, payload: dict[str, Any] | None = None) -> Any:
+        """Explicit external call. Never executed implicitly during a stage retry."""
+        if self.gateway is None:
+            from agents.execution.execution_gateway import ExecutionGateway
+            self.gateway = ExecutionGateway()
         return self.gateway.execute(capability, payload)
 
-    def status_info(self):
-        return {
-            "engine": "Master Job Engine",
-            "version": self.version,
-            "status": self.status
-        }
+    def status_info(self) -> dict[str, str]:
+        return {"engine": "Master Job Engine", "version": self.version, "status": self.status}
+
 
 if __name__ == "__main__":
-    engine = MasterJobEngine()
-
-    print("===================================")
-    print("       MASTER JOB ENGINE")
-    print("===================================")
-    print("STATUS:", engine.status)
-    print("READY")
+    print(MasterJobEngine().status_info())
