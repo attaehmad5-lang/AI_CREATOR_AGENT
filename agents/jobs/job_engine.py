@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -41,6 +42,33 @@ FLAGS = {
 }
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
+_INITIAL_ALLOWED = frozenset({
+    "job_id", "status", "current_stage", "created_at", "request",
+    "priority", "stages", "revision", "cancel_requested", "updated_at",
+    "brain_analysis", "idea_result", "script_result", "research_result",
+    "source_result", "reference_result", "legacy_imported",
+})
+_IDEMPOTENCY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\Z")
+_WORKER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\Z")
+_SENSITIVE_KEYS = frozenset({"password", "passwd", "secret", "api_key", "apikey", "access_token", "refresh_token", "private_key", "authorization", "credential", "credentials", "client_secret", "auth_token"})
+
+
+def _validate_no_credentials(value: Any) -> None:
+    """Refuse accidental credential persistence in arbitrary request/output maps."""
+    todo = [(value, 0)]
+    while todo:
+        current, depth = todo.pop()
+        if depth > 40:
+            raise JobStateError("Nested job content exceeds depth limit")
+        if isinstance(current, dict):
+            for key, nested in current.items():
+                if isinstance(key, str) and key.lower().replace("-", "_") in _SENSITIVE_KEYS:
+                    raise JobStateError("Credential fields are prohibited in persisted job data")
+                if isinstance(nested, (dict, list)):
+                    todo.append((nested, depth + 1))
+        elif isinstance(current, list):
+            todo.extend((item, depth + 1) for item in current if isinstance(item, (dict, list)))
+
 
 
 class JobStateError(ValueError):
@@ -100,7 +128,8 @@ class MasterJobEngine:
         max_recoveries: int = 3,
         max_queued: int = 5000,
     ) -> None:
-        if (not 1 <= lease_seconds <= 86400 or not 1 <= max_concurrent <= 512
+        if (any(type(x) is not int for x in (lease_seconds, max_concurrent, max_recoveries, max_queued))
+                or not 1 <= lease_seconds <= 86400 or not 1 <= max_concurrent <= 512
                 or not 0 <= max_recoveries <= 100 or not 1 <= max_queued <= 1000000):
             raise ValueError("Invalid worker limits")
         self.version = "2.0"
@@ -148,6 +177,18 @@ class MasterJobEngine:
                 lease_until REAL, recoveries INTEGER NOT NULL DEFAULT 0
             )""")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(status,priority,created_at)")
+            db.execute("""CREATE TABLE IF NOT EXISTS submission_keys (
+                key_hash TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE,
+                request_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+                FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+            )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS job_events (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
+                at TEXT NOT NULL, revision INTEGER NOT NULL,
+                event TEXT NOT NULL, status TEXT NOT NULL,
+                current_stage TEXT NOT NULL
+            )""")
+            db.execute("CREATE INDEX IF NOT EXISTS job_events_job_seq ON job_events(job_id,seq)")
             db.execute("PRAGMA user_version=2")
 
     @contextmanager
@@ -183,6 +224,7 @@ class MasterJobEngine:
             value = request.get(field)
             if value is not None and (not isinstance(value, str) or len(value) > 128):
                 raise JobStateError("Invalid request field: " + field)
+        _validate_no_credentials(request)
         _serialized(request, MAX_OUTPUT_BYTES)
         return request
 
@@ -225,6 +267,7 @@ class MasterJobEngine:
             and job["stage_result"].get("status") == "READY"
         ):
             raise JobStateError("A completed job must pass the final quality gate")
+        _validate_no_credentials(job)
         _serialized(job, MAX_SNAPSHOT_BYTES)
 
     @staticmethod
@@ -251,6 +294,10 @@ class MasterJobEngine:
         elif token is not None:
             raise JobStateError("Cannot lease a missing job")
         else:
+            if (new["status"] != "CREATED" or new["current_stage"] != "CREATED"
+                    or new.get("revision", 0) != 0
+                    or any(field not in _INITIAL_ALLOWED for field in new)):
+                raise JobStateError("New jobs must contain pre-execution planning only")
             queued = db.execute("SELECT count(*) FROM jobs WHERE status IN ('CREATED','QUEUED')").fetchone()[0]
             if queued >= self.max_queued:
                 raise JobStateError("Job queue full")
@@ -267,12 +314,68 @@ class MasterJobEngine:
                 VALUES (?,?,?,?,?,?,?)""", (new["job_id"], snapshot, new["status"],
                   new["current_stage"], new.get("priority", 50),
                   new.get("created_at", new["updated_at"]), new["updated_at"]))
+        self._event(db, new, "WRITE")
         job.clear()
         job.update(new)
         return job
 
-    def save_job(self, job: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _event(db: sqlite3.Connection, job: dict[str, Any], event: str) -> None:
+        """Transactionally record metadata only: no request, prompts or credentials."""
+        db.execute("""INSERT INTO job_events(job_id,at,revision,event,status,current_stage)
+            VALUES(?,?,?,?,?,?)""", (job["job_id"], _now(), job.get("revision", 0),
+            event, job["status"], job["current_stage"]))
+
+    def job_events(self, job_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Local trusted operator view. Service layers must enforce authorization."""
+        if type(limit) is not int or not 1 <= limit <= 500:
+            raise JobStateError("Invalid event limit")
+        with self._db() as db:
+            rows = db.execute("""SELECT seq,at,revision,event,status,current_stage FROM
+                job_events WHERE job_id=? ORDER BY seq DESC LIMIT ?""", (job_id, limit)).fetchall()
+            return [dict(row) for row in reversed(rows)]
+
+    def submit_request(self, request: dict[str, Any], *, idempotency_key: str,
+                       priority: int = 50) -> dict[str, Any]:
+        """Atomic, deduplicated submission. Identical retries return the original job."""
+        if not isinstance(idempotency_key, str) or not _IDEMPOTENCY_RE.fullmatch(idempotency_key):
+            raise JobStateError("Invalid idempotency key")
+        job = self.create_job(request, priority=priority)
+        key_hash = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+        # JSON key ordering is not part of the request identity.
+        fingerprint = hashlib.sha256(json.dumps({"request": job["request"], "priority": priority},
+            ensure_ascii=False, sort_keys=True, allow_nan=False, separators=(",", ":")).encode("utf-8")).hexdigest()
         with self._tx() as db:
+            row = db.execute("SELECT job_id,request_hash FROM submission_keys WHERE key_hash=?",
+                             (key_hash,)).fetchone()
+            if row:
+                if row["request_hash"] != fingerprint:
+                    raise JobStateError("Idempotency key used for a different request")
+                record = db.execute("SELECT snapshot FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+                if not record:
+                    raise JobStateError("Idempotency record refers to a missing job")
+                return json.loads(record["snapshot"])
+            self._write(db, job)
+            db.execute("INSERT INTO submission_keys(key_hash,job_id,request_hash,created_at) VALUES(?,?,?,?)",
+                       (key_hash, job["job_id"], fingerprint, _now()))
+            return job
+
+    def save_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        """Persist pre-execution planning only; never manually advance a live pipeline."""
+        self._check_job(job)
+        # Only internal pre-execution planning fields may be attached with this
+        # compatibility method. All later artifacts require record_stage_output.
+        if (job["status"] != "CREATED" or job["current_stage"] != "CREATED"
+                or any(key not in _INITIAL_ALLOWED for key in job)):
+            raise JobStateError("Only pre-execution planning can be saved directly")
+        with self._tx() as db:
+            row = db.execute("SELECT snapshot FROM jobs WHERE job_id=?", (job["job_id"],)).fetchone()
+            if row:
+                old = json.loads(row["snapshot"])
+                if old["status"] != "CREATED" or old["current_stage"] != "CREATED":
+                    raise JobStateError("Stage transition requires a worker lease")
+            elif job.get("revision", 0) != 0:
+                raise JobStateError("New jobs must have revision zero")
             return self._write(db, job)
 
     def load_job(self, job_id: str) -> dict[str, Any] | None:
@@ -310,6 +413,7 @@ class MasterJobEngine:
             db.execute("""UPDATE jobs SET snapshot=?,status=?,owner=NULL,lease_hash=NULL,
                 lease_until=NULL,recoveries=recoveries+1,updated_at=? WHERE job_id=?""",
                 (_serialized(job, MAX_SNAPSHOT_BYTES), job["status"], job["updated_at"], job["job_id"]))
+            self._event(db, job, "LEASE_EXPIRED")
 
     def _claim(self, db: sqlite3.Connection, worker_id: str, job_id: str | None) -> dict[str, Any] | None:
         self._reap(db)
@@ -332,10 +436,11 @@ class MasterJobEngine:
             WHERE job_id=?""", (_serialized(job, MAX_SNAPSHOT_BYTES), worker_id,
             hashlib.sha256(token.encode()).hexdigest(), time.time() + self.lease_seconds,
             job["updated_at"], job["job_id"]))
+        self._event(db, job, "CLAIM")
         return {"job": job, "lease_token": token, "worker_id": worker_id}
 
     def claim_next(self, worker_id: str) -> dict[str, Any] | None:
-        if not isinstance(worker_id, str) or not 1 <= len(worker_id) <= 128 or not worker_id.isascii():
+        if not isinstance(worker_id, str) or not _WORKER_RE.fullmatch(worker_id):
             raise JobStateError("Invalid worker ID")
         with self._tx() as db:
             return self._claim(db, worker_id, None)
@@ -379,6 +484,7 @@ class MasterJobEngine:
             job["revision"] = job.get("revision", 0) + 1
             db.execute("UPDATE jobs SET snapshot=?,status=?,updated_at=? WHERE job_id=?", (
                 _serialized(job, MAX_SNAPSHOT_BYTES), job["status"], job["updated_at"], job_id))
+            self._event(db, job, "CANCEL_REQUEST")
             return job
 
     def reopen_failed_job(self, job_id: str, *, reason: str) -> dict[str, Any]:
@@ -402,6 +508,7 @@ class MasterJobEngine:
         """Trusted integration hook; external API authorization is caller's responsibility."""
         if stage not in RESULT_KEYS or not isinstance(output, dict):
             raise JobStateError("Unknown output stage or invalid output")
+        _validate_no_credentials(output)
         _serialized(output, MAX_OUTPUT_BYTES)
         with self._tx() as db:
             row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()

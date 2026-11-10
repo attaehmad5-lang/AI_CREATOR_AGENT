@@ -26,6 +26,10 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     submit = commands.add_parser("submit", help="Create job from local JSON file")
     submit.add_argument("request_file")
+    submit.add_argument("--idempotency-key", help="Stable retry key (no secrets)")
+    events = commands.add_parser("events", help="Metadata-only local audit history")
+    events.add_argument("job_id")
+    events.add_argument("--limit", type=int, default=100)
     status = commands.add_parser("status", help="Show safe status summary")
     status.add_argument("job_id")
     worker = commands.add_parser("worker", help="Process queued jobs without external billing")
@@ -46,15 +50,24 @@ def main(argv: list[str] | None = None) -> int:
     try:
         engine = MasterJobEngine(args.db)
         if args.command == "submit":
-            job = engine.create_job(_read_json(args.request_file))
-            engine.save_job(job)
+            request = _read_json(args.request_file)
+            if args.idempotency_key is not None:
+                job = engine.submit_request(request, idempotency_key=args.idempotency_key)
+            else:
+                job = engine.create_job(request)
+                engine.save_job(job)
             output = {"job_id": job["job_id"], "status": job["status"]}
+        elif args.command == "events":
+            output = {"job_id": args.job_id, "events": engine.job_events(args.job_id, limit=args.limit)}
         elif args.command == "status":
             job = engine.load_job(args.job_id)
             if job is None:
                 raise JobStateError("Job not found")
+            stage = job.get("stage_result")
+            safe_stage = {k: stage[k] for k in ("stage", "status", "reason", "exception_type")
+                          if k in stage} if isinstance(stage, dict) else None
             output = {"job_id": job["job_id"], "status": job["status"],
-                      "current_stage": job["current_stage"], "stage_result": job.get("stage_result")}
+                      "current_stage": job["current_stage"], "stage_result": safe_stage}
         elif args.command == "worker":
             output = {"processed": []}
             while True:

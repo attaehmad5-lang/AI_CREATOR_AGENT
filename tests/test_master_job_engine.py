@@ -1,5 +1,6 @@
 """Offline regression/contract tests. No network or paid providers are called."""
 import hashlib
+from contextlib import closing
 import json
 import sqlite3
 import subprocess
@@ -217,7 +218,7 @@ class MasterJobTests(unittest.TestCase):
     def test_lease_hash_not_plaintext_and_invalid_token_cannot_process(self):
         job = self.create()
         claim = self.engine.claim_next("worker-A")
-        with sqlite3.connect(self.dbpath) as db:
+        with closing(sqlite3.connect(self.dbpath)) as conn, conn as db:
             stored = db.execute("SELECT lease_hash,snapshot FROM jobs WHERE job_id=?", (job["job_id"],)).fetchone()
         self.assertEqual(stored[0], hashlib.sha256(claim["lease_token"].encode()).hexdigest())
         self.assertNotIn(claim["lease_token"], stored[1])
@@ -257,7 +258,7 @@ class MasterJobTests(unittest.TestCase):
         job = engine.create_job({"topic": "recover"})
         engine.save_job(job)
         first = engine.claim_next("worker-crashed")
-        with sqlite3.connect(self.dbpath) as db:
+        with closing(sqlite3.connect(self.dbpath)) as conn, conn as db:
             db.execute("UPDATE jobs SET lease_until=? WHERE job_id=?", (time.time()-1, job["job_id"]))
         next_claim = engine.claim_next("worker-rescued")
         self.assertNotEqual(first["lease_token"], next_claim["lease_token"])
@@ -273,13 +274,13 @@ class MasterJobTests(unittest.TestCase):
         job = engine.create_job({"topic": "never settle"})
         engine.save_job(job)
         engine.claim_next("worker-crashed")
-        with sqlite3.connect(self.dbpath) as db:
+        with closing(sqlite3.connect(self.dbpath)) as conn, conn as db:
             db.execute("UPDATE jobs SET lease_until=? WHERE job_id=?", (time.time()-1, job["job_id"]))
         self.assertIsNone(engine.claim_next("worker-two"))
         self.assertEqual(engine.load_job(job["job_id"])["status"], "FAILED")
 
     def test_bad_storage_schema_is_refused(self):
-        with sqlite3.connect(self.dbpath) as db:
+        with closing(sqlite3.connect(self.dbpath)) as conn, conn as db:
             db.execute("PRAGMA user_version=999")
         with self.assertRaises(JobStateError):
             MasterJobEngine(self.dbpath)
@@ -401,6 +402,127 @@ class MasterJobTests(unittest.TestCase):
         self.engine.run_job(job)
         self.assertEqual(self.spy.calls, 0)
         self.assertNotIn("READY", ("COMPLETED",))
+
+
+    def test_idempotency_deduplicates_exact_retry_across_engine_restart(self):
+        job = self.engine.submit_request({"topic": "repeat", "language": "ur"},
+                                         idempotency_key="req-1", priority=75)
+        restarted = MasterJobEngine(self.dbpath)
+        duplicate = restarted.submit_request({"language": "ur", "topic": "repeat"},
+                                              idempotency_key="req-1", priority=75)
+        self.assertEqual(duplicate["job_id"], job["job_id"])
+        self.assertEqual(duplicate["revision"], job["revision"])
+        self.assertEqual(len(restarted.load_jobs()), 1)
+        with closing(sqlite3.connect(self.dbpath)) as conn, conn as db:
+            row = db.execute("SELECT key_hash,request_hash FROM submission_keys").fetchone()
+            self.assertNotEqual(row[0], "req-1")
+            self.assertEqual(len(row[1]), 64)
+        self.assertEqual(self.spy.calls, 0)
+
+    def test_idempotency_key_conflict_and_invalid_keys_fail_closed(self):
+        self.engine.submit_request({"topic": "one"}, idempotency_key="req-unique")
+        for request, priority in (({"topic": "two"}, 50), ({"topic": "one"}, 30)):
+            with self.subTest(request=request, priority=priority), self.assertRaises(JobStateError):
+                self.engine.submit_request(request, idempotency_key="req-unique", priority=priority)
+        for key in ("", "space here", "\n", "!unsafe", "x" * 129):
+            with self.subTest(key=key), self.assertRaises(JobStateError):
+                self.engine.submit_request({"topic": "one"}, idempotency_key=key)
+        self.assertEqual(len(self.engine.load_jobs()), 1)
+
+    def test_same_idempotency_key_concurrent_submit_only_creates_one_job(self):
+        jobs = []
+        errors = []
+        barrier = threading.Barrier(6)
+
+        def worker():
+            try:
+                engine = MasterJobEngine(self.dbpath)
+                barrier.wait(timeout=10)
+                jobs.append(engine.submit_request({"topic": "concurrent"}, idempotency_key="same-key"))
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(6)]
+        for t in threads: t.start()
+        for t in threads: t.join(timeout=15)
+        self.assertFalse(errors)
+        self.assertEqual(len(jobs), 6)
+        self.assertEqual(len(set(x["job_id"] for x in jobs)), 1)
+        self.assertEqual(len(self.engine.load_jobs()), 1)
+
+    def test_audit_event_stream_contains_no_private_prompts_or_worker_tokens(self):
+        job = self.engine.create_job({"topic": "private sensitive prompt"})
+        self.engine.save_job(job)
+        claim = self.engine.claim_next("worker-A")
+        self.engine.process_claim(job["job_id"], "worker-A", claim["lease_token"])
+        self.engine.record_stage_output(job["job_id"], "SCRIPT", {
+            "script": ["private sensitive script"], "scenes": [{"scene": 1, "description": "scene"}],
+        })
+        events = self.engine.job_events(job["job_id"])
+        self.assertGreaterEqual(len(events), 4)
+        self.assertEqual(events[-1]["event"], "WRITE")
+        self.assertEqual([x["seq"] for x in events], sorted(x["seq"] for x in events))
+        with closing(sqlite3.connect(self.dbpath)) as conn, conn as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM job_events").fetchone()[0], len(events))
+        self.assertNotIn("private sensitive", json.dumps(events))
+        self.assertNotIn(claim["lease_token"], json.dumps(events))
+        self.assertEqual(self.engine.job_events(job["job_id"], limit=2), events[-2:])
+        with self.assertRaises(JobStateError):
+            self.engine.job_events(job["job_id"], limit=501)
+
+    def test_direct_save_cannot_forge_any_stage_or_quality_evidence(self):
+        job = self.create()
+        for name, value in (
+            ("current_stage", "COMPLETED"), ("status", "WAITING"),
+            ("quality_control_result", {"status": "PASSED"}),
+            ("final_result", {"asset_ref": "asset:fake"}),
+        ):
+            fake = dict(self.engine.load_job(job["job_id"]))
+            fake[name] = value
+            with self.subTest(name=name), self.assertRaises(JobStateError):
+                self.engine.save_job(fake)
+        waiting = self.engine.run_job(job)
+        self.assertEqual(waiting["status"], "WAITING")
+        with self.assertRaises(JobStateError):
+            self.engine.save_job(waiting)
+        # Legacy run_job also refuses to insert a fabricated terminal job.
+        forged = self.engine.create_job({"topic": "forged"})
+        forged.update({"current_stage": "COMPLETED", "status": "COMPLETED",
+            "quality_plan": {"final_quality_status": "PASSED"},
+            "final_output": {"status": "READY", "asset_ref": "asset:unverified"},
+            "stage_result": {"stage": "COMPLETED", "status": "READY"}})
+        with self.assertRaises(JobStateError):
+            self.engine.run_job(forged)
+
+    def test_persistence_rejects_nested_credentials_and_boolean_worker_limits(self):
+        with self.assertRaises(JobStateError):
+            self.engine.create_job({"topic": "x", "nested": {"credentials": {"password": "abc"}}})
+        job = self.create()
+        self.engine.run_job(job)
+        with self.assertRaises(JobStateError):
+            self.engine.record_stage_output(job["job_id"], "SCRIPT", {
+                "script": ["x"], "auth-token": "SECRET"})
+        with self.assertRaises(ValueError):
+            MasterJobEngine(self.dbpath, max_concurrent=True)
+        with self.assertRaises(JobStateError):
+            self.engine.claim_next("bad worker\n")
+
+    def test_cli_idempotent_submit_events_and_redacted_final_status(self):
+        request = Path(self.temp.name) / "request.json"
+        request.write_text(json.dumps({"topic": "private CLI topic"}), encoding="utf-8")
+        def cli(*args):
+            proc = subprocess.run([sys.executable, "-m", "agents.jobs.job_cli", "--db", self.dbpath, *args],
+                                  check=True, capture_output=True, text=True)
+            return json.loads(proc.stdout)
+        first = cli("submit", str(request), "--idempotency-key", "stable-request")
+        again = cli("submit", str(request), "--idempotency-key", "stable-request")
+        self.assertEqual(first["job_id"], again["job_id"])
+        cli("worker")
+        events = cli("events", first["job_id"])["events"]
+        self.assertTrue(any(x["event"] == "CLAIM" for x in events))
+        status = cli("status", first["job_id"])
+        self.assertNotIn("private CLI topic", json.dumps(status))
+
 
 
 if __name__ == "__main__":
