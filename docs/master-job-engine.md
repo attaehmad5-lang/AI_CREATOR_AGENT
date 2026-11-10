@@ -345,7 +345,7 @@ python -m unittest discover -s tests -p 'test_master*.py' -v
 python -m compileall -q agents/jobs tests/test_master_disaster_recovery.py
 ```
 
-The 13 additional offline tests cover WAL-consistent backup/restore, full event
+The 14 additional offline tests cover WAL-consistent backup/restore, full event
 retention, signed and unsigned policy, corruption, manifest forgery, wrong keys,
 create-only safety, malformed databases, migration-version rejection, symlink
 refusal, concurrent same-name snapshot attempts, redacted CLI output and FIFO

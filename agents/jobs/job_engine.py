@@ -286,10 +286,12 @@ class MasterJobEngine:
     @contextmanager
     def _db(self):
         db = sqlite3.connect(self.storage_path, timeout=15, isolation_level=None)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout=15000")
-        db.execute("PRAGMA foreign_keys=ON")
         try:
+            # Close the connection even if PRAGMA initialization raises.
+            # Otherwise a failed open under heavy contention leaks handles.
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA busy_timeout=15000")
+            db.execute("PRAGMA foreign_keys=ON")
             yield db
         finally:
             db.close()

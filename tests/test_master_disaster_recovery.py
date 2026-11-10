@@ -11,6 +11,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from agents.jobs.artifact_integrity import ArtifactIntegrityError, ArtifactVerifier
 from agents.jobs.disaster_recovery import (
@@ -37,6 +38,16 @@ class DisasterRecoveryTests(unittest.TestCase):
 
     def make_backup(self):
         return create_verified_backup(self.database, self.backup, signing_key=KEY)
+
+    def test_connection_setup_exception_closes_sqlite_handle(self):
+        # PRAGMA setup can fail under local lock contention or injected I/O errors.
+        fake = Mock()
+        fake.execute.side_effect = sqlite3.OperationalError("simulated sqlite setup failure")
+        with patch("agents.jobs.job_engine.sqlite3.connect", return_value=fake):
+            with self.assertRaises(sqlite3.OperationalError):
+                with self.engine._db():
+                    pass
+        fake.close.assert_called_once()
 
     def test_signed_wal_consistent_backup_restore_preserves_workflow_and_deduplication(self):
         expected_events = self.engine.job_events(self.job["job_id"])
