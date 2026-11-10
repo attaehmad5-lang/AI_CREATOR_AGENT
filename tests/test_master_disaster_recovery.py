@@ -1,7 +1,6 @@
 """Offline disaster recovery acceptance. Never contacts providers or spends credits."""
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import sqlite3
@@ -11,6 +10,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from contextlib import closing
 from unittest.mock import Mock, patch
 
 from agents.jobs.artifact_integrity import ArtifactIntegrityError, ArtifactVerifier
@@ -129,7 +129,7 @@ class DisasterRecoveryTests(unittest.TestCase):
             create_verified_backup(other, self.folder / "other.backup", signing_key=KEY)
 
     def test_unsupported_db_version_is_refused_without_output(self):
-        with sqlite3.connect(self.database) as db:
+        with closing(sqlite3.connect(self.database)) as db:
             db.execute("PRAGMA user_version=99")
         with self.assertRaisesRegex(RecoveryError, "Unsupported master job database version"):
             self.make_backup()
