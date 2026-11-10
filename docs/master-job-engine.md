@@ -222,3 +222,69 @@ from the dependency-free Windows/Linux unittest matrix because ffmpeg is not
 installed identically on every runner. A successful synthetic test is **not**
 a production-provider connection test, a codec matrix, or a multimedia quality
 certification.
+
+## v2.3: authenticated reconciliation ledger and production safeguards
+
+`MasterJobEngine` v2.3 adds an **atomic, backward-compatible** SQLite schema
+migration from `user_version=2` to `3`. It preserves all jobs and existing
+external operation intents, even when a process restarts after migration.
+
+Local operator mode (or a separately authenticated service layer) can call
+`reconcile_external_dispatch(job_id, stage, operation_id, outcome,
+resolver_id=..., authorize_reconciliation=True, result_ref=...)`, where
+`outcome` is `SUCCEEDED` or `FAILED`. An unknown operation, invalid output
+reference, missing authorization, forged receipt, or conflicting response is
+rejected without mutating existing decisions. Identical replay produces
+`ALREADY_RECONCILED`. The only stored resolver identity and result reference
+are **SHA-256 digests**, not raw tokens or URLs. A confirmation never marks a
+job `COMPLETED` or bypasses media verification and independent stage receipts.
+
+If `receipt_key` is configured, callers must supply a valid domain-separated
+`external_reconciliation_signature(job_id, stage, operation_id,
+request_sha256, outcome, result_ref, receipt_key)`. The request hash must be
+read from the original immutable dispatch history, not an operator-generated
+replacement. Independent proof of provider identity, actual billing and
+physical media still belongs to a trusted ingestion and authorization service.
+
+`max_external_operations=128` by default bounds the number of *distinct*
+external provider operation intents per job. This is **not** a monetary budget
+or rate limit. `authorize_spend=True` remains required for *every* dispatch;
+no failed or ambiguous operation is ever automatically submitted again.
+
+High-assurance local deployments should explicitly choose
+`MasterJobEngine(receipt_key=secrets.token_bytes(32), artifact_root=path,
+strict_production=True)`. Strict mode refuses to initialize without both
+signatures and physical media verification. Never ship development's permissive
+legacy mode as an authenticated production API. In the CLI, set the secret
+`AI_CREATOR_JOB_RECEIPT_KEY_HEX` and `--artifact-root` before using
+`--strict-production`. Store keys using managed secret storage, not in git,
+command history, or crash logs.
+
+Offline operator commands, only from a trusted account:
+
+```
+python -m agents.jobs.job_cli dispatch-history <job_id>
+python -m agents.jobs.job_cli reconcile <job_id> GENERATION scene-1 SUCCEEDED \
+    --resolver-id trusted-operator --result-ref asset:verified --authorize
+```
+
+In signed mode, also provide `--signature` computed by the authorized callback
+service. Do not attempt to claim success solely from a `QUEUED` or `ROUTABLE`
+response. Never expose these commands to untrusted clients; tenant-scoped
+permissions, billing reconciliations, provider callback verification and
+monitoring remain integration work.
+
+### v2.3 offline verification
+
+```
+python -m compileall -q agents/jobs tests/test_master_job_engine.py \
+    tests/test_master_artifact_integrity.py tests/test_master_reconciliation.py
+python -m unittest discover -s tests -p 'test_master*.py' -v
+python -m scripts.offline_media_acceptance
+```
+
+The additional suite tests signed and unsigned reconciliation, immutable
+conflicting reports, concurrency races, v2→v3 schema migration, spending limits,
+strict production initialization and private ledger fields. The final synthetic
+media command requires separately available FFmpeg/FFprobe. Linux-host tests
+are **not proof of Windows, Android, iOS or real third-party provider PASS**.

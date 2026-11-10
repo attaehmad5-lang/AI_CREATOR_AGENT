@@ -60,6 +60,7 @@ _EXTERNAL_CAPABILITIES = {
     "EDITING": frozenset({"video_editing"}),
 }
 _WORKER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}\Z")
+_REFERENCE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\Z")
 _SENSITIVE_KEYS = frozenset({"password", "passwd", "secret", "api_key", "apikey", "access_token", "refresh_token", "private_key", "authorization", "credential", "credentials", "client_secret", "auth_token"})
 
 
@@ -117,6 +118,31 @@ def stage_receipt_signature(job_id: str, stage: str, output: dict[str, Any], key
                     hashlib.sha256).hexdigest()
 
 
+def external_reconciliation_signature(job_id: str, stage: str, operation_id: str,
+                                      request_sha256: str, outcome: str,
+                                      result_ref: str | None, key: bytes) -> str:
+    """Domain-separated HMAC for a manually authenticated provider resolution.
+
+    Bind the exact originally submitted request digest, operation, outcome and
+    result reference; do not reuse a stage receipt or a signature from another
+    provider operation. This attests operator/provider evidence, not media bytes.
+    """
+    if (not all(isinstance(x, str) and x for x in (job_id, stage, operation_id)) or
+            not isinstance(request_sha256, str) or
+            not re.fullmatch(r"[0-9a-f]{64}", request_sha256) or
+            outcome not in ("SUCCEEDED", "FAILED") or
+            (result_ref is not None and (not isinstance(result_ref, str) or
+             not _REFERENCE_RE.fullmatch(result_ref))) or
+            (outcome == "SUCCEEDED") != (result_ref is not None) or
+            type(key) is not bytes or len(key) < 32):
+        raise JobStateError("Invalid reconciliation signing input")
+    msg = json.dumps({"job_id": job_id, "stage": stage, "operation_id": operation_id,
+                      "request_sha256": request_sha256, "outcome": outcome,
+                      "result_ref": result_ref}, sort_keys=True, separators=(",", ":"))
+    return hmac.new(key, b"master-job-external-reconcile-v1\x00" + msg.encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
 def _has_content(value: Any) -> bool:
     if isinstance(value, str):
         return bool(value.strip())
@@ -157,6 +183,8 @@ class MasterJobEngine:
         max_queued: int = 5000,
         receipt_key: bytes | None = None,
         artifact_root: str | os.PathLike[str] | None = None,
+        strict_production: bool = False,
+        max_external_operations: int = 128,
     ) -> None:
         if (any(type(x) is not int for x in (lease_seconds, max_concurrent, max_recoveries, max_queued))
                 or not 1 <= lease_seconds <= 86400 or not 1 <= max_concurrent <= 512
@@ -164,9 +192,16 @@ class MasterJobEngine:
             raise ValueError("Invalid worker limits")
         if receipt_key is not None and (type(receipt_key) is not bytes or len(receipt_key) < 32):
             raise ValueError("receipt_key must be at least 32 bytes")
-        self.version = "2.2"
+        if type(strict_production) is not bool or (strict_production and
+                (receipt_key is None or artifact_root is None)):
+            raise ValueError("Strict production requires a receipt key and artifact root")
+        if type(max_external_operations) is not int or not 1 <= max_external_operations <= 10000:
+            raise ValueError("Invalid external operation limit")
+        self.version = "2.3"
         self.status = "READY"
         self._receipt_key = receipt_key
+        self.strict_production = strict_production
+        self.max_external_operations = max_external_operations
         # Production opt-in: require on-disk SHA-256 evidence for every media stage.
         # Disabled for legacy deployments that use remote asset references.
         self._artifacts = ArtifactVerifier(artifact_root) if artifact_root is not None else None
@@ -202,44 +237,58 @@ class MasterJobEngine:
         with self._db() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA synchronous=FULL")
-            v = db.execute("PRAGMA user_version").fetchone()[0]
-            if v not in (0, 2):
-                raise JobStateError("Unsupported master job database schema")
-            db.execute("""CREATE TABLE IF NOT EXISTS jobs (
-                job_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL,
-                status TEXT NOT NULL, current_stage TEXT NOT NULL,
-                priority INTEGER NOT NULL, created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL, owner TEXT, lease_hash TEXT,
-                lease_until REAL, recoveries INTEGER NOT NULL DEFAULT 0
-            )""")
-            db.execute("CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(status,priority,created_at)")
-            db.execute("""CREATE TABLE IF NOT EXISTS submission_keys (
-                key_hash TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE,
-                request_hash TEXT NOT NULL, created_at TEXT NOT NULL,
-                FOREIGN KEY(job_id) REFERENCES jobs(job_id)
-            )""")
-            db.execute("""CREATE TABLE IF NOT EXISTS job_events (
-                seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
-                at TEXT NOT NULL, revision INTEGER NOT NULL,
-                event TEXT NOT NULL, status TEXT NOT NULL,
-                current_stage TEXT NOT NULL
-            )""")
-            db.execute("CREATE INDEX IF NOT EXISTS job_events_job_seq ON job_events(job_id,seq)")
-            db.execute("""CREATE TABLE IF NOT EXISTS external_dispatches (
-                job_id TEXT NOT NULL, stage TEXT NOT NULL,
-                operation_id TEXT NOT NULL, capability TEXT NOT NULL,
-                request_sha256 TEXT NOT NULL, state TEXT NOT NULL,
-                recorded_at TEXT NOT NULL, response_status TEXT,
-                PRIMARY KEY(job_id,stage,operation_id),
-                FOREIGN KEY(job_id) REFERENCES jobs(job_id)
-            )""")
-            db.execute("PRAGMA user_version=2")
+            # One atomic migration keeps v2 deployments restart-safe: a crash
+            # cannot leave half-applied schema upgrades and a version mismatch.
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                v = db.execute("PRAGMA user_version").fetchone()[0]
+                if v not in (0, 2, 3):
+                    raise JobStateError("Unsupported master job database schema")
+                db.execute("""CREATE TABLE IF NOT EXISTS jobs (
+                    job_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL,
+                    status TEXT NOT NULL, current_stage TEXT NOT NULL,
+                    priority INTEGER NOT NULL, created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL, owner TEXT, lease_hash TEXT,
+                    lease_until REAL, recoveries INTEGER NOT NULL DEFAULT 0
+                )""")
+                db.execute("CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(status,priority,created_at)")
+                db.execute("""CREATE TABLE IF NOT EXISTS submission_keys (
+                    key_hash TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE,
+                    request_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+                    FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+                )""")
+                db.execute("""CREATE TABLE IF NOT EXISTS job_events (
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
+                    at TEXT NOT NULL, revision INTEGER NOT NULL,
+                    event TEXT NOT NULL, status TEXT NOT NULL,
+                    current_stage TEXT NOT NULL
+                )""")
+                db.execute("CREATE INDEX IF NOT EXISTS job_events_job_seq ON job_events(job_id,seq)")
+                db.execute("""CREATE TABLE IF NOT EXISTS external_dispatches (
+                    job_id TEXT NOT NULL, stage TEXT NOT NULL,
+                    operation_id TEXT NOT NULL, capability TEXT NOT NULL,
+                    request_sha256 TEXT NOT NULL, state TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL, response_status TEXT,
+                    resolution_ref_hash TEXT, resolver_hash TEXT, resolved_at TEXT,
+                    PRIMARY KEY(job_id,stage,operation_id),
+                    FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+                )""")
+                cols = {row[1] for row in db.execute("PRAGMA table_info(external_dispatches)")}
+                for name in ("resolution_ref_hash", "resolver_hash", "resolved_at"):
+                    if name not in cols:
+                        db.execute(f"ALTER TABLE external_dispatches ADD COLUMN {name} TEXT")
+                db.execute("PRAGMA user_version=3")
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
 
     @contextmanager
     def _db(self):
         db = sqlite3.connect(self.storage_path, timeout=15, isolation_level=None)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA busy_timeout=15000")
+        db.execute("PRAGMA foreign_keys=ON")
         try:
             yield db
         finally:
@@ -918,8 +967,62 @@ class MasterJobEngine:
         """For trusted operators only; intentionally excludes request bodies and credentials."""
         with self._db() as db:
             return [dict(row) for row in db.execute("""SELECT stage, operation_id, capability,
-                request_sha256,state,recorded_at,response_status FROM external_dispatches
+                request_sha256,state,recorded_at,response_status,
+                resolution_ref_hash,resolver_hash,resolved_at FROM external_dispatches
                 WHERE job_id=? ORDER BY recorded_at,operation_id""", (job_id,))]
+
+    def reconcile_external_dispatch(self, job_id: str, stage: str, operation_id: str,
+                                    outcome: str, *, resolver_id: str,
+                                    authorize_reconciliation: bool = False,
+                                    result_ref: str | None = None,
+                                    receipt_signature: str | None = None) -> dict[str, Any]:
+        """Record independently verified provider outcome without moving pipeline stage.
+
+        Caller must authenticate the resolver, verify upstream status and
+        billing externally, and ingest/validate media before any stage receipt.
+        This API never makes a provider call. Resolution is immutable; exact
+        duplicates are idempotent and conflicting callbacks are refused.
+        """
+        if authorize_reconciliation is not True:
+            raise JobStateError("Provider reconciliation requires explicit operator authorization")
+        if (not isinstance(resolver_id, str) or not _WORKER_RE.fullmatch(resolver_id)
+                or not isinstance(job_id, str) or not isinstance(operation_id, str)
+                or not _OPERATION_RE.fullmatch(operation_id)
+                or stage not in _EXTERNAL_CAPABILITIES or outcome not in ("SUCCEEDED", "FAILED")
+                or (outcome == "SUCCEEDED") != (result_ref is not None)
+                or (result_ref is not None and (not isinstance(result_ref, str)
+                    or not _REFERENCE_RE.fullmatch(result_ref)))):
+            raise JobStateError("Invalid provider reconciliation input")
+        actor_hash = hashlib.sha256(resolver_id.encode("utf-8")).hexdigest()
+        ref_hash = hashlib.sha256(result_ref.encode("utf-8")).hexdigest() if result_ref else None
+        with self._tx() as db:
+            row = db.execute("""SELECT request_sha256,state,resolution_ref_hash,
+                resolver_hash FROM external_dispatches WHERE job_id=? AND stage=?
+                AND operation_id=?""", (job_id, stage, operation_id)).fetchone()
+            if row is None:
+                raise JobStateError("Cannot reconcile unknown provider operation")
+            if self._receipt_key is not None:
+                expected = external_reconciliation_signature(job_id, stage, operation_id,
+                    row["request_sha256"], outcome, result_ref, self._receipt_key)
+                if (not isinstance(receipt_signature, str) or
+                        not hmac.compare_digest(expected, receipt_signature)):
+                    raise JobStateError("Missing or invalid signed reconciliation evidence")
+            desired_state = "CONFIRMED_" + outcome
+            if row["state"] in ("CONFIRMED_SUCCEEDED", "CONFIRMED_FAILED"):
+                if (row["state"] != desired_state or row["resolution_ref_hash"] != ref_hash):
+                    raise JobStateError("Conflicting provider reconciliation is immutable")
+                return {"status": "ALREADY_RECONCILED", "outcome": outcome,
+                        "job_id": job_id, "stage": stage, "operation_id": operation_id}
+            db.execute("""UPDATE external_dispatches SET state=?,resolution_ref_hash=?,
+                resolver_hash=?,resolved_at=? WHERE job_id=? AND stage=? AND operation_id=?""",
+                (desired_state, ref_hash, actor_hash, _now(), job_id, stage, operation_id))
+            # Record the immutable decision separately. Job stage stays WAITING;
+            # only independently authenticated stage evidence may advance it.
+            jobrow = db.execute("SELECT snapshot FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if jobrow:
+                self._event(db, json.loads(jobrow["snapshot"]), "PROVIDER_RECONCILED")
+        return {"status": "RECONCILED", "outcome": outcome,
+                "job_id": job_id, "stage": stage, "operation_id": operation_id}
 
     def dispatch_external_stage(self, job_id: str, stage: str, operation_id: str,
                                 capability: str, payload: dict[str, Any], *,
@@ -952,6 +1055,10 @@ class MasterJobEngine:
                                 (job_id, stage, operation_id)).fetchone()
             if exists:
                 raise JobStateError("Provider operation already submitted; reconcile before further action")
+            count = db.execute("SELECT count(*) FROM external_dispatches WHERE job_id=?",
+                               (job_id,)).fetchone()[0]
+            if count >= self.max_external_operations:
+                raise JobStateError("External operation limit reached; reconcile spending")
             db.execute("""INSERT INTO external_dispatches
                 (job_id,stage,operation_id,capability,request_sha256,state,recorded_at)
                 VALUES(?,?,?,?,?,'UNKNOWN',?)""", (job_id, stage, operation_id, capability, request_hash, _now()))
