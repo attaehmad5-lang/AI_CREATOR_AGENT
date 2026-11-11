@@ -114,3 +114,15 @@ security scanning, Windows hosted-runner CI, Android/iOS on-device validation,
 external availability monitoring, and live production rollout remain separate
 integration and operations activities requiring credentials/infrastructure.
 The code cannot claim these checks PASS without execution evidence.
+
+
+## Signed request replay retention
+
+The HMAC request timestamp permits up to 300 seconds of clock skew in either
+direction. A request presented with a timestamp 300 seconds in the future
+could still be valid 600 seconds after first presentation. Persist nonce hashes
+for at least **600 seconds** after their first acceptance, not merely 300,
+or a once-accepted signed request can be replayed inside its validity window.
+The offline tenant gateway regression suite exercises this exact boundary.
+A clustered deployment must use a single atomic, shared nonce store and
+enforce synchronized clocks; process-local caches are not safe substitutes.

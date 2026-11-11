@@ -149,7 +149,9 @@ class SignedTenantJobApp:
         with closing(sqlite3.connect(self._nonce_db, timeout=15)) as db:
             try:
                 db.execute("BEGIN IMMEDIATE")
-                db.execute("DELETE FROM used_nonces WHERE timestamp<?", (now - _ALLOWED_SKEW,))
+                # A future-dated request can remain valid for 2*skew from first
+                # presentation. Keep its nonce for that entire lifetime.
+                db.execute("DELETE FROM used_nonces WHERE timestamp<?", (now - 2 * _ALLOWED_SKEW,))
                 db.execute("INSERT INTO used_nonces(tenant,nonce_hash,timestamp) VALUES(?,?,?)",
                            (tenant, digest, now))
                 db.commit()

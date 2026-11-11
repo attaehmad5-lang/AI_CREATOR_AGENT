@@ -289,5 +289,18 @@ class TenantGatewayTests(unittest.TestCase):
         self.assertEqual(list(outside.iterdir()), [])
 
 
+    def test_future_dated_nonce_cannot_replay_after_cleanup(self):
+        # A valid request timestamp up to 300s in the future remains valid
+        # 301s later; the nonce must outlive the full 600s acceptance span.
+        nonce = "future-dated-nonce-00001"
+        future_timestamp = str(self.now + 300)
+        first, _, _ = self.invoke("GET", "/v1/jobs", timestamp=future_timestamp, nonce=nonce)
+        self.assertEqual(first, 404)
+        self.now += 301
+        replay, _, _ = self.invoke("GET", "/v1/jobs", timestamp=future_timestamp, nonce=nonce)
+        self.assertEqual(replay, 409)
+
+
+
 if __name__ == "__main__":
     unittest.main()
