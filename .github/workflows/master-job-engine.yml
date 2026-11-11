@@ -49,7 +49,7 @@ jobs:
       - name: Check compiled module and regression test
         run: python -m compileall -q agents/jobs tests/test_master_job_engine.py tests/test_master_artifact_integrity.py tests/test_master_reconciliation.py tests/test_master_disaster_recovery.py tests/test_master_tenant_gateway.py scripts/offline_tenant_api_acceptance.py
       - name: Offline workflow and CLI integration tests
-        run: python -m unittest discover -s tests -p 'test_master*.py' -v
+        run: python -W error::ResourceWarning -m unittest discover -s tests -p 'test_master*.py' -v
 
       - name: Signed tenant API loopback HTTP acceptance (no cloud calls)
         run: python -m scripts.offline_tenant_api_acceptance
