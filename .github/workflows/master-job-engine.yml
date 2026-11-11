@@ -8,7 +8,7 @@ on:
       - 'tests/test_master_artifact_integrity.py'
       - 'tests/test_master_reconciliation.py'
       - 'tests/test_master_disaster_recovery.py'
-      - 'tests/test_master_tenant_gateway.py'
+      - 'tests/test_master_tenant_gateway.py tests/test_master_request_quota.py'
       - 'scripts/offline_tenant_api_acceptance.py'
       - 'docs/master-job-tenant-gateway.md'
       - 'scripts/offline_media_acceptance.py'

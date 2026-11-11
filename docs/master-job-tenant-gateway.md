@@ -126,3 +126,21 @@ or a once-accepted signed request can be replayed inside its validity window.
 The offline tenant gateway regression suite exercises this exact boundary.
 A clustered deployment must use a single atomic, shared nonce store and
 enforce synchronized clocks; process-local caches are not safe substitutes.
+
+
+## Durable API request admission
+
+Authenticated client and producer traffic now passes through a SQLite-backed,
+process-safe GCRA rate limiter, **after replay defense** and before dispatch.
+The default limit is 600 requests per 60 seconds for each tenant and role, with
+an independent bounded burst and durable state across service restarts.
+Configure the same max_requests_per_minute on every application instance.
+The admission database is private to the trusted gateway state directory and
+stores hashed tenant/role identifiers, never keys, signatures, or payloads.
+Limit rejection returns 429 with retry_after_seconds; malformed or unauthenticated
+requests do not consume quota. Add perimeter rate limits and DDoS protection
+at the trusted TLS proxy as a separate operational control.
+
+CI offline tests: tests/test_master_request_quota.py and
+tests/test_master_tenant_gateway.py. Live edge/proxy load testing remains
+a deployment verification gate.

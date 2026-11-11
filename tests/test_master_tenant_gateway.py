@@ -302,5 +302,23 @@ class TenantGatewayTests(unittest.TestCase):
 
 
 
+    def test_rate_limit_is_durable_tenant_isolated_and_returns_429(self):
+        low = SignedTenantJobApp(self.root, self.keys, clock=lambda: self.now,
+                                 max_requests_per_minute=2)
+        self.assertEqual(self.invoke(path="/v1/jobs", app=low)[0], 404)
+        self.assertEqual(self.invoke(path="/v1/jobs", app=low)[0], 404)
+        code, body, _ = self.invoke(path="/v1/jobs", app=low)
+        self.assertEqual(code, 429)
+        self.assertEqual(body["error"], "RATE_LIMITED")
+        self.assertGreaterEqual(body["retry_after_seconds"], 1)
+        # Independent authenticated tenant budget, even when the store is shared.
+        self.assertEqual(self.invoke(path="/v1/jobs", tenant="beta", app=low)[0], 404)
+        fresh = SignedTenantJobApp(self.root, self.keys, clock=lambda: self.now,
+                                   max_requests_per_minute=2)
+        self.assertEqual(self.invoke(path="/v1/jobs", app=fresh)[0], 429)
+        self.now += 30
+        self.assertEqual(self.invoke(path="/v1/jobs", app=fresh)[0], 404)
+
+
 if __name__ == "__main__":
     unittest.main()

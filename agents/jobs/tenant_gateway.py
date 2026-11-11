@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .job_engine import JobStateError, MasterJobEngine, STAGES
+from .request_quota import DurableTenantRateLimiter, RateLimitExceeded
 
 _TENANT = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}\Z")
 _NONCE = re.compile(r"[A-Za-z0-9_-]{16,80}\Z")
@@ -109,7 +110,8 @@ class SignedTenantJobApp:
     def __init__(self, state_root: str | os.PathLike[str], tenants: Mapping[str, TenantSecrets],
                  *, clock: Callable[[], int] | None = None,
                  allow_insecure_loopback: bool = False,
-                 max_body_bytes: int = _MAX_BODY):
+                 max_body_bytes: int = _MAX_BODY,
+                 max_requests_per_minute: int = 600):
         if (not tenants or not isinstance(tenants, Mapping)
                 or type(allow_insecure_loopback) is not bool
                 or type(max_body_bytes) is not int or not 1 <= max_body_bytes <= _MAX_BODY):
@@ -132,6 +134,10 @@ class SignedTenantJobApp:
         self.clock = clock or (lambda: int(time.time()))
         self.allow_insecure_loopback = allow_insecure_loopback
         self.max_body_bytes = max_body_bytes
+        self._rate_limiter = DurableTenantRateLimiter(
+            self.state_root / "request_admission.sqlite3",
+            max_events=max_requests_per_minute, window_seconds=60
+        )
         self._nonce_db = self.state_root / "auth_replays.sqlite3"
         if self._nonce_db.is_symlink():
             raise ValueError("Nonce database must not be symlinked")
@@ -207,6 +213,9 @@ class SignedTenantJobApp:
             return self._reply(start_response, "401 Unauthorized", {"error": "UNAUTHORIZED"})
         except ReplayError:
             return self._reply(start_response, "409 Conflict", {"error": "REPLAY_REJECTED"})
+        except RateLimitExceeded as exc:
+            return self._reply(start_response, "429 Too Many Requests",
+                               {"error": "RATE_LIMITED", "retry_after_seconds": exc.retry_after})
         except PermissionError:
             return self._reply(start_response, "403 Forbidden", {"error": "FORBIDDEN"})
         except LookupError:
@@ -268,6 +277,8 @@ class SignedTenantJobApp:
             raise AuthenticationError("Invalid signature")
         # Reject duplicate signed messages across processes and crashes, before any side effect.
         self._mark_nonce(tenant, nonce, now)
+        # Authenticated replays are rejected before they consume another quota slot.
+        self._rate_limiter.check(tenant, role, now)
         if method == "POST" and path == "/v1/jobs":
             if role != "client":
                 raise PermissionError("Only client may submit")
