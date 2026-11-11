@@ -18,3 +18,11 @@ hf_token_setup.py
 *.mp3
 *.wav
 *.zip
+
+# Durable local job state: never commit personal inputs or lease data
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
+.coverage
+.pytest_cache/
