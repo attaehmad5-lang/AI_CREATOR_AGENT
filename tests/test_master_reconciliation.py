@@ -5,6 +5,7 @@ No live API calls, secrets, or chargeable providers are used.
 from __future__ import annotations
 
 import hashlib
+from contextlib import closing
 import json
 import sqlite3
 import subprocess
@@ -186,14 +187,14 @@ class ReconciliationTests(unittest.TestCase):
 
     def test_old_v2_database_schema_migrates_atomically_without_losing_jobs(self):
         old_id = self.job["job_id"]
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("ALTER TABLE external_dispatches DROP COLUMN resolution_ref_hash")
             db.execute("ALTER TABLE external_dispatches DROP COLUMN resolver_hash")
             db.execute("ALTER TABLE external_dispatches DROP COLUMN resolved_at")
             db.execute("PRAGMA user_version=2")
         upgraded = MasterJobEngine(self.path)
         self.assertEqual(upgraded.load_job(old_id)["current_stage"], "GENERATION")
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
             columns = {row[1] for row in db.execute("PRAGMA table_info(external_dispatches)")}
             self.assertTrue({"resolution_ref_hash", "resolver_hash", "resolved_at"} <= columns)

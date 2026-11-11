@@ -355,3 +355,22 @@ protection. No live cloud provider or payment APIs are invoked.
 end-to-end authenticated provider staging/sandbox exercises, tenant-scoped API
 authorization, independent media decoding and iOS/Android host verification.
 Do not infer any of those passes from local tests.
+
+## v2.5: signed tenant API boundary (optional, no provider billing)
+
+`agents.jobs.tenant_gateway.SignedTenantJobApp` now provides a role-separated
+HMAC-authenticated WSGI boundary with per-tenant SQLite/artifact roots, durable
+nonce replay protection, signed producer stage receipts, bounded JSON and
+redacted status/events. Client credentials cannot submit trusted stage evidence;
+producer credentials cannot read/cancel client jobs. The API refuses plain HTTP
+except explicitly enabled loopback tests. No external charged dispatch endpoint
+is exposed. **Production deployment remains an integration task**: configure a
+trusted TLS reverse proxy/WSGI server, tenant key issuance/revocation, user
+login, rate limits, incident monitoring, provider-side verification and budgets.
+
+See [`docs/master-job-tenant-gateway.md`](master-job-tenant-gateway.md) for the
+protocol, role separation, threat model, example and integration checklist.
+Local verification includes the loopback HTTP acceptance script and new
+`test_master_tenant_gateway.py` security regression suite. This local testing
+cannot establish Windows runner PASS or any real provider/staging credential
+status. Do not call the full platform production-ready without those gates.
