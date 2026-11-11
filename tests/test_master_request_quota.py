@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from pathlib import Path
 
 from agents.jobs.request_quota import DurableTenantRateLimiter, RateLimitExceeded
@@ -83,7 +84,7 @@ class DurableRequestQuotaTests(unittest.TestCase):
         self.assertNotIn(b"sensitiveTenant", self.path.read_bytes())
 
     def test_existing_database_schema_tampering_fails_closed(self):
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as conn, conn as db:
             db.execute("ALTER TABLE quota ADD COLUMN unexpected TEXT")
         with self.assertRaises(ValueError):
             DurableTenantRateLimiter(self.path)
