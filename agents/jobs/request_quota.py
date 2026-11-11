@@ -13,7 +13,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-_SCOPE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,47}\\Z")
+_SCOPE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,47}\Z")
 _ROLES = frozenset(("client", "producer"))
 _MICROSECOND = 1_000_000
 
